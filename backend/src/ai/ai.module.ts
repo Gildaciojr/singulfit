@@ -1,0 +1,21 @@
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { EntitlementsModule } from '../entitlements/entitlements.module';
+import { AIUsageService } from './ai-usage.service';
+import { AIService } from './ai.service';
+import { OpenAIGateway } from './openai.gateway';
+import { PromptService } from './prompt.service';
+import { AIRecoveryService } from './ai-recovery.service';
+
+@Module({
+  imports: [ConfigModule, EntitlementsModule],
+  providers: [
+    OpenAIGateway,
+    AIService,
+    PromptService,
+    AIUsageService,
+    AIRecoveryService,
+  ],
+  exports: [AIService, PromptService, AIUsageService, AIRecoveryService],
+})
+export class AIModule {}

@@ -1,0 +1,62 @@
+# ======================
+# Logs
+# ======================
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ======================
+# Node
+# ======================
+node_modules
+dist
+dist-ssr
+build
+
+# ======================
+# Env (CRÍTICO)
+# ======================
+.env
+.env.*
+!.env.example
+
+# ======================
+# Prisma
+# ======================
+.prisma
+
+# ======================
+# Coverage / Test
+# ======================
+coverage
+*.lcov
+
+# ======================
+# Editor / IDE
+# ======================
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+Thumbs.db
+
+# ======================
+# OS
+# ======================
+*.swp
+*.swo
+
+# ======================
+# Misc
+# ======================
+*.local
+
+# Backup Git antigo
+.git-lucyfit-backup/
+
+# Backup Bundle
+*.bundle

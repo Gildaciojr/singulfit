@@ -1,0 +1,10 @@
+export const IMAGE_ANALYSIS_DAILY = 'IMAGE_ANALYSIS_DAILY';
+export const IMAGE_ANALYSIS_MONTHLY = 'IMAGE_ANALYSIS_MONTHLY';
+
+export const IMAGE_ANALYSIS_ENTITLEMENTS = [
+  IMAGE_ANALYSIS_DAILY,
+  IMAGE_ANALYSIS_MONTHLY,
+] as const;
+
+export type ImageAnalysisEntitlementCode =
+  (typeof IMAGE_ANALYSIS_ENTITLEMENTS)[number];

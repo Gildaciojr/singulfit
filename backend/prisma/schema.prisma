@@ -1,0 +1,3192 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PlanType {
+  BASIC
+  PREMIUM
+}
+
+enum SubscriptionStatus {
+  PENDING_PAYMENT
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  EXPIRED
+}
+
+enum PaymentMethod {
+  PIX
+  MANUAL
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum InvoiceStatus {
+  OPEN
+  PAID
+  VOID
+  UNCOLLECTIBLE
+}
+
+enum PaymentStatus {
+  CREATED
+  PENDING
+  PROCESSING
+  APPROVED
+  REJECTED
+  CANCELED
+  EXPIRED
+  REFUNDED
+}
+
+enum PaymentProvider {
+  PAGBANK
+  MERCADO_PAGO
+  MANUAL
+}
+
+enum Currency {
+  BRL
+}
+
+enum BillingInterval {
+  MONTH
+}
+
+enum WebhookStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  IGNORED
+  FAILED
+}
+
+enum WebhookResourceType {
+  ORDER
+  PAYMENT
+  UNKNOWN
+}
+
+enum ConversationStatus {
+  ACTIVE
+  CLOSED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  AUDIO
+  DOCUMENT
+  SYSTEM
+}
+
+enum AIJobType {
+  TEXT
+  IMAGE
+  AUDIO
+  DIET
+  WORKOUT
+  PROGRESS
+}
+
+enum AIJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum AIResponseEvaluationType {
+  NUTRITION_RESPONSE
+  TEXT_RESPONSE
+}
+
+enum AIResponseRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  BLOCKED
+}
+
+enum AIReviewStatus {
+  OPEN
+  REVIEWED
+  DISMISSED
+}
+
+enum MealAnalysisStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum MealSource {
+  WHATSAPP
+  UPLOAD
+}
+
+enum MealCategory {
+  BREAKFAST
+  LUNCH
+  DINNER
+  SNACK
+  UNKNOWN
+}
+
+enum NutritionInsightType {
+  LOW_PROTEIN
+  EXCESS_SUGAR
+  INSUFFICIENT_HYDRATION
+  HIGH_ULTRA_PROCESSED
+  LOW_VEGETABLES
+  UNBALANCED_MEALS
+}
+
+enum NutritionInsightStatus {
+  ACTIVE
+  RESOLVED
+}
+
+enum NutritionRecommendationType {
+  FOOD_IMPROVEMENT
+  PROTEIN_ADJUSTMENT
+  FIBER_ADJUSTMENT
+  HYDRATION
+  CONSISTENCY
+  HABITS
+}
+
+enum RecommendationCategory {
+  NUTRITION
+  HYDRATION
+  HABIT
+  BEHAVIOR
+  ENGAGEMENT
+  RETENTION
+  COACHING
+}
+
+enum RecommendationPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum RecommendationStatus {
+  ACTIVE
+  ACCEPTED
+  DISMISSED
+  EXPIRED
+}
+
+enum NutritionTrendDirection {
+  IMPROVING
+  STABLE
+  DECLINING
+}
+
+enum OutboundMessageStatus {
+  PENDING
+  SENDING
+  SENT
+  DELIVERED
+  FAILED
+}
+
+enum ResponseType {
+  NUTRITION_ANALYSIS
+  USAGE_LIMIT
+}
+
+enum UsageEventStatus {
+  RESERVED
+  CONFIRMED
+  REVERSED
+}
+
+enum MediaType {
+  IMAGE
+  AUDIO
+  DOCUMENT
+}
+
+enum StorageProvider {
+  LOCAL
+  S3
+}
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+enum ActivityLevel {
+  SEDENTARY
+  LIGHT
+  MODERATE
+  HIGH
+  ATHLETE
+}
+
+enum FitnessGoal {
+  WEIGHT_LOSS
+  MUSCLE_GAIN
+  MAINTENANCE
+}
+
+enum WorkoutStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum DietPlanStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum ScheduledMessageStatus {
+  PENDING
+  SENDING
+  SENT
+  FAILED
+  CANCELED
+}
+
+enum EnergyLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum Severity {
+  INFO
+  WARNING
+  ERROR
+  CRITICAL
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+  DEAD_LETTER
+}
+
+enum WorkerStatus {
+  RUNNING
+  STOPPED
+}
+
+enum MemoryType {
+  SHORT_TERM
+  LONG_TERM
+}
+
+enum CoachCommunicationStyle {
+  FORMAL
+  BALANCED
+  FRIENDLY
+}
+
+enum CoachCoachingStyle {
+  EDUCATOR
+  ACCOUNTABILITY
+  MOTIVATIONAL
+}
+
+enum CoachTone {
+  SOFT
+  MODERATE
+  DIRECT
+}
+
+enum CoachMotivationStyle {
+  DATA_DRIVEN
+  ACHIEVEMENT
+  HEALTH
+  APPEARANCE
+}
+
+enum UserGoalType {
+  WEIGHT_LOSS
+  HYPERTROPHY
+  MAINTENANCE
+  HEALTH
+}
+
+enum ChurnRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum CoachMessageType {
+  INCENTIVE
+  POSITIVE_REINFORCEMENT
+  FOLLOW_UP
+  RECOVERY
+}
+
+enum CoachReviewType {
+  WEEKLY
+  MONTHLY
+}
+
+enum CoachCommunicationProfileType {
+  DIRECT
+  TECHNICAL
+  MOTIVATIONAL
+  DISCIPLINARIAN
+  WARM
+  BALANCED
+}
+
+enum CoachMotivationalTrigger {
+  VISUAL_RESULT
+  HEALTH
+  SELF_ESTEEM
+  PERFORMANCE
+  DISCIPLINE
+  LONGEVITY
+  ROUTINE
+}
+
+enum CoachReengagementReason {
+  FORGOTTEN
+  MOTIVATION_LOSS
+  LACK_OF_RESULTS
+  TEMPORARY_ABANDONMENT
+}
+
+enum FoodQualityClass {
+  EXCELLENT
+  GOOD
+  REGULAR
+  POOR
+}
+
+enum DietaryPatternType {
+  HIGH_PROTEIN
+  LOW_PROTEIN
+  EXCESS_SUGAR
+  HIGH_ULTRA_PROCESSED
+  LOW_HYDRATION
+  LOW_VARIETY
+  BALANCED
+}
+
+enum AdaptiveCommunicationProfile {
+  EXECUTIVE
+  TECHNICAL
+  DISCIPLINED
+  WARM
+  INSPIRATIONAL
+}
+
+enum EarlyChurnLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum WhatsAppCostCategory {
+  INBOUND
+  RESPONSE
+  AUTOMATION
+}
+
+enum BehavioralCommunicationStyle {
+  DIRECT
+  FRIENDLY
+  ANALYTICAL
+  COACH
+  MOTIVATIONAL
+}
+
+enum BehavioralMotivationStyle {
+  HEALTH
+  AESTHETICS
+  PERFORMANCE
+  LONGEVITY
+  SELF_ESTEEM
+}
+
+enum BehavioralAdherenceStyle {
+  STRUCTURED
+  FLEXIBLE
+  ACCOUNTABILITY
+  SELF_DIRECTED
+}
+
+enum BehavioralPersonalityPattern {
+  DATA_ORIENTED
+  ROUTINE_ORIENTED
+  CHALLENGE_ORIENTED
+  SUPPORT_ORIENTED
+  BALANCED
+}
+
+enum StageOfChange {
+  PRE_CONTEMPLATION
+  CONTEMPLATION
+  PREPARATION
+  ACTION
+  MAINTENANCE
+}
+
+enum MotivationTriggerType {
+  PROGRESS
+  CHALLENGE
+  REWARD
+  HEALTH
+  FAMILY
+  SELF_ESTEEM
+  PERFORMANCE
+}
+
+enum BehavioralInsightType {
+  SHORT_MESSAGES
+  MORNING_ENGAGEMENT
+  AFTERNOON_ENGAGEMENT
+  EVENING_ENGAGEMENT
+  WEEKEND_DROP
+  DATA_RESPONSIVE
+  CONSISTENCY_RESPONSIVE
+}
+
+enum BehavioralInsightStatus {
+  ACTIVE
+  RESOLVED
+}
+
+enum ActivationStage {
+  REGISTERED
+  PAID
+  WHATSAPP_CONNECTED
+  FIRST_MESSAGE_SENT
+  FIRST_MEAL_RECEIVED
+  FIRST_ANALYSIS_COMPLETED
+  FIRST_RECOMMENDATION_DELIVERED
+  FIRST_COACH_INTERACTION
+  ACTIVATED
+  ABANDONED
+}
+
+enum ActivationRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum ActivationEventKind {
+  STAGE_TRANSITION
+  FIRST_VALUE
+  FLOW_MESSAGE
+  RECOVERY_MESSAGE
+  SCORE_UPDATED
+  RISK_UPDATED
+}
+
+enum ActivationDeliveryStatus {
+  PENDING
+  SENDING
+  SENT
+  FAILED
+}
+
+enum LongitudinalDirection {
+  IMPROVING
+  STABLE
+  DECLINING
+}
+
+enum FoodPreferenceKind {
+  FREQUENT
+  ACCEPTED
+  AVOIDED
+  REJECTED
+}
+
+enum NutritionRelapseSeverity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum GoalProgressionState {
+  IMPROVING
+  STABLE
+  DECLINING
+}
+
+enum LongitudinalMemoryKind {
+  VICTORY
+  DIFFICULTY
+  RELAPSE
+  ACHIEVEMENT
+  POSITIVE_HABIT
+}
+
+enum CoachAdaptationMode {
+  TECHNICAL
+  ENCOURAGING
+  RECOVERY
+  PERFORMANCE
+}
+
+enum PilotCohortStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+  CANCELED
+}
+
+enum PilotParticipantStatus {
+  INVITED
+  ACTIVE
+  ACTIVATED
+  COMPLETED
+  DROPPED
+}
+
+enum PilotManualCheckType {
+  DNS
+  TLS
+  FIREWALL
+  BACKUP
+  RESTORE
+  PAGBANK_REAL
+  EVOLUTION_REAL
+  OPENAI_REAL
+  FIRST_PAYMENT
+  FIRST_WEBHOOK
+  FIRST_WHATSAPP
+  FIRST_ANALYSIS
+}
+
+enum PilotManualCheckStatus {
+  PENDING
+  PASSED
+  FAILED
+  WAIVED
+}
+
+enum PilotGoStatus {
+  GO
+  WARNING
+  NO_GO
+}
+
+model User {
+  id String @id @default(uuid())
+
+  // IDENTIFICAÇÃO
+  phone     String  @unique
+  phoneE164 String? @unique
+  email     String? @unique
+  name      String?
+
+  // AUTENTICAÇÃO
+  passwordHash String?
+  role         UserRole  @default(USER)
+  lastLoginAt  DateTime?
+
+  // DADOS DE NEGÓCIO
+  cpf     String?
+  address String?
+  city    String?
+  state   String?
+  zipCode String?
+
+  // CONTROLE
+  isActive            Boolean @default(true)
+  onboardingCompleted Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscriptions               Subscription[]
+  meals                       Meal[]
+  usageDaily                  UsageDaily[]
+  authSessions                AuthSession[]
+  conversations               Conversation[]
+  aiJobs                      AIJob[]
+  aiUsage                     AIUsage[]
+  mediaFiles                  MediaFile[]
+  outboundMessages            OutboundMessage[]
+  usageBuckets                UsageBucket[]
+  usageEvents                 UsageEvent[]
+  fitnessProfile              FitnessProfile?
+  workoutPlans                WorkoutPlan[]
+  dietPlans                   DietPlan[]
+  fitnessCheckIns             FitnessCheckIn[]
+  progressSnapshots           ProgressSnapshot[]
+  progressInsights            ProgressInsight[]
+  automationPreference        UserAutomationPreference?
+  scheduledMessages           ScheduledMessage[]
+  auditLogs                   AuditLog[]
+  aiUsageSummaries            AIUsageSummary[]
+  nutritionProfile            NutritionProfile?
+  preferences                 UserPreferences?
+  conversationMemories        ConversationMemory[]
+  contextSnapshots            UserContextSnapshot[]
+  nutritionScores             NutritionQualityScore[]
+  nutritionInsights           NutritionInsight[]
+  mealPatterns                MealPattern[]
+  nutritionTrends             NutritionTrend[]
+  nutritionRecommendations    NutritionRecommendation[]
+  coachProfile                CoachProfile?
+  goalClassification          UserGoalClassification?
+  habitSnapshots              HabitSnapshot[]
+  consistencyScores           ConsistencyScore[]
+  engagementScores            EngagementScore[]
+  churnAssessments            ChurnRiskAssessment[]
+  coachMessages               CoachMessage[]
+  coachReviews                CoachReview[]
+  coachCommunicationProfiles  CoachCommunicationProfileSnapshot[]
+  coachMotivationProfiles     CoachMotivationProfileSnapshot[]
+  messageFatigueSnapshots     MessageFatigueSnapshot[]
+  reengagementClassifications CoachReengagementClassification[]
+  goalMomentumSnapshots       GoalMomentumSnapshot[]
+  whatsappExperienceSnapshots WhatsAppExperienceSnapshot[]
+  retentionStrengthSnapshots  RetentionStrengthSnapshot[]
+  nutritionEvidenceSnapshots  NutritionEvidenceSnapshot[]
+  foodQualityIndexes          FoodQualityIndex[]
+  dietaryPatternSnapshots     DietaryPatternSnapshot[]
+  learningProfile             UserLearningProfile?
+  communicationAdaptations    CommunicationAdaptationSnapshot[]
+  earlyChurnSnapshots         EarlyChurnSnapshot[]
+  adaptiveRecommendationRanks AdaptiveRecommendationRank[]
+  nutritionWindowSnapshots    LongitudinalNutritionWindowSnapshot[]
+  whatsappCostSnapshots       WhatsAppCostSnapshot[]
+  storageCostSnapshots        StorageCostSnapshot[]
+  profitabilitySnapshots      UserProfitabilitySnapshot[]
+  behavioralProfile           BehavioralProfile?
+  behavioralMotivations       BehavioralMotivation[]
+  stageHistory                StageOfChangeHistory[]
+  adherencePredictions        AdherencePrediction[]
+  motivationTriggers          MotivationTrigger[]
+  behavioralInsights          BehavioralInsight[]
+  behavioralSnapshots         BehavioralSnapshot[]
+  aiResponseEvaluations       AIResponseEvaluation[]
+  aiReviewQueue               AIReviewQueue[]
+  recommendations             Recommendation[]
+  activation                  UserActivation?
+  activationEvents            ActivationEvent[]
+  activationSnapshots         ActivationSnapshot[]
+  longitudinalProfiles        LongitudinalNutritionProfile[]
+  foodPreferenceSnapshots     FoodPreferenceSnapshot[]
+  nutritionEvolution          NutritionEvolutionSnapshot[]
+  nutritionRelapses           NutritionRelapse[]
+  goalProgression             GoalProgressionSnapshot[]
+  longitudinalMemories        LongitudinalMemory[]
+  coachAdaptations            CoachAdaptationSnapshot[]
+  recommendationFeedback      RecommendationFeedbackSnapshot[]
+  monthlyEvolutionReviews     MonthlyEvolutionReview[]
+  pilotParticipations         PilotParticipant[]
+  pilotChecksPerformed        PilotManualCheck[]                    @relation("PilotCheckOperator")
+
+  @@index([isActive])
+  @@map("users")
+}
+
+model FitnessProfile {
+  id              String        @id @default(uuid())
+  userId          String        @unique
+  gender          Gender
+  birthDate       DateTime      @db.Date
+  heightCm        Int
+  currentWeightKg Decimal       @db.Decimal(6, 2)
+  targetWeightKg  Decimal       @db.Decimal(6, 2)
+  activityLevel   ActivityLevel
+  goal            FitnessGoal
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  foodRestrictions   FoodRestriction[]
+  injuryRestrictions InjuryRestriction[]
+  bodyMeasurements   BodyMeasurement[]
+  workoutPlans       WorkoutPlan[]
+  dietPlans          DietPlan[]
+  fitnessCheckIns    FitnessCheckIn[]
+  progressSnapshots  ProgressSnapshot[]
+
+  @@map("fitness_profiles")
+}
+
+model NutritionProfile {
+  id                String        @id @default(uuid())
+  userId            String        @unique
+  sex               Gender
+  birthDate         DateTime      @db.Date
+  heightCm          Int
+  currentWeightKg   Decimal       @db.Decimal(6, 2)
+  targetWeightKg    Decimal       @db.Decimal(6, 2)
+  activityLevel     ActivityLevel
+  goal              FitnessGoal
+  restrictions      Json          @default("[]")
+  allergies         Json          @default("[]")
+  medicalConditions Json          @default("[]")
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([goal, activityLevel])
+  @@map("nutrition_profiles")
+}
+
+model UserPreferences {
+  id                    String   @id @default(uuid())
+  userId                String   @unique
+  preferredWakeUpTime   String?
+  preferredSleepTime    String?
+  preferredTrainingTime String?
+  preferredMealTimes    Json     @default("[]")
+  preferredLanguage     String   @default("pt-BR")
+  timezone              String   @default("America/Sao_Paulo")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([timezone])
+  @@map("user_preferences")
+}
+
+model ConversationMemory {
+  id             String     @id @default(uuid())
+  userId         String
+  memoryType     MemoryType
+  sourceKey      String?
+  content        Json
+  summary        String
+  relevanceScore Decimal    @db.Decimal(5, 4)
+  generatedAt    DateTime
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, memoryType, sourceKey])
+  @@index([userId, relevanceScore, generatedAt])
+  @@index([userId, memoryType, generatedAt])
+  @@map("conversation_memories")
+}
+
+model UserContextSnapshot {
+  id                     String         @id @default(uuid())
+  userId                 String
+  refreshKey             String         @unique
+  weightKg               Decimal?       @db.Decimal(6, 2)
+  goal                   FitnessGoal?
+  activityLevel          ActivityLevel?
+  lastInteractionAt      DateTime?
+  messagesLast7Days      Int
+  messagesLast30Days     Int
+  nutritionAnalysesCount Int
+  adherenceScore         Int?
+  generatedAt            DateTime
+  createdAt              DateTime       @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, generatedAt])
+  @@index([generatedAt])
+  @@map("user_context_snapshots")
+}
+
+model FoodRestriction {
+  id          String @id @default(uuid())
+  profileId   String
+  type        String
+  description String
+
+  profile FitnessProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+  @@map("food_restrictions")
+}
+
+model InjuryRestriction {
+  id          String @id @default(uuid())
+  profileId   String
+  description String
+
+  profile FitnessProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+  @@map("injury_restrictions")
+}
+
+model BodyMeasurement {
+  id             String   @id @default(uuid())
+  profileId      String
+  weightKg       Decimal  @db.Decimal(6, 2)
+  bodyFatPercent Decimal? @db.Decimal(5, 2)
+  muscleMassKg   Decimal? @db.Decimal(6, 2)
+  measuredAt     DateTime @default(now())
+
+  profile FitnessProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, measuredAt])
+  @@map("body_measurements")
+}
+
+model FitnessCheckIn {
+  id             String      @id @default(uuid())
+  userId         String
+  profileId      String
+  mood           String
+  energyLevel    EnergyLevel
+  adherenceScore Int
+  notes          String?
+  createdAt      DateTime    @default(now())
+
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile FitnessProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([profileId, createdAt])
+  @@map("fitness_check_ins")
+}
+
+model ProgressSnapshot {
+  id             String   @id @default(uuid())
+  userId         String
+  profileId      String
+  weightKg       Decimal  @db.Decimal(6, 2)
+  bodyFatPercent Decimal? @db.Decimal(5, 2)
+  muscleMassKg   Decimal? @db.Decimal(6, 2)
+  bmi            Decimal  @db.Decimal(5, 2)
+  createdAt      DateTime @default(now())
+
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile  FitnessProfile    @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  insights ProgressInsight[]
+
+  @@index([userId, createdAt])
+  @@index([profileId, createdAt])
+  @@map("progress_snapshots")
+}
+
+model ProgressInsight {
+  id         String   @id @default(uuid())
+  userId     String
+  snapshotId String
+  aiJobId    String?  @unique
+  insight    String
+  createdAt  DateTime @default(now())
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  snapshot ProgressSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  aiJob    AIJob?           @relation(fields: [aiJobId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([snapshotId, createdAt])
+  @@map("progress_insights")
+}
+
+model WorkoutPlan {
+  id          String        @id @default(uuid())
+  userId      String
+  profileId   String
+  aiJobId     String?       @unique
+  title       String
+  objective   FitnessGoal
+  status      WorkoutStatus @default(ACTIVE)
+  generatedAt DateTime      @default(now())
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile FitnessProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  aiJob   AIJob?         @relation(fields: [aiJobId], references: [id], onDelete: Restrict)
+  days    WorkoutDay[]
+
+  @@index([userId, status, generatedAt])
+  @@index([profileId, generatedAt])
+  @@map("workout_plans")
+}
+
+model WorkoutDay {
+  id            String @id @default(uuid())
+  workoutPlanId String
+  dayNumber     Int
+  title         String
+
+  workoutPlan WorkoutPlan       @relation(fields: [workoutPlanId], references: [id], onDelete: Cascade)
+  exercises   WorkoutExercise[]
+
+  @@unique([workoutPlanId, dayNumber])
+  @@index([workoutPlanId])
+  @@map("workout_days")
+}
+
+model WorkoutExercise {
+  id           String  @id @default(uuid())
+  workoutDayId String
+  exerciseName String
+  sets         Int
+  reps         String
+  restSeconds  Int
+  notes        String?
+
+  workoutDay WorkoutDay @relation(fields: [workoutDayId], references: [id], onDelete: Cascade)
+
+  @@index([workoutDayId])
+  @@map("workout_exercises")
+}
+
+model DietPlan {
+  id                  String         @id @default(uuid())
+  userId              String
+  profileId           String
+  aiJobId             String         @unique
+  title               String
+  objective           FitnessGoal
+  dailyCaloriesTarget Decimal        @db.Decimal(8, 2)
+  proteinTarget       Decimal        @db.Decimal(8, 2)
+  carbsTarget         Decimal        @db.Decimal(8, 2)
+  fatTarget           Decimal        @db.Decimal(8, 2)
+  status              DietPlanStatus @default(ACTIVE)
+  generatedAt         DateTime       @default(now())
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile FitnessProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  aiJob   AIJob          @relation(fields: [aiJobId], references: [id], onDelete: Restrict)
+  meals   DietMeal[]
+
+  @@index([userId, status, generatedAt])
+  @@index([profileId, generatedAt])
+  @@map("diet_plans")
+}
+
+model DietMeal {
+  id             String  @id @default(uuid())
+  dietPlanId     String
+  name           String
+  order          Int
+  caloriesTarget Decimal @db.Decimal(8, 2)
+  notes          String?
+
+  dietPlan DietPlan       @relation(fields: [dietPlanId], references: [id], onDelete: Cascade)
+  items    DietMealItem[]
+
+  @@unique([dietPlanId, order])
+  @@index([dietPlanId])
+  @@map("diet_meals")
+}
+
+model DietMealItem {
+  id                String  @id @default(uuid())
+  dietMealId        String
+  foodName          String
+  quantity          String
+  calories          Decimal @db.Decimal(8, 2)
+  protein           Decimal @db.Decimal(8, 2)
+  carbs             Decimal @db.Decimal(8, 2)
+  fat               Decimal @db.Decimal(8, 2)
+  substitutionGroup String?
+
+  dietMeal DietMeal @relation(fields: [dietMealId], references: [id], onDelete: Cascade)
+
+  @@index([dietMealId])
+  @@map("diet_meal_items")
+}
+
+model AutomationRule {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  scheduledMessages ScheduledMessage[]
+
+  @@index([enabled])
+  @@map("automation_rules")
+}
+
+model UserAutomationPreference {
+  id                       String   @id @default(uuid())
+  userId                   String   @unique
+  remindersEnabled         Boolean  @default(true)
+  workoutReminderEnabled   Boolean  @default(true)
+  mealReminderEnabled      Boolean  @default(true)
+  hydrationReminderEnabled Boolean  @default(true)
+  progressReminderEnabled  Boolean  @default(true)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_automation_preferences")
+}
+
+model ScheduledMessage {
+  id               String                 @id @default(uuid())
+  userId           String
+  automationRuleId String
+  scheduledFor     DateTime
+  status           ScheduledMessageStatus @default(PENDING)
+  content          String
+  attempts         Int                    @default(0)
+  leaseExpiresAt   DateTime?
+  createdAt        DateTime               @default(now())
+
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  automationRule AutomationRule @relation(fields: [automationRuleId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, automationRuleId, scheduledFor])
+  @@index([status, scheduledFor])
+  @@index([status, leaseExpiresAt])
+  @@index([userId, scheduledFor])
+  @@map("scheduled_messages")
+}
+
+model AuthSession {
+  id               String    @id @default(uuid())
+  userId           String
+  refreshTokenHash String
+  jti              String    @unique
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  ipAddress        String?
+  userAgent        String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([userId, revokedAt])
+  @@map("auth_sessions")
+}
+
+model Plan {
+  id                   String          @id @default(uuid())
+  type                 PlanType        @unique
+  name                 String
+  description          String?
+  price                Decimal         @db.Decimal(10, 2)
+  currency             Currency        @default(BRL)
+  billingInterval      BillingInterval @default(MONTH)
+  billingIntervalCount Int             @default(1)
+  imageLimit           Int
+  isActive             Boolean         @default(true)
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  subscriptions Subscription[]
+  entitlements  PlanEntitlement[]
+
+  @@index([isActive])
+  @@map("plans")
+}
+
+model EntitlementDefinition {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+
+  plans        PlanEntitlement[]
+  usageBuckets UsageBucket[]
+  usageEvents  UsageEvent[]
+
+  @@map("entitlement_definitions")
+}
+
+model PlanEntitlement {
+  id            String @id @default(uuid())
+  planId        String
+  entitlementId String
+  value         Int
+
+  plan        Plan                  @relation(fields: [planId], references: [id], onDelete: Cascade)
+  entitlement EntitlementDefinition @relation(fields: [entitlementId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, entitlementId])
+  @@index([entitlementId])
+  @@map("plan_entitlements")
+}
+
+model Subscription {
+  id                  String             @id @default(uuid())
+  userId              String
+  planId              String
+  activationInvoiceId String?            @unique
+  status              SubscriptionStatus @default(PENDING_PAYMENT)
+
+  // CICLO DE ASSINATURA (fonte de verdade)
+  startedAt          DateTime?
+  billingPeriodStart DateTime?
+  billingPeriodEnd   DateTime?
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  gracePeriodEnd     DateTime?
+  cancelAtPeriodEnd  Boolean   @default(false)
+  canceledAt         DateTime?
+  endedAt            DateTime?
+
+  // PAGAMENTO / INTEGRAÇÃO
+  provider               PaymentProvider?
+  externalSubscriptionId String?
+  amount                 Decimal          @db.Decimal(10, 2)
+  externalPaymentId      String?          @unique
+  paymentMethod          PaymentMethod?
+  paidAt                 DateTime?
+  version                Int              @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan              Plan           @relation(fields: [planId], references: [id])
+  invoices          Invoice[]      @relation("SubscriptionInvoices")
+  activationInvoice Invoice?       @relation("SubscriptionActivationInvoice", fields: [activationInvoiceId], references: [id], onDelete: Restrict)
+  conversations     Conversation[]
+
+  @@unique([provider, externalSubscriptionId])
+  // PERFORMANCE + CONSULTA
+  @@index([userId])
+  @@index([planId])
+  @@index([status])
+  @@index([userId, status])
+  @@index([billingPeriodEnd])
+  @@index([userId, billingPeriodEnd])
+  @@index([currentPeriodEnd])
+  @@index([gracePeriodEnd])
+  @@map("subscriptions")
+}
+
+model Invoice {
+  id                String        @id @default(uuid())
+  subscriptionId    String
+  externalReference String        @unique
+  cycleNumber       Int
+  status            InvoiceStatus @default(OPEN)
+  currency          Currency      @default(BRL)
+  subtotal          Decimal       @db.Decimal(10, 2)
+  discount          Decimal       @default(0) @db.Decimal(10, 2)
+  total             Decimal       @db.Decimal(10, 2)
+  periodStart       DateTime
+  periodEnd         DateTime
+  dueAt             DateTime
+  paidAt            DateTime?
+  voidedAt          DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  subscription          Subscription  @relation("SubscriptionInvoices", fields: [subscriptionId], references: [id], onDelete: Restrict)
+  activatedSubscription Subscription? @relation("SubscriptionActivationInvoice")
+  payments              Payment[]
+
+  @@unique([subscriptionId, cycleNumber])
+  @@unique([subscriptionId, periodStart, periodEnd])
+  @@index([subscriptionId, status])
+  @@index([status, dueAt])
+  @@map("invoices")
+}
+
+model Payment {
+  id                String          @id @default(uuid())
+  invoiceId         String
+  provider          PaymentProvider
+  method            PaymentMethod
+  status            PaymentStatus   @default(CREATED)
+  amount            Decimal         @db.Decimal(10, 2)
+  currency          Currency        @default(BRL)
+  idempotencyKey    String          @unique
+  externalReference String          @unique
+  providerOrderId   String?
+  providerPaymentId String?
+  statusDetail      String?
+  installments      Int             @default(1)
+  cardBrand         String?
+  cardLastFour      String?
+  pixQrCode         String?
+  pixQrCodeBase64   String?
+  pixTicketUrl      String?
+  expiresAt         DateTime?
+  approvedAt        DateTime?
+  failedAt          DateTime?
+  metadata          Json?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  @@unique([provider, providerOrderId])
+  @@unique([provider, providerPaymentId])
+  @@index([invoiceId, status])
+  @@index([provider, status])
+  @@index([status, expiresAt])
+  @@map("payments")
+}
+
+model WebhookEvent {
+  id              String              @id @default(uuid())
+  provider        PaymentProvider
+  eventKey        String
+  providerEventId String?
+  resourceType    WebhookResourceType @default(UNKNOWN)
+  resourceId      String?
+  action          String?
+  requestId       String?
+  liveMode        Boolean             @default(false)
+  signatureValid  Boolean             @default(false)
+  payload         Json
+  status          WebhookStatus       @default(RECEIVED)
+  attempts        Int                 @default(0)
+  claimedAt       DateTime?
+  leaseExpiresAt  DateTime?
+  lastError       String?
+  receivedAt      DateTime            @default(now())
+  processedAt     DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@unique([provider, eventKey])
+  @@index([provider, resourceType, resourceId])
+  @@index([status, receivedAt])
+  @@index([status, leaseExpiresAt])
+  @@index([status, processedAt])
+  @@map("webhook_events")
+}
+
+model EvolutionInboundEvent {
+  id                String        @id @default(uuid())
+  instanceName      String
+  externalMessageId String
+  payload           Json
+  status            WebhookStatus @default(RECEIVED)
+  attempts          Int           @default(0)
+  claimedAt         DateTime?
+  leaseExpiresAt    DateTime?
+  lastError         String?
+  processedAt       DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@unique([instanceName, externalMessageId])
+  @@index([status, createdAt])
+  @@index([status, leaseExpiresAt])
+  @@map("evolution_inbound_events")
+}
+
+model Conversation {
+  id             String             @id @default(uuid())
+  userId         String
+  subscriptionId String?
+  phoneNumber    String
+  status         ConversationStatus @default(ACTIVE)
+  startedAt      DateTime           @default(now())
+  lastMessageAt  DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscription     Subscription?     @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  messages         Message[]
+  aiJobs           AIJob[]
+  mediaFiles       MediaFile[]
+  meals            Meal[]
+  outboundMessages OutboundMessage[]
+
+  @@index([userId, status])
+  @@index([subscriptionId])
+  @@index([phoneNumber, status])
+  @@index([lastMessageAt])
+  @@map("conversations")
+}
+
+model Message {
+  id                String           @id @default(uuid())
+  conversationId    String
+  direction         MessageDirection
+  type              MessageType
+  content           String
+  instanceName      String           @default("INTERNAL")
+  externalMessageId String?
+  remoteJid         String?
+  timestamp         DateTime         @default(now())
+  mediaUrl          String?
+  mimeType          String?
+  fileSize          Int?
+  deliveredAt       DateTime?
+  readAt            DateTime?
+  createdAt         DateTime         @default(now())
+
+  conversation          Conversation           @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  aiJobs                AIJob[]
+  mediaFile             MediaFile?
+  meal                  Meal?
+  outboundResponses     OutboundMessage[]
+  aiResponseEvaluations AIResponseEvaluation[]
+
+  @@unique([instanceName, externalMessageId])
+  @@index([conversationId, createdAt])
+  @@index([direction, createdAt])
+  @@index([remoteJid, timestamp])
+  @@index([instanceName, timestamp])
+  @@map("messages")
+}
+
+model MediaFile {
+  id               String          @id @default(uuid())
+  userId           String
+  conversationId   String
+  messageId        String          @unique
+  mediaType        MediaType
+  storageProvider  StorageProvider @default(LOCAL)
+  originalFileName String
+  mimeType         String
+  fileSize         Int
+  checksum         String          @db.Char(64)
+  storagePath      String
+  publicUrl        String?
+  createdAt        DateTime        @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message      Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  meal         Meal?
+
+  @@index([userId, createdAt])
+  @@index([conversationId, createdAt])
+  @@index([storageProvider, checksum])
+  @@map("media_files")
+}
+
+model PromptVersion {
+  id        String   @id @default(uuid())
+  name      String
+  version   Int
+  prompt    String
+  isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  aiJobs              AIJob[]
+  responseEvaluations AIResponseEvaluation[]
+  qualitySnapshots    PromptQualitySnapshot[]
+
+  @@unique([name, version])
+  @@index([name, isActive])
+  @@map("prompt_versions")
+}
+
+model AIJob {
+  id                 String      @id @default(uuid())
+  userId             String
+  conversationId     String?
+  messageId          String?
+  type               AIJobType
+  status             AIJobStatus @default(PENDING)
+  promptVersionId    String
+  providerResponseId String?     @unique
+  operationKey       String?     @unique
+  attempts           Int         @default(0)
+  startedAt          DateTime?
+  leaseExpiresAt     DateTime?
+  completedAt        DateTime?
+  failedAt           DateTime?
+  error              String?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  user                User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation        Conversation?          @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message             Message?               @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  promptVersion       PromptVersion          @relation(fields: [promptVersionId], references: [id], onDelete: Restrict)
+  usage               AIUsage[]
+  usageEvents         UsageEvent[]
+  mealAnalysis        MealAnalysis?
+  dietPlan            DietPlan?
+  workoutPlan         WorkoutPlan?
+  progressInsight     ProgressInsight?
+  responseEvaluations AIResponseEvaluation[]
+
+  @@unique([messageId, type, promptVersionId])
+  @@index([userId, status, createdAt])
+  @@index([conversationId, createdAt])
+  @@index([status, createdAt])
+  @@index([status, leaseExpiresAt])
+  @@map("ai_jobs")
+}
+
+model AIUsage {
+  id               String   @id @default(uuid())
+  userId           String
+  aiJobId          String
+  provider         String   @default("OPENAI")
+  model            String
+  promptTokens     Int
+  completionTokens Int
+  totalTokens      Int
+  estimatedCost    Decimal  @db.Decimal(14, 8)
+  costCurrency     String   @default("USD")
+  usageDate        DateTime @default(now()) @db.Date
+  createdAt        DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aiJob AIJob @relation(fields: [aiJobId], references: [id], onDelete: Cascade)
+
+  @@unique([aiJobId])
+  @@index([userId, createdAt])
+  @@index([userId, usageDate])
+  @@index([provider, usageDate])
+  @@index([model, createdAt])
+  @@map("ai_usage")
+}
+
+model AIResponseEvaluation {
+  id                   String                   @id @default(uuid())
+  userId               String
+  aiJobId              String?
+  messageId            String?
+  responseId           String?                  @unique
+  promptVersionId      String?
+  evaluationType       AIResponseEvaluationType
+  qualityScore         Int
+  safetyScore          Int
+  personalizationScore Int
+  usefulnessScore      Int
+  clarityScore         Int
+  riskLevel            AIResponseRiskLevel
+  flags                Json                     @default("[]")
+  blocked              Boolean                  @default(false)
+  fallbackUsed         Boolean                  @default(false)
+  estimatedCost        Decimal                  @default(0) @db.Decimal(14, 8)
+  evaluatedAt          DateTime                 @default(now())
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aiJob         AIJob?           @relation(fields: [aiJobId], references: [id], onDelete: SetNull)
+  message       Message?         @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  response      OutboundMessage? @relation(fields: [responseId], references: [id], onDelete: SetNull)
+  promptVersion PromptVersion?   @relation(fields: [promptVersionId], references: [id], onDelete: SetNull)
+  reviewQueue   AIReviewQueue?
+
+  @@index([userId, evaluatedAt])
+  @@index([aiJobId, evaluatedAt])
+  @@index([promptVersionId, evaluatedAt])
+  @@index([riskLevel, evaluatedAt])
+  @@index([evaluationType, evaluatedAt])
+  @@map("ai_response_evaluations")
+}
+
+model AIReviewQueue {
+  id                     String         @id @default(uuid())
+  userId                 String
+  aiResponseEvaluationId String         @unique
+  reason                 String
+  status                 AIReviewStatus @default(OPEN)
+  createdAt              DateTime       @default(now())
+  reviewedAt             DateTime?
+  updatedAt              DateTime       @updatedAt
+
+  user       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  evaluation AIResponseEvaluation @relation(fields: [aiResponseEvaluationId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+  @@map("ai_review_queue")
+}
+
+model AIQualityDailySnapshot {
+  id                     String   @id @default(uuid())
+  snapshotDate           DateTime @unique @db.Date
+  evaluationCount        Int
+  averageQualityScore    Decimal  @db.Decimal(5, 2)
+  averageSafetyScore     Decimal  @db.Decimal(5, 2)
+  averagePersonalization Decimal  @db.Decimal(5, 2)
+  averageUsefulness      Decimal  @db.Decimal(5, 2)
+  averageClarity         Decimal  @db.Decimal(5, 2)
+  lowRiskCount           Int
+  mediumRiskCount        Int
+  highRiskCount          Int
+  blockedCount           Int
+  flaggedCount           Int
+  fallbackCount          Int
+  generatedAt            DateTime
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([snapshotDate, generatedAt])
+  @@map("ai_quality_daily_snapshots")
+}
+
+model PromptQualitySnapshot {
+  id                  String   @id @default(uuid())
+  promptVersionId     String
+  snapshotDate        DateTime @db.Date
+  evaluationCount     Int
+  averageQualityScore Decimal  @db.Decimal(5, 2)
+  averageSafetyScore  Decimal  @db.Decimal(5, 2)
+  averageCost         Decimal  @db.Decimal(14, 8)
+  flaggedCount        Int
+  flagRate            Decimal  @db.Decimal(5, 2)
+  blockedCount        Int
+  fallbackCount       Int
+  generatedAt         DateTime
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  promptVersion PromptVersion @relation(fields: [promptVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([promptVersionId, snapshotDate])
+  @@index([snapshotDate, averageQualityScore])
+  @@index([promptVersionId, generatedAt])
+  @@map("prompt_quality_snapshots")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  action     String
+  entityType String
+  entityId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+  @@index([entityType, entityId, createdAt])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model SystemEvent {
+  id        String   @id @default(uuid())
+  source    String
+  severity  Severity
+  eventType String
+  message   String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([severity, createdAt])
+  @@index([source, eventType, createdAt])
+  @@index([createdAt])
+  @@map("system_events")
+}
+
+model OutboxEvent {
+  id            String       @id @default(uuid())
+  eventType     String
+  aggregateType String
+  aggregateId   String
+  payload       Json
+  status        OutboxStatus @default(PENDING)
+  attempts      Int          @default(0)
+  availableAt   DateTime     @default(now())
+  claimedAt     DateTime?
+  processedAt   DateTime?
+  failedAt      DateTime?
+  lastError     String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@unique([eventType, aggregateType, aggregateId])
+  @@index([status, availableAt, createdAt])
+  @@index([status, claimedAt])
+  @@index([status, processedAt])
+  @@index([aggregateType, aggregateId, createdAt])
+  @@map("outbox_events")
+}
+
+model WorkerHeartbeat {
+  id          String       @id @default(uuid())
+  workerName  String
+  instanceId  String
+  status      WorkerStatus @default(RUNNING)
+  startedAt   DateTime     @default(now())
+  heartbeatAt DateTime     @default(now())
+  stoppedAt   DateTime?
+  metadata    Json?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@unique([workerName, instanceId])
+  @@index([workerName, heartbeatAt])
+  @@index([status, heartbeatAt])
+  @@map("worker_heartbeats")
+}
+
+model AIUsageSummary {
+  id           String   @id @default(uuid())
+  userId       String
+  date         DateTime @db.Date
+  totalTokens  Int
+  totalCostUsd Decimal  @db.Decimal(14, 8)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@index([date])
+  @@map("ai_usage_summaries")
+}
+
+model RevenueSnapshot {
+  id                  String   @id @default(uuid())
+  snapshotDate        DateTime @unique @db.Date
+  currency            Currency @default(BRL)
+  mrr                 Decimal  @db.Decimal(16, 2)
+  arr                 Decimal  @db.Decimal(16, 2)
+  arpu                Decimal  @db.Decimal(16, 2)
+  recognizedRevenue   Decimal  @db.Decimal(16, 2)
+  payingUsers         Int
+  activeSubscriptions Int
+  premiumUsers        Int
+  basicUsers          Int
+  generatedAt         DateTime
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([snapshotDate, generatedAt])
+  @@map("revenue_snapshots")
+}
+
+model ChurnSnapshot {
+  id                        String   @id @default(uuid())
+  snapshotDate              DateTime @unique @db.Date
+  monthlyStartingUsers      Int
+  monthlyChurnedUsers       Int
+  monthlyUserChurnRate      Decimal  @db.Decimal(7, 4)
+  monthlyStartingMrr        Decimal  @db.Decimal(16, 2)
+  monthlyChurnedMrr         Decimal  @db.Decimal(16, 2)
+  monthlyRevenueChurnRate   Decimal  @db.Decimal(7, 4)
+  quarterlyStartingUsers    Int
+  quarterlyChurnedUsers     Int
+  quarterlyUserChurnRate    Decimal  @db.Decimal(7, 4)
+  quarterlyStartingMrr      Decimal  @db.Decimal(16, 2)
+  quarterlyChurnedMrr       Decimal  @db.Decimal(16, 2)
+  quarterlyRevenueChurnRate Decimal  @db.Decimal(7, 4)
+  generatedAt               DateTime
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  @@index([snapshotDate, generatedAt])
+  @@map("churn_snapshots")
+}
+
+model RetentionSnapshot {
+  id            String   @id @default(uuid())
+  snapshotDate  DateTime @unique @db.Date
+  d1CohortSize  Int
+  d1Retained    Int
+  d1Rate        Decimal  @db.Decimal(7, 4)
+  d7CohortSize  Int
+  d7Retained    Int
+  d7Rate        Decimal  @db.Decimal(7, 4)
+  d30CohortSize Int
+  d30Retained   Int
+  d30Rate       Decimal  @db.Decimal(7, 4)
+  retentionRate Decimal  @db.Decimal(7, 4)
+  generatedAt   DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([snapshotDate, generatedAt])
+  @@map("retention_snapshots")
+}
+
+model CostSnapshot {
+  id                   String   @id @default(uuid())
+  snapshotDate         DateTime @unique @db.Date
+  aiInputTokens        Int
+  aiOutputTokens       Int
+  aiTotalTokens        Int
+  aiCostUsd            Decimal  @db.Decimal(16, 8)
+  aiCostBrl            Decimal  @db.Decimal(16, 8)
+  aiByProvider         Json     @default("{}")
+  aiByModel            Json     @default("{}")
+  whatsappSent         Int
+  whatsappReceived     Int
+  whatsappCostBrl      Decimal  @db.Decimal(16, 8)
+  storageImages        Int
+  storageUploads       Int
+  storageTotalBytes    BigInt
+  storageCostBrl       Decimal  @db.Decimal(16, 8)
+  totalOperationalCost Decimal  @db.Decimal(16, 8)
+  generatedAt          DateTime
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([snapshotDate, generatedAt])
+  @@map("cost_snapshots")
+}
+
+model WhatsAppCostSnapshot {
+  id               String               @id @default(uuid())
+  userId           String
+  snapshotDate     DateTime             @db.Date
+  category         WhatsAppCostCategory
+  sentMessages     Int
+  receivedMessages Int
+  estimatedCost    Decimal              @db.Decimal(16, 8)
+  currency         Currency             @default(BRL)
+  generatedAt      DateTime
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate, category])
+  @@index([snapshotDate, category])
+  @@index([userId, snapshotDate])
+  @@map("whatsapp_cost_snapshots")
+}
+
+model StorageCostSnapshot {
+  id            String   @id @default(uuid())
+  userId        String
+  snapshotDate  DateTime @db.Date
+  imageCount    Int
+  uploadCount   Int
+  totalBytes    BigInt
+  estimatedCost Decimal  @db.Decimal(16, 8)
+  currency      Currency @default(BRL)
+  generatedAt   DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate])
+  @@index([snapshotDate])
+  @@index([userId, snapshotDate])
+  @@map("storage_cost_snapshots")
+}
+
+model UserProfitabilitySnapshot {
+  id              String   @id @default(uuid())
+  userId          String
+  snapshotDate    DateTime @db.Date
+  planType        PlanType
+  currency        Currency @default(BRL)
+  monthlyRevenue  Decimal  @db.Decimal(16, 2)
+  aiCost          Decimal  @db.Decimal(16, 8)
+  whatsappCost    Decimal  @db.Decimal(16, 8)
+  storageCost     Decimal  @db.Decimal(16, 8)
+  estimatedProfit Decimal  @db.Decimal(16, 8)
+  marginPercent   Decimal  @db.Decimal(7, 4)
+  generatedAt     DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate])
+  @@index([snapshotDate, estimatedProfit])
+  @@index([planType, snapshotDate])
+  @@map("user_profitability_snapshots")
+}
+
+model PlanPerformanceSnapshot {
+  id               String   @id @default(uuid())
+  snapshotDate     DateTime @db.Date
+  planType         PlanType
+  payingUsers      Int
+  retentionRate    Decimal  @db.Decimal(7, 4)
+  churnRate        Decimal  @db.Decimal(7, 4)
+  monthlyRevenue   Decimal  @db.Decimal(16, 2)
+  estimatedProfit  Decimal  @db.Decimal(16, 8)
+  marginPercent    Decimal  @db.Decimal(7, 4)
+  aiTokens         Int
+  aiCost           Decimal  @db.Decimal(16, 8)
+  whatsappMessages Int
+  whatsappCost     Decimal  @db.Decimal(16, 8)
+  generatedAt      DateTime
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([snapshotDate, planType])
+  @@index([planType, snapshotDate])
+  @@map("plan_performance_snapshots")
+}
+
+model GrowthSnapshot {
+  id                  String   @id @default(uuid())
+  snapshotDate        DateTime @unique @db.Date
+  newUsers            Int
+  newUsersMonthly     Int
+  newUsersQuarterly   Int
+  activeUsers         Int
+  payingUsers         Int
+  monthlyGrowthRate   Decimal  @db.Decimal(9, 4)
+  quarterlyGrowthRate Decimal  @db.Decimal(9, 4)
+  generatedAt         DateTime
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([snapshotDate, generatedAt])
+  @@map("growth_snapshots")
+}
+
+model BehavioralProfile {
+  id                      String                       @id @default(uuid())
+  userId                  String                       @unique
+  communicationStyle      BehavioralCommunicationStyle
+  motivationStyle         BehavioralMotivationStyle
+  adherenceStyle          BehavioralAdherenceStyle
+  personalityPattern      BehavioralPersonalityPattern
+  confidenceScore         Decimal                      @db.Decimal(5, 4)
+  preferredEngagementHour Int?
+  evidence                Json                         @default("{}")
+  generatedAt             DateTime                     @default(now())
+  createdAt               DateTime                     @default(now())
+  updatedAt               DateTime                     @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([communicationStyle, updatedAt])
+  @@index([motivationStyle, updatedAt])
+  @@map("behavioral_profiles")
+}
+
+model BehavioralMotivation {
+  id         String                    @id @default(uuid())
+  userId     String
+  type       BehavioralMotivationStyle
+  weight     Decimal                   @db.Decimal(5, 2)
+  evidence   Json                      @default("[]")
+  detectedAt DateTime                  @default(now())
+  createdAt  DateTime                  @default(now())
+  updatedAt  DateTime                  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type])
+  @@index([userId, weight])
+  @@map("behavioral_motivations")
+}
+
+model StageOfChangeHistory {
+  id            String         @id @default(uuid())
+  userId        String
+  snapshotDate  DateTime       @db.Date
+  stage         StageOfChange
+  previousStage StageOfChange?
+  confidence    Decimal        @db.Decimal(5, 4)
+  evidence      Json
+  detectedAt    DateTime       @default(now())
+  createdAt     DateTime       @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate])
+  @@index([stage, detectedAt])
+  @@index([userId, detectedAt])
+  @@map("stage_of_change_history")
+}
+
+model AdherencePrediction {
+  id               String   @id @default(uuid())
+  userId           String
+  snapshotDate     DateTime @db.Date
+  score            Int
+  frequencyScore   Int
+  consistencyScore Int
+  habitScore       Int
+  contextScore     Int
+  responseScore    Int
+  evidence         Json
+  calculatedAt     DateTime @default(now())
+  createdAt        DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate])
+  @@index([score, calculatedAt])
+  @@index([userId, calculatedAt])
+  @@map("adherence_predictions")
+}
+
+model MotivationTrigger {
+  id         String                @id @default(uuid())
+  userId     String
+  type       MotivationTriggerType
+  weight     Decimal               @db.Decimal(5, 2)
+  evidence   Json
+  active     Boolean               @default(true)
+  detectedAt DateTime              @default(now())
+  createdAt  DateTime              @default(now())
+  updatedAt  DateTime              @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type])
+  @@index([userId, active, weight])
+  @@map("motivation_triggers")
+}
+
+model BehavioralInsight {
+  id              String                  @id @default(uuid())
+  userId          String
+  type            BehavioralInsightType
+  status          BehavioralInsightStatus @default(ACTIVE)
+  summary         String
+  evidence        Json
+  occurrences     Int                     @default(1)
+  firstDetectedAt DateTime                @default(now())
+  lastDetectedAt  DateTime                @default(now())
+  resolvedAt      DateTime?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type])
+  @@index([userId, status, lastDetectedAt])
+  @@index([status, lastDetectedAt])
+  @@map("behavioral_insights")
+}
+
+model BehavioralSnapshot {
+  id                      String                       @id @default(uuid())
+  userId                  String
+  snapshotDate            DateTime                     @db.Date
+  adherenceScore          Int
+  stage                   StageOfChange
+  dominantMotivation      BehavioralMotivationStyle
+  engagementScore         Int
+  communicationStyle      BehavioralCommunicationStyle
+  preferredEngagementHour Int?
+  confidenceScore         Decimal                      @db.Decimal(5, 4)
+  generatedAt             DateTime                     @default(now())
+  createdAt               DateTime                     @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate])
+  @@index([snapshotDate, stage])
+  @@index([userId, generatedAt])
+  @@map("behavioral_snapshots")
+}
+
+model Meal {
+  id             String     @id @default(uuid())
+  userId         String
+  conversationId String?
+  messageId      String?    @unique
+  mediaFileId    String?    @unique
+  source         MealSource @default(UPLOAD)
+  imageUrl       String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message      Message?      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  mediaFile    MediaFile?    @relation(fields: [mediaFileId], references: [id], onDelete: Restrict)
+  analysis     MealAnalysis?
+
+  @@index([userId, createdAt])
+  @@index([conversationId, createdAt])
+  @@index([source, createdAt])
+  @@map("meals")
+}
+
+model MealAnalysis {
+  id                  String             @id @default(uuid())
+  mealId              String             @unique
+  aiJobId             String?            @unique
+  status              MealAnalysisStatus @default(PENDING)
+  confidence          Decimal?           @db.Decimal(5, 4)
+  totalCalories       Decimal?           @db.Decimal(10, 2)
+  totalProtein        Decimal?           @db.Decimal(10, 2)
+  totalCarbs          Decimal?           @db.Decimal(10, 2)
+  totalFat            Decimal?           @db.Decimal(10, 2)
+  totalFiber          Decimal?           @db.Decimal(10, 2)
+  totalSugar          Decimal?           @db.Decimal(10, 2)
+  ultraProcessedRatio Decimal?           @db.Decimal(5, 4)
+  vegetableGrams      Decimal?           @db.Decimal(10, 2)
+  hydrationMl         Decimal?           @db.Decimal(10, 2)
+  mealCategory        MealCategory       @default(UNKNOWN)
+  rawResponse         Json?
+  error               String?
+  processingStartedAt DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  meal            Meal                   @relation(fields: [mealId], references: [id], onDelete: Cascade)
+  aiJob           AIJob?                 @relation(fields: [aiJobId], references: [id], onDelete: SetNull)
+  items           MealItem[]
+  outboundMessage OutboundMessage?
+  qualityScore    NutritionQualityScore?
+
+  @@index([status, createdAt])
+  @@map("meal_analyses")
+}
+
+model MealItem {
+  id               String  @id @default(uuid())
+  mealAnalysisId   String
+  foodName         String
+  estimatedGrams   Decimal @db.Decimal(10, 2)
+  calories         Decimal @db.Decimal(10, 2)
+  protein          Decimal @db.Decimal(10, 2)
+  carbs            Decimal @db.Decimal(10, 2)
+  fat              Decimal @db.Decimal(10, 2)
+  fiber            Decimal @default(0) @db.Decimal(10, 2)
+  sugar            Decimal @default(0) @db.Decimal(10, 2)
+  isUltraProcessed Boolean @default(false)
+  isVegetable      Boolean @default(false)
+
+  mealAnalysis MealAnalysis @relation(fields: [mealAnalysisId], references: [id], onDelete: Cascade)
+
+  @@index([mealAnalysisId])
+  @@map("meal_items")
+}
+
+model NutritionQualityScore {
+  id                  String   @id @default(uuid())
+  userId              String
+  mealAnalysisId      String   @unique
+  score               Int
+  proteinScore        Int
+  fiberScore          Int
+  ultraProcessedScore Int
+  sugarScore          Int
+  fatScore            Int
+  balanceScore        Int
+  goalAdherenceScore  Int
+  calculatedAt        DateTime @default(now())
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mealAnalysis MealAnalysis @relation(fields: [mealAnalysisId], references: [id], onDelete: Cascade)
+
+  @@index([userId, calculatedAt])
+  @@index([score, calculatedAt])
+  @@map("nutrition_quality_scores")
+}
+
+model NutritionInsight {
+  id              String                 @id @default(uuid())
+  userId          String
+  type            NutritionInsightType
+  status          NutritionInsightStatus @default(ACTIVE)
+  title           String
+  summary         String
+  evidence        Json
+  occurrences     Int                    @default(1)
+  firstDetectedAt DateTime               @default(now())
+  lastDetectedAt  DateTime               @default(now())
+  resolvedAt      DateTime?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  user            User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recommendations NutritionRecommendation[]
+
+  @@unique([userId, type])
+  @@index([status, lastDetectedAt])
+  @@index([userId, status, lastDetectedAt])
+  @@map("nutrition_insights")
+}
+
+model MealPattern {
+  id                  String       @id @default(uuid())
+  userId              String
+  category            MealCategory
+  windowDays          Int          @default(30)
+  mealCount           Int
+  frequencyPerWeek    Decimal      @db.Decimal(6, 2)
+  averageQualityScore Int
+  recurringFoods      Json
+  periodStart         DateTime
+  periodEnd           DateTime
+  calculatedAt        DateTime     @default(now())
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, category, windowDays])
+  @@index([userId, calculatedAt])
+  @@map("meal_patterns")
+}
+
+model NutritionTrend {
+  id                   String                  @id @default(uuid())
+  userId               String
+  windowDays           Int
+  windowStart          DateTime
+  windowEnd            DateTime
+  mealsAnalyzed        Int
+  averageQualityScore  Int
+  previousAverageScore Int?
+  scoreChange          Int?
+  direction            NutritionTrendDirection
+  consistencyScore     Int
+  goalAdherenceScore   Int
+  calculatedAt         DateTime                @default(now())
+  createdAt            DateTime                @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, windowDays, windowEnd])
+  @@index([userId, windowDays, calculatedAt])
+  @@index([calculatedAt])
+  @@map("nutrition_trends")
+}
+
+model NutritionRecommendation {
+  id          String                      @id @default(uuid())
+  userId      String
+  insightId   String?
+  type        NutritionRecommendationType
+  sourceKey   String
+  title       String
+  rationale   String
+  action      String
+  priority    Int
+  active      Boolean                     @default(true)
+  generatedAt DateTime                    @default(now())
+  expiresAt   DateTime?
+  createdAt   DateTime                    @default(now())
+  updatedAt   DateTime                    @updatedAt
+
+  user    User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  insight NutritionInsight? @relation(fields: [insightId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, type, sourceKey])
+  @@index([userId, active, priority, generatedAt])
+  @@map("nutrition_recommendations")
+}
+
+model Recommendation {
+  id              String                 @id @default(uuid())
+  userId          String
+  category        RecommendationCategory
+  priority        RecommendationPriority
+  signalKey       String
+  sourceKey       String
+  title           String
+  description     String
+  reason          String
+  confidenceScore Int
+  status          RecommendationStatus   @default(ACTIVE)
+  evidence        Json                   @default("{}")
+  generatedAt     DateTime               @default(now())
+  acceptedAt      DateTime?
+  dismissedAt     DateTime?
+  expiredAt       DateTime?
+  expiresAt       DateTime?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, sourceKey])
+  @@index([userId, status, priority, generatedAt])
+  @@index([userId, signalKey, status])
+  @@index([status, expiresAt])
+  @@index([category, status, generatedAt])
+  @@map("recommendations")
+}
+
+model RecommendationDailySnapshot {
+  id             String   @id @default(uuid())
+  snapshotDate   DateTime @unique @db.Date
+  generatedCount Int
+  acceptedCount  Int
+  dismissedCount Int
+  expiredCount   Int
+  activeCount    Int
+  byCategory     Json
+  generatedAt    DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([snapshotDate, generatedAt])
+  @@map("recommendation_daily_snapshots")
+}
+
+model CoachProfile {
+  id                 String                  @id @default(uuid())
+  userId             String                  @unique
+  communicationStyle CoachCommunicationStyle @default(BALANCED)
+  coachingStyle      CoachCoachingStyle      @default(EDUCATOR)
+  tone               CoachTone               @default(MODERATE)
+  motivationStyle    CoachMotivationStyle    @default(HEALTH)
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("coach_profiles")
+}
+
+model UserGoalClassification {
+  id           String       @id @default(uuid())
+  userId       String       @unique
+  goal         UserGoalType
+  confidence   Decimal      @db.Decimal(5, 4)
+  evidence     Json
+  classifiedAt DateTime     @default(now())
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([goal, classifiedAt])
+  @@map("user_goal_classifications")
+}
+
+model HabitSnapshot {
+  id                   String   @id @default(uuid())
+  userId               String
+  snapshotDate         DateTime @db.Date
+  windowDays           Int      @default(30)
+  mealsRegistered      Int
+  messagesSent         Int
+  activeDays           Int
+  consecutiveDays      Int
+  daysSinceInteraction Int
+  mealFrequency        Decimal  @db.Decimal(6, 2)
+  interactionFrequency Decimal  @db.Decimal(6, 2)
+  regularityScore      Int
+  calculatedAt         DateTime @default(now())
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate])
+  @@index([snapshotDate])
+  @@index([userId, calculatedAt])
+  @@map("habit_snapshots")
+}
+
+model ConsistencyScore {
+  id              String   @id @default(uuid())
+  userId          String
+  snapshotDate    DateTime @db.Date
+  score           Int
+  frequencyScore  Int
+  regularityScore Int
+  adherenceScore  Int
+  continuityScore Int
+  calculatedAt    DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate])
+  @@index([userId, calculatedAt])
+  @@index([score, calculatedAt])
+  @@map("consistency_scores")
+}
+
+model EngagementScore {
+  id                 String   @id @default(uuid())
+  userId             String
+  snapshotDate       DateTime @db.Date
+  score              Int
+  messagesScore      Int
+  analysesScore      Int
+  weeklyUsageScore   Int
+  monthlyUsageScore  Int
+  messagesLast7Days  Int
+  messagesLast30Days Int
+  analysesLast7Days  Int
+  analysesLast30Days Int
+  calculatedAt       DateTime @default(now())
+  createdAt          DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate])
+  @@index([userId, calculatedAt])
+  @@index([score, calculatedAt])
+  @@map("engagement_scores")
+}
+
+model ChurnRiskAssessment {
+  id               String          @id @default(uuid())
+  userId           String
+  snapshotDate     DateTime        @db.Date
+  level            ChurnRiskLevel
+  previousLevel    ChurnRiskLevel?
+  reasons          Json
+  daysInactive     Int
+  engagementScore  Int
+  consistencyScore Int
+  activityDrop     Int
+  assessedAt       DateTime        @default(now())
+  createdAt        DateTime        @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate])
+  @@index([level, assessedAt])
+  @@index([userId, assessedAt])
+  @@map("churn_risk_assessments")
+}
+
+model CoachMessage {
+  id             String           @id @default(uuid())
+  userId         String
+  type           CoachMessageType
+  idempotencyKey String           @unique
+  content        String
+  context        Json
+  generatedAt    DateTime         @default(now())
+  scheduledFor   DateTime?
+  createdAt      DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, generatedAt])
+  @@index([type, generatedAt])
+  @@map("coach_messages")
+}
+
+model CoachReview {
+  id                    String          @id @default(uuid())
+  userId                String
+  type                  CoachReviewType
+  periodStart           DateTime
+  periodEnd             DateTime
+  content               String
+  averageNutritionScore Int
+  consistencyScore      Int
+  engagementScore       Int
+  trendSummary          String
+  achievements          Json
+  opportunities         Json
+  recommendations       Json
+  generatedAt           DateTime        @default(now())
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type, periodStart, periodEnd])
+  @@index([userId, generatedAt])
+  @@index([type, generatedAt])
+  @@map("coach_reviews")
+}
+
+model CoachCommunicationProfileSnapshot {
+  id                  String                         @id @default(uuid())
+  userId              String
+  snapshotDate        DateTime                       @db.Date
+  dominantStyle       CoachCommunicationProfileType
+  previousStyle       CoachCommunicationProfileType?
+  directScore         Int
+  technicalScore      Int
+  motivationalScore   Int
+  disciplinarianScore Int
+  warmScore           Int
+  balancedScore       Int
+  confidence          Decimal                        @db.Decimal(5, 4)
+  evidence            Json
+  generatedAt         DateTime
+  createdAt           DateTime                       @default(now())
+  updatedAt           DateTime                       @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate])
+  @@index([dominantStyle, generatedAt])
+  @@index([userId, generatedAt])
+  @@map("coach_communication_profile_snapshots")
+}
+
+model CoachMotivationProfileSnapshot {
+  id                String                   @id @default(uuid())
+  userId            String
+  snapshotDate      DateTime                 @db.Date
+  dominantTrigger   CoachMotivationalTrigger
+  visualResultScore Int
+  healthScore       Int
+  selfEsteemScore   Int
+  performanceScore  Int
+  disciplineScore   Int
+  longevityScore    Int
+  routineScore      Int
+  confidence        Decimal                  @db.Decimal(5, 4)
+  evidence          Json
+  generatedAt       DateTime
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate])
+  @@index([dominantTrigger, generatedAt])
+  @@index([userId, generatedAt])
+  @@map("coach_motivation_profile_snapshots")
+}
+
+model MessageFatigueSnapshot {
+  id                        String   @id @default(uuid())
+  userId                    String
+  snapshotDate              DateTime @db.Date
+  fatigueScore              Int
+  outboundMessages14Days    Int
+  inboundMessages14Days     Int
+  repeatedThemeScore        Int
+  repeatedPhraseScore       Int
+  interactionResponseScore  Int
+  recommendedFrequencyHours Int
+  evidence                  Json
+  calculatedAt              DateTime
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate])
+  @@index([fatigueScore, calculatedAt])
+  @@index([userId, calculatedAt])
+  @@map("message_fatigue_snapshots")
+}
+
+model CoachReengagementClassification {
+  id             String                  @id @default(uuid())
+  userId         String
+  sourceKey      String                  @unique
+  reason         CoachReengagementReason
+  confidence     Decimal                 @db.Decimal(5, 4)
+  messageVariant Int
+  evidence       Json
+  generatedAt    DateTime
+  createdAt      DateTime                @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([reason, generatedAt])
+  @@index([userId, generatedAt])
+  @@map("coach_reengagement_classifications")
+}
+
+model GoalMomentumSnapshot {
+  id               String   @id @default(uuid())
+  userId           String
+  snapshotDate     DateTime @db.Date
+  score            Int
+  consistencyScore Int
+  evolutionScore   Int
+  relapseScore     Int
+  engagementScore  Int
+  adherenceScore   Int
+  evidence         Json
+  calculatedAt     DateTime
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate])
+  @@index([score, calculatedAt])
+  @@index([userId, calculatedAt])
+  @@map("goal_momentum_snapshots")
+}
+
+model WhatsAppExperienceSnapshot {
+  id                    String   @id @default(uuid())
+  userId                String
+  snapshotDate          DateTime @db.Date
+  idealMessageLength    Int
+  idealEmojiCount       Int
+  idealFrequencyHours   Int
+  preferredHourUtc      Int?
+  averageInboundLength  Int
+  averageOutboundLength Int
+  interactionRate       Int
+  evidence              Json
+  calculatedAt          DateTime
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate])
+  @@index([userId, calculatedAt])
+  @@index([idealFrequencyHours, calculatedAt])
+  @@map("whatsapp_experience_snapshots")
+}
+
+model RetentionStrengthSnapshot {
+  id                            String   @id @default(uuid())
+  userId                        String
+  snapshotDate                  DateTime @db.Date
+  score                         Int
+  usageScore                    Int
+  engagementScore               Int
+  contextScore                  Int
+  evolutionScore                Int
+  coachScore                    Int
+  recommendationAcceptanceScore Int
+  evidence                      Json
+  calculatedAt                  DateTime
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate])
+  @@index([score, calculatedAt])
+  @@index([userId, calculatedAt])
+  @@map("retention_strength_snapshots")
+}
+
+model NutritionEvidenceSnapshot {
+  id                  String   @id @default(uuid())
+  userId              String
+  snapshotDate        DateTime @db.Date
+  score               Int
+  vegetableScore      Int
+  proteinScore        Int
+  ultraProcessedScore Int
+  sugarScore          Int
+  fiberScore          Int
+  hydrationScore      Int
+  mealsAnalyzed       Int
+  evidence            Json
+  calculatedAt        DateTime
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate])
+  @@index([score, calculatedAt])
+  @@index([userId, calculatedAt])
+  @@map("nutrition_evidence_snapshots")
+}
+
+model FoodQualityIndex {
+  id              String           @id @default(uuid())
+  userId          String
+  mealAnalysisId  String           @unique
+  qualityClass    FoodQualityClass
+  score           Int
+  positiveFactors Json
+  limitingFactors Json
+  explanation     String
+  calculatedAt    DateTime
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, calculatedAt])
+  @@index([qualityClass, calculatedAt])
+  @@map("food_quality_indexes")
+}
+
+model DietaryPatternSnapshot {
+  id           String             @id @default(uuid())
+  userId       String
+  snapshotDate DateTime           @db.Date
+  pattern      DietaryPatternType
+  confidence   Decimal            @db.Decimal(5, 4)
+  active       Boolean            @default(true)
+  evidence     Json
+  calculatedAt DateTime
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate, pattern])
+  @@index([pattern, confidence, calculatedAt])
+  @@index([userId, calculatedAt])
+  @@map("dietary_pattern_snapshots")
+}
+
+model UserLearningProfile {
+  id                  String   @id @default(uuid())
+  userId              String   @unique
+  acceptedCount       Int
+  ignoredCount        Int
+  rejectedCount       Int
+  shortChallengeScore Int
+  preferredTopics     Json
+  ignoredTopics       Json
+  topicScores         Json
+  confidence          Decimal  @db.Decimal(5, 4)
+  evidence            Json
+  generatedAt         DateTime
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([confidence, generatedAt])
+  @@map("user_learning_profiles")
+}
+
+model CommunicationAdaptationSnapshot {
+  id                  String                        @id @default(uuid())
+  userId              String
+  snapshotDate        DateTime                      @db.Date
+  profile             AdaptiveCommunicationProfile
+  previousProfile     AdaptiveCommunicationProfile?
+  executiveScore      Int
+  technicalScore      Int
+  disciplinedScore    Int
+  warmScore           Int
+  inspirationalScore  Int
+  idealLength         Int
+  structurePreference String
+  confidence          Decimal                       @db.Decimal(5, 4)
+  evidence            Json
+  generatedAt         DateTime
+  createdAt           DateTime                      @default(now())
+  updatedAt           DateTime                      @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate])
+  @@index([profile, generatedAt])
+  @@index([userId, generatedAt])
+  @@map("communication_adaptation_snapshots")
+}
+
+model EarlyChurnSnapshot {
+  id               String          @id @default(uuid())
+  userId           String
+  snapshotDate     DateTime        @db.Date
+  score            Int
+  level            EarlyChurnLevel
+  engagementScore  Int
+  consistencyScore Int
+  responseScore    Int
+  usageScore       Int
+  analysisScore    Int
+  coachScore       Int
+  reasons          Json
+  evidence         Json
+  calculatedAt     DateTime
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate])
+  @@index([level, score, calculatedAt])
+  @@index([userId, calculatedAt])
+  @@map("early_churn_snapshots")
+}
+
+model AdaptiveRecommendationRank {
+  id               String   @id @default(uuid())
+  userId           String
+  snapshotDate     DateTime @db.Date
+  recommendationId String
+  rank             Int
+  adaptiveScore    Int
+  baseScore        Int
+  learningModifier Int
+  contextModifier  Int
+  noveltyModifier  Int
+  evidence         Json
+  rankedAt         DateTime
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate, recommendationId])
+  @@index([userId, snapshotDate, rank])
+  @@index([adaptiveScore, rankedAt])
+  @@map("adaptive_recommendation_ranks")
+}
+
+model LongitudinalNutritionWindowSnapshot {
+  id                  String                  @id @default(uuid())
+  userId              String
+  snapshotDate        DateTime                @db.Date
+  windowDays          Int
+  score               Int
+  previousScore       Int?
+  direction           NutritionTrendDirection
+  vegetableScore      Int
+  proteinScore        Int
+  ultraProcessedScore Int
+  sugarScore          Int
+  fiberScore          Int
+  hydrationScore      Int
+  mealsAnalyzed       Int
+  evidence            Json
+  calculatedAt        DateTime
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate, windowDays])
+  @@index([userId, windowDays, calculatedAt])
+  @@index([direction, calculatedAt])
+  @@map("longitudinal_nutrition_window_snapshots")
+}
+
+model OutboundMessage {
+  id                String                @id @default(uuid())
+  userId            String
+  conversationId    String
+  sourceMessageId   String
+  mealAnalysisId    String?               @unique
+  responseType      ResponseType
+  content           String
+  externalMessageId String?               @unique
+  status            OutboundMessageStatus @default(PENDING)
+  attempts          Int                   @default(0)
+  leaseExpiresAt    DateTime?
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  failedAt          DateTime?
+  errorMessage      String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  user               User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation       Conversation          @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sourceMessage      Message               @relation(fields: [sourceMessageId], references: [id], onDelete: Cascade)
+  mealAnalysis       MealAnalysis?         @relation(fields: [mealAnalysisId], references: [id], onDelete: Cascade)
+  responseEvaluation AIResponseEvaluation?
+
+  @@unique([sourceMessageId, responseType])
+  @@index([userId, createdAt])
+  @@index([conversationId, createdAt])
+  @@index([status, createdAt])
+  @@index([status, leaseExpiresAt])
+  @@map("outbound_messages")
+}
+
+model UsageBucket {
+  id              String   @id @default(uuid())
+  userId          String
+  entitlementCode String
+  periodStart     DateTime
+  periodEnd       DateTime
+  used            Int      @default(0)
+  reserved        Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entitlement EntitlementDefinition @relation(fields: [entitlementCode], references: [code], onDelete: Restrict)
+
+  @@unique([userId, entitlementCode, periodStart, periodEnd])
+  @@index([userId, entitlementCode, periodEnd])
+  @@index([periodEnd])
+  @@map("usage_buckets")
+}
+
+model UsageEvent {
+  id              String           @id @default(uuid())
+  userId          String
+  aiJobId         String
+  entitlementCode String
+  quantity        Int
+  status          UsageEventStatus @default(RESERVED)
+  expiresAt       DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aiJob       AIJob                 @relation(fields: [aiJobId], references: [id], onDelete: Cascade)
+  entitlement EntitlementDefinition @relation(fields: [entitlementCode], references: [code], onDelete: Restrict)
+
+  @@unique([aiJobId, entitlementCode])
+  @@index([userId, entitlementCode, status, createdAt])
+  @@index([aiJobId, status])
+  @@index([status, expiresAt])
+  @@map("usage_events")
+}
+
+model UsageDaily {
+  id         String   @id @default(uuid())
+  userId     String
+  date       DateTime
+  imagesUsed Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@index([date])
+  @@index([userId])
+  @@map("usage_daily")
+}
+
+model UserActivation {
+  id                             String              @id @default(uuid())
+  userId                         String              @unique
+  currentStage                   ActivationStage     @default(REGISTERED)
+  score                          Int                 @default(5)
+  riskLevel                      ActivationRiskLevel @default(LOW)
+  registeredAt                   DateTime
+  paidAt                         DateTime?
+  whatsappConnectedAt            DateTime?
+  firstMessageSentAt             DateTime?
+  firstMealReceivedAt            DateTime?
+  firstAnalysisCompletedAt       DateTime?
+  firstRecommendationDeliveredAt DateTime?
+  firstCoachInteractionAt        DateTime?
+  firstValueAt                   DateTime?
+  activatedAt                    DateTime?
+  abandonedAt                    DateTime?
+  lastProgressAt                 DateTime
+  createdAt                      DateTime            @default(now())
+  updatedAt                      DateTime            @updatedAt
+
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events    ActivationEvent[]
+  snapshots ActivationSnapshot[]
+
+  @@index([currentStage, updatedAt])
+  @@index([riskLevel, lastProgressAt])
+  @@index([activatedAt])
+  @@index([abandonedAt])
+  @@map("user_activations")
+}
+
+model ActivationEvent {
+  id                          String                    @id @default(uuid())
+  activationId                String
+  userId                      String
+  kind                        ActivationEventKind
+  eventCode                   String
+  idempotencyKey              String                    @unique
+  fromStage                   ActivationStage?
+  toStage                     ActivationStage?
+  source                      String
+  occurredAt                  DateTime
+  durationFromPreviousSeconds Int?
+  metadata                    Json                      @default("{}")
+  deliveryStatus              ActivationDeliveryStatus?
+  scheduledFor                DateTime?
+  sentAt                      DateTime?
+  failedAt                    DateTime?
+  externalMessageId           String?
+  attempts                    Int                       @default(0)
+  leaseExpiresAt              DateTime?
+  errorMessage                String?
+  createdAt                   DateTime                  @default(now())
+  updatedAt                   DateTime                  @updatedAt
+
+  activation UserActivation @relation(fields: [activationId], references: [id], onDelete: Cascade)
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([activationId, occurredAt])
+  @@index([userId, kind, occurredAt])
+  @@index([deliveryStatus, scheduledFor])
+  @@index([eventCode, occurredAt])
+  @@map("activation_events")
+}
+
+model ActivationSnapshot {
+  id            String              @id @default(uuid())
+  activationId  String
+  userId        String
+  snapshotDate  DateTime            @db.Date
+  currentStage  ActivationStage
+  score         Int
+  riskLevel     ActivationRiskLevel
+  stalledHours  Int
+  stepDurations Json
+  firstValueAt  DateTime?
+  finalStatus   ActivationStage?
+  generatedAt   DateTime
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  activation UserActivation @relation(fields: [activationId], references: [id], onDelete: Cascade)
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, snapshotDate])
+  @@index([snapshotDate, currentStage])
+  @@index([riskLevel, snapshotDate])
+  @@index([activationId, generatedAt])
+  @@map("activation_snapshots")
+}
+
+model LongitudinalNutritionProfile {
+  id                String   @id @default(uuid())
+  userId            String
+  sourceKey         String   @unique
+  mealAnalysisId    String
+  historySize       Int
+  adherenceScore    Int
+  consistencyScore  Int
+  preferenceSummary Json
+  evolutionSummary  Json
+  regressionSummary Json
+  generatedAt       DateTime
+  createdAt         DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, generatedAt])
+  @@index([mealAnalysisId])
+  @@map("longitudinal_nutrition_profiles")
+}
+
+model FoodPreferenceSnapshot {
+  id             String             @id @default(uuid())
+  userId         String
+  sourceKey      String             @unique
+  foodName       String
+  normalizedFood String
+  kind           FoodPreferenceKind
+  confidence     Decimal            @db.Decimal(5, 4)
+  occurrences    Int
+  evidence       Json
+  observedAt     DateTime
+  createdAt      DateTime           @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, normalizedFood, observedAt])
+  @@index([kind, confidence, observedAt])
+  @@map("food_preference_snapshots")
+}
+
+model NutritionEvolutionSnapshot {
+  id                      String                @id @default(uuid())
+  userId                  String
+  sourceKey               String                @unique
+  periodStart             DateTime
+  periodEnd               DateTime
+  mealsAnalyzed           Int
+  qualityScore            Int
+  hydrationScore          Int
+  vegetableScore          Int
+  ultraProcessedScore     Int
+  sugarScore              Int
+  proteinScore            Int
+  qualityDirection        LongitudinalDirection
+  hydrationDirection      LongitudinalDirection
+  vegetableDirection      LongitudinalDirection
+  ultraProcessedDirection LongitudinalDirection
+  sugarDirection          LongitudinalDirection
+  proteinDirection        LongitudinalDirection
+  overallDirection        LongitudinalDirection
+  evidence                Json
+  generatedAt             DateTime
+  createdAt               DateTime              @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, generatedAt])
+  @@index([overallDirection, generatedAt])
+  @@map("nutrition_evolution_snapshots")
+}
+
+model NutritionRelapse {
+  id         String                   @id @default(uuid())
+  userId     String
+  sourceKey  String                   @unique
+  severity   NutritionRelapseSeverity
+  reasons    Json
+  evidence   Json
+  detectedAt DateTime
+  createdAt  DateTime                 @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, detectedAt])
+  @@index([severity, detectedAt])
+  @@map("nutrition_relapses")
+}
+
+model GoalProgressionSnapshot {
+  id               String               @id @default(uuid())
+  userId           String
+  sourceKey        String               @unique
+  goal             UserGoalType
+  state            GoalProgressionState
+  score            Int
+  behaviorScore    Int
+  consistencyScore Int
+  nutritionScore   Int
+  adherenceScore   Int
+  evidence         Json
+  generatedAt      DateTime
+  createdAt        DateTime             @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, generatedAt])
+  @@index([goal, state, generatedAt])
+  @@map("goal_progression_snapshots")
+}
+
+model LongitudinalMemory {
+  id          String                 @id @default(uuid())
+  userId      String
+  sourceKey   String                 @unique
+  kind        LongitudinalMemoryKind
+  title       String
+  summary     String
+  evidence    Json
+  confidence  Decimal                @db.Decimal(5, 4)
+  generatedAt DateTime
+  createdAt   DateTime               @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, generatedAt])
+  @@index([userId, kind, generatedAt])
+  @@map("longitudinal_memories")
+}
+
+model CoachAdaptationSnapshot {
+  id                 String              @id @default(uuid())
+  userId             String
+  sourceKey          String              @unique
+  mode               CoachAdaptationMode
+  technicalLevel     Int
+  encouragementLevel Int
+  recoveryLevel      Int
+  performanceLevel   Int
+  reason             String
+  evidence           Json
+  generatedAt        DateTime
+  createdAt          DateTime            @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, generatedAt])
+  @@index([mode, generatedAt])
+  @@map("coach_adaptation_snapshots")
+}
+
+model RecommendationFeedbackSnapshot {
+  id             String   @id @default(uuid())
+  userId         String
+  sourceKey      String   @unique
+  acceptedCount  Int
+  ignoredCount   Int
+  rejectedCount  Int
+  acceptanceRate Int
+  categoryScores Json
+  signalScores   Json
+  generatedAt    DateTime
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, generatedAt])
+  @@map("recommendation_feedback_snapshots")
+}
+
+model MonthlyEvolutionReview {
+  id              String                @id @default(uuid())
+  userId          String
+  monthStart      DateTime              @db.Date
+  periodEnd       DateTime              @db.Date
+  direction       LongitudinalDirection
+  evolution       Json
+  regressions     Json
+  habits          Json
+  victories       Json
+  recommendations Json
+  content         String
+  generatedAt     DateTime
+  createdAt       DateTime              @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, monthStart])
+  @@index([monthStart, direction])
+  @@index([userId, generatedAt])
+  @@map("monthly_evolution_reviews")
+}
+
+model PilotCohort {
+  id            String            @id @default(uuid())
+  name          String
+  description   String
+  status        PilotCohortStatus @default(PLANNED)
+  lastGoStatus  PilotGoStatus?
+  goEvaluatedAt DateTime?
+  startsAt      DateTime
+  endsAt        DateTime
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  participants PilotParticipant[]
+  manualChecks PilotManualCheck[]
+
+  @@index([status, startsAt])
+  @@index([endsAt])
+  @@map("pilot_cohorts")
+}
+
+model PilotParticipant {
+  id          String                 @id @default(uuid())
+  cohortId    String
+  userId      String
+  status      PilotParticipantStatus @default(INVITED)
+  joinedAt    DateTime               @default(now())
+  activatedAt DateTime?
+  completedAt DateTime?
+  droppedAt   DateTime?
+  notes       String?
+
+  cohort PilotCohort @relation(fields: [cohortId], references: [id], onDelete: Cascade)
+  user   User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([cohortId, userId])
+  @@index([cohortId, status, joinedAt])
+  @@index([userId, joinedAt])
+  @@map("pilot_participants")
+}
+
+model PilotManualCheck {
+  id              String                 @id @default(uuid())
+  cohortId        String
+  checkType       PilotManualCheckType
+  status          PilotManualCheckStatus @default(PENDING)
+  notes           String?
+  checkedAt       DateTime
+  checkedByUserId String
+
+  cohort    PilotCohort @relation(fields: [cohortId], references: [id], onDelete: Cascade)
+  checkedBy User        @relation("PilotCheckOperator", fields: [checkedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([cohortId, checkType])
+  @@index([cohortId, status, checkedAt])
+  @@index([checkedByUserId, checkedAt])
+  @@map("pilot_manual_checks")
+}

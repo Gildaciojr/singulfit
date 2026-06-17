@@ -1,0 +1,65 @@
+export interface PagBankCreateOrderRequest {
+  reference_id: string;
+  customer: {
+    name: string;
+    email: string;
+    tax_id: string;
+    phones: Array<{
+      country: string;
+      area: string;
+      number: string;
+      type: 'MOBILE';
+    }>;
+  };
+  items: Array<{
+    reference_id: string;
+    name: string;
+    quantity: number;
+    unit_amount: number;
+  }>;
+  qr_codes: Array<{
+    amount: {
+      value: number;
+    };
+    expiration_date: string;
+  }>;
+}
+
+export interface PagBankLink {
+  rel: string;
+  href: string;
+}
+
+export interface PagBankQrCode {
+  id: string;
+  expiration_date: string;
+  text: string;
+  links: PagBankLink[];
+}
+
+export interface PagBankCreateOrderResponse {
+  id: string;
+  reference_id: string;
+  qr_codes: PagBankQrCode[];
+}
+
+export interface PagBankCharge {
+  id: string;
+  reference_id: string;
+  status: string;
+  paid_at?: string;
+  amount: {
+    value: number;
+    currency: string;
+  };
+  payment_response?: {
+    code?: string;
+    message?: string;
+  };
+}
+
+export interface PagBankOrderResponse {
+  id: string;
+  reference_id: string;
+  charges: PagBankCharge[];
+}
