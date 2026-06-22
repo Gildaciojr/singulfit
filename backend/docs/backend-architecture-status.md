@@ -1,4 +1,4 @@
-# NutraFit Backend Architecture Status
+# SingulFit Backend Architecture Status
 
 ## Status
 

@@ -12,7 +12,7 @@ export default function NotFound() {
       <h1 className="text-3xl font-semibold tracking-tight">Página não encontrada</h1>
       <p className="mt-2 max-w-md text-sm text-muted-foreground">
         Parece que essa rota não existe mais ou foi movida. Mas não se preocupe, você pode voltar para a página
-        principal e continuar explorando a LucyFit.
+        principal e continuar explorando a SingulFit.
       </p>
 
       <Button asChild className="mt-6">

@@ -36,7 +36,7 @@ module.exports = {
     {
       ...common,
       ...logs('api'),
-      name: 'nutrafit-api',
+      name: 'singulfit-api',
       script: 'dist/main.js',
       max_memory_restart: '512M',
       kill_timeout: 15000,
@@ -48,7 +48,7 @@ module.exports = {
     {
       ...common,
       ...logs('worker-outbox'),
-      name: 'nutrafit-worker-outbox',
+      name: 'singulfit-worker-outbox',
       script: 'dist/main.worker.js',
       args: 'outbox',
       max_memory_restart: '384M',
@@ -61,7 +61,7 @@ module.exports = {
     {
       ...common,
       ...logs('worker-ai'),
-      name: 'nutrafit-worker-ai',
+      name: 'singulfit-worker-ai',
       script: 'dist/main.worker.js',
       args: 'ai',
       max_memory_restart: '768M',
@@ -74,7 +74,7 @@ module.exports = {
     {
       ...common,
       ...logs('worker-automation'),
-      name: 'nutrafit-worker-automation',
+      name: 'singulfit-worker-automation',
       script: 'dist/main.worker.js',
       args: 'automation',
       max_memory_restart: '384M',

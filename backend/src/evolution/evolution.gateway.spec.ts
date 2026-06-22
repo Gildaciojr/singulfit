@@ -11,7 +11,7 @@ describe('EvolutionGateway', () => {
     const values: Record<string, string> = {
       EVOLUTION_BASE_URL: 'https://evolution.example.com',
       EVOLUTION_API_KEY: 'evolution-api-key',
-      EVOLUTION_INSTANCE_NAME: 'lucyfit',
+      EVOLUTION_INSTANCE_NAME: 'singulfit',
       EVOLUTION_WEBHOOK_SECRET: 'evolution-webhook-secret',
     };
     const configService = {
@@ -40,11 +40,11 @@ describe('EvolutionGateway', () => {
     const gateway = createGateway();
 
     await expect(gateway.getConnectionState()).resolves.toEqual({
-      instance: 'lucyfit',
+      instance: 'singulfit',
       state: 'open',
     });
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://evolution.example.com/instance/connectionState/lucyfit',
+      'https://evolution.example.com/instance/connectionState/singulfit',
       expect.objectContaining({
         method: 'GET',
         headers: {
@@ -93,7 +93,7 @@ describe('EvolutionGateway', () => {
       externalMessageId: 'wamid-outbound-test',
     });
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://evolution.example.com/message/sendText/lucyfit',
+      'https://evolution.example.com/message/sendText/singulfit',
       expect.objectContaining({
         method: 'POST',
         headers: {

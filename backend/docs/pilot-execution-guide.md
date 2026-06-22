@@ -1,4 +1,4 @@
-# NutraFit Controlled Pilot Execution Guide
+# SingulFit Controlled Pilot Execution Guide
 
 Execute this guide only in staging or production-equivalent infrastructure.
 Use an ADMIN JWT and never place tokens, secrets, payment payloads, personal
@@ -89,7 +89,7 @@ GET /api/v1/admin/pilot/cohorts/{cohortId}
 
 ## 4. Add Participants
 
-Participants must already have a NutraFit user ID. This means the current data
+Participants must already have a SingulFit user ID. This means the current data
 model treats every invited participant as a registered account; the
 `registeredUsers` metric confirms that the linked account exists in the pilot
 period.

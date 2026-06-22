@@ -553,7 +553,7 @@ describe('CoachIntelligenceService', () => {
     const prisma = {
       user: {
         findUniqueOrThrow: jest.fn().mockResolvedValue({
-          name: 'Lucy Fit',
+          name: 'SingulFit',
           fitnessProfile: null,
           coachProfile: state().coachProfile,
           goalClassification: state().goalClassification,

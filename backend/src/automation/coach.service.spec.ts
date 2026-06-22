@@ -12,7 +12,7 @@ describe('CoachService', () => {
     const prisma = {
       user: {
         findUnique: jest.fn().mockResolvedValue({
-          name: 'Lucy Fit',
+          name: 'SingulFit',
           fitnessProfile: {
             currentWeightKg: new Prisma.Decimal('70.00'),
             targetWeightKg: new Prisma.Decimal('62.00'),

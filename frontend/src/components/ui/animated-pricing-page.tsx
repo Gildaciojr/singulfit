@@ -3,6 +3,11 @@
 import { motion } from "framer-motion";
 import { Check, Shield, Flame } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  checkoutPath,
+  COMMERCIAL_PLANS,
+  formatPlanPrice,
+} from "@/lib/commercial-plans";
 
 interface PricingCardProps {
   title: string;
@@ -18,10 +23,8 @@ const features = [
   "Registro por foto",
   "Registro por áudio",
   "IA nutricionista",
-  "Histórico completo",
-  "Metas automáticas",
-  "Dashboard inteligente",
   "Análise completa",
+  "Ativação via WhatsApp",
   "Suporte prioritário",
 ];
 
@@ -104,9 +107,9 @@ function PricingCard({
 
       {/* CTA */}
       <Button
-        variant={highlight ? "premium" : "outline"}
+        variant={highlight ? "default" : "outline"}
         className="w-full"
-        onClick={() => window.open(checkoutUrl, "_blank")}
+        onClick={() => window.location.assign(checkoutUrl)}
       >
         {highlight ? "Quero acesso completo" : "Testar por 1 mês"}
       </Button>
@@ -144,18 +147,18 @@ export const PricingPage = () => {
       <div className="grid md:grid-cols-2 gap-6 w-full max-w-5xl">
 
         <PricingCard
-          title="Plano Mensal"
-          price="29,99"
+          title={COMMERCIAL_PLANS.BASIC.displayName}
+          price={formatPlanPrice(COMMERCIAL_PLANS.BASIC.price).replace("R$ ", "")}
           period="/ mês"
-          checkoutUrl="https://pay.hotmart.com/K102603335O?off=oe515n4q&checkoutMode=6"
+          checkoutUrl={checkoutPath("BASIC")}
         />
 
         <PricingCard
-          title="Plano Anual"
-          price="19,99"
+          title={COMMERCIAL_PLANS.PREMIUM.displayName}
+          price={formatPlanPrice(COMMERCIAL_PLANS.PREMIUM.price).replace("R$ ", "")}
           period="/ mês"
-          subtitle="Cobrança de R$ 239,88 por ano"
-          checkoutUrl="https://pay.hotmart.com/K102603335O?off=ms9bkn4k&checkoutMode=6"
+          subtitle="Plano completo da SingulFit"
+          checkoutUrl={checkoutPath("PREMIUM")}
           highlight
         />
 

@@ -17,7 +17,7 @@ describe('EvolutionWebhookService', () => {
   }) {
     const evolutionGateway = {
       validateWebhookSecret: jest.fn(),
-      getInstanceName: jest.fn().mockReturnValue('lucyfit'),
+      getInstanceName: jest.fn().mockReturnValue('singulfit'),
     };
     const usersService = {
       findByWhatsAppPhone: jest.fn().mockResolvedValue(
@@ -97,7 +97,7 @@ describe('EvolutionWebhookService', () => {
   function webhook(message: Record<string, unknown>) {
     return {
       event: 'messages.upsert',
-      instance: 'lucyfit',
+      instance: 'singulfit',
       data: {
         key: {
           id: 'wamid-test',
@@ -114,7 +114,7 @@ describe('EvolutionWebhookService', () => {
     service: EvolutionWebhookService,
     message: Record<string, unknown>,
   ) {
-    return service.processQueuedEntry('lucyfit', webhook(message).data);
+    return service.processQueuedEntry('singulfit', webhook(message).data);
   }
 
   it('links an inbound text message to the user and active subscription', async () => {
@@ -286,7 +286,7 @@ describe('EvolutionWebhookService', () => {
       subject.service.handle(
         {
           event: 'messages.upsert',
-          instance: 'lucyfit',
+          instance: 'singulfit',
           data: {
             message: {
               conversation: 'Sem chave',
@@ -306,7 +306,7 @@ describe('EvolutionWebhookService', () => {
     payload.data.key.fromMe = true;
 
     const result = await subject.service.processQueuedEntry(
-      'lucyfit',
+      'singulfit',
       payload.data,
     );
 

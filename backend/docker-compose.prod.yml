@@ -1,13 +1,13 @@
-name: nutrafit-production
+name: singulfit-production
 
 x-backend-environment: &backend-environment
   NODE_ENV: production
-  DATABASE_URL: postgresql://${POSTGRES_USER:-nutrafit}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-nutrafit}?schema=public
+  DATABASE_URL: postgresql://${POSTGRES_USER:-singulfit}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-singulfit}?schema=public
   PRISMA_MIGRATIONS_PATH: /app/prisma/migrations
   UPLOAD_PATH: /app/uploads
 
 x-backend-service: &backend-service
-  image: nutrafit-backend:${IMAGE_TAG:-latest}
+  image: singulfit-backend:${IMAGE_TAG:-latest}
   build:
     context: .
     dockerfile: Dockerfile
@@ -20,29 +20,29 @@ x-backend-service: &backend-service
     migrate:
       condition: service_completed_successfully
   volumes:
-    - nutrafit_uploads:/app/uploads
+    - singulfit_uploads:/app/uploads
 
 services:
   postgres:
     image: postgres:16-bookworm
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-nutrafit}
-      POSTGRES_USER: ${POSTGRES_USER:-nutrafit}
+      POSTGRES_DB: ${POSTGRES_DB:-singulfit}
+      POSTGRES_USER: ${POSTGRES_USER:-singulfit}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     healthcheck:
       test:
         - CMD-SHELL
-        - pg_isready -U ${POSTGRES_USER:-nutrafit} -d ${POSTGRES_DB:-nutrafit}
+        - pg_isready -U ${POSTGRES_USER:-singulfit} -d ${POSTGRES_DB:-singulfit}
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 20s
     volumes:
-      - nutrafit_postgres:/var/lib/postgresql/data
+      - singulfit_postgres:/var/lib/postgresql/data
 
   migrate:
-    image: nutrafit-backend:${IMAGE_TAG:-latest}
+    image: singulfit-backend:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -100,5 +100,5 @@ services:
     command: ["node", "dist/main.worker.js", "automation"]
 
 volumes:
-  nutrafit_postgres:
-  nutrafit_uploads:
+  singulfit_postgres:
+  singulfit_uploads:

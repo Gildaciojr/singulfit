@@ -42,7 +42,7 @@ export default function MoreFeatures({ data }: Props) {
   const isMobile = useIsMobile();
 
   return (
-    <section className="relative overflow-hidden py-24 lg:py-36">
+    <section className="relative overflow-hidden py-16 lg:py-20">
       {/* BACKGROUND */}
       <div className="absolute inset-0 -z-20 bg-[radial-gradient(700px_450px_at_50%_0%,rgba(34,120,84,0.08),transparent_70%)]" />
 

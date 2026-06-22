@@ -4,6 +4,7 @@ import PrivacyPolicy from "@/pages/PrivacyPolicy";
 import About from "@/pages/About";
 import Terms from "@/pages/Terms";
 import NotFound from "@/pages/NotFound";
+import Checkout from "@/pages/Checkout";
 
 export function AppRoutes() {
   return (
@@ -13,6 +14,7 @@ export function AppRoutes() {
         <Route path="/sobre" element={<About />} />
         <Route path="/politica-de-privacidade" element={<PrivacyPolicy />} />
         <Route path="/termos-de-uso" element={<Terms />} />
+        <Route path="/checkout/:planType" element={<Checkout />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>

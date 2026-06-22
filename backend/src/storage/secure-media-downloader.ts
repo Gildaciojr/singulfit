@@ -38,7 +38,7 @@ export class SecureMediaDownloader {
           method: 'GET',
           headers: {
             Accept: '*/*',
-            'User-Agent': 'LucyFit-Media-Downloader/1.0',
+            'User-Agent': 'SingulFit-Media-Downloader/1.0',
           },
           lookup: pinnedLookup,
           servername: url.hostname,

@@ -7,7 +7,7 @@ export default function About() {
 
         <div className="space-y-4 text-center">
           <h1 className="text-4xl md:text-5xl font-bold tracking-tight">
-            Sobre a LucyFit
+            Sobre a SingulFit
           </h1>
           <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
             Tecnologia de ponta para transformar a maneira como as pessoas 
@@ -17,7 +17,7 @@ export default function About() {
 
         <div className="space-y-8 text-lg leading-relaxed text-gray-700">
           <p>
-            A <strong>LucyFit</strong> nasceu com o propósito de simplificar a vida 
+            A <strong>SingulFit</strong> nasceu com o propósito de simplificar a vida
             de quem quer ter mais controle sobre sua alimentação sem precisar 
             perder tempo com planilhas, cálculos ou aplicativos complicados.
           </p>
@@ -35,7 +35,7 @@ export default function About() {
           </p>
 
           <p>
-            Hoje, já são <strong>mais de 50 mil usuários</strong> utilizando a LucyFit diariamente. 
+            Hoje, já são <strong>mais de 50 mil usuários</strong> utilizando a SingulFit diariamente.
             Estamos em constante evolução, sempre ouvindo nossa comunidade e trazendo 
             melhorias constantes para oferecer a melhor experiência possível.
           </p>

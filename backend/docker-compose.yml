@@ -3,16 +3,16 @@ version: "3.8"
 services:
   postgres:
     image: postgres:16
-    container_name: lucyfit-postgres
+    container_name: singulfit-postgres
     restart: always
     environment:
-      POSTGRES_DB: lucyfit_db
-      POSTGRES_USER: postgres
+      POSTGRES_DB: singulfit
+      POSTGRES_USER: singulfit
       POSTGRES_PASSWORD: postgres
     ports:
       - "5438:5432"
     volumes:
-      - lucyfit_pgdata:/var/lib/postgresql/data
+      - singulfit_pgdata:/var/lib/postgresql/data
 
 volumes:
-  lucyfit_pgdata:
+  singulfit_pgdata:

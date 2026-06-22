@@ -9,8 +9,8 @@ describe('JwtTokenService', () => {
     const values: Record<string, string> = {
       JWT_ACCESS_SECRET: 'test-access-secret-with-sufficient-entropy',
       JWT_REFRESH_SECRET: 'test-refresh-secret-with-sufficient-entropy',
-      JWT_ISSUER: 'lucyfit-test-api',
-      JWT_AUDIENCE: 'lucyfit-test-app',
+      JWT_ISSUER: 'singulfit-test-api',
+      JWT_AUDIENCE: 'singulfit-test-app',
     };
     const configService = {
       get: <T>(key: string): T | undefined => values[key] as T | undefined,
@@ -37,8 +37,8 @@ describe('JwtTokenService', () => {
         role: UserRole.USER,
         sessionId: 'fc0bfd65-3e68-4981-87cc-5c66550f906a',
         jti: 'bb48915d-5510-4e5c-a40c-65691a10825f',
-        iss: 'lucyfit-test-api',
-        aud: 'lucyfit-test-app',
+        iss: 'singulfit-test-api',
+        aud: 'singulfit-test-app',
         tokenType: 'access',
       }),
     );

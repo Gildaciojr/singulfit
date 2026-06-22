@@ -1,212 +1,74 @@
-# 🌟 LucyFit — Landing Page Oficial
+# SingulFit
 
-Landing page moderna, responsiva e otimizada da **LucyFit**, desenvolvida com foco em **alta conversão mobile**, performance e design premium.
+Landing e checkout comercial da SingulFit: um fluxo WhatsApp-first para cadastro, escolha de plano, pagamento via PIX e ativação automática.
 
-Projeto construído em **React + TypeScript + Vite**, utilizando **TailwindCSS**, **shadcn/ui** e **framer-motion**, seguindo padrões profissionais de SaaS e infoprodutos.
+## Stack
 
----
+- React 18 + TypeScript + Vite
+- TailwindCSS + shadcn/ui + Radix UI
+- React Query
+- Backend NestJS + Prisma + PostgreSQL
+- PagBank para PIX
+- Evolution API para WhatsApp
+- OpenAI para análise nutricional
 
-## 🚀 Tecnologias Utilizadas
+## Fluxo Comercial
 
-- **React 18**
-- **TypeScript**
-- **Vite**
-- **TailwindCSS**
-- **shadcn/ui**
-- **Radix UI**
-- **framer-motion**
-- **Lucide Icons**
-- **Hotmart Checkout**
-- **Meta Pixel (Facebook Ads)**
+Landing -> Plano -> Cadastro -> PIX -> Aguardando pagamento -> Pagamento aprovado -> Boas-vindas no WhatsApp.
 
----
+O frontend consome os endpoints do backend:
 
-## 📂 Estrutura do Projeto
+- `POST /api/v1/auth/register`
+- `POST /api/v1/payments/pix`
+- `GET /api/v1/checkout/status`
+- `POST /api/v1/auth/refresh`
 
-```txt
-src/
- ├─ assets/
- │   ├─ gifs/
- │   ├─ images/
- │
- ├─ components/
- │   ├─ Hero.tsx
- │   ├─ Features.tsx
- │   ├─ MoreFeatures.tsx
- │   ├─ Testimonials.tsx
- │   ├─ Pricing.tsx
- │   ├─ FAQ.tsx
- │
- ├─ hooks/
- │   ├─ use-mobile.tsx
- │
- ├─ lib/
- │   ├─ motion-config.ts
- │   ├─ utils.ts
- │
- ├─ main.tsx
- ├─ index.css
-💜 Funcionalidades da Landing Page
-🎯 Hero Section
-Headline principal da LucyFit
+## Frontend
 
-CTA direto para planos
-
-Métricas sociais (prova social)
-
-GIF animado otimizado (mobile-first)
-
-Design premium com gradientes suaves
-
-📄 Arquivo:
-src/components/Hero.tsx
-
-⚡ Seção “Como a LucyFit te ajuda todos os dias”
-Cards informativos
-
-GIFs demonstrativos
-
-Interação otimizada para desktop
-
-Versão mobile estável e sem travamentos
-
-📄 Arquivo:
-src/components/Features.tsx
-
-🎨 Seção “Mais Funções”
-Grade de recursos
-
-Ícones profissionais
-
-Animações leves (desativadas no mobile para performance)
-
-📄 Arquivo:
-src/components/MoreFeatures.tsx
-
-⭐ Depoimentos de Usuários
-Carrossel automático
-
-Layout premium
-
-Mais depoimentos visíveis no desktop
-
-Mobile otimizado sem sobrecarga de animações
-
-📄 Arquivo:
-src/components/Testimonials.tsx
-
-💰 Seção de Preços
-Alternância Mensal / Anual
-
-Plano anual destacado
-
-Selo “Mais Vendido”
-
-Card de Garantia de 7 dias
-
-Integração direta com Hotmart
-
-📄 Arquivo:
-src/components/Pricing.tsx
-
-🔗 Links de Checkout (Hotmart)
-Plano Mensal
-txt
-Copiar código
-https://pay.hotmart.com/K102603335O?off=oe515n4q&checkoutMode=10&bid=1765197985158
-Plano Anual
-txt
-Copiar código
-https://pay.hotmart.com/K102603335O?off=gv3oc04g&checkoutMode=10
-
-📌 Para trocar os links, editar apenas:
-
-ts
-Copiar código
-cta: {
-  text: "...",
-  href: "NOVO_LINK_AQUI"
-}
-❓ FAQ
-Accordion animado
-
-Conteúdo 100% editável
-
-Visual limpo e profissional
-
-📄 Arquivo:
-src/components/FAQ.tsx
-
-⚙️ Configuração de Performance (Importante)
-A landing foi otimizada para mobile-first, pois o acesso será feito na maior parte dos casos pelo smartphone
-
-O que já está otimizado:
-GIFs carregados sob demanda
-
-Animações desativadas no mobile
-
-Lazy loading em imagens
-
-Layout estável (sem CLS)
-
-Pontuação alta no Lighthouse Mobile
-
-📄 Arquivo chave:
-src/lib/motion-config.ts
-
-⚠️ Não remover essa lógica, pois ela é essencial para performance.
-
-🏗 Rodando o Projeto Localmente
-bash
-Copiar código
+```bash
+cd frontend
 npm install
 npm run dev
-A aplicação irá rodar em:
-
-txt
-Copiar código
-http://localhost:5173
-
-🚀 Build de Produção
-
-bash
-
-Copiar código
 npm run build
+npm run lint
+```
 
-🌐 Deploy (Recomendado)
+Ambiente local usa `http://localhost:3000/api/v1` por padrão.
 
-Vercel
+Para staging/produção, configure explicitamente:
 
-Netlify
+```env
+VITE_API_BASE_URL=https://api.singulfit.com.br/api/v1
+```
 
-Configuração padrão, sem variáveis de ambiente obrigatórias.
+## Backend
 
-✏️ Como Fazer Alterações com Segurança
-Alterar textos
-➡️ Editar diretamente nos componentes (Hero.tsx, Features.tsx, etc.)
+```bash
+cd backend
+npm install
+npx prisma validate
+npm run build
+npm run lint
+npm test -- --runInBand
+npm run test:e2e -- --runInBand
+```
 
-Alterar imagens ou GIFs
-➡️ Substituir arquivos em:
+O backend exige variáveis reais para banco, JWT, PagBank, Evolution, OpenAI, storage, CORS e workers. Use `backend/.env.example` como base e nunca versione `.env` reais.
 
-txt
-Copiar código
-src/assets/gifs/
-src/assets/images/
-⚠️ Manter o mesmo nome do arquivo evita retrabalho.
+## Deploy Staging
 
-🔒 Boas Práticas
-Não remover hooks de performance
+Antes do primeiro deploy real:
 
-Não reativar animações no mobile
+- consolidar e revisar o commit de release;
+- configurar `VITE_API_BASE_URL` no frontend;
+- configurar `.env.production` do backend fora do Git;
+- aplicar migrations com `prisma migrate deploy`;
+- subir API e workers;
+- configurar DNS, TLS, CORS e webhooks PagBank/Evolution;
+- executar healthchecks e smoke test.
 
-Sempre testar no celular
+## Observações
 
-Comprimir GIFs antes de subir
-
-
-
-👨‍💻 Desenvolvido por Gildácio Júnior
-
-Landing criada com foco em conversão, performance e experiência do usuário.
-
+- O checkout é próprio da SingulFit.
+- O pagamento PIX é processado pelo PagBank.
+- A experiência pós-pagamento acontece pelo WhatsApp informado no cadastro.

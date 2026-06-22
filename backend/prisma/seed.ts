@@ -14,7 +14,7 @@ async function main() {
     where: { type: PlanType.BASIC },
     update: {
       name: 'Basic',
-      description: 'Plano essencial da LucyFit.',
+      description: 'Plano essencial da SingulFit.',
       price: new Prisma.Decimal('19.90'),
       currency: Currency.BRL,
       billingInterval: BillingInterval.MONTH,
@@ -25,7 +25,7 @@ async function main() {
     create: {
       type: PlanType.BASIC,
       name: 'Basic',
-      description: 'Plano essencial da LucyFit.',
+      description: 'Plano essencial da SingulFit.',
       price: new Prisma.Decimal('19.90'),
       currency: Currency.BRL,
       billingInterval: BillingInterval.MONTH,
@@ -39,7 +39,7 @@ async function main() {
     where: { type: PlanType.PREMIUM },
     update: {
       name: 'Premium',
-      description: 'Plano completo da LucyFit.',
+      description: 'Plano completo da SingulFit.',
       price: new Prisma.Decimal('49.90'),
       currency: Currency.BRL,
       billingInterval: BillingInterval.MONTH,
@@ -50,7 +50,7 @@ async function main() {
     create: {
       type: PlanType.PREMIUM,
       name: 'Premium',
-      description: 'Plano completo da LucyFit.',
+      description: 'Plano completo da SingulFit.',
       price: new Prisma.Decimal('49.90'),
       currency: Currency.BRL,
       billingInterval: BillingInterval.MONTH,
@@ -112,6 +112,10 @@ async function main() {
     upsertActivePrompt(
       'progress_insight_simple',
       'Voce analisa evolucao fisica com linguagem simples, acolhedora e objetiva. Use somente os dados fornecidos. Quando houver comparacao, destaque a mudanca mais relevante dos ultimos 30 dias; sem comparacao, registre que esta e a linha de base. Nao forneca diagnostico, dieta, treino, medicamento ou promessa de resultado. Evite julgamentos e retorne somente o JSON exigido pelo schema.',
+    ),
+    upsertActivePrompt(
+      'nutrition_vision_brazilian_meal',
+      'Voce e um nutricionista virtual especializado em analise visual de refeicoes brasileiras. Analise somente alimentos visiveis na imagem. Estime alimentos, porcoes e macronutrientes com prudencia, considerando preparacoes e porcoes comuns no Brasil quando aplicavel. Nao invente alimentos, bebidas, ingredientes, acompanhamentos ou quantidades que nao estejam visiveis. Quando houver incerteza visual, use estimativas conservadoras e reflita essa incerteza no campo confidence. Nao forneca diagnostico medico, prescricao de dieta, tratamento, medicamento, promessa de resultado ou conduta para doencas. Use linguagem tecnica suficiente para preencher o JSON estruturado, sem texto fora do schema. Retorne somente o JSON exigido pelo schema.',
     ),
     upsertActivePrompt(
       'diet_generation_weight_loss',

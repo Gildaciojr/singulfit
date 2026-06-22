@@ -12,7 +12,7 @@ export default function PrivacyPolicy() {
         {/* TÍTULO */}
         <header className="text-center mb-16">
           <h1 className="text-4xl md:text-5xl font-bold tracking-tight">
-            🥗 Política de Privacidade – LucyFit
+            🥗 Política de Privacidade – SingulFit
           </h1>
           <p className="text-muted-foreground mt-4">
             Última atualização: 14 de novembro de 2025
@@ -23,11 +23,11 @@ export default function PrivacyPolicy() {
         <section className="space-y-12 text-lg leading-relaxed text-foreground/90">
 
           <p>
-            A <strong>LucyFit</strong> respeita sua privacidade e se compromete
+            A <strong>SingulFit</strong> respeita sua privacidade e se compromete
             a proteger todos os dados fornecidos pelos usuários. Esta
             Política de Privacidade explica como coletamos, utilizamos,
             armazenamos e tratamos as informações quando você utiliza nossos
-            serviços via WhatsApp ou painel web.
+            serviços via WhatsApp, site ou checkout web.
           </p>
 
           {/* 1. INFORMAÇÕES COLETADAS */}
@@ -47,8 +47,8 @@ export default function PrivacyPolicy() {
             <ul className="list-disc pl-6 space-y-2">
               <li>Data e hora das interações;</li>
               <li>Identificador único do usuário;</li>
-              <li>Dados de uso do painel web;</li>
-              <li>Status da assinatura (Free / Mensal / Anual).</li>
+              <li>Dados de uso do site e do checkout;</li>
+              <li>Status da assinatura e plano contratado.</li>
             </ul>
           </article>
 
@@ -68,13 +68,13 @@ export default function PrivacyPolicy() {
           <article>
             <h2 className="text-2xl font-bold mb-4">3. Compartilhamento de Dados</h2>
             <p>
-              A LucyFit <strong>não vende</strong> e <strong>não compartilha</strong>
+              A SingulFit <strong>não vende</strong> e <strong>não compartilha</strong>
               dados pessoais com terceiros, exceto quando necessário para:
             </p>
             <ul className="list-disc pl-6 space-y-2 mt-2">
               <li>Cumprir obrigações legais;</li>
               <li>Garantir segurança da plataforma;</li>
-              <li>Processamento de pagamento via Hotmart.</li>
+              <li>Processamento de pagamento via PagBank.</li>
             </ul>
           </article>
 
@@ -99,10 +99,10 @@ export default function PrivacyPolicy() {
             <p className="mt-4">
               Contato:{" "}
               <a
-                href="mailto:atendimento@lucyfit.com.br"
+                href="mailto:atendimento@singulfit.com.br"
                 className="text-primary underline"
               >
-                atendimento@lucyfit.com.br
+                atendimento@singulfit.com.br
               </a>
             </p>
           </article>
@@ -112,16 +112,16 @@ export default function PrivacyPolicy() {
             <h2 className="text-2xl font-bold mb-4">6. Uso do WhatsApp</h2>
             <p>
               Todas as mensagens enviadas ao nosso número são processadas
-              exclusivamente dentro da infraestrutura autorizada da LucyFit.
+              exclusivamente dentro da infraestrutura autorizada da SingulFit.
             </p>
           </article>
 
           {/* 7. PAGAMENTOS */}
           <article>
-            <h2 className="text-2xl font-bold mb-4">7. Pagamentos e Hotmart</h2>
+            <h2 className="text-2xl font-bold mb-4">7. Pagamentos e PagBank</h2>
             <p>
-              A LucyFit não armazena informações de pagamento. Todo o
-              processamento é feito pela Hotmart, seguindo seus próprios
+              A SingulFit não armazena informações de pagamento. Todo o
+              processamento é feito pelo PagBank, seguindo seus próprios
               protocolos de segurança.
             </p>
           </article>

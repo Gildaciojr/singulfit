@@ -1,4 +1,4 @@
-# NutraFit VPS Deploy Execution Report
+# SingulFit VPS Deploy Execution Report
 
 ## Execution Identity
 
@@ -45,7 +45,7 @@ Relevant results:
 - Docker daemon: available after explicit managed-session approval.
 - Compose configuration: valid with the example environment structure.
 - Production image: built successfully as
-  `nutrafit-backend:block31-validation`.
+  `singulfit-backend:block31-validation`.
 - Final image ID:
   `sha256:0a00a4576df04fa9ecf259f7d69ac4ba714116540cde1ede964207c095f4403b`.
 - Final image size: `211522537` bytes.

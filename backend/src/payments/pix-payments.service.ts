@@ -23,6 +23,17 @@ import { PixPaymentResponseDto } from './dto/pix-payment-response.dto';
 @Injectable()
 export class PixPaymentsService {
   private static readonly PIX_EXPIRATION_MINUTES = 30;
+  private static readonly ACTIVE_PAYMENT_STATUSES = new Set<PaymentStatus>([
+    PaymentStatus.CREATED,
+    PaymentStatus.PENDING,
+    PaymentStatus.PROCESSING,
+  ]);
+  private static readonly RETRYABLE_PAYMENT_STATUSES = new Set<PaymentStatus>([
+    PaymentStatus.REJECTED,
+    PaymentStatus.CANCELED,
+    PaymentStatus.EXPIRED,
+    PaymentStatus.REFUNDED,
+  ]);
 
   constructor(
     private readonly billingService: BillingService,
@@ -46,9 +57,7 @@ export class PixPaymentsService {
       currentPayment &&
       currentPayment.idempotencyKey !== data.idempotencyKey
     ) {
-      throw new ConflictException(
-        'Já existe uma cobrança em andamento para esta fatura',
-      );
+      await this.releaseRetryablePayment(currentPayment);
     }
 
     const requestedExpiration =
@@ -90,7 +99,7 @@ export class PixPaymentsService {
       customer,
       item: {
         referenceId: subscription.plan.type,
-        name: `Assinatura LucyFit ${subscription.plan.name}`,
+        name: `Assinatura SingulFit ${subscription.plan.name}`,
       },
     });
     const pendingPayment = await this.paymentsService.updateStatus(payment.id, {
@@ -158,6 +167,39 @@ export class PixPaymentsService {
     }
 
     return cents.toNumber();
+  }
+
+  private async releaseRetryablePayment(payment: {
+    id: string;
+    status: PaymentStatus;
+    expiresAt: Date | null;
+  }): Promise<void> {
+    if (PixPaymentsService.RETRYABLE_PAYMENT_STATUSES.has(payment.status)) {
+      return;
+    }
+
+    if (this.isExpiredActivePayment(payment)) {
+      await this.paymentsService.updateStatus(payment.id, {
+        status: PaymentStatus.EXPIRED,
+        statusDetail: 'PIX expirado antes de nova cobrança',
+        failedAt: new Date().toISOString(),
+      });
+      return;
+    }
+
+    throw new ConflictException(
+      'Já existe uma cobrança em andamento para esta fatura',
+    );
+  }
+
+  private isExpiredActivePayment(payment: {
+    status: PaymentStatus;
+    expiresAt: Date | null;
+  }): boolean {
+    return (
+      PixPaymentsService.ACTIVE_PAYMENT_STATUSES.has(payment.status) &&
+      Boolean(payment.expiresAt && payment.expiresAt.getTime() <= Date.now())
+    );
   }
 
   private toResponse(payment: {

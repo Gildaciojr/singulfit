@@ -39,7 +39,7 @@ export default function HowItWorks() {
   return (
     <section
       id="how-it-works"
-      className="relative overflow-hidden py-24 lg:py-36"
+      className="relative overflow-hidden py-16 lg:py-20"
     >
       <div className="absolute inset-0 -z-20 bg-[radial-gradient(900px_540px_at_50%_0%,rgba(34,120,84,0.10),transparent_70%)]" />
       <div className="absolute inset-0 -z-10 opacity-[0.028] bg-[linear-gradient(to_right,#111_1px,transparent_1px),linear-gradient(to_bottom,#111_1px,transparent_1px)] bg-[size:56px_56px]" />

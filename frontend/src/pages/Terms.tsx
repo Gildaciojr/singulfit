@@ -12,7 +12,7 @@ export default function Terms() {
 
         <header className="text-center mb-16">
           <h1 className="text-4xl md:text-5xl font-bold tracking-tight">
-            ⚖️ Termos de Uso – LucyFit
+            ⚖️ Termos de Uso – SingulFit
           </h1>
           <p className="text-muted-foreground mt-4">
             Última atualização: 14 de novembro de 2025
@@ -25,9 +25,9 @@ export default function Terms() {
           <article>
             <h2 className="text-2xl font-bold mb-4">1. Introdução</h2>
             <p>
-              Ao utilizar a LucyFit, você concorda automaticamente com estes
+              Ao utilizar a SingulFit, você concorda automaticamente com estes
               Termos de Uso, que regem o acesso e utilização da plataforma no
-              WhatsApp e no painel web.
+              WhatsApp, no site e no checkout web.
             </p>
           </article>
 
@@ -35,9 +35,9 @@ export default function Terms() {
           <article>
             <h2 className="text-2xl font-bold mb-4">2. Definições</h2>
             <ul className="list-disc pl-6 space-y-2">
-              <li><strong>LucyFit:</strong> Assistente de IA focada em nutrição e bem-estar.</li>
+              <li><strong>SingulFit:</strong> Assistente de IA focada em nutrição e bem-estar.</li>
               <li><strong>Usuário:</strong> Qualquer pessoa que utiliza nossos serviços.</li>
-              <li><strong>Serviços:</strong> Registro alimentar, IA, relatórios e integrações.</li>
+              <li><strong>Serviços:</strong> Registro alimentar, IA e recomendações nutricionais.</li>
               <li><strong>Conta:</strong> Perfil vinculado ao número do WhatsApp.</li>
             </ul>
           </article>
@@ -56,12 +56,12 @@ export default function Terms() {
           {/* 4 */}
           <article>
             <h2 className="text-2xl font-bold mb-4">4. Funcionalidades</h2>
-            <p>A LucyFit oferece recursos como:</p>
+            <p>A SingulFit oferece recursos como:</p>
             <ul className="list-disc pl-6 space-y-2 mt-2">
               <li>Análise nutricional de refeições;</li>
-              <li>Registro de treinos e evolução;</li>
               <li>Recomendações automáticas;</li>
-              <li>Acesso ao painel web com relatórios;</li>
+              <li>Ativação e atendimento pelo WhatsApp cadastrado;</li>
+              <li>Gestão do status de assinatura pelo checkout;</li>
             </ul>
           </article>
 
@@ -69,8 +69,9 @@ export default function Terms() {
           <article>
             <h2 className="text-2xl font-bold mb-4">5. Planos e Assinaturas</h2>
             <p>
-              Assinaturas são processadas pela Hotmart. Cancelamentos devem ser
-              feitos diretamente na plataforma da Hotmart.
+              Assinaturas são processadas pelo PagBank. Solicitações de
+              cancelamento devem ser feitas pelos canais oficiais de atendimento
+              da SingulFit.
             </p>
           </article>
 
@@ -85,7 +86,7 @@ export default function Terms() {
               <li>Proteger seu dispositivo de acessos indevidos.</li>
             </ul>
 
-            <h3 className="text-xl font-semibold mb-2 mt-6">LucyFit</h3>
+            <h3 className="text-xl font-semibold mb-2 mt-6">SingulFit</h3>
             <ul className="list-disc pl-6 space-y-2">
               <li>Proteger dados e comunicações;</li>
               <li>Garantir a disponibilidade do serviço;</li>

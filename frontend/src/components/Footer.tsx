@@ -9,6 +9,8 @@ import {
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
+import { checkoutPath } from "@/lib/commercial-plans";
+import singulfitLogo from "@/assets/images/singulfit-logo.png";
 
 export default function Footer() {
   return (
@@ -16,7 +18,7 @@ export default function Footer() {
       <div className="absolute inset-0 -z-20 bg-[radial-gradient(800px_500px_at_50%_0%,rgba(34,120,84,0.10),transparent_70%)]" />
       <div className="absolute inset-0 -z-10 opacity-[0.03] bg-[linear-gradient(to_right,#111_1px,transparent_1px),linear-gradient(to_bottom,#111_1px,transparent_1px)] bg-[size:56px_56px]" />
 
-      <div className="container relative z-10 mx-auto max-w-6xl px-6 py-24 text-center lg:py-32">
+      <div className="container relative z-10 mx-auto max-w-6xl px-6 py-16 lg:py-36  text-center">
         <motion.div
           initial={{ opacity: 0, y: 14 }}
           whileInView={{ opacity: 1, y: 0 }}
@@ -26,12 +28,12 @@ export default function Footer() {
         >
           <div className="mb-8 flex justify-center">
             <img
-              src="/images/singulfit-logo.png"
+              src={singulfitLogo}
               alt="SingulFit"
-              className="h-16 w-auto"
+              className="h-11 w-auto"
             />
           </div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white px-5 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-900 shadow-sm">
+          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200/70 bg-white/70 backdrop-blur-xl px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-900 shadow-sm">
             <Sparkles className="h-4 w-4" />
             Comece hoje
           </div>
@@ -67,8 +69,8 @@ export default function Footer() {
         >
           <Button
             size="lg"
-            onClick={() => window.open("https://wa.me/SEUNUMERO", "_blank")}
-            className="group h-14 rounded-2xl bg-emerald-900 px-8 text-base font-bold text-white shadow-[0_18px_45px_-18px_rgba(6,78,59,0.55)] hover:bg-emerald-950"
+            onClick={() => window.location.assign(checkoutPath("PREMIUM"))}
+            className="group h-14 rounded-[1.35rem] bg-gradient-to-r from-emerald-950 via-emerald-900 to-emerald-800 px-8 text-base font-bold text-white shadow-[0_30px_60px_-25px_rgba(6,78,59,0.45)] hover:shadow-[0_40px_80px_-25px_rgba(6,78,59,0.60)]"
           >
             Começar no WhatsApp
             <ArrowRight className="h-5 w-5 transition-transform duration-300 group-hover:translate-x-1" />
@@ -82,17 +84,71 @@ export default function Footer() {
           transition={{ duration: 0.55 }}
           className="mx-auto mt-10 grid max-w-3xl gap-4 md:grid-cols-3"
         >
-          <div className="flex items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 py-4 text-sm font-semibold text-zinc-700 shadow-sm">
+          <div
+            className="
+flex
+items-center
+justify-center
+gap-2
+rounded-[1.4rem]
+border
+border-white/60
+bg-white/70
+backdrop-blur-xl
+px-4
+py-4
+text-sm
+font-semibold
+text-zinc-700
+shadow-[0_20px_45px_-30px_rgba(0,0,0,0.18)]
+"
+          >
             <CheckCircle2 className="h-4 w-4 text-emerald-800" />
             Sem aplicativo extra
           </div>
 
-          <div className="flex items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 py-4 text-sm font-semibold text-zinc-700 shadow-sm">
+          <div
+            className="
+flex
+items-center
+justify-center
+gap-2
+rounded-[1.4rem]
+border
+border-white/60
+bg-white/70
+backdrop-blur-xl
+px-4
+py-4
+text-sm
+font-semibold
+text-zinc-700
+shadow-[0_20px_45px_-30px_rgba(0,0,0,0.18)]
+"
+          >
             <Sparkles className="h-4 w-4 text-emerald-800" />
             IA contextual
           </div>
 
-          <div className="flex items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 py-4 text-sm font-semibold text-zinc-700 shadow-sm">
+          <div
+            className="
+flex
+items-center
+justify-center
+gap-2
+rounded-[1.4rem]
+border
+border-white/60
+bg-white/70
+backdrop-blur-xl
+px-4
+py-4
+text-sm
+font-semibold
+text-zinc-700
+shadow-[0_20px_45px_-30px_rgba(0,0,0,0.18)]
+"
+          >
             <ShieldCheck className="h-4 w-4 text-emerald-800" />
             Dados protegidos
           </div>

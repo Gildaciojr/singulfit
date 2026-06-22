@@ -1,4 +1,4 @@
-# NutraFit Pilot Launch Checklist
+# SingulFit Pilot Launch Checklist
 
 Complete this checklist in the production-equivalent environment. Attach
 evidence without storing secrets, tokens, passwords, payment data, or personal

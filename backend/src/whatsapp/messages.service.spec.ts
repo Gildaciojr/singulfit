@@ -115,7 +115,7 @@ describe('MessagesService', () => {
       direction: MessageDirection.INBOUND,
       type: MessageType.IMAGE,
       content: 'Meu almoço',
-      instanceName: 'lucyfit',
+      instanceName: 'singulfit',
       externalMessageId: 'wamid-image',
       remoteJid: '5511999999999@s.whatsapp.net',
       timestamp,
@@ -158,7 +158,7 @@ describe('MessagesService', () => {
       userId: 'user-id',
       subscriptionId: 'subscription-id',
       phoneNumber: '+5511999999999',
-      instanceName: 'lucyfit',
+      instanceName: 'singulfit',
       externalMessageId: 'wamid-image',
       type: MessageType.IMAGE,
       content: 'Meu almoço',
@@ -175,7 +175,7 @@ describe('MessagesService', () => {
     });
     expect(transaction.message.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        instanceName: 'lucyfit',
+        instanceName: 'singulfit',
         externalMessageId: 'wamid-image',
         mediaUrl: 'https://media.example.com/image.enc',
         mimeType: 'image/jpeg',

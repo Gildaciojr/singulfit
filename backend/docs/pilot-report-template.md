@@ -1,4 +1,4 @@
-# NutraFit Pilot Report
+# SingulFit Pilot Report
 
 ## Identification
 

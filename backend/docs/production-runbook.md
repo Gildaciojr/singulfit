@@ -1,4 +1,4 @@
-# NutraFit Production Runbook
+# SingulFit Production Runbook
 
 Operational launch documents:
 
@@ -93,7 +93,7 @@ npm run start:worker:automation
 npm run smoke:test
 ```
 
-The smoke test only calls the local NutraFit API. Provider readiness is checked
+The smoke test only calls the local SingulFit API. Provider readiness is checked
 from configuration and no paid provider endpoint is called.
 
 ## VPS Deploy With PM2
@@ -106,9 +106,9 @@ from configuration and no paid provider endpoint is called.
 6. Check readiness and run the smoke test.
 
 ```bash
-cd /srv/nutrafit
+cd /opt/singulfit
 git pull --ff-only
-cd /srv/nutrafit/backend
+cd /opt/singulfit/backend
 npm ci
 npm run prisma:generate
 
@@ -143,9 +143,9 @@ Docker Compose binds the API to loopback and does not publish PostgreSQL.
 Expose the API only through the TLS reverse proxy.
 
 ```bash
-cd /srv/nutrafit
+cd /opt/singulfit
 git pull --ff-only
-cd /srv/nutrafit/backend
+cd /opt/singulfit/backend
 npm ci
 npm run prisma:generate
 npm run build
@@ -195,9 +195,9 @@ letters or an old backlog and requires investigation before traffic is enabled.
 
 ```bash
 pm2 status
-pm2 logs nutrafit-worker-outbox --lines 100
-pm2 logs nutrafit-worker-ai --lines 100
-pm2 logs nutrafit-worker-automation --lines 100
+pm2 logs singulfit-worker-outbox --lines 100
+pm2 logs singulfit-worker-ai --lines 100
+pm2 logs singulfit-worker-automation --lines 100
 ```
 
 With Docker:
@@ -215,14 +215,14 @@ heartbeats in `/api/v1/admin/health`.
 Create an encrypted off-host copy after the dump:
 
 ```bash
-mkdir -p /srv/backups/nutrafit
-docker compose --env-file .env.production -f docker-compose.prod.yml exec -T postgres sh -c 'pg_dump --format=custom --no-owner -U "$POSTGRES_USER" "$POSTGRES_DB"' > /srv/backups/nutrafit/nutrafit-$(date +%Y%m%d-%H%M%S).dump
+mkdir -p /srv/backups/singulfit
+docker compose --env-file .env.production -f docker-compose.prod.yml exec -T postgres sh -c 'pg_dump --format=custom --no-owner -U "$POSTGRES_USER" "$POSTGRES_DB"' > /srv/backups/singulfit/singulfit-$(date +%Y%m%d-%H%M%S).dump
 ```
 
 Verify the dump:
 
 ```bash
-pg_restore --list /srv/backups/nutrafit/nutrafit-YYYYMMDD-HHMMSS.dump > /dev/null
+pg_restore --list /srv/backups/singulfit/singulfit-YYYYMMDD-HHMMSS.dump > /dev/null
 ```
 
 ## PostgreSQL Restore
@@ -233,7 +233,7 @@ before an in-place restore.
 ```bash
 docker compose --env-file .env.production -f docker-compose.prod.yml stop backend-api worker-outbox worker-ai worker-automation
 docker compose --env-file .env.production -f docker-compose.prod.yml exec -T postgres sh -c 'dropdb --if-exists -U "$POSTGRES_USER" "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
-docker compose --env-file .env.production -f docker-compose.prod.yml exec -T postgres sh -c 'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < /srv/backups/nutrafit/nutrafit-YYYYMMDD-HHMMSS.dump
+docker compose --env-file .env.production -f docker-compose.prod.yml exec -T postgres sh -c 'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < /srv/backups/singulfit/singulfit-YYYYMMDD-HHMMSS.dump
 docker compose --env-file .env.production -f docker-compose.prod.yml up -d
 ```
 

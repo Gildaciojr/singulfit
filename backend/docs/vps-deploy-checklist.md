@@ -1,4 +1,4 @@
-# NutraFit VPS Deploy Checklist
+# SingulFit VPS Deploy Checklist
 
 Use this checklist for a controlled Ubuntu LTS pilot deployment. Docker Compose
 is the recommended runtime. PM2 is an alternative for a host-managed Node.js
@@ -29,10 +29,10 @@ printf '%s\n' '== identity and application directory =='
 id
 getent passwd "$USER"
 sudo -n true
-test -d /srv/nutrafit
-test -r /srv/nutrafit
-test -w /srv/nutrafit
-stat -c '%U:%G %a %n' /srv/nutrafit
+test -d /opt/singulfit
+test -r /opt/singulfit
+test -w /opt/singulfit
+stat -c '%U:%G %a %n' /opt/singulfit
 printf '%s\n' '== capacity =='
 df -h /
 df -h /var/lib/docker 2>/dev/null || true
@@ -51,7 +51,7 @@ Expected results:
 
 - The operating system is a supported Ubuntu LTS release.
 - The deploy user is non-root, uses key-based SSH, and has controlled sudo.
-- `/srv/nutrafit` is owned by the deployment account and is not world-writable.
+- `/opt/singulfit` is owned by the deployment account and is not world-writable.
 - Disk and memory have enough headroom for two images, a database dump, build
   files, logs, PostgreSQL growth, and uploads.
 - Docker and Compose v2 are installed, active, and enabled at boot.
@@ -62,7 +62,7 @@ sudo apt update
 sudo apt full-upgrade -y
 sudo timedatectl set-timezone UTC
 sudo apt install -y ca-certificates curl git ufw
-sudo install -d -o "$USER" -g "$USER" /srv/nutrafit
+sudo install -d -o "$USER" -g "$USER" /opt/singulfit
 ```
 
 A reboot may be required after kernel or critical library updates:
@@ -186,7 +186,7 @@ that ports 3000 and 5432 are closed.
 ## 7. Secrets And Files
 
 - [ ] Complete [the secrets checklist](./secrets-checklist.md).
-- [ ] Store `/srv/nutrafit/backend/.env.production` outside Git history.
+- [ ] Store `/opt/singulfit/backend/.env.production` outside Git history.
 - [ ] Set ownership to the deploy user and permissions to `0600`.
 - [ ] Use unique production secrets; do not reuse sandbox credentials.
 - [ ] Set `TRUST_PROXY_HOPS=1` for one trusted reverse proxy.
@@ -194,14 +194,14 @@ that ports 3000 and 5432 are closed.
 - [ ] Review cost and exchange-rate variables before launch.
 
 ```bash
-chmod 600 /srv/nutrafit/backend/.env.production
-stat -c '%U:%G %a %n' /srv/nutrafit/backend/.env.production
+chmod 600 /opt/singulfit/backend/.env.production
+stat -c '%U:%G %a %n' /opt/singulfit/backend/.env.production
 ```
 
 Validate required names without printing values:
 
 ```bash
-cd /srv/nutrafit/backend
+cd /opt/singulfit/backend
 set -a
 . ./.env.production
 set +a
@@ -226,7 +226,7 @@ and worker startup. The host build is an explicit preflight requested by the
 release process; the image is then built independently.
 
 ```bash
-cd /srv/nutrafit
+cd /opt/singulfit
 git status --short
 git rev-parse --abbrev-ref HEAD
 git rev-parse HEAD
@@ -257,7 +257,7 @@ Use this flow only when the database is reachable from the host through a
 private or loopback address.
 
 ```bash
-cd /srv/nutrafit
+cd /opt/singulfit
 git pull --ff-only
 cd backend
 npm ci
@@ -313,7 +313,7 @@ npm run smoke:test
 
 - [ ] Complete [the backup and restore drill](./backup-restore-drill.md).
 - [ ] Create a fresh PostgreSQL dump before every migration.
-- [ ] Back up the `nutrafit_uploads` volume independently.
+- [ ] Back up the `singulfit_uploads` volume independently.
 - [ ] Copy encrypted backups off the VPS and test retention.
 - [ ] Record the deployed Git commit and image tag.
 

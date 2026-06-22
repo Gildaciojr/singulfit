@@ -1,4 +1,6 @@
 import { LandingData } from "@/engine/landing.types";
+import { checkoutPath, COMMERCIAL_PLANS } from "@/lib/commercial-plans";
+import singulfitLogo from "@/assets/images/singulfit-logo.png";
 
 import { Shield } from "lucide-react";
 
@@ -12,7 +14,7 @@ export const landingData: LandingData = {
       "Análise da sua alimentação, contexto que evolui com você e acompanhamento contínuo para alcançar seus objetivos com clareza e consistência.",
     cta: {
       label: "Começar agora no WhatsApp",
-      link: "https://wa.me/SEUNUMERO",
+      link: checkoutPath("PREMIUM"),
     },
     metrics: [
       {
@@ -30,95 +32,46 @@ export const landingData: LandingData = {
     ],
   },
 
-  features: [
-    {
-      id: 0,
-      title: "Registre suas refeições de forma simples",
-      text: "Adicione suas refeições em segundos e tenha tudo organizado automaticamente, sem precisar anotar manualmente.",
-      media: "/gifs/chat-typing.gif",
-    },
-    {
-      id: 1,
-      title: "Acompanhe sua rotina com clareza",
-      text: "Visualize seu dia completo e entenda exatamente o que está consumindo ao longo do tempo.",
-      media: "/gifs/hero-chat.gif",
-    },
-    {
-      id: 2,
-      title: "Tenha controle real dos seus hábitos",
-      text: "Transforme dados simples em decisões melhores e evolua com consistência na sua alimentação.",
-      media: "/gifs/meal-animation.gif",
-    },
-  ],
+  features: [],
 
   pricing: {
     monthly: {
       name: "Plano Básico",
-      price: 29.9,
+      price: COMMERCIAL_PLANS.BASIC.price,
       interval: "/mês",
-      description:
-        "Ideal para quem deseja organizar a alimentação e receber análises inteligentes diariamente.",
+      description: COMMERCIAL_PLANS.BASIC.description,
       features: [
-        { name: "Análise de refeições", included: true },
-        { name: "Registro ilimitado", included: true },
-        { name: "Acompanhamento diário", included: true },
-        { name: "Histórico completo", included: true },
-        { name: "Suporte padrão", included: true },
+        ...COMMERCIAL_PLANS.BASIC.features.map((name) => ({
+          name,
+          included: true,
+        })),
       ],
       cta: {
         text: "Começar agora",
-        href: "#",
+        href: checkoutPath("BASIC"),
       },
     },
 
     annual: {
       name: "Plano Premium",
-      price: 59.9,
+      price: COMMERCIAL_PLANS.PREMIUM.price,
       interval: "/mês",
-      description:
-        "Experiência completa com inteligência contextual, evolução contínua e acompanhamento avançado.",
+      description: COMMERCIAL_PLANS.PREMIUM.description,
       features: [
-        { name: "Tudo do Básico", included: true },
-        { name: "IA contextual avançada", included: true },
-        { name: "Insights personalizados", included: true },
-        { name: "Acompanhamento premium", included: true },
-        { name: "Suporte prioritário", included: true },
+        ...COMMERCIAL_PLANS.PREMIUM.features.map((name) => ({
+          name,
+          included: true,
+        })),
       ],
       cta: {
         text: "Escolher Premium",
-        href: "#",
+        href: checkoutPath("PREMIUM"),
       },
     },
   },
 
   testimonials: {
-    videos: [
-      {
-        src: "/videos/depoimentolucy4.mp4",
-        poster: "/videos/posters/depoimentolucy4.jpg",
-        person: { name: "Luanna", age: 34 },
-      },
-      {
-        src: "/videos/depoimentolucy1.mp4",
-        poster: "/videos/posters/depoimentolucy1.jpg",
-        person: { name: "Natalia", age: 30 },
-      },
-      {
-        src: "/videos/depoimentolucy2.mp4",
-        poster: "/videos/posters/depoimentolucy2.jpg",
-        person: { name: "Adrielly", age: 24 },
-      },
-      {
-        src: "/videos/depoimentolucy3.mp4",
-        poster: "/videos/posters/depoimentolucy3.jpg",
-        person: { name: "Amanda", age: 27 },
-      },
-      {
-        src: "/videos/depoimentolucy5.mp4",
-        poster: "/videos/posters/depoimentolucy5.jpg",
-        person: { name: "Gabriela", age: 26 },
-      },
-    ],
+    videos: [],
 
     comments: [
       {
@@ -217,7 +170,7 @@ export const landingData: LandingData = {
   },
 
   header: {
-    logo: "/images/singulfit-logo.png",
+    logo: singulfitLogo,
     links: [
       { label: "Recursos", target: "features" },
       { label: "Como funciona", target: "how-it-works" },

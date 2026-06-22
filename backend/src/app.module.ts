@@ -35,6 +35,7 @@ import { RUNTIME_MODE } from './production/runtime-mode';
 import { ActivationModule } from './activation/activation.module';
 import { LongitudinalModule } from './longitudinal/longitudinal.module';
 import { PilotModule } from './pilot/pilot.module';
+import { CheckoutModule } from './checkout/checkout.module';
 
 @Module({
   imports: [
@@ -77,6 +78,7 @@ import { PilotModule } from './pilot/pilot.module';
     ActivationModule,
     LongitudinalModule,
     PilotModule,
+    CheckoutModule,
     IntegrationEventsModule,
     AdminModule,
   ],

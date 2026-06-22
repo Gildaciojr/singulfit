@@ -229,6 +229,54 @@ describe('ActivationJourneyService', () => {
     );
   });
 
+  it('does not resend D0 when the activation event was already sent', async () => {
+    const setup = subject();
+    setup.prisma.user.findUniqueOrThrow.mockResolvedValue({
+      name: 'Ana Silva',
+      phone: '11999999999',
+      phoneE164: '+5511999999999',
+      activation: {
+        currentStage: ActivationStage.WHATSAPP_CONNECTED,
+        score: 20,
+        riskLevel: ActivationRiskLevel.LOW,
+      },
+      behavioralProfile: null,
+      goalClassification: null,
+      contextSnapshots: [],
+      recommendations: [],
+      coachProfile: null,
+    });
+    setup.prisma.activationEvent.upsert.mockResolvedValue({
+      id: 'event-id',
+    });
+    setup.transaction.activationEvent.findUnique.mockResolvedValue({
+      id: 'event-id',
+      deliveryStatus: ActivationDeliveryStatus.SENT,
+      leaseExpiresAt: null,
+    });
+
+    await setup.testable.sendMessage(
+      'activation-id',
+      'user-id',
+      'FLOW_MESSAGE',
+      'D0',
+      'activation-id:flow:D0',
+      new Date('2026-06-14T12:00:00.000Z'),
+      new Date('2026-06-14T12:00:00.000Z'),
+    );
+
+    expect(setup.prisma.activationEvent.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          idempotencyKey: 'activation-id:flow:D0',
+        },
+        update: {},
+      }),
+    );
+    expect(setup.evolution.sendText).not.toHaveBeenCalled();
+    expect(setup.prisma.activationEvent.updateMany).not.toHaveBeenCalled();
+  });
+
   it('classifies a 14-day inactive journey as high risk', () => {
     const scores = new ActivationScoreService();
 

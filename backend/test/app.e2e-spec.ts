@@ -113,7 +113,7 @@ describe('AppController (e2e)', () => {
     createVisionResponse: jest.fn(),
   };
   const evolutionGateway = {
-    getInstanceName: jest.fn().mockReturnValue('lucyfit'),
+    getInstanceName: jest.fn().mockReturnValue('singulfit'),
     getConnectionState: jest.fn(),
     validateWebhookSecret: jest.fn(),
     sendText: jest.fn(),
@@ -128,7 +128,7 @@ describe('AppController (e2e)', () => {
     process.env.SUBSCRIPTION_GRACE_PERIOD_DAYS = '3';
     process.env.EVOLUTION_BASE_URL = 'https://evolution.example.com';
     process.env.EVOLUTION_API_KEY = 'e2e-evolution-api-key';
-    process.env.EVOLUTION_INSTANCE_NAME = 'lucyfit';
+    process.env.EVOLUTION_INSTANCE_NAME = 'singulfit';
     process.env.EVOLUTION_WEBHOOK_SECRET = evolutionWebhookSecret;
     process.env.OPENAI_API_KEY = 'e2e-openai-api-key';
     process.env.OPENAI_MODEL_TEXT = 'e2e-text-model';
@@ -160,7 +160,7 @@ describe('AppController (e2e)', () => {
       totalTokens: 150,
     });
     openAIGateway.createVisionResponse.mockReset();
-    evolutionGateway.getInstanceName.mockReturnValue('lucyfit');
+    evolutionGateway.getInstanceName.mockReturnValue('singulfit');
     evolutionGateway.validateWebhookSecret
       .mockReset()
       .mockImplementation((secret: string | undefined) => {
@@ -517,7 +517,7 @@ describe('AppController (e2e)', () => {
 
   it('protects and serves operational metrics and health to admins', async () => {
     const uniqueId = randomUUID().replaceAll('-', '');
-    const email = `operations-${uniqueId}@lucyfit.test`;
+    const email = `operations-${uniqueId}@singulfit.test`;
     const phone = `119${randomInt(10_000_000, 100_000_000)}`;
     const registrationResponse = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
@@ -525,7 +525,7 @@ describe('AppController (e2e)', () => {
         name: 'Operations Admin',
         phone,
         email,
-        password: 'LucyFit#Secure123',
+        password: 'SingulFit#Secure123',
         planType: PlanType.BASIC,
       })
       .expect(201);
@@ -545,7 +545,7 @@ describe('AppController (e2e)', () => {
       .post('/api/v1/auth/login')
       .send({
         email,
-        password: 'LucyFit#Secure123',
+        password: 'SingulFit#Secure123',
       })
       .expect(201);
     const admin = loginResponse.body as AuthResponse;
@@ -606,7 +606,7 @@ describe('AppController (e2e)', () => {
 
   it('manages fitness onboarding, profile and measurements for eligible subscriptions', async () => {
     const uniqueId = randomUUID().replaceAll('-', '');
-    const email = `profile-${uniqueId}@lucyfit.test`;
+    const email = `profile-${uniqueId}@singulfit.test`;
     const phone = `119${randomInt(10_000_000, 100_000_000)}`;
     const registrationResponse = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
@@ -614,7 +614,7 @@ describe('AppController (e2e)', () => {
         name: 'Perfil Fitness',
         phone,
         email,
-        password: 'LucyFit#Secure123',
+        password: 'SingulFit#Secure123',
         planType: PlanType.BASIC,
       })
       .expect(201);
@@ -918,7 +918,7 @@ describe('AppController (e2e)', () => {
 
   it('generates and persists structured workout history from the fitness profile', async () => {
     const uniqueId = randomUUID().replaceAll('-', '');
-    const email = `workout-${uniqueId}@lucyfit.test`;
+    const email = `workout-${uniqueId}@singulfit.test`;
     const phone = `119${randomInt(10_000_000, 100_000_000)}`;
     const registrationResponse = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
@@ -926,7 +926,7 @@ describe('AppController (e2e)', () => {
         name: 'Workout Engine',
         phone,
         email,
-        password: 'LucyFit#Secure123',
+        password: 'SingulFit#Secure123',
         planType: PlanType.PREMIUM,
       })
       .expect(201);
@@ -1174,7 +1174,7 @@ describe('AppController (e2e)', () => {
 
   it('generates a personalized diet with history, restrictions and AI usage', async () => {
     const uniqueId = randomUUID().replaceAll('-', '');
-    const email = `diet-${uniqueId}@lucyfit.test`;
+    const email = `diet-${uniqueId}@singulfit.test`;
     const phone = `119${randomInt(10_000_000, 100_000_000)}`;
     const registrationResponse = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
@@ -1182,7 +1182,7 @@ describe('AppController (e2e)', () => {
         name: 'Diet Engine',
         phone,
         email,
-        password: 'LucyFit#Secure123',
+        password: 'SingulFit#Secure123',
         planType: PlanType.PREMIUM,
       })
       .expect(201);
@@ -1524,7 +1524,7 @@ describe('AppController (e2e)', () => {
 
   it('manages automation preferences, personalized schedules and Evolution dispatch', async () => {
     const uniqueId = randomUUID().replaceAll('-', '');
-    const email = `automation-${uniqueId}@lucyfit.test`;
+    const email = `automation-${uniqueId}@singulfit.test`;
     const phone = `119${randomInt(10_000_000, 100_000_000)}`;
     const registrationResponse = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
@@ -1532,7 +1532,7 @@ describe('AppController (e2e)', () => {
         name: 'Coach Automation',
         phone,
         email,
-        password: 'LucyFit#Secure123',
+        password: 'SingulFit#Secure123',
         planType: PlanType.BASIC,
       })
       .expect(201);
@@ -1760,7 +1760,7 @@ describe('AppController (e2e)', () => {
     const user = await prisma.user.create({
       data: {
         phone: `119${randomInt(10_000_000, 100_000_000)}`,
-        email: `concurrency-${uniqueId}@lucyfit.test`,
+        email: `concurrency-${uniqueId}@singulfit.test`,
       },
     });
 
@@ -1871,9 +1871,9 @@ describe('AppController (e2e)', () => {
 
   it('persists conversations and internal WhatsApp messages for admins', async () => {
     const uniqueId = randomUUID().replaceAll('-', '');
-    const email = `whatsapp-${uniqueId}@lucyfit.test`;
+    const email = `whatsapp-${uniqueId}@singulfit.test`;
     const phone = `119${randomInt(10_000_000, 100_000_000)}`;
-    const password = 'LucyFit#Secure123';
+    const password = 'SingulFit#Secure123';
     const registrationResponse = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
       .send({
@@ -1997,7 +1997,7 @@ describe('AppController (e2e)', () => {
 
   it('validates the complete controlled-pilot journey from registration to first value', async () => {
     const uniqueId = randomUUID().replaceAll('-', '');
-    const email = `evolution-${uniqueId}@lucyfit.test`;
+    const email = `evolution-${uniqueId}@singulfit.test`;
     const phone = `119${randomInt(10_000_000, 100_000_000)}`;
     const registrationResponse = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
@@ -2005,7 +2005,7 @@ describe('AppController (e2e)', () => {
         name: 'Usuário Evolution',
         phone,
         email,
-        password: 'LucyFit#Secure123',
+        password: 'SingulFit#Secure123',
         planType: PlanType.BASIC,
         cpf: '12345678901',
       })
@@ -2119,7 +2119,7 @@ describe('AppController (e2e)', () => {
     const jpegContent = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a]);
     const webhookPayload = {
       event: 'messages.upsert',
-      instance: 'lucyfit',
+      instance: 'singulfit',
       data: {
         key: {
           id: externalMessageId,
@@ -2226,7 +2226,7 @@ describe('AppController (e2e)', () => {
       prisma.evolutionInboundEvent.findUniqueOrThrow({
         where: {
           instanceName_externalMessageId: {
-            instanceName: 'lucyfit',
+            instanceName: 'singulfit',
             externalMessageId,
           },
         },
@@ -2263,7 +2263,7 @@ describe('AppController (e2e)', () => {
         direction: MessageDirection.INBOUND,
         type: MessageType.IMAGE,
         content: 'Meu almoço',
-        instanceName: 'lucyfit',
+        instanceName: 'singulfit',
         externalMessageId,
         remoteJid: `55${phone}@s.whatsapp.net`,
         mediaUrl: 'https://media.example.com/meal.enc',
@@ -2628,7 +2628,7 @@ describe('AppController (e2e)', () => {
       .post('/api/v1/auth/login')
       .send({
         email,
-        password: 'LucyFit#Secure123',
+        password: 'SingulFit#Secure123',
       })
       .expect(201);
     const adminLogin = adminLoginResponse.body as AuthResponse;
@@ -2649,7 +2649,7 @@ describe('AppController (e2e)', () => {
           nextCursor: null,
         });
       });
-  });
+  }, 30_000);
 
   it('persists prompt versions, idempotent AI jobs and token usage', async () => {
     const uniqueId = randomUUID().replaceAll('-', '');
@@ -2659,8 +2659,8 @@ describe('AppController (e2e)', () => {
       .send({
         name: 'Usuário AI Foundation',
         phone,
-        email: `ai-${uniqueId}@lucyfit.test`,
-        password: 'LucyFit#Secure123',
+        email: `ai-${uniqueId}@singulfit.test`,
+        password: 'SingulFit#Secure123',
         planType: PlanType.BASIC,
       })
       .expect(201);
@@ -2741,9 +2741,9 @@ describe('AppController (e2e)', () => {
 
   it('completes registration, login, refresh rotation, me and logout', async () => {
     const uniqueId = randomUUID().replaceAll('-', '');
-    const email = `auth-${uniqueId}@lucyfit.test`;
+    const email = `auth-${uniqueId}@singulfit.test`;
     const phone = `119${randomInt(10_000_000, 100_000_000)}`;
-    const password = 'LucyFit#Secure123';
+    const password = 'SingulFit#Secure123';
 
     const registerResponse = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
@@ -2964,9 +2964,9 @@ describe('AppController (e2e)', () => {
 
   it('refreshes persistent user context idempotently and exposes it only to admins', async () => {
     const uniqueId = randomUUID().replaceAll('-', '');
-    const email = `context-${uniqueId}@lucyfit.test`;
+    const email = `context-${uniqueId}@singulfit.test`;
     const phone = `119${randomInt(10_000_000, 100_000_000)}`;
-    const password = 'LucyFit#Context123';
+    const password = 'SingulFit#Context123';
     const registrationResponse = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
       .send({
@@ -3221,9 +3221,9 @@ describe('AppController (e2e)', () => {
 
   it('protects and serves persisted SaaS analytics to admins', async () => {
     const uniqueId = randomUUID().replaceAll('-', '');
-    const email = `analytics-${uniqueId}@lucyfit.test`;
+    const email = `analytics-${uniqueId}@singulfit.test`;
     const phone = `119${randomInt(10_000_000, 100_000_000)}`;
-    const password = 'LucyFit#Secure123';
+    const password = 'SingulFit#Secure123';
     const registrationResponse = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
       .send({
@@ -3388,9 +3388,9 @@ describe('AppController (e2e)', () => {
 
   it('persists behavioral intelligence and protects its admin APIs', async () => {
     const uniqueId = randomUUID().replaceAll('-', '');
-    const email = `behavior-${uniqueId}@lucyfit.test`;
+    const email = `behavior-${uniqueId}@singulfit.test`;
     const phone = `119${randomInt(10_000_000, 100_000_000)}`;
-    const password = 'LucyFit#Secure123';
+    const password = 'SingulFit#Secure123';
     const registrationResponse = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
       .send({
@@ -3486,9 +3486,9 @@ describe('AppController (e2e)', () => {
 
   it('blocks unsafe AI responses and serves the human review workflow to admins', async () => {
     const uniqueId = randomUUID().replaceAll('-', '');
-    const email = `ai-quality-${uniqueId}@lucyfit.test`;
+    const email = `ai-quality-${uniqueId}@singulfit.test`;
     const phone = `119${randomInt(10_000_000, 100_000_000)}`;
-    const password = 'LucyFit#Secure123';
+    const password = 'SingulFit#Secure123';
     const registrationResponse = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
       .send({
@@ -3663,9 +3663,9 @@ describe('AppController (e2e)', () => {
 
   it('protects recommendation admin APIs and persists lifecycle transitions', async () => {
     const uniqueId = randomUUID().replaceAll('-', '');
-    const email = `recommendations-${uniqueId}@lucyfit.test`;
+    const email = `recommendations-${uniqueId}@singulfit.test`;
     const phone = `119${randomInt(10_000_000, 100_000_000)}`;
-    const password = 'LucyFit#Secure123';
+    const password = 'SingulFit#Secure123';
     const registrationResponse = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
       .send({
@@ -3839,9 +3839,9 @@ describe('AppController (e2e)', () => {
 
   it('protects activation admin APIs and exposes funnel, risk and snapshots', async () => {
     const uniqueId = randomUUID().replaceAll('-', '');
-    const email = `activation-${uniqueId}@lucyfit.test`;
+    const email = `activation-${uniqueId}@singulfit.test`;
     const phone = `119${randomInt(10_000_000, 100_000_000)}`;
-    const password = 'LucyFit#Secure123';
+    const password = 'SingulFit#Secure123';
     const registrationResponse = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
       .send({

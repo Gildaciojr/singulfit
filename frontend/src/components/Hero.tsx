@@ -136,7 +136,7 @@ export default function Hero({ data }: HeroProps) {
                     key={`${item.title}-${item.description}`}
                     className="flex items-center gap-3 text-left"
                   >
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-900">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-900">
                       <Icon className="h-5 w-5" />
                     </div>
 
@@ -160,7 +160,7 @@ export default function Hero({ data }: HeroProps) {
               <Button
                 size="lg"
                 className="group h-14 rounded-2xl bg-emerald-900 px-8 text-base font-bold text-white shadow-[0_18px_45px_-18px_rgba(6,78,59,0.55)] hover:bg-emerald-950"
-                onClick={() => window.open(data.cta.link, "_blank")}
+                onClick={() => window.location.assign(data.cta.link)}
               >
                 {data.cta.label}
                 <ArrowRight className="h-5 w-5 transition-transform duration-300 group-hover:translate-x-1" />

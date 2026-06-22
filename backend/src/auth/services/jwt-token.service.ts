@@ -47,9 +47,10 @@ export class JwtTokenService {
       this.configService.get<string>('JWT_REFRESH_SECRET') ??
       fallbackSecret ??
       '';
-    this.issuer = this.configService.get<string>('JWT_ISSUER') ?? 'lucyfit-api';
+    this.issuer =
+      this.configService.get<string>('JWT_ISSUER') ?? 'singulfit-api';
     this.audience =
-      this.configService.get<string>('JWT_AUDIENCE') ?? 'lucyfit-app';
+      this.configService.get<string>('JWT_AUDIENCE') ?? 'singulfit-app';
 
     if (!this.accessSecret || !this.refreshSecret) {
       throw new InternalServerErrorException(

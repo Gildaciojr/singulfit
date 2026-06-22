@@ -7,6 +7,7 @@ import { NutritionVisionService } from '../nutrition/nutrition-vision.service';
 import { NutritionService } from '../nutrition/nutrition.service';
 import { ResponseBuilderService } from '../responses/response-builder.service';
 import { AutomationService } from '../automation/automation.service';
+import { ActivationJourneyService } from '../activation/activation-journey.service';
 import { PagBankWebhookService } from '../webhooks/pagbank-webhook.service';
 import { INTERNAL_EVENT } from './event-bus.constants';
 import { EventHandlerRegistry } from './event-handler.registry';
@@ -22,6 +23,7 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     private readonly responseBuilderService: ResponseBuilderService,
     private readonly evolutionSendService: EvolutionSendService,
     private readonly automationService: AutomationService,
+    private readonly activationJourneyService: ActivationJourneyService,
   ) {}
 
   onModuleInit(): void {
@@ -43,6 +45,9 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     );
     this.registry.register(INTERNAL_EVENT.AUTOMATION_TRIGGERED, (event) =>
       this.processAutomation(event),
+    );
+    this.registry.register(INTERNAL_EVENT.SUBSCRIPTION_ACTIVATED, (event) =>
+      this.processSubscriptionActivated(event),
     );
   }
 
@@ -96,6 +101,14 @@ export class IntegrationEventHandlersService implements OnModuleInit {
   private async processAutomation(event: OutboxEvent): Promise<void> {
     await this.automationService.sendScheduledMessage(
       this.requiredString(event.payload, 'scheduledMessageId'),
+    );
+  }
+
+  private async processSubscriptionActivated(
+    event: OutboxEvent,
+  ): Promise<void> {
+    await this.activationJourneyService.processUser(
+      this.requiredString(event.payload, 'userId'),
     );
   }
 

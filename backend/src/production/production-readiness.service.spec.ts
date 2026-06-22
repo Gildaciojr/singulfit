@@ -19,7 +19,7 @@ describe('ProductionReadinessService', () => {
   });
 
   it('checks production dependencies locally without provider calls', async () => {
-    temporaryRoot = await mkdtemp(join(tmpdir(), 'nutrafit-readiness-'));
+    temporaryRoot = await mkdtemp(join(tmpdir(), 'singulfit-readiness-'));
     const migrationsPath = join(temporaryRoot, 'migrations');
     const uploadPath = join(temporaryRoot, 'uploads');
     await mkdir(join(migrationsPath, '20260613000000_ready'), {
@@ -65,7 +65,7 @@ describe('ProductionReadinessService', () => {
       ['OPENAI_MODEL_VISION', 'vision-model'],
       ['EVOLUTION_BASE_URL', 'https://evolution.example.com'],
       ['EVOLUTION_API_KEY', 'configured-evolution-key'],
-      ['EVOLUTION_INSTANCE_NAME', 'nutrafit'],
+      ['EVOLUTION_INSTANCE_NAME', 'singulfit'],
       ['EVOLUTION_WEBHOOK_SECRET', 'configured-evolution-secret'],
       ['PAGBANK_API_URL', 'https://pagbank.example.com'],
       ['PAGBANK_TOKEN', 'configured-pagbank-token'],
@@ -96,7 +96,7 @@ describe('ProductionReadinessService', () => {
   });
 
   it('marks readiness down when a required worker is stale', async () => {
-    temporaryRoot = await mkdtemp(join(tmpdir(), 'nutrafit-readiness-'));
+    temporaryRoot = await mkdtemp(join(tmpdir(), 'singulfit-readiness-'));
     const migrationsPath = join(temporaryRoot, 'migrations');
     await mkdir(join(migrationsPath, '20260613000000_ready'), {
       recursive: true,
@@ -134,7 +134,7 @@ describe('ProductionReadinessService', () => {
       ['OPENAI_MODEL_VISION', 'vision-model'],
       ['EVOLUTION_BASE_URL', 'https://evolution.example.com'],
       ['EVOLUTION_API_KEY', 'configured-evolution-key'],
-      ['EVOLUTION_INSTANCE_NAME', 'nutrafit'],
+      ['EVOLUTION_INSTANCE_NAME', 'singulfit'],
       ['EVOLUTION_WEBHOOK_SECRET', 'configured-evolution-secret'],
       ['PAGBANK_API_URL', 'https://pagbank.example.com'],
       ['PAGBANK_TOKEN', 'configured-pagbank-token'],

@@ -8,7 +8,7 @@ describe('EvolutionInboundWorkerService', () => {
   it('reclaims and completes a queued event outside the webhook request', async () => {
     const event = {
       id: 'event-id',
-      instanceName: 'lucyfit',
+      instanceName: 'singulfit',
       externalMessageId: 'wamid-test',
       payload: { key: { id: 'wamid-test' } },
       status: WebhookStatus.PROCESSING,
@@ -46,7 +46,7 @@ describe('EvolutionInboundWorkerService', () => {
 
     await expect(worker.drain()).resolves.toBe(1);
     expect(webhookService.processQueuedEntry).toHaveBeenCalledWith(
-      'lucyfit',
+      'singulfit',
       event.payload,
     );
     expect(prisma.evolutionInboundEvent.update).toHaveBeenCalledWith(

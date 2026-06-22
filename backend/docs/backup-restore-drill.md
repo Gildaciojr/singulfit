@@ -1,10 +1,10 @@
-# NutraFit Backup And Restore Drill
+# SingulFit Backup And Restore Drill
 
 Run this drill before the pilot and after material database or infrastructure
 changes. PostgreSQL and local uploads are separate backup domains. Keep
 encrypted, off-host copies and record evidence in the pilot report.
 
-Commands assume Docker Compose from `/srv/nutrafit/backend` on Linux.
+Commands assume Docker Compose from `/opt/singulfit/backend` on Linux.
 
 ## 1. Preconditions
 
@@ -14,7 +14,7 @@ Commands assume Docker Compose from `/srv/nutrafit/backend` on Linux.
 - [ ] Announce the drill window and identify the rollback operator.
 
 ```bash
-cd /srv/nutrafit/backend
+cd /opt/singulfit/backend
 set -a
 . ./.env.production
 set +a
@@ -26,8 +26,8 @@ docker compose --env-file .env.production -f docker-compose.prod.yml \
 ## 2. PostgreSQL Backup
 
 ```bash
-sudo install -d -m 0700 -o "$USER" -g "$USER" /srv/backups/nutrafit
-BACKUP="/srv/backups/nutrafit/nutrafit-$(date -u +%Y%m%dT%H%M%SZ).dump"
+sudo install -d -m 0700 -o "$USER" -g "$USER" /srv/backups/singulfit
+BACKUP="/srv/backups/singulfit/singulfit-$(date -u +%Y%m%dT%H%M%SZ).dump"
 docker compose --env-file .env.production -f docker-compose.prod.yml \
   exec -T postgres sh -c \
   'pg_dump --format=custom --compress=9 --no-owner --no-acl -U "$POSTGRES_USER" "$POSTGRES_DB"' \
@@ -46,12 +46,12 @@ Copy the dump, checksum, and drill record to encrypted off-host storage.
 Local uploads are not included in `pg_dump`.
 
 ```bash
-UPLOAD_BACKUP="/srv/backups/nutrafit/uploads-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
+UPLOAD_BACKUP="/srv/backups/singulfit/uploads-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
 UPLOAD_ARCHIVE="$(basename "$UPLOAD_BACKUP")"
 docker run --rm \
   -e UPLOAD_ARCHIVE="$UPLOAD_ARCHIVE" \
-  -v nutrafit-production_nutrafit_uploads:/data:ro \
-  -v /srv/backups/nutrafit:/backup \
+  -v singulfit-production_singulfit_uploads:/data:ro \
+  -v /srv/backups/singulfit:/backup \
   alpine:3.20 sh -c \
   'tar -czf "/backup/$UPLOAD_ARCHIVE" -C /data .'
 test -s "$UPLOAD_BACKUP"
@@ -67,7 +67,7 @@ Create a temporary database in the same PostgreSQL server. This verifies dump
 integrity without replacing production data.
 
 ```bash
-RESTORE_DB="nutrafit_restore_$(date -u +%Y%m%d%H%M%S)"
+RESTORE_DB="singulfit_restore_$(date -u +%Y%m%d%H%M%S)"
 docker compose --env-file .env.production -f docker-compose.prod.yml \
   exec -T postgres sh -c \
   'createdb -U "$POSTGRES_USER" "'"$RESTORE_DB"'"'

@@ -27,7 +27,7 @@ export class RetentionService {
       async (transaction) => {
         const [lock] = await transaction.$queryRaw<Array<{ locked: boolean }>>`
           SELECT pg_try_advisory_xact_lock(
-            hashtext('nutrafit:retention-cleanup')
+            hashtext('singulfit:retention-cleanup')
           ) AS "locked"
         `;
 

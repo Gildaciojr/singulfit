@@ -1,4 +1,4 @@
-# NutraFit Secrets And Environment Checklist
+# SingulFit Secrets And Environment Checklist
 
 This document lists production environment inputs without values. Keep the real
 `.env.production` out of Git, restrict it to `0600`, and rotate any value that

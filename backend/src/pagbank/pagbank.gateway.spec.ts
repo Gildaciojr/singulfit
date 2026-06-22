@@ -54,7 +54,7 @@ describe('PagBankGateway', () => {
       amountInCents: 1990,
       expirationDate: new Date('2026-06-06T18:30:00.000Z'),
       customer: {
-        name: 'Lucy Fit',
+        name: 'SingulFit',
         email: 'lucy@example.com',
         taxId: '12345678901',
         phone: {
@@ -66,7 +66,7 @@ describe('PagBankGateway', () => {
       },
       item: {
         referenceId: 'BASIC',
-        name: 'Assinatura LucyFit Basic',
+        name: 'Assinatura SingulFit Basic',
       },
     });
 
