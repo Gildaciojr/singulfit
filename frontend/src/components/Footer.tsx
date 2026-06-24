@@ -10,7 +10,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { checkoutPath } from "@/lib/commercial-plans";
-import singulfitLogo from "@/assets/images/singulfit-logo.png";
+import singulfitLogo from "@/assets/images/singulfit-logo.webp";
 
 export default function Footer() {
   return (

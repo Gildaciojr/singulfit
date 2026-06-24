@@ -56,7 +56,6 @@ export abstract class BaseOutboxWorker
     this.timer = setInterval(() => {
       void this.drain();
     }, this.getPollMs());
-    this.timer.unref();
   }
 
   async beforeApplicationShutdown(): Promise<void> {

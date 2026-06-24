@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Clock3,
   Copy,
+  CreditCard,
   Loader2,
   Lock,
   RefreshCw,
@@ -23,11 +24,17 @@ import {
   ApiError,
   AuthTokensResponse,
   CHECKOUT_STATUS_LABEL,
+  CheckoutStatusResponse,
+  createCreditCardPayment,
   createPixPayment,
+  CreditCardPaymentResponse,
+  CreateCreditCardPayload,
+  getCreditCardPublicKey,
   PixPaymentResponse,
   registerCheckout,
   refreshCheckoutSession,
 } from "@/lib/api";
+import { encryptPagBankCard, loadPagBankSdk } from "@/lib/pagbank-sdk";
 import {
   COMMERCIAL_PLAN_LIST,
   CommercialPlan,
@@ -43,7 +50,7 @@ import {
   saveCheckoutSession,
 } from "@/lib/checkout-storage";
 import { useCheckoutStatus } from "@/hooks/useCheckoutStatus";
-import singulfitLogo from "@/assets/images/singulfit-logo.png";
+import singulfitLogo from "@/assets/images/singulfit-logo.webp";
 
 type RegisterFormState = {
   firstName: string;
@@ -56,6 +63,18 @@ type RegisterFormState = {
 
 type RegisterFormErrors = Partial<Record<keyof RegisterFormState, string>>;
 
+type PaymentMethodOption = "PIX" | "CREDIT_CARD";
+
+type CardFormState = {
+  holderName: string;
+  holderCpf: string;
+  cardNumber: string;
+  expiry: string;
+  cvv: string;
+};
+
+type CardFormErrors = Partial<Record<keyof CardFormState, string>>;
+
 type CheckoutRouteParams = {
   planType?: string;
 };
@@ -66,6 +85,8 @@ type PaymentDisplay = {
   expiresAt: string | null;
 };
 
+type CheckoutStatusPayment = NonNullable<CheckoutStatusResponse["payment"]>;
+
 const initialFormState: RegisterFormState = {
   firstName: "",
   lastName: "",
@@ -73,6 +94,14 @@ const initialFormState: RegisterFormState = {
   cpf: "",
   email: "",
   password: "",
+};
+
+const initialCardFormState: CardFormState = {
+  holderName: "",
+  holderCpf: "",
+  cardNumber: "",
+  expiry: "",
+  cvv: "",
 };
 
 export default function Checkout() {
@@ -83,6 +112,11 @@ export default function Checkout() {
     useState<CommercialPlanType>(initialPlan.type);
   const [form, setForm] = useState<RegisterFormState>(initialFormState);
   const [errors, setErrors] = useState<RegisterFormErrors>({});
+  const [paymentMethod, setPaymentMethod] =
+    useState<PaymentMethodOption>("PIX");
+  const [cardForm, setCardForm] =
+    useState<CardFormState>(initialCardFormState);
+  const [cardErrors, setCardErrors] = useState<CardFormErrors>({});
   const [accessToken, setAccessToken] = useState<string | null>(() =>
     readCheckoutAccessToken(),
   );
@@ -90,7 +124,10 @@ export default function Checkout() {
     readCheckoutRefreshToken(),
   );
   const [pixPayment, setPixPayment] = useState<PixPaymentResponse | null>(null);
+  const [creditCardPayment, setCreditCardPayment] =
+    useState<CreditCardPaymentResponse | null>(null);
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [securePaymentLoading, setSecurePaymentLoading] = useState(false);
   const [pollingStartedAt, setPollingStartedAt] = useState<number | null>(
     accessToken ? Date.now() : null,
   );
@@ -119,10 +156,27 @@ export default function Checkout() {
         token,
       ),
   });
+  const creditCardMutation = useMutation({
+    mutationFn: ({
+      payload,
+      token,
+    }: {
+      payload: CreateCreditCardPayload;
+      token: string;
+    }) => createCreditCardPayment(payload, token),
+  });
 
   const currentStatus = checkoutStatus.data?.checkoutStatus;
   const currentPayment = pixPayment ?? checkoutStatus.data?.payment ?? null;
-  const submitting = registerMutation.isPending || pixMutation.isPending;
+  const activePaymentMethod =
+    checkoutStatus.data?.payment?.method === "CREDIT_CARD"
+      ? "CREDIT_CARD"
+      : paymentMethod;
+  const submitting =
+    registerMutation.isPending ||
+    pixMutation.isPending ||
+    creditCardMutation.isPending ||
+    securePaymentLoading;
 
   function updateField(field: keyof RegisterFormState, value: string): void {
     setForm((current) => ({
@@ -135,6 +189,22 @@ export default function Checkout() {
     }));
   }
 
+  function updateCardField(field: keyof CardFormState, value: string): void {
+    setCardForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+    setCardErrors((current) => ({
+      ...current,
+      [field]: undefined,
+    }));
+  }
+
+  function selectPaymentMethod(nextMethod: PaymentMethodOption): void {
+    setPaymentMethod(nextMethod);
+    setCardErrors({});
+  }
+
   function selectPlan(nextPlan: CommercialPlanType): void {
     setSelectedPlan(nextPlan);
     navigate(checkoutPath(nextPlan), { replace: true });
@@ -143,9 +213,15 @@ export default function Checkout() {
   async function submitRegister(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const validation = validateForm(form);
+    const cardValidation =
+      paymentMethod === "CREDIT_CARD" ? validateCardForm(cardForm) : {};
 
-    if (Object.keys(validation).length > 0) {
+    if (
+      Object.keys(validation).length > 0 ||
+      Object.keys(cardValidation).length > 0
+    ) {
       setErrors(validation);
+      setCardErrors(cardValidation);
       return;
     }
 
@@ -164,13 +240,40 @@ export default function Checkout() {
       setRefreshToken(registerResult.tokens.refreshToken);
       setSessionExpired(false);
       setPollingStartedAt(Date.now());
-      const pix = await pixMutation.mutateAsync(
+
+      if (paymentMethod === "PIX") {
+        const pix = await pixMutation.mutateAsync(
+          registerResult.tokens.accessToken,
+        );
+        setPixPayment(pix);
+        toast({
+          title: "PIX gerado",
+          description: "Agora é só pagar e aguardar a ativação automática.",
+        });
+        return;
+      }
+
+      const cardPayment = await createCreditCardPaymentSecurely(
         registerResult.tokens.accessToken,
       );
-      setPixPayment(pix);
+
+      setCreditCardPayment(cardPayment);
+      if (
+        cardPayment.status === "REJECTED" ||
+        cardPayment.status === "CANCELED"
+      ) {
+        toast({
+          title: "Cartão recusado",
+          description:
+            "Não foi possível aprovar este pagamento. Confira os dados ou tente outro cartão.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       toast({
-        title: "PIX gerado",
-        description: "Agora é só pagar e aguardar a ativação automática.",
+        title: "Pagamento enviado",
+        description: "Estamos confirmando seu acesso automaticamente.",
       });
     } catch (error: unknown) {
       toast({
@@ -239,6 +342,66 @@ export default function Checkout() {
     return pixMutation.mutateAsync(refreshed.tokens.accessToken);
   }
 
+  async function createCreditCardPaymentSecurely(
+    token: string,
+  ): Promise<CreditCardPaymentResponse> {
+    const expiry = parseExpiry(cardForm.expiry);
+
+    if (!expiry) {
+      throw new ApiError("Informe uma validade válida para o cartão.", 400);
+    }
+
+    setSecurePaymentLoading(true);
+
+    try {
+      const [{ publicKey }, sdk] = await Promise.all([
+        getCreditCardPublicKey(token),
+        loadPagBankSdk(),
+      ]);
+      const encryptedCard = encryptPagBankCard(sdk, {
+        publicKey,
+        holderName: cardForm.holderName.trim(),
+        cardNumber: digitsOnly(cardForm.cardNumber),
+        expMonth: expiry.month,
+        expYear: expiry.year,
+        securityCode: digitsOnly(cardForm.cvv),
+      });
+
+      setCardForm((current) => ({
+        ...current,
+        cardNumber: "",
+        expiry: "",
+        cvv: "",
+      }));
+
+      return await creditCardMutation.mutateAsync({
+        token,
+        payload: {
+          encryptedCard,
+          holderName: cardForm.holderName.trim(),
+          holderCpf: digitsOnly(cardForm.holderCpf),
+          installments: 1,
+          idempotencyKey: createIdempotencyKey("card"),
+        },
+      });
+    } catch (error: unknown) {
+      if (error instanceof ApiError) {
+        throw error;
+      }
+
+      if (error instanceof Error) {
+        throw new ApiError(error.message, 400);
+      }
+
+      throw new ApiError(
+        "Não foi possível carregar o ambiente seguro de pagamento.",
+        400,
+      );
+    } finally {
+      setSecurePaymentLoading(false);
+    }
+  }
+
   async function copyPixCode(code: string | null | undefined) {
     if (!code) {
       return;
@@ -255,7 +418,7 @@ export default function Checkout() {
     <main className="min-h-screen overflow-hidden bg-[#f8f7f3] text-zinc-950">
       <div className="absolute inset-0 -z-10 bg-[radial-gradient(900px_520px_at_50%_0%,rgba(34,120,84,0.13),transparent_70%)]" />
 
-      <div className="container mx-auto max-w-6xl px-6 py-8 lg:py-12">
+      <div className="container mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:py-12">
         <Link
           to="/"
           className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-900 hover:text-emerald-950"
@@ -271,10 +434,15 @@ export default function Checkout() {
             <SessionExpiredCard onRestart={() => setSessionExpired(false)} />
           ) : !accessToken ? (
             <RegisterCard
+              cardErrors={cardErrors}
+              cardForm={cardForm}
               errors={errors}
               form={form}
+              onCardChange={updateCardField}
               onChange={updateField}
+              onPaymentMethodChange={selectPaymentMethod}
               onSubmit={submitRegister}
+              paymentMethod={paymentMethod}
               plan={plan}
               submitting={submitting}
             />
@@ -284,6 +452,17 @@ export default function Checkout() {
             <ExpiredCard onRetry={retryPix} retrying={pixMutation.isPending} />
           ) : currentStatus === "PAYMENT_FAILED" ? (
             <RejectedCard />
+          ) : activePaymentMethod === "CREDIT_CARD" ? (
+            <CreditCardStatusCard
+              loading={creditCardMutation.isPending || securePaymentLoading}
+              payment={creditCardPayment ?? checkoutStatus.data?.payment ?? null}
+              polling={checkoutStatus.isFetching}
+              statusLabel={
+                currentStatus
+                  ? CHECKOUT_STATUS_LABEL[currentStatus]
+                  : "Processando cartão"
+              }
+            />
           ) : (
             <PixCard
               payment={currentPayment}
@@ -329,18 +508,18 @@ function PlanSummary({
       </div>
 
       <Card className="overflow-hidden rounded-[2rem] border-zinc-200 bg-white/90 shadow-[0_35px_90px_-45px_rgba(15,23,42,0.25)] backdrop-blur-xl">
-        <CardContent className="p-7">
+        <CardContent className="p-5 sm:p-7">
           <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-emerald-900">
             <ShieldCheck className="h-4 w-4" />
             Plano selecionado
           </div>
 
-          <h1 className="mt-6 text-4xl font-black tracking-[-0.055em] text-zinc-950">
+          <h1 className="mt-6 text-3xl font-black tracking-[-0.055em] text-zinc-950 sm:text-4xl">
             {plan.displayName}
           </h1>
 
           <div className="mt-4 flex items-end gap-2">
-            <span className="text-5xl font-black tracking-[-0.06em]">
+            <span className="text-4xl font-black tracking-[-0.06em] sm:text-5xl">
               {formatPlanPrice(plan.price)}
             </span>
             <span className="pb-2 text-zinc-500">{plan.interval}</span>
@@ -382,33 +561,45 @@ function PlanSummary({
 }
 
 function RegisterCard({
+  cardErrors,
+  cardForm,
   errors,
   form,
+  onCardChange,
   onChange,
+  onPaymentMethodChange,
   onSubmit,
+  paymentMethod,
   plan,
   submitting,
 }: {
+  cardErrors: CardFormErrors;
+  cardForm: CardFormState;
   errors: RegisterFormErrors;
   form: RegisterFormState;
+  onCardChange: (field: keyof CardFormState, value: string) => void;
   onChange: (field: keyof RegisterFormState, value: string) => void;
+  onPaymentMethodChange: (method: PaymentMethodOption) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  paymentMethod: PaymentMethodOption;
   plan: CommercialPlan;
   submitting: boolean;
 }) {
   return (
     <Card className="rounded-[2rem] border-zinc-200 bg-white shadow-[0_35px_90px_-45px_rgba(15,23,42,0.24)]">
-      <CardContent className="p-7 lg:p-9">
+      <CardContent className="p-5 sm:p-7 lg:p-9">
         <div className="mb-8">
           <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-emerald-900">
             Cadastro
           </div>
           <h2 className="mt-5 text-3xl font-black tracking-[-0.04em]">
-            Crie seu acesso para gerar o PIX.
+            {paymentMethod === "PIX"
+              ? "Crie seu acesso para gerar o PIX."
+              : "Crie seu acesso para pagar com cartão."}
           </h2>
           <p className="mt-3 text-sm leading-7 text-zinc-600">
             O CPF é obrigatório aqui porque o provedor de pagamento exige esse
-            dado para emitir o PIX.
+            dado para processar o pagamento.
           </p>
         </div>
 
@@ -472,16 +663,34 @@ function RegisterCard({
             </div>
           </div>
 
+          <PaymentMethodSelector
+            paymentMethod={paymentMethod}
+            onChange={onPaymentMethodChange}
+          />
+
+          {paymentMethod === "CREDIT_CARD" && (
+            <CreditCardForm
+              errors={cardErrors}
+              form={cardForm}
+              onChange={onCardChange}
+            />
+          )}
+
           <Button
             type="submit"
             disabled={submitting}
             className="h-14 w-full rounded-2xl bg-emerald-900 text-base font-bold text-white hover:bg-emerald-950"
           >
             {submitting ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
+              <>
+                <Loader2 className="h-5 w-5 animate-spin" />
+                {paymentMethod === "PIX"
+                  ? "Gerando PIX..."
+                  : "Processando cartão com segurança..."}
+              </>
             ) : (
               <>
-                Gerar PIX
+                {paymentMethod === "PIX" ? "Gerar PIX" : "Pagar com cartão"}
                 <ArrowRight className="h-5 w-5" />
               </>
             )}
@@ -489,6 +698,120 @@ function RegisterCard({
         </form>
       </CardContent>
     </Card>
+  );
+}
+
+function PaymentMethodSelector({
+  onChange,
+  paymentMethod,
+}: {
+  onChange: (method: PaymentMethodOption) => void;
+  paymentMethod: PaymentMethodOption;
+}) {
+  return (
+    <div>
+      <Label>Forma de pagamento</Label>
+      <div className="mt-2 grid gap-3 sm:grid-cols-2">
+        <button
+          type="button"
+          onClick={() => onChange("PIX")}
+          className={`rounded-2xl border p-4 text-left transition ${
+            paymentMethod === "PIX"
+              ? "border-emerald-800 bg-emerald-50 text-emerald-950"
+              : "border-zinc-200 bg-white text-zinc-700 hover:border-emerald-200"
+          }`}
+        >
+          <div className="flex items-center gap-2 text-sm font-black">
+            <ShieldCheck className="h-4 w-4" />
+            PIX
+          </div>
+          <p className="mt-2 text-xs leading-5 text-zinc-600">
+            Geração instantânea com QR Code e copia e cola.
+          </p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onChange("CREDIT_CARD")}
+          className={`rounded-2xl border p-4 text-left transition ${
+            paymentMethod === "CREDIT_CARD"
+              ? "border-emerald-800 bg-emerald-50 text-emerald-950"
+              : "border-zinc-200 bg-white text-zinc-700 hover:border-emerald-200"
+          }`}
+        >
+          <div className="flex items-center gap-2 text-sm font-black">
+            <CreditCard className="h-4 w-4" />
+            Cartão de Crédito
+          </div>
+          <p className="mt-2 text-xs leading-5 text-zinc-600">
+            Pagamento à vista com criptografia PagBank.
+          </p>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CreditCardForm({
+  errors,
+  form,
+  onChange,
+}: {
+  errors: CardFormErrors;
+  form: CardFormState;
+  onChange: (field: keyof CardFormState, value: string) => void;
+}) {
+  return (
+    <div className="rounded-[1.6rem] border border-zinc-200 bg-zinc-50 p-4">
+      <div className="flex items-center gap-2 text-sm font-bold text-zinc-950">
+        <Lock className="h-4 w-4 text-emerald-800" />
+        Dados criptografados no ambiente seguro PagBank
+      </div>
+
+      <div className="mt-4 grid gap-4">
+        <FormField
+          error={errors.holderName}
+          label="Nome do titular"
+          onChange={(value) => onChange("holderName", value)}
+          placeholder="Como está no cartão"
+          value={form.holderName}
+        />
+        <FormField
+          error={errors.holderCpf}
+          inputMode="numeric"
+          label="CPF do titular"
+          onChange={(value) => onChange("holderCpf", value)}
+          placeholder="000.000.000-00"
+          value={form.holderCpf}
+        />
+        <FormField
+          error={errors.cardNumber}
+          inputMode="numeric"
+          label="Número do cartão"
+          onChange={(value) => onChange("cardNumber", value)}
+          placeholder="0000 0000 0000 0000"
+          value={form.cardNumber}
+        />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FormField
+            error={errors.expiry}
+            inputMode="numeric"
+            label="Validade"
+            onChange={(value) => onChange("expiry", value)}
+            placeholder="MM/AA"
+            value={form.expiry}
+          />
+          <FormField
+            error={errors.cvv}
+            inputMode="numeric"
+            label="CVV"
+            onChange={(value) => onChange("cvv", value)}
+            placeholder="123"
+            value={form.cvv}
+          />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -559,7 +882,7 @@ function PixCard({
           você receberá a mensagem inicial no WhatsApp cadastrado.
         </p>
 
-        <div className="mt-8 rounded-[1.6rem] border border-zinc-200 bg-zinc-50 p-5">
+        <div className="mt-8 rounded-[1.6rem] border border-zinc-200 bg-zinc-50 p-4 sm:p-5">
           {loadingPix && !normalized ? (
             <div className="flex min-h-[260px] flex-col items-center justify-center gap-3 text-zinc-600">
               <Loader2 className="h-8 w-8 animate-spin text-emerald-900" />
@@ -572,7 +895,7 @@ function PixCard({
                   <img
                     src={normalized.qrCodeImageUrl}
                     alt="QR Code PIX"
-                    className="h-64 w-64 rounded-2xl border border-zinc-200 bg-white object-contain p-3"
+                    className="aspect-square w-full max-w-64 rounded-2xl border border-zinc-200 bg-white object-contain p-3"
                   />
                 </div>
               )}
@@ -614,6 +937,76 @@ function PixCard({
             {polling && <RefreshCw className="h-5 w-5 animate-spin text-emerald-900" />}
           </div>
           <Progress value={65} className="mt-4 h-2 bg-emerald-100" />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CreditCardStatusCard({
+  loading,
+  payment,
+  polling,
+  statusLabel,
+}: {
+  loading: boolean;
+  payment: CreditCardPaymentResponse | CheckoutStatusPayment | null;
+  polling: boolean;
+  statusLabel: string;
+}) {
+  return (
+    <Card className="rounded-[2rem] border-zinc-200 bg-white shadow-[0_35px_90px_-45px_rgba(15,23,42,0.24)]">
+      <CardContent className="p-7 lg:p-9">
+        <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-emerald-900">
+          <CreditCard className="h-4 w-4" />
+          {statusLabel}
+        </div>
+
+        <h2 className="mt-5 text-3xl font-black tracking-[-0.04em]">
+          Pagamento com cartão em processamento.
+        </h2>
+        <p className="mt-3 text-sm leading-7 text-zinc-600">
+          Seus dados sensíveis foram criptografados pelo ambiente seguro do
+          PagBank. Agora estamos aguardando a confirmação automática.
+        </p>
+
+        <div className="mt-8 rounded-[1.6rem] border border-zinc-200 bg-zinc-50 p-5">
+          <div className="flex items-center gap-3">
+            {loading ? (
+              <Loader2 className="h-6 w-6 animate-spin text-emerald-900" />
+            ) : (
+              <ShieldCheck className="h-6 w-6 text-emerald-900" />
+            )}
+            <div>
+              <div className="text-sm font-bold text-zinc-950">
+                {loading
+                  ? "Processando cartão com segurança..."
+                  : "Cartão enviado com segurança"}
+              </div>
+              <div className="mt-1 text-xs text-zinc-600">
+                {payment?.providerPaymentId
+                  ? `Referência PagBank: ${payment.providerPaymentId}`
+                  : "A tela será atualizada automaticamente."}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 rounded-2xl bg-emerald-50 p-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-sm font-bold text-emerald-950">
+                Aguardando confirmação
+              </div>
+              <div className="mt-1 text-xs text-emerald-900/75">
+                Assim que o PagBank confirmar, seu acesso será ativado.
+              </div>
+            </div>
+            {polling && (
+              <RefreshCw className="h-5 w-5 animate-spin text-emerald-900" />
+            )}
+          </div>
+          <Progress value={55} className="mt-4 h-2 bg-emerald-100" />
         </div>
       </CardContent>
     </Card>
@@ -724,7 +1117,7 @@ function StatusCard({
 
   return (
     <Card className="rounded-[2rem] border-zinc-200 bg-white shadow-[0_35px_90px_-45px_rgba(15,23,42,0.24)]">
-      <CardContent className="p-8 lg:p-10">
+      <CardContent className="p-6 sm:p-8 lg:p-10">
         <div
           className={`flex h-20 w-20 items-center justify-center rounded-[1.6rem] ${toneClass}`}
         >
@@ -773,6 +1166,38 @@ function validateForm(form: RegisterFormState): RegisterFormErrors {
   return errors;
 }
 
+function validateCardForm(form: CardFormState): CardFormErrors {
+  const errors: CardFormErrors = {};
+  const cardNumber = digitsOnly(form.cardNumber);
+  const cvv = digitsOnly(form.cvv);
+
+  if (form.holderName.trim().length < 3) {
+    errors.holderName = "Informe o nome do titular.";
+  }
+
+  if (!isValidCpf(form.holderCpf)) {
+    errors.holderCpf = "Informe um CPF de titular válido.";
+  }
+
+  if (
+    cardNumber.length < 13 ||
+    cardNumber.length > 19 ||
+    !passesLuhn(cardNumber)
+  ) {
+    errors.cardNumber = "Informe um número de cartão válido.";
+  }
+
+  if (!parseExpiry(form.expiry)) {
+    errors.expiry = "Informe uma validade futura no formato MM/AA.";
+  }
+
+  if (cvv.length < 3 || cvv.length > 4) {
+    errors.cvv = "Informe um CVV com 3 ou 4 dígitos.";
+  }
+
+  return errors;
+}
+
 function normalizePayment(
   payment: PixPaymentResponse | PaymentDisplay | null,
 ): PaymentDisplay | null {
@@ -787,16 +1212,97 @@ function normalizePayment(
   };
 }
 
-function createIdempotencyKey(): string {
+function createIdempotencyKey(prefix: "pix" | "card" = "pix"): string {
   if (typeof window.crypto.randomUUID === "function") {
-    return window.crypto.randomUUID();
+    return `${prefix}-${window.crypto.randomUUID()}`;
   }
 
-  return `pix-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function digitsOnly(value: string): string {
   return value.replace(/\D/g, "");
+}
+
+function isValidCpf(value: string): boolean {
+  const cpf = digitsOnly(value);
+
+  if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) {
+    return false;
+  }
+
+  const firstDigit = calculateCpfDigit(cpf.slice(0, 9));
+  const secondDigit = calculateCpfDigit(`${cpf.slice(0, 9)}${firstDigit}`);
+
+  return cpf === `${cpf.slice(0, 9)}${firstDigit}${secondDigit}`;
+}
+
+function calculateCpfDigit(base: string): number {
+  const factorStart = base.length + 1;
+  const total = base
+    .split("")
+    .reduce(
+      (sum, digit, index) => sum + Number.parseInt(digit, 10) * (factorStart - index),
+      0,
+    );
+  const remainder = total % 11;
+
+  return remainder < 2 ? 0 : 11 - remainder;
+}
+
+function passesLuhn(value: string): boolean {
+  let sum = 0;
+  let shouldDouble = false;
+
+  for (let index = value.length - 1; index >= 0; index -= 1) {
+    let digit = Number.parseInt(value[index], 10);
+
+    if (!Number.isInteger(digit)) {
+      return false;
+    }
+
+    if (shouldDouble) {
+      digit *= 2;
+
+      if (digit > 9) {
+        digit -= 9;
+      }
+    }
+
+    sum += digit;
+    shouldDouble = !shouldDouble;
+  }
+
+  return sum > 0 && sum % 10 === 0;
+}
+
+function parseExpiry(value: string): { month: string; year: string } | null {
+  const match = value.trim().match(/^(\d{1,2})\s*\/?\s*(\d{2}|\d{4})$/);
+
+  if (!match) {
+    return null;
+  }
+
+  const month = Number.parseInt(match[1], 10);
+  const rawYear = match[2];
+  const year =
+    rawYear.length === 2 ? 2000 + Number.parseInt(rawYear, 10) : Number.parseInt(rawYear, 10);
+
+  if (month < 1 || month > 12) {
+    return null;
+  }
+
+  const now = new Date();
+  const expiryEnd = new Date(year, month, 0, 23, 59, 59, 999);
+
+  if (expiryEnd.getTime() < now.getTime()) {
+    return null;
+  }
+
+  return {
+    month: month.toString().padStart(2, "0"),
+    year: year.toString(),
+  };
 }
 
 function formatDateTime(value: string): string {

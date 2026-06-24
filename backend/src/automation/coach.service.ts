@@ -149,6 +149,54 @@ export class CoachService {
     }
   }
 
+  async generateOnboardingKickoff(userId: string): Promise<string> {
+    const user = await this.prisma.user.findUnique({
+      where: {
+        id: userId,
+      },
+      select: {
+        name: true,
+        fitnessProfile: {
+          select: {
+            goal: true,
+          },
+        },
+        goalClassification: {
+          select: {
+            goal: true,
+          },
+        },
+      },
+    });
+    const name = user?.name?.trim()?.split(/\s+/, 1)[0] || 'atleta';
+    const goal =
+      user?.goalClassification?.goal ??
+      user?.fitnessProfile?.goal ??
+      'EVOLUCAO_FISICA';
+
+    return [
+      `Olá ${name} 👋`,
+      '',
+      'Agora já tenho todas as informações necessárias para personalizar seu acompanhamento.',
+      '',
+      `Identifiquei que seu principal objetivo é ${this.premiumGoalLabel(goal)}.`,
+      '',
+      'A partir de agora posso ajudar você com:',
+      '',
+      '🥗 Alimentação',
+      '🏋️ Treinos',
+      '📸 Análise de refeições',
+      '📈 Evolução física',
+      '🎯 Estratégias personalizadas',
+      '',
+      'O que você gostaria de fazer primeiro?',
+      '',
+      '1. Plano alimentar',
+      '2. Plano de treino',
+      '3. Os dois',
+    ].join('\n');
+  }
+
   private goodMorning(
     name: string,
     profile:
@@ -287,5 +335,17 @@ export class CoachService {
 
   private formatNumber(value: number): string {
     return Number(value.toFixed(2)).toString().replace('.', ',');
+  }
+
+  private premiumGoalLabel(goal: string): string {
+    const labels: Record<string, string> = {
+      ...GOAL_LABELS,
+      WEIGHT_LOSS: 'emagrecimento',
+      HYPERTROPHY: 'ganho de massa muscular',
+      HEALTH: 'saúde e qualidade de vida',
+      EVOLUCAO_FISICA: 'evolução física',
+    };
+
+    return labels[goal] ?? 'evolução física';
   }
 }

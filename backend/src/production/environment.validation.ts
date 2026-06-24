@@ -24,6 +24,7 @@ const REQUIRED_PRODUCTION_KEYS = [
   'CORS_ALLOWED_ORIGINS',
   'PAGBANK_API_URL',
   'PAGBANK_TOKEN',
+  'PAGBANK_PUBLIC_KEY',
   'PAGBANK_WEBHOOK_SECRET',
   'EVOLUTION_BASE_URL',
   'EVOLUTION_API_KEY',
@@ -65,6 +66,8 @@ const DECIMAL_KEYS = [
   'ANALYTICS_WHATSAPP_AUTOMATION_COST_BRL',
   'ANALYTICS_STORAGE_GB_MONTH_COST_BRL',
 ] as const;
+
+const NON_SECRET_PLACEHOLDER_KEYS = ['PAGBANK_PUBLIC_KEY'] as const;
 
 const INTEGER_RULES: IntegerRule[] = [
   { key: 'PORT', fallback: 3000, min: 1, max: 65_535 },
@@ -219,6 +222,7 @@ export function collectEnvironmentIssues(
   validateProviderUrl(environment, 'EVOLUTION_BASE_URL', issues, production);
   validateCors(environment, issues, production);
   validateSecrets(environment, issues, production);
+  validateConfiguredValues(environment, issues, production);
   validateDecimals(environment, issues, production);
   validateIntegers(environment, issues);
   validateStorage(environment, issues, production);
@@ -342,6 +346,24 @@ function validateSecrets(
 
   if (access && refresh && access === refresh) {
     issues.push('JWT_ACCESS_SECRET e JWT_REFRESH_SECRET devem ser diferentes');
+  }
+}
+
+function validateConfiguredValues(
+  environment: Environment,
+  issues: string[],
+  production: boolean,
+): void {
+  if (!production) {
+    return;
+  }
+
+  for (const key of NON_SECRET_PLACEHOLDER_KEYS) {
+    const value = text(environment[key]);
+
+    if (value && isPlaceholder(value)) {
+      issues.push(`${key} não pode utilizar valor placeholder`);
+    }
   }
 }
 

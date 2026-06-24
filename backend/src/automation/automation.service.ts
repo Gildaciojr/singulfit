@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ChurnRiskLevel, Prisma, ScheduledMessageStatus } from '@prisma/client';
@@ -31,6 +32,8 @@ type ScheduledMessageWithRule = Prisma.ScheduledMessageGetPayload<{
 
 @Injectable()
 export class AutomationService {
+  private readonly logger = new Logger(AutomationService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly subscriptionsService: SubscriptionsService,
@@ -212,6 +215,85 @@ export class AutomationService {
             userId,
             automationRuleId: rule.id,
             ruleCode,
+          },
+          availableAt: scheduledFor,
+        },
+        transaction,
+      );
+
+      return scheduledMessage;
+    });
+  }
+
+  async scheduleOnboardingKickoff(userId: string, scheduledFor: Date) {
+    await this.subscriptionsService.getProfileSubscription(userId);
+
+    if (Number.isNaN(scheduledFor.getTime())) {
+      throw new BadRequestException('Horário de automação inválido');
+    }
+
+    const [preferences, rule] = await Promise.all([
+      this.getOrCreatePreferences(userId),
+      this.prisma.automationRule.findUnique({
+        where: {
+          code: AUTOMATION_RULE_CODES.DAILY_COACH,
+        },
+      }),
+    ]);
+
+    if (!rule || !rule.enabled) {
+      throw new NotFoundException('Regra de automação indisponível');
+    }
+
+    if (!this.isRuleEnabled(AUTOMATION_RULE_CODES.DAILY_COACH, preferences)) {
+      throw new ForbiddenException(
+        'As preferências do usuário desabilitam esta automação',
+      );
+    }
+
+    try {
+      await this.coachIntelligence.recalculateUser(userId, scheduledFor);
+    } catch (error: unknown) {
+      this.logger.warn(
+        `Recalculo do coach pós-onboarding falhou para o usuário ${userId}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
+
+    const content = await this.coachService.generateOnboardingKickoff(userId);
+
+    return this.prisma.$transaction(async (transaction) => {
+      const scheduledMessage = await transaction.scheduledMessage.upsert({
+        where: {
+          userId_automationRuleId_scheduledFor: {
+            userId,
+            automationRuleId: rule.id,
+            scheduledFor,
+          },
+        },
+        update: {},
+        create: {
+          userId,
+          automationRuleId: rule.id,
+          scheduledFor,
+          content,
+        },
+        include: {
+          automationRule: true,
+        },
+      });
+
+      await this.eventBus.publish(
+        {
+          eventType: INTERNAL_EVENT.AUTOMATION_TRIGGERED,
+          aggregateType: 'SCHEDULED_MESSAGE',
+          aggregateId: scheduledMessage.id,
+          payload: {
+            scheduledMessageId: scheduledMessage.id,
+            userId,
+            automationRuleId: rule.id,
+            ruleCode: AUTOMATION_RULE_CODES.DAILY_COACH,
+            source: 'ONBOARDING_COMPLETED',
           },
           availableAt: scheduledFor,
         },

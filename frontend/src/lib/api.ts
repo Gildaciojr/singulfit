@@ -72,6 +72,14 @@ export type CreatePixPayload = {
   idempotencyKey: string;
 };
 
+export type CreateCreditCardPayload = {
+  encryptedCard: string;
+  holderName: string;
+  holderCpf: string;
+  installments: 1;
+  idempotencyKey: string;
+};
+
 export type PixPaymentResponse = {
   paymentId: string;
   invoiceId: string;
@@ -84,6 +92,23 @@ export type PixPaymentResponse = {
   qrCode: string;
   qrCodeImageUrl: string;
   expiresAt: string;
+};
+
+export type CreditCardPaymentResponse = {
+  paymentId: string;
+  invoiceId: string;
+  provider: string;
+  status: string;
+  amount: string;
+  currency: "BRL";
+  externalReference: string;
+  providerPaymentId: string;
+  providerOrderId: string;
+  approvedAt: string | null;
+};
+
+export type CreditCardPublicKeyResponse = {
+  publicKey: string;
 };
 
 export type CheckoutStatusResponse = {
@@ -179,6 +204,32 @@ export function createPixPayment(
     {
       method: "POST",
       body: payload,
+    },
+    accessToken,
+  );
+}
+
+export function createCreditCardPayment(
+  payload: CreateCreditCardPayload,
+  accessToken: string,
+): Promise<CreditCardPaymentResponse> {
+  return request(
+    "/payments/credit-card",
+    {
+      method: "POST",
+      body: payload,
+    },
+    accessToken,
+  );
+}
+
+export function getCreditCardPublicKey(
+  accessToken: string,
+): Promise<CreditCardPublicKeyResponse> {
+  return request(
+    "/payments/credit-card/public-key",
+    {
+      method: "GET",
     },
     accessToken,
   );

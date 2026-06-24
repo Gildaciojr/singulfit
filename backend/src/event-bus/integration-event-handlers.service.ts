@@ -6,8 +6,11 @@ import { EvolutionWebhookService } from '../evolution/evolution-webhook.service'
 import { NutritionVisionService } from '../nutrition/nutrition-vision.service';
 import { NutritionService } from '../nutrition/nutrition.service';
 import { ResponseBuilderService } from '../responses/response-builder.service';
+import { CoachCommandService } from '../automation/coach-command.service';
 import { AutomationService } from '../automation/automation.service';
 import { ActivationJourneyService } from '../activation/activation-journey.service';
+import { ActivationOnboardingService } from '../activation/activation-onboarding.service';
+import { ACTIVATION_ONBOARDING_PROFILE_SOURCE_KEY } from '../activation/activation-onboarding.constants';
 import { PagBankWebhookService } from '../webhooks/pagbank-webhook.service';
 import { INTERNAL_EVENT } from './event-bus.constants';
 import { EventHandlerRegistry } from './event-handler.registry';
@@ -22,8 +25,10 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     private readonly nutritionVisionService: NutritionVisionService,
     private readonly responseBuilderService: ResponseBuilderService,
     private readonly evolutionSendService: EvolutionSendService,
+    private readonly coachCommandService: CoachCommandService,
     private readonly automationService: AutomationService,
     private readonly activationJourneyService: ActivationJourneyService,
+    private readonly activationOnboardingService: ActivationOnboardingService,
   ) {}
 
   onModuleInit(): void {
@@ -32,6 +37,10 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     );
     this.registry.register(INTERNAL_EVENT.WHATSAPP_MESSAGE_RECEIVED, (event) =>
       this.processWhatsAppMessage(event),
+    );
+    this.registry.register(
+      INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED,
+      (event) => this.processCoachOnboardingText(event),
     );
     this.registry.register(INTERNAL_EVENT.MEDIA_RECEIVED, (event) =>
       this.processMedia(event),
@@ -45,6 +54,10 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     );
     this.registry.register(INTERNAL_EVENT.AUTOMATION_TRIGGERED, (event) =>
       this.processAutomation(event),
+    );
+    this.registry.register(
+      INTERNAL_EVENT.USER_CONTEXT_REFRESH_COMPLETED,
+      (event) => this.processContextRefreshCompleted(event),
     );
     this.registry.register(INTERNAL_EVENT.SUBSCRIPTION_ACTIVATED, (event) =>
       this.processSubscriptionActivated(event),
@@ -61,6 +74,19 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     await this.evolutionWebhookService.processQueuedEvent(
       this.requiredString(event.payload, 'evolutionInboundEventId'),
     );
+  }
+
+  private async processCoachOnboardingText(event: OutboxEvent): Promise<void> {
+    const input = {
+      userId: this.requiredString(event.payload, 'userId'),
+      messageId: this.requiredString(event.payload, 'messageId'),
+    };
+    const result =
+      await this.activationOnboardingService.processTextMessage(input);
+
+    if (!result.handled) {
+      await this.coachCommandService.processTextMessage(input);
+    }
   }
 
   private async processMedia(event: OutboxEvent): Promise<void> {
@@ -101,6 +127,23 @@ export class IntegrationEventHandlersService implements OnModuleInit {
   private async processAutomation(event: OutboxEvent): Promise<void> {
     await this.automationService.sendScheduledMessage(
       this.requiredString(event.payload, 'scheduledMessageId'),
+    );
+  }
+
+  private async processContextRefreshCompleted(
+    event: OutboxEvent,
+  ): Promise<void> {
+    const refreshKey = this.requiredString(event.payload, 'refreshKey');
+
+    if (
+      !refreshKey.startsWith(`${ACTIVATION_ONBOARDING_PROFILE_SOURCE_KEY}:`)
+    ) {
+      return;
+    }
+
+    await this.automationService.scheduleOnboardingKickoff(
+      this.requiredString(event.payload, 'userId'),
+      event.createdAt,
     );
   }
 

@@ -7,7 +7,9 @@ import { ConfigService } from '@nestjs/config';
 import { PaymentProvider } from '@prisma/client';
 import {
   CanonicalGatewayPayment,
+  CreateGatewayCreditCardPayment,
   CreateGatewayPixPayment,
+  GatewayCreditCardPayment,
   GatewayPixPayment,
   GatewayPaymentStatus,
   PaymentGateway,
@@ -75,6 +77,70 @@ export class PagBankGateway implements PaymentGateway {
       qrCode: qrCode.text,
       qrCodeImageUrl: imageLink.href,
       expiresAt: new Date(qrCode.expiration_date),
+    };
+  }
+
+  async createCreditCardPayment(
+    input: CreateGatewayCreditCardPayment,
+  ): Promise<GatewayCreditCardPayment> {
+    const apiUrl = this.getApiUrl();
+    const token = this.getRequiredConfig('PAGBANK_TOKEN');
+    const requestBody = this.buildCreditCardRequest(input);
+    let response: Response;
+
+    try {
+      response = await fetch(`${apiUrl}/orders`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'x-idempotency-key': input.idempotencyKey,
+        },
+        body: JSON.stringify(requestBody),
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch {
+      throw new BadGatewayException('Não foi possível comunicar com o PagBank');
+    }
+
+    const payload = await this.readJson(response);
+
+    if (!response.ok) {
+      throw new BadGatewayException(
+        `PagBank rejeitou a cobrança no cartão (${response.status})`,
+      );
+    }
+
+    const order = this.parseOrderResponse(payload);
+    const charge = order.charges[0];
+
+    if (!charge) {
+      throw new BadGatewayException(
+        'PagBank não retornou a cobrança no cartão',
+      );
+    }
+
+    const status = this.mapPaymentStatus(charge.status);
+    const approvedAt = charge.paid_at
+      ? this.parseDate(charge.paid_at, 'Data de aprovação inválida no PagBank')
+      : undefined;
+
+    if (status === 'APPROVED' && !approvedAt) {
+      throw new BadGatewayException(
+        'PagBank não retornou a data real de aprovação',
+      );
+    }
+
+    return {
+      providerOrderId: order.id,
+      providerPaymentId: charge.id,
+      status,
+      statusDetail:
+        charge.payment_response?.message ?? charge.payment_response?.code,
+      approvedAt,
+      cardBrand: charge.payment_method?.card?.brand,
+      cardLastFour: charge.payment_method?.card?.last_digits,
     };
   }
 
@@ -170,6 +236,51 @@ export class PagBankGateway implements PaymentGateway {
             value: input.amountInCents,
           },
           expiration_date: input.expirationDate.toISOString(),
+        },
+      ],
+    };
+  }
+
+  private buildCreditCardRequest(
+    input: CreateGatewayCreditCardPayment,
+  ): PagBankCreateOrderRequest {
+    return {
+      reference_id: input.externalReference,
+      customer: {
+        name: input.customer.name,
+        email: input.customer.email,
+        tax_id: input.customer.taxId,
+        phones: [input.customer.phone],
+      },
+      items: [
+        {
+          reference_id: input.item.referenceId,
+          name: input.item.name,
+          quantity: 1,
+          unit_amount: input.amountInCents,
+        },
+      ],
+      charges: [
+        {
+          reference_id: input.externalReference,
+          description: input.item.name,
+          amount: {
+            value: input.amountInCents,
+            currency: 'BRL',
+          },
+          payment_method: {
+            type: 'CREDIT_CARD',
+            installments: input.installments,
+            capture: true,
+            card: {
+              encrypted: input.encryptedCard,
+              store: false,
+            },
+            holder: {
+              name: input.holder.name,
+              tax_id: input.holder.taxId,
+            },
+          },
         },
       ],
     };
@@ -286,6 +397,9 @@ export class PagBankGateway implements PaymentGateway {
               : undefined,
         }
       : undefined;
+    const paymentMethod = this.isRecord(payload.payment_method)
+      ? this.parsePaymentMethod(payload.payment_method)
+      : undefined;
 
     return {
       id: payload.id,
@@ -298,6 +412,28 @@ export class PagBankGateway implements PaymentGateway {
         currency: payload.amount.currency,
       },
       payment_response: paymentResponse,
+      payment_method: paymentMethod,
+    };
+  }
+
+  private parsePaymentMethod(
+    payload: Record<string, unknown>,
+  ): PagBankCharge['payment_method'] | undefined {
+    if (!this.isRecord(payload.card)) {
+      return undefined;
+    }
+
+    return {
+      card: {
+        brand:
+          typeof payload.card.brand === 'string'
+            ? payload.card.brand
+            : undefined,
+        last_digits:
+          typeof payload.card.last_digits === 'string'
+            ? payload.card.last_digits
+            : undefined,
+      },
     };
   }
 

@@ -95,6 +95,7 @@ export class SubscriptionsService {
       approvedAt: Date;
       provider: PaymentProvider;
       providerPaymentId: string;
+      paymentMethod: PaymentMethod;
     },
   ) {
     const subscription = await transaction.subscription.findUnique({
@@ -151,7 +152,7 @@ export class SubscriptionsService {
         status: SubscriptionStatus.ACTIVE,
         provider: input.provider,
         externalPaymentId: input.providerPaymentId,
-        paymentMethod: PaymentMethod.PIX,
+        paymentMethod: input.paymentMethod,
         paidAt: input.approvedAt,
         startedAt: input.approvedAt,
         billingPeriodStart: periodStart.toDate(),

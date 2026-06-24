@@ -282,6 +282,18 @@ export class EvolutionWebhookService {
       });
     }
 
+    if (MessageType[inboundMessage.messageType] === MessageType.TEXT) {
+      await this.eventBus.publish({
+        eventType: INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED,
+        aggregateType: 'MESSAGE',
+        aggregateId: persisted.message.id,
+        payload: {
+          userId: user.id,
+          messageId: persisted.message.id,
+        },
+      });
+    }
+
     await this.eventBus.publish({
       eventType: INTERNAL_EVENT.USER_CONTEXT_REFRESH_REQUESTED,
       aggregateType: 'MESSAGE',

@@ -72,6 +72,7 @@ describe('PixPaymentsService', () => {
     const gateway: PaymentGateway = {
       provider: PaymentProvider.PAGBANK,
       createPixPayment,
+      createCreditCardPayment: jest.fn(),
       getPayment: jest.fn(),
     };
     const service = new PixPaymentsService(
@@ -145,6 +146,7 @@ describe('PixPaymentsService', () => {
     const gateway: PaymentGateway = {
       provider: PaymentProvider.PAGBANK,
       createPixPayment,
+      createCreditCardPayment: jest.fn(),
       getPayment: jest.fn(),
     };
     const service = new PixPaymentsService(
@@ -246,6 +248,7 @@ describe('PixPaymentsService', () => {
     const gateway: PaymentGateway = {
       provider: PaymentProvider.PAGBANK,
       createPixPayment,
+      createCreditCardPayment: jest.fn(),
       getPayment: jest.fn(),
     };
     const service = new PixPaymentsService(

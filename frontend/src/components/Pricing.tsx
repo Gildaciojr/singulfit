@@ -68,7 +68,8 @@ function PlanCard({
           ? `
             -translate-y-2
             border-emerald-800/20
-            p-8
+            p-5
+            sm:p-8
             shadow-[0_50px_120px_-40px_rgba(6,78,59,0.30)]
             ring-1
             ring-emerald-800/10
@@ -77,6 +78,7 @@ function PlanCard({
              border-zinc-200/70
              bg-[linear-gradient(180deg,#fbfbfa_0%,#f7f8f7_100%)]
             p-4
+            sm:p-5
             shadow-[0_25px_70px_-45px_rgba(15,23,42,0.12)]
           `
       }
@@ -95,12 +97,13 @@ function PlanCard({
 
           <div
             className="
-        absolute
-        right-5
-        top-5
+        relative
+        mb-5
         flex
+        w-full
         items-center
         gap-3
+        self-start
         rounded-full
         border
         border-emerald-300/40
@@ -108,7 +111,8 @@ function PlanCard({
         from-emerald-900
         via-emerald-800
         to-emerald-700
-        px-4
+        px-3
+        sm:px-4
         py-2
         text-white
         shadow-[0_18px_45px_-18px_rgba(6,78,59,0.55)]
@@ -164,13 +168,13 @@ function PlanCard({
           {featured ? "Experiência Premium" : "Plano Inicial"}
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <h3
             className={`
         font-black
         tracking-[-0.05em]
         text-zinc-950
-        ${featured ? "text-[2.8rem]" : "text-[1.9rem]"}
+        ${featured ? "text-[2.15rem] sm:text-[2.8rem]" : "text-[1.75rem] sm:text-[1.9rem]"}
       `}
           >
             {plan.name}
@@ -209,13 +213,13 @@ function PlanCard({
       </div>
 
       <div className="relative mb-6">
-        <div className="flex items-end gap-2">
+        <div className="flex flex-wrap items-end gap-x-2 gap-y-1">
           <span
             className={`
         font-black
         tracking-[-0.07em]
         text-zinc-950
-        ${featured ? "text-[4.4rem]" : "text-[3rem]"}
+        ${featured ? "text-[3.2rem] sm:text-[4.4rem]" : "text-[2.6rem] sm:text-[3rem]"}
       `}
           >
             R$ {plan.price.toFixed(2).replace(".", ",")}
@@ -223,7 +227,7 @@ function PlanCard({
 
           <span
             className={`
-        pb-3
+        pb-2
         font-medium
         ${featured ? "text-lg text-emerald-800" : "text-base text-zinc-500"}
       `}
@@ -508,7 +512,8 @@ export default function Pricing({ data }: Props) {
             mx-auto
             mt-14
             flex
-            w-fit
+            w-full
+            max-w-xl
             items-center
             gap-4
             rounded-full
@@ -536,12 +541,12 @@ export default function Pricing({ data }: Props) {
             <MessageCircle className="h-5 w-5 text-[#25D366]" />
           </div>
 
-          <div>
+          <div className="min-w-0">
             <div className="text-sm font-semibold text-zinc-900">
               WhatsApp integrado
             </div>
 
-            <div className="mt-1 text-[12px] text-zinc-500">
+            <div className="mt-1 text-[12px] leading-relaxed text-zinc-500">
               Pagamento seguro • Cancelamento simples • Garantia de 7 dias
             </div>
           </div>

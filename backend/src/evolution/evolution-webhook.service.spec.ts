@@ -145,6 +145,17 @@ describe('EvolutionWebhookService', () => {
     );
     expect(subject.eventBus.publish).toHaveBeenCalledWith(
       expect.objectContaining({
+        eventType: 'COACH_ONBOARDING_TEXT_RECEIVED',
+        aggregateType: 'MESSAGE',
+        aggregateId: 'message-id',
+        payload: {
+          userId: 'user-id',
+          messageId: 'message-id',
+        },
+      }),
+    );
+    expect(subject.eventBus.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
         eventType: 'USER_CONTEXT_REFRESH_REQUESTED',
         aggregateType: 'MESSAGE',
         aggregateId: 'message-id',
@@ -252,6 +263,11 @@ describe('EvolutionWebhookService', () => {
       expect.objectContaining({
         eventType: 'MEDIA_RECEIVED',
         aggregateId: 'media-file-id',
+      }),
+    );
+    expect(subject.eventBus.publish).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'COACH_ONBOARDING_TEXT_RECEIVED',
       }),
     );
     expect(result).toEqual(

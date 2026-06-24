@@ -127,6 +127,9 @@ describe('AutomationService', () => {
     };
     const coachService = {
       generateContent: jest.fn().mockResolvedValue('Treino personalizado'),
+      generateOnboardingKickoff: jest
+        .fn()
+        .mockResolvedValue('Mensagem premium inicial'),
     };
     const evolutionGateway = {
       sendText: options?.gatewayFailure
@@ -161,15 +164,16 @@ describe('AutomationService', () => {
     const behavioralIntelligence = {
       preferredScheduleHour: jest.fn().mockResolvedValue(9),
     };
+    const eventBus = {
+      publish: jest.fn().mockResolvedValue({ id: 'outbox-id' }),
+    };
     const service = new AutomationService(
       prisma as unknown as PrismaService,
       subscriptionsService as unknown as SubscriptionsService,
       coachService as unknown as CoachService,
       evolutionGateway as unknown as EvolutionGateway,
       subscriptionAccessService as unknown as SubscriptionAccessService,
-      {
-        publish: jest.fn().mockResolvedValue({ id: 'outbox-id' }),
-      } as unknown as EventBusService,
+      eventBus as unknown as EventBusService,
       coachIntelligence as unknown as CoachIntelligenceService,
       behavioralIntelligence as unknown as BehavioralIntelligenceService,
     );
@@ -184,6 +188,7 @@ describe('AutomationService', () => {
       subscriptionAccessService,
       coachIntelligence,
       behavioralIntelligence,
+      eventBus,
       preferences,
       rule,
       scheduledMessage,
@@ -261,6 +266,58 @@ describe('AutomationService', () => {
         },
       }),
     );
+  });
+
+  it('schedules an onboarding kickoff through the existing automation outbox', async () => {
+    const subject = createSubject();
+    const scheduledFor = new Date('2026-06-10T12:00:00.000Z');
+
+    await expect(
+      subject.service.scheduleOnboardingKickoff('user-id', scheduledFor),
+    ).resolves.toBe(subject.scheduledMessage);
+    expect(
+      subject.subscriptionsService.getProfileSubscription,
+    ).toHaveBeenCalledWith('user-id');
+    expect(subject.coachIntelligence.recalculateUser).toHaveBeenCalledWith(
+      'user-id',
+      scheduledFor,
+    );
+    expect(subject.coachService.generateOnboardingKickoff).toHaveBeenCalledWith(
+      'user-id',
+    );
+    expect(subject.transaction.scheduledMessage.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          content: 'Mensagem premium inicial',
+        }),
+      }),
+    );
+    expect(subject.eventBus.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'AUTOMATION_TRIGGERED',
+        aggregateType: 'SCHEDULED_MESSAGE',
+        payload: expect.objectContaining({
+          scheduledMessageId: 'scheduled-id',
+          source: 'ONBOARDING_COMPLETED',
+        }),
+      }),
+      subject.transaction,
+    );
+  });
+
+  it('keeps onboarding kickoff scheduling available when coach recalculation lacks enough context', async () => {
+    const subject = createSubject();
+    subject.coachIntelligence.recalculateUser.mockRejectedValueOnce(
+      new Error('Contexto insuficiente'),
+    );
+
+    await expect(
+      subject.service.scheduleOnboardingKickoff(
+        'user-id',
+        new Date('2026-06-10T12:00:00.000Z'),
+      ),
+    ).resolves.toBe(subject.scheduledMessage);
+    expect(subject.coachService.generateOnboardingKickoff).toHaveBeenCalled();
   });
 
   it('blocks scheduling when the user disabled the rule category', async () => {

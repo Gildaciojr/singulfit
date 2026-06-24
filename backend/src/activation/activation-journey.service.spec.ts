@@ -8,6 +8,7 @@ import { EventService } from '../observability/event.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConversationsService } from '../whatsapp/conversations.service';
 import { ActivationJourneyService } from './activation-journey.service';
+import { ActivationOnboardingService } from './activation-onboarding.service';
 import { ActivationScoreService } from './activation-score.service';
 import { ActivationService } from './activation.service';
 
@@ -43,6 +44,9 @@ describe('ActivationJourneyService', () => {
     const events = {
       record: jest.fn().mockResolvedValue({ id: 'system-event-id' }),
     };
+    const onboarding = {
+      start: jest.fn().mockResolvedValue({ id: 'onboarding-id' }),
+    };
     const service = new ActivationJourneyService(
       prisma as unknown as PrismaService,
       {} as ActivationService,
@@ -50,6 +54,7 @@ describe('ActivationJourneyService', () => {
       {} as ConversationsService,
       evolution as unknown as EvolutionGateway,
       events as unknown as EventService,
+      onboarding as unknown as ActivationOnboardingService,
     );
     const testable = service as unknown as {
       dueRecovery(
@@ -76,7 +81,15 @@ describe('ActivationJourneyService', () => {
       ): Promise<void>;
     };
 
-    return { service, testable, prisma, transaction, evolution, events };
+    return {
+      service,
+      testable,
+      prisma,
+      transaction,
+      evolution,
+      events,
+      onboarding,
+    };
   }
 
   it('selects the latest due D+ flow and retries an expired lease', async () => {

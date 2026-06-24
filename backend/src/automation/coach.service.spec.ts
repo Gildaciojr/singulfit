@@ -18,6 +18,9 @@ describe('CoachService', () => {
             targetWeightKg: new Prisma.Decimal('62.00'),
             goal: 'WEIGHT_LOSS',
           },
+          goalClassification: {
+            goal: 'WEIGHT_LOSS',
+          },
         }),
       },
       workoutPlan: {
@@ -137,5 +140,17 @@ describe('CoachService', () => {
     expect(content).toContain('Você perdeu 2 kg no período.');
     expect(content).toContain('Treino personalizado');
     expect(content).toContain('Dieta brasileira');
+  });
+
+  it('builds the premium onboarding kickoff with the real user goal', async () => {
+    const subject = createSubject();
+
+    const content = await subject.service.generateOnboardingKickoff('user-id');
+
+    expect(content).toContain('Olá SingulFit');
+    expect(content).toContain('emagrecimento');
+    expect(content).toContain('1. Plano alimentar');
+    expect(content).toContain('2. Plano de treino');
+    expect(content).toContain('3. Os dois');
   });
 });

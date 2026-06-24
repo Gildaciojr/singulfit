@@ -53,6 +53,7 @@ describe('PagBankWebhookService', () => {
     const gateway: PaymentGateway = {
       provider: PaymentProvider.PAGBANK,
       createPixPayment: jest.fn(),
+      createCreditCardPayment: jest.fn(),
       getPayment,
     };
     const transaction = {

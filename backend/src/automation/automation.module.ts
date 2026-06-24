@@ -4,11 +4,14 @@ import { BehaviorModule } from '../behavior/behavior.module';
 import { EvolutionModule } from '../evolution/evolution.module';
 import { NutritionModule } from '../nutrition/nutrition.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
+import { DietModule } from '../diet/diet.module';
 import { RecommendationModule } from '../recommendations/recommendation.module';
 import { LongitudinalModule } from '../longitudinal/longitudinal.module';
 import { AdaptiveIntelligenceModule } from '../adaptive-intelligence/adaptive-intelligence.module';
+import { WorkoutModule } from '../workout/workout.module';
 import { AutomationController } from './automation.controller';
 import { AutomationService } from './automation.service';
+import { CoachCommandService } from './coach-command.service';
 import { CoachAdminController } from './coach-admin.controller';
 import { CoachExperienceCalculatorService } from './coach-experience-calculator.service';
 import { CoachExperienceService } from './coach-experience.service';
@@ -24,6 +27,8 @@ import { UserGoalEngineService } from './user-goal-engine.service';
     EvolutionModule,
     NutritionModule,
     SubscriptionsModule,
+    DietModule,
+    WorkoutModule,
     RecommendationModule,
     LongitudinalModule,
     AdaptiveIntelligenceModule,
@@ -31,6 +36,7 @@ import { UserGoalEngineService } from './user-goal-engine.service';
   controllers: [AutomationController, CoachAdminController],
   providers: [
     AutomationService,
+    CoachCommandService,
     CoachService,
     CoachIntelligenceService,
     CoachExperienceCalculatorService,
@@ -40,6 +46,7 @@ import { UserGoalEngineService } from './user-goal-engine.service';
   ],
   exports: [
     AutomationService,
+    CoachCommandService,
     CoachService,
     CoachIntelligenceService,
     CoachExperienceService,

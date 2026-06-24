@@ -1,4 +1,4 @@
-import { Currency, PaymentStatus, Prisma } from '@prisma/client';
+import { Currency, PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
 import { BillingService } from '../billing/billing.service';
 import { InvoicesService } from '../billing/invoices.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -26,6 +26,7 @@ describe('WebhookProcessorService', () => {
       amount: new Prisma.Decimal('19.90'),
       currency: Currency.BRL,
       externalReference: 'pay_reference',
+      method: PaymentMethod.PIX,
       status: PaymentStatus.PENDING,
       invoice: {
         subscriptionId: 'subscription-id',
@@ -98,6 +99,14 @@ describe('WebhookProcessorService', () => {
       }),
     );
     expect(eventBus.publish).toHaveBeenCalledTimes(2);
+    expect(
+      subscriptionsService.activateForInvoiceInTransaction,
+    ).toHaveBeenCalledWith(
+      transaction,
+      expect.objectContaining({
+        paymentMethod: PaymentMethod.PIX,
+      }),
+    );
     expect(auditService.recordInTransaction).toHaveBeenNthCalledWith(
       2,
       transaction,
@@ -126,6 +135,7 @@ describe('WebhookProcessorService', () => {
         amount: new Prisma.Decimal('19.90'),
         currency: Currency.BRL,
         externalReference: 'pay_reference',
+        method: PaymentMethod.PIX,
         status: PaymentStatus.APPROVED,
         invoice: {
           subscriptionId: 'subscription-id',

@@ -5,11 +5,12 @@ import { PagBankModule } from '../pagbank/pagbank.module';
 import { PaymentsService } from './payments.service';
 import { PaymentsController } from './payments.controller';
 import { PixPaymentsService } from './pix-payments.service';
+import { CreditCardPaymentsService } from './credit-card-payments.service';
 
 @Module({
   imports: [AuthModule, BillingModule, PagBankModule],
-  providers: [PaymentsService, PixPaymentsService],
+  providers: [PaymentsService, PixPaymentsService, CreditCardPaymentsService],
   controllers: [PaymentsController],
-  exports: [PaymentsService, PixPaymentsService],
+  exports: [PaymentsService, PixPaymentsService, CreditCardPaymentsService],
 })
 export class PaymentsModule {}

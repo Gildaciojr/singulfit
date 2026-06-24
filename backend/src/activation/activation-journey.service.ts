@@ -19,6 +19,7 @@ import {
   TERMINAL_ACTIVATION_STAGES,
 } from './activation.constants';
 import { ActivationScoreService } from './activation-score.service';
+import { ActivationOnboardingService } from './activation-onboarding.service';
 import { ActivationService } from './activation.service';
 
 const MESSAGE_COOLDOWN_MS = 12 * 3_600_000;
@@ -36,6 +37,7 @@ export class ActivationJourneyService {
     private readonly conversations: ConversationsService,
     private readonly evolution: EvolutionGateway,
     private readonly events: EventService,
+    private readonly onboarding: ActivationOnboardingService,
   ) {}
 
   async processDue(at = new Date(), limit = 100): Promise<number> {
@@ -296,6 +298,15 @@ export class ActivationJourneyService {
         },
       });
 
+      if (kind === ActivationEventKind.FLOW_MESSAGE && eventCode === 'D0') {
+        await this.onboarding.start({
+          userId,
+          activationId,
+          userFirstName: message.userFirstName,
+          startedAt: at,
+        });
+      }
+
       if (kind === ActivationEventKind.RECOVERY_MESSAGE) {
         await this.events.record({
           source: ACTIVATION_SOURCE,
@@ -440,6 +451,7 @@ export class ActivationJourneyService {
     return {
       phone: user.phoneE164 ?? user.phone,
       content,
+      userFirstName: name,
       metadata: {
         stage: activation?.currentStage ?? ActivationStage.REGISTERED,
         score: activation?.score ?? 0,
@@ -454,6 +466,7 @@ export class ActivationJourneyService {
         contextSnapshotUsed: user.contextSnapshots.length > 0,
         recommendationUsed: Boolean(recommendation),
         coachContextUsed: true,
+        userFirstName: name,
         nextAction,
       } satisfies Prisma.InputJsonObject,
     };
@@ -470,7 +483,7 @@ export class ActivationJourneyService {
 
     switch (code) {
       case 'D0':
-        return `${name}, sua assinatura está ativa. Vamos transformar isso em resultado real: ${nextAction}${suffix}`;
+        return `Olá ${name}.\n\nFico muito feliz em ter você aqui.\n\nA partir de agora vou acompanhar sua alimentação, seus treinos, seus objetivos e sua evolução para te ajudar a alcançar resultados de forma saudável e consistente.\n\nTudo será personalizado para sua realidade, rotina e necessidades.\n\nAntes de começarmos nossa jornada, preciso conhecer um pouco mais sobre você.\n\nVamos lá?${suffix}`;
       case 'D1':
         return `${name}, seu progresso de ativação está em ${score}/100. O passo mais útil agora é: ${nextAction}${suffix}`;
       case 'D3':

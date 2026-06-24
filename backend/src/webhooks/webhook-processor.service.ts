@@ -81,6 +81,7 @@ export class WebhookProcessorService {
             approvedAt: canonicalPayment.approvedAt as Date,
             provider: PaymentProvider.PAGBANK,
             providerPaymentId: canonicalPayment.providerPaymentId,
+            paymentMethod: payment.method,
           },
         );
 

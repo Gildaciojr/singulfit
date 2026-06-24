@@ -17,11 +17,32 @@ export interface PagBankCreateOrderRequest {
     quantity: number;
     unit_amount: number;
   }>;
-  qr_codes: Array<{
+  qr_codes?: Array<{
     amount: {
       value: number;
     };
     expiration_date: string;
+  }>;
+  charges?: Array<{
+    reference_id: string;
+    description: string;
+    amount: {
+      value: number;
+      currency: 'BRL';
+    };
+    payment_method: {
+      type: 'CREDIT_CARD';
+      installments: number;
+      capture: true;
+      card: {
+        encrypted: string;
+        store: false;
+      };
+      holder: {
+        name: string;
+        tax_id: string;
+      };
+    };
   }>;
 }
 
@@ -55,6 +76,12 @@ export interface PagBankCharge {
   payment_response?: {
     code?: string;
     message?: string;
+  };
+  payment_method?: {
+    card?: {
+      brand?: string;
+      last_digits?: string;
+    };
   };
 }
 

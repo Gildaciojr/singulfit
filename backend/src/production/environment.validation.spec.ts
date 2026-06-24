@@ -17,6 +17,7 @@ describe('production environment validation', () => {
       CORS_ALLOWED_ORIGINS: 'https://app.singulfit.example',
       PAGBANK_API_URL: 'https://api.pagseguro.com',
       PAGBANK_TOKEN: 'pagbank-token-production-value',
+      PAGBANK_PUBLIC_KEY: 'pagbank-public-key-production-value',
       PAGBANK_WEBHOOK_SECRET: 'pagbank-webhook-production-value',
       EVOLUTION_BASE_URL: 'https://evolution.singulfit.example',
       EVOLUTION_API_KEY: 'evolution-api-production-value',
@@ -87,6 +88,7 @@ describe('production environment validation', () => {
     environment.JWT_REFRESH_SECRET = environment.JWT_ACCESS_SECRET;
     environment.CORS_ALLOWED_ORIGINS = '*';
     environment.PAGBANK_API_URL = 'http://pagbank.local';
+    environment.PAGBANK_PUBLIC_KEY = 'replace-with-public-key';
     delete environment.OPENAI_MODEL_VISION;
 
     const issues = collectEnvironmentIssues(environment, RUNTIME_MODE.API);
@@ -96,6 +98,7 @@ describe('production environment validation', () => {
         'OPENAI_MODEL_VISION é obrigatória em produção',
         'CORS_ALLOWED_ORIGINS deve listar origens explícitas',
         'PAGBANK_API_URL deve utilizar HTTPS em produção',
+        'PAGBANK_PUBLIC_KEY não pode utilizar valor placeholder',
         'JWT_ACCESS_SECRET não pode utilizar valor placeholder',
         'JWT_ACCESS_SECRET e JWT_REFRESH_SECRET devem ser diferentes',
       ]),
