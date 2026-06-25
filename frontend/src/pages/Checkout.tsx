@@ -86,6 +86,7 @@ type PaymentDisplay = {
 };
 
 type CheckoutStatusPayment = NonNullable<CheckoutStatusResponse["payment"]>;
+type SavedCheckoutSession = AuthTokensResponse;
 
 const initialFormState: RegisterFormState = {
   firstName: "",
@@ -117,19 +118,17 @@ export default function Checkout() {
   const [cardForm, setCardForm] =
     useState<CardFormState>(initialCardFormState);
   const [cardErrors, setCardErrors] = useState<CardFormErrors>({});
-  const [accessToken, setAccessToken] = useState<string | null>(() =>
-    readCheckoutAccessToken(),
-  );
-  const [refreshToken, setRefreshToken] = useState<string | null>(() =>
-    readCheckoutRefreshToken(),
-  );
+  const [savedCheckoutSession, setSavedCheckoutSession] =
+    useState<SavedCheckoutSession | null>(() => readSavedCheckoutSession());
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [refreshToken, setRefreshToken] = useState<string | null>(null);
   const [pixPayment, setPixPayment] = useState<PixPaymentResponse | null>(null);
   const [creditCardPayment, setCreditCardPayment] =
     useState<CreditCardPaymentResponse | null>(null);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [securePaymentLoading, setSecurePaymentLoading] = useState(false);
   const [pollingStartedAt, setPollingStartedAt] = useState<number | null>(
-    accessToken ? Date.now() : null,
+    null,
   );
 
   const plan = useMemo(
@@ -236,6 +235,7 @@ export default function Checkout() {
       });
 
       saveCheckoutSession(registerResult.tokens, selectedPlan);
+      setSavedCheckoutSession(registerResult.tokens);
       setAccessToken(registerResult.tokens.accessToken);
       setRefreshToken(registerResult.tokens.refreshToken);
       setSessionExpired(false);
@@ -306,6 +306,7 @@ export default function Checkout() {
 
   function handleTokenRefresh(tokens: AuthTokensResponse): void {
     saveCheckoutSession(tokens, selectedPlan);
+    setSavedCheckoutSession(tokens);
     setAccessToken(tokens.accessToken);
     setRefreshToken(tokens.refreshToken);
     setSessionExpired(false);
@@ -313,10 +314,33 @@ export default function Checkout() {
 
   function expireCheckoutSession(): void {
     clearCheckoutSession();
+    setSavedCheckoutSession(null);
     setAccessToken(null);
     setRefreshToken(null);
     setPollingStartedAt(null);
     setSessionExpired(true);
+  }
+
+  function continueSavedCheckout(): void {
+    if (!savedCheckoutSession) {
+      return;
+    }
+
+    setAccessToken(savedCheckoutSession.accessToken);
+    setRefreshToken(savedCheckoutSession.refreshToken);
+    setSessionExpired(false);
+    setPollingStartedAt(Date.now());
+  }
+
+  function startNewCheckout(): void {
+    clearCheckoutSession();
+    setSavedCheckoutSession(null);
+    setAccessToken(null);
+    setRefreshToken(null);
+    setPixPayment(null);
+    setCreditCardPayment(null);
+    setPollingStartedAt(null);
+    setSessionExpired(false);
   }
 
   async function createPixWithSessionRefresh(): Promise<PixPaymentResponse> {
@@ -432,6 +456,11 @@ export default function Checkout() {
 
           {!accessToken && sessionExpired ? (
             <SessionExpiredCard onRestart={() => setSessionExpired(false)} />
+          ) : !accessToken && savedCheckoutSession ? (
+            <SavedCheckoutCard
+              onContinue={continueSavedCheckout}
+              onStartNew={startNewCheckout}
+            />
           ) : !accessToken ? (
             <RegisterCard
               cardErrors={cardErrors}
@@ -449,9 +478,13 @@ export default function Checkout() {
           ) : currentStatus === "ACTIVE" ? (
             <ApprovedCard />
           ) : currentStatus === "PAYMENT_EXPIRED" ? (
-            <ExpiredCard onRetry={retryPix} retrying={pixMutation.isPending} />
+            <ExpiredCard
+              onRetry={retryPix}
+              onStartNew={startNewCheckout}
+              retrying={pixMutation.isPending}
+            />
           ) : currentStatus === "PAYMENT_FAILED" ? (
-            <RejectedCard />
+            <RejectedCard onStartNew={startNewCheckout} />
           ) : activePaymentMethod === "CREDIT_CARD" ? (
             <CreditCardStatusCard
               loading={creditCardMutation.isPending || securePaymentLoading}
@@ -1013,6 +1046,42 @@ function CreditCardStatusCard({
   );
 }
 
+function SavedCheckoutCard({
+  onContinue,
+  onStartNew,
+}: {
+  onContinue: () => void;
+  onStartNew: () => void;
+}) {
+  return (
+    <StatusCard
+      icon={<Clock3 className="h-9 w-9 text-emerald-800" />}
+      title="Pagamento encontrado"
+      tone="warning"
+    >
+      <p>Encontramos um pagamento iniciado anteriormente.</p>
+      <p className="mt-3">
+        Você pode continuar esse pagamento ou iniciar um novo checkout.
+      </p>
+      <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+        <Button
+          className="rounded-2xl bg-emerald-900 text-white hover:bg-emerald-950"
+          onClick={onContinue}
+        >
+          Continuar pagamento
+        </Button>
+        <Button
+          className="rounded-2xl"
+          variant="outline"
+          onClick={onStartNew}
+        >
+          Iniciar novo checkout
+        </Button>
+      </div>
+    </StatusCard>
+  );
+}
+
 function ApprovedCard() {
   return (
     <StatusCard
@@ -1032,9 +1101,11 @@ function ApprovedCard() {
 }
 
 function ExpiredCard({
+  onStartNew,
   onRetry,
   retrying,
 }: {
+  onStartNew: () => void;
   onRetry: () => void;
   retrying: boolean;
 }) {
@@ -1052,11 +1123,18 @@ function ExpiredCard({
       >
         {retrying ? <Loader2 className="h-4 w-4 animate-spin" /> : "Gerar novo PIX"}
       </Button>
+      <Button
+        className="ml-0 mt-3 rounded-2xl sm:ml-3 sm:mt-6"
+        variant="outline"
+        onClick={onStartNew}
+      >
+        Iniciar novo checkout
+      </Button>
     </StatusCard>
   );
 }
 
-function RejectedCard() {
+function RejectedCard({ onStartNew }: { onStartNew: () => void }) {
   return (
     <StatusCard
       icon={<XCircle className="h-9 w-9 text-red-700" />}
@@ -1069,6 +1147,13 @@ function RejectedCard() {
       </p>
       <Button asChild className="mt-6 rounded-2xl bg-emerald-900 text-white">
         <Link to="/#pricing">Voltar aos planos</Link>
+      </Button>
+      <Button
+        className="ml-0 mt-3 rounded-2xl sm:ml-3 sm:mt-6"
+        variant="outline"
+        onClick={onStartNew}
+      >
+        Iniciar novo checkout
       </Button>
     </StatusCard>
   );
@@ -1209,6 +1294,20 @@ function normalizePayment(
     qrCode: payment.qrCode,
     qrCodeImageUrl: payment.qrCodeImageUrl,
     expiresAt: payment.expiresAt,
+  };
+}
+
+function readSavedCheckoutSession(): SavedCheckoutSession | null {
+  const accessToken = readCheckoutAccessToken();
+  const refreshToken = readCheckoutRefreshToken();
+
+  if (!accessToken || !refreshToken) {
+    return null;
+  }
+
+  return {
+    accessToken,
+    refreshToken,
   };
 }
 
