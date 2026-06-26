@@ -18,7 +18,7 @@ type ButtonVariantOptions = {
 };
 
 const baseButtonClasses =
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-sm font-medium ring-offset-background transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0";
+  "inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-xl text-sm font-medium ring-offset-background transition-[background-color,border-color,color,box-shadow,opacity,transform] duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 aria-[busy=true]:cursor-wait aria-[busy=true]:opacity-80 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0";
 
 const variantClasses: Record<ButtonVariant, string> = {
   default:
@@ -34,10 +34,10 @@ const variantClasses: Record<ButtonVariant, string> = {
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
-  default: "h-12 px-6 py-3 text-base",
-  sm: "h-9 rounded-xl px-3 text-sm",
-  lg: "h-14 rounded-2xl px-10 text-lg font-semibold",
-  icon: "h-10 w-10",
+  default: "h-12 min-h-12 px-6 py-3 text-base",
+  sm: "h-9 min-h-9 rounded-xl px-3 text-sm",
+  lg: "h-14 min-h-14 rounded-2xl px-10 text-lg font-semibold",
+  icon: "h-10 min-h-10 w-10 min-w-10",
 };
 
 function buttonVariants({

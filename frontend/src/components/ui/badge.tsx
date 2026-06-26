@@ -8,7 +8,7 @@ type BadgeVariantOptions = {
 };
 
 const baseBadgeClasses =
-  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2";
+  "inline-flex select-none items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-[background-color,border-color,color,box-shadow,opacity] duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 aria-disabled:pointer-events-none aria-disabled:opacity-50";
 
 const badgeVariantClasses: Record<BadgeVariant, string> = {
   default: "border-transparent bg-primary text-primary-foreground hover:bg-primary/80",

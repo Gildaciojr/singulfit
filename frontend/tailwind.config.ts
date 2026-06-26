@@ -75,6 +75,42 @@ const config: Config = {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+        "sf-sm": "var(--sf-radius-sm)",
+        "sf-md": "var(--sf-radius-md)",
+        "sf-lg": "var(--sf-radius-lg)",
+        "sf-xl": "var(--sf-radius-xl)",
+      },
+      spacing: {
+        "sf-2xs": "var(--sf-space-2xs)",
+        "sf-xs": "var(--sf-space-xs)",
+        "sf-sm": "var(--sf-space-sm)",
+        "sf-md": "var(--sf-space-md)",
+        "sf-lg": "var(--sf-space-lg)",
+        "sf-xl": "var(--sf-space-xl)",
+        "sf-2xl": "var(--sf-space-2xl)",
+      },
+      fontSize: {
+        "sf-xs": ["var(--sf-text-xs)", { lineHeight: "1.4" }],
+        "sf-sm": ["var(--sf-text-sm)", { lineHeight: "1.45" }],
+        "sf-base": ["var(--sf-text-base)", { lineHeight: "1.55" }],
+        "sf-lg": ["var(--sf-text-lg)", { lineHeight: "1.55" }],
+        "sf-xl": ["var(--sf-text-xl)", { lineHeight: "1.2" }],
+        "sf-2xl": ["var(--sf-text-2xl)", { lineHeight: "1.15" }],
+        "sf-3xl": ["var(--sf-text-3xl)", { lineHeight: "1.08" }],
+        "sf-4xl": ["var(--sf-text-4xl)", { lineHeight: "1" }],
+      },
+      maxWidth: {
+        "sf-container": "var(--sf-container-max)",
+      },
+      minHeight: {
+        "sf-screen": "var(--sf-viewport-height)",
+        "sf-small-screen": "var(--sf-viewport-small-height)",
+        "sf-large-screen": "var(--sf-viewport-large-height)",
+      },
+      height: {
+        "sf-screen": "var(--sf-viewport-height)",
+        "sf-small-screen": "var(--sf-viewport-small-height)",
+        "sf-large-screen": "var(--sf-viewport-large-height)",
       },
       keyframes: {
         "accordion-down": {

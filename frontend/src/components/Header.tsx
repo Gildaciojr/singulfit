@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Menu, X, ArrowRight } from "lucide-react";
 
@@ -15,6 +15,9 @@ export default function Header({ data }: Props) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [activeSection, setActiveSection] = useState("");
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const mobileMenuId = "singulfit-mobile-menu";
 
   useEffect(() => {
     const handleScroll = () => {
@@ -37,10 +40,33 @@ export default function Header({ data }: Props) {
 
     handleScroll();
 
-    window.addEventListener("scroll", handleScroll);
+    window.addEventListener("scroll", handleScroll, { passive: true });
 
     return () => window.removeEventListener("scroll", handleScroll);
   }, [data.links]);
+
+  useEffect(() => {
+    if (!mobileOpen) {
+      return;
+    }
+
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeMobileMenu();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [mobileOpen]);
+
+  const closeMobileMenu = () => {
+    setMobileOpen(false);
+    menuButtonRef.current?.focus();
+  };
 
   const scrollTo = (target: string) => {
     const element = document.getElementById(target);
@@ -51,7 +77,9 @@ export default function Header({ data }: Props) {
       });
     }
 
-    setMobileOpen(false);
+    if (mobileOpen) {
+      closeMobileMenu();
+    }
   };
 
   return (
@@ -73,7 +101,9 @@ export default function Header({ data }: Props) {
 
             <button
               onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-              className="flex items-center gap-3"
+              aria-label="Voltar ao início da página"
+              className="flex min-h-11 items-center gap-3"
+              type="button"
             >
               <img src={data.logo} alt="SingulFit" className="h-11 w-auto" />
 
@@ -90,7 +120,10 @@ export default function Header({ data }: Props) {
 
             {/* DESKTOP NAV */}
 
-            <nav className="hidden lg:flex items-center gap-8">
+            <nav
+              aria-label="Navegação principal"
+              className="hidden lg:flex items-center gap-8"
+            >
               {data.links.map((link) => {
                 const active = activeSection === link.target;
 
@@ -98,14 +131,16 @@ export default function Header({ data }: Props) {
                   <button
                     key={link.target}
                     onClick={() => scrollTo(link.target)}
+                    aria-current={active ? "page" : undefined}
                     className={`
-                      relative text-[15px] font-semibold transition-all duration-300
+                      relative flex min-h-11 items-center text-[15px] font-semibold transition-all duration-300
                       ${
                         active
                           ? "text-emerald-800"
                           : "text-zinc-600 hover:text-zinc-800"
                       }
                     `}
+                    type="button"
                   >
                     {link.label}
 
@@ -151,7 +186,15 @@ export default function Header({ data }: Props) {
 
             {/* MOBILE */}
 
-            <button className="lg:hidden" onClick={() => setMobileOpen(true)}>
+            <button
+              ref={menuButtonRef}
+              aria-controls={mobileMenuId}
+              aria-expanded={mobileOpen}
+              aria-label="Abrir menu"
+              className="flex min-h-11 min-w-11 items-center justify-center lg:hidden"
+              onClick={() => setMobileOpen(true)}
+              type="button"
+            >
               <Menu className="h-6 w-6 text-zinc-900" />
             </button>
           </div>
@@ -168,10 +211,14 @@ export default function Header({ data }: Props) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setMobileOpen(false)}
+              onClick={closeMobileMenu}
             />
 
             <motion.div
+              id={mobileMenuId}
+              aria-label="Menu principal"
+              aria-modal="true"
+              role="dialog"
               initial={{ x: "100%" }}
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
@@ -185,13 +232,18 @@ export default function Header({ data }: Props) {
                 right-0
                 top-0
                 z-[60]
-                h-full
+                h-sf-screen
+                min-h-sf-small-screen
                 w-[88%]
                 max-w-sm
                 bg-white
                 p-6
                 shadow-2xl
               "
+              style={{
+                paddingTop: "calc(1.5rem + var(--sf-safe-top))",
+                paddingBottom: "calc(1.5rem + var(--sf-safe-bottom))",
+              }}
             >
               <div className="mb-10 flex items-center justify-between">
                 <img
@@ -200,18 +252,28 @@ export default function Header({ data }: Props) {
                   className="h-12 w-auto object-contain"
                 />
 
-                <button onClick={() => setMobileOpen(false)}>
+                <button
+                  ref={closeButtonRef}
+                  aria-label="Fechar menu"
+                  className="flex min-h-11 min-w-11 items-center justify-center"
+                  onClick={closeMobileMenu}
+                  type="button"
+                >
                   <X className="h-6 w-6" />
                 </button>
               </div>
 
-              <div className="space-y-1">
+              <nav aria-label="Navegação mobile" className="space-y-1">
                 {data.links.map((link) => (
                   <button
                     key={link.target}
                     onClick={() => scrollTo(link.target)}
+                    aria-current={
+                      activeSection === link.target ? "page" : undefined
+                    }
                     className="
                       flex
+                      min-h-11
                       w-full
                       items-center
                       justify-between
@@ -223,13 +285,14 @@ export default function Header({ data }: Props) {
                       text-zinc-800
                       hover:bg-zinc-50
                     "
+                    type="button"
                   >
                     {link.label}
 
                     <ArrowRight className="h-4 w-4" />
                   </button>
                 ))}
-              </div>
+              </nav>
 
               <div className="mt-8">
                 <Button
