@@ -267,13 +267,13 @@ export default function Hero({ data }: HeroProps) {
             <div
               className="
       absolute
-      right-[3%]
-      top-[5%]
+      right-[0%]
+      top-[6%]
       z-10
-      h-[520px]
-      w-[520px]
+      h-[500px]
+      w-[500px]
       overflow-hidden
-      rounded-full
+      rounded-[3rem]
       bg-gradient-to-br
       from-emerald-50
       via-white
@@ -287,9 +287,9 @@ export default function Hero({ data }: HeroProps) {
                 className="
         h-full
         w-full
-        scale-[1.02]
         object-cover
-        object-[57%_48%]
+        object-[58%_48%]
+        scale-[1.03]
         opacity-95
       "
               />
@@ -300,15 +300,15 @@ export default function Hero({ data }: HeroProps) {
               alt="Demonstração do SingulFit no WhatsApp"
               className="
       absolute
-      left-[-14%]
-      top-[9%]
+      left-[-18%]
+      top-[4%]
       z-40
-      w-[280px]
+      w-[292px]
       object-contain
       mix-blend-multiply
       drop-shadow-[0_38px_80px_rgba(15,23,42,.24)]
-      xl:left-[-10%]
-      xl:w-[292px]
+      xl:left-[-15%]
+      xl:w-[305px]
     "
               animate={{ y: [0, -8, 0] }}
               transition={{
@@ -326,15 +326,15 @@ export default function Hero({ data }: HeroProps) {
               transition={{ delay: 0.55, duration: 0.55 }}
               className="
       absolute
-      right-[29%]
-      top-[57%]
+      right-[24%]
+      top-[73%]
       z-50
-      w-[185px]
+      w-[175px]
       rounded-[1.35rem]
       border
       border-white/15
       bg-zinc-950/88
-      p-3
+      p-2.5
       text-white
       shadow-[0_30px_70px_-32px_rgba(0,0,0,.62)]
       backdrop-blur-2xl
@@ -379,15 +379,15 @@ export default function Hero({ data }: HeroProps) {
               transition={{ delay: 0.7, duration: 0.55 }}
               className="
       absolute
-      right-[3%]
-      top-[57%]
+      right-[-2%]
+      top-[73%]
       z-50
-      w-[220px]
+      w-[205px]
       rounded-[1.45rem]
       border
       border-white/80
       bg-white/95
-      p-3
+      p-2.5
       shadow-[0_30px_80px_-38px_rgba(15,23,42,.34)]
       backdrop-blur-2xl
     "
@@ -420,7 +420,7 @@ export default function Hero({ data }: HeroProps) {
                 ))}
               </div>
 
-              <div className="relative mt-3 h-[36px]">
+              <div className="relative mt-2 h-[30px]">
                 <svg
                   viewBox="0 0 320 72"
                   className="absolute inset-0 h-full w-full"
