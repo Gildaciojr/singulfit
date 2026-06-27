@@ -126,60 +126,212 @@ hover:shadow-[0_20px_50px_-30px_rgba(0,0,0,0.18)]
         </div>
 
         {/* TRUST STRIP */}
-        <div
+        <motion.div
+          initial={{ opacity: 0, y: 18 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.55 }}
           className="
-  mt-24
-  rounded-[2.5rem]
-  border
-  border-white/60
-  bg-white/75
-  p-10
-  backdrop-blur-xl
-  shadow-[0_35px_90px_-45px_rgba(0,0,0,0.18)]
-"
+    mt-20
+    flex
+    flex-wrap
+    items-center
+    justify-center
+    gap-4
+    lg:gap-5
+  "
         >
-          <div className="grid gap-8 md:grid-cols-4">
-            <div className="text-center">
-              <div className="text-4xl tracking-[-0.04em] font-black text-zinc-950">
-                Clareza
-              </div>
-
-              <div className="mt-2 text-sm text-zinc-500">
-                entenda sua alimentação sem complicação
-              </div>
+          <div
+            className="
+    group
+    inline-flex
+    items-center
+    gap-3
+    rounded-full
+    border
+    border-zinc-200
+    bg-white/80
+    px-5
+    py-3
+    backdrop-blur-xl
+    shadow-[0_10px_35px_-24px_rgba(15,23,42,.18)]
+    transition-all
+    duration-300
+    hover:-translate-y-0.5
+    hover:border-emerald-200
+  "
+          >
+            <div
+              className="
+      flex
+      h-10
+      w-10
+      items-center
+      justify-center
+      rounded-full
+      bg-emerald-50
+      text-lg
+    "
+            >
+              🎯
             </div>
 
-            <div className="text-center">
-              <div className="text-4xl tracking-[-0.04em] font-black text-zinc-950">
-                Consistência
-              </div>
+            <div className="text-left">
+              <div className="text-lg font-black text-zinc-950">Clareza</div>
 
-              <div className="mt-2 text-sm text-zinc-500">
-                pequenos hábitos sustentáveis todos os dias
-              </div>
-            </div>
-
-            <div className="text-center">
-              <div className="text-4xl tracking-[-0.04em] font-black text-emerald-800">
-                Evolução
-              </div>
-
-              <div className="mt-2 text-sm text-zinc-500">
-                acompanhamento contínuo da sua jornada
-              </div>
-            </div>
-
-            <div className="text-center">
-              <div className="text-4xl tracking-[-0.04em] font-black text-zinc-950">
-                Resultado
-              </div>
-
-              <div className="mt-2 text-sm text-zinc-500">
-                decisões melhores através de contexto
+              <div className="text-[13px] text-zinc-500">
+                Entenda sua alimentação.
               </div>
             </div>
           </div>
-        </div>
+
+          <div
+            className="
+    group
+    inline-flex
+    items-center
+    gap-3
+    rounded-full
+    border
+    border-zinc-200
+    bg-white/80
+    px-5
+    py-3
+    backdrop-blur-xl
+    shadow-[0_10px_35px_-24px_rgba(15,23,42,.18)]
+    transition-all
+    duration-300
+    hover:-translate-y-0.5
+    hover:border-emerald-200
+    hover:shadow-[0_16px_40px_-26px_rgba(6,78,59,.18)]
+  "
+          >
+            <div
+              className="
+      flex
+      h-10
+      w-10
+      items-center
+      justify-center
+      rounded-full
+      bg-emerald-50
+      text-emerald-700
+      text-lg
+      font-bold
+    "
+            >
+              🌱
+            </div>
+
+            <div className="text-left">
+              <div className="text-lg font-black tracking-[-0.03em] text-zinc-950">
+                Consistência
+              </div>
+
+              <div className="text-[13px] text-zinc-500">
+                Pequenos hábitos diários
+              </div>
+            </div>
+          </div>
+
+          <div
+            className="
+    group
+    inline-flex
+    items-center
+    gap-3
+    rounded-full
+    border
+    border-zinc-200
+    bg-white/80
+    px-5
+    py-3
+    backdrop-blur-xl
+    shadow-[0_10px_35px_-24px_rgba(15,23,42,.18)]
+    transition-all
+    duration-300
+    hover:-translate-y-0.5
+    hover:border-emerald-200
+    hover:shadow-[0_16px_40px_-26px_rgba(6,78,59,.18)]
+  "
+          >
+            <div
+              className="
+      flex
+      h-10
+      w-10
+      items-center
+      justify-center
+      rounded-full
+      bg-emerald-50
+      text-emerald-700
+      text-lg
+      font-bold
+    "
+            >
+              📈
+            </div>
+
+            <div className="text-left">
+              <div className="text-lg font-black tracking-[-0.03em] text-emerald-800">
+                Evolução
+              </div>
+
+              <div className="text-[13px] text-zinc-500">
+                Coach nutricional que se adapta com você
+              </div>
+            </div>
+          </div>
+
+          <div
+            className="
+    group
+    inline-flex
+    items-center
+    gap-3
+    rounded-full
+    border
+    border-zinc-200
+    bg-white/80
+    px-5
+    py-3
+    backdrop-blur-xl
+    shadow-[0_10px_35px_-24px_rgba(15,23,42,.18)]
+    transition-all
+    duration-300
+    hover:-translate-y-0.5
+    hover:border-emerald-200
+    hover:shadow-[0_16px_40px_-26px_rgba(6,78,59,.18)]
+  "
+          >
+            <div
+              className="
+      flex
+      h-10
+      w-10
+      items-center
+      justify-center
+      rounded-full
+      bg-emerald-50
+      text-emerald-700
+      text-lg
+      font-bold
+    "
+            >
+              🏆
+            </div>
+
+            <div className="text-left">
+              <div className="text-lg font-black tracking-[-0.03em] text-zinc-950">
+                Resultado
+              </div>
+
+              <div className="text-[13px] text-zinc-500">
+                Decisões mais inteligentes
+              </div>
+            </div>
+          </div>
+        </motion.div>
       </div>
     </section>
   );
