@@ -115,7 +115,9 @@ export default function Hero({ data }: HeroProps) {
             >
               Nutrição inteligente
               <span className="block text-zinc-950">no WhatsApp.</span>
-              <span className="mt-2 block text-emerald-800">Você quem evolui.</span>
+              <span className="mt-2 block text-emerald-800">
+                Você quem evolui.
+              </span>
             </motion.h1>
 
             <motion.p
@@ -225,70 +227,72 @@ export default function Hero({ data }: HeroProps) {
             animate="visible"
             variants={visualIn}
             className="
-              relative
-              mx-auto
-              hidden
-              h-[680px]
-              w-full
-              max-w-[860px]
-              lg:block
-            "
+    relative
+    mx-auto
+    hidden
+    h-[640px]
+    w-full
+    max-w-[820px]
+    lg:block
+  "
           >
-            <div className="absolute left-[18%] top-[34%] -z-10 h-[500px] w-[500px] -translate-x-1/2 rounded-full bg-emerald-500/12 blur-[85px]" />
+            <div className="absolute right-[2%] top-[7%] z-0 h-[520px] w-[520px] rounded-full bg-emerald-100/55 blur-[1px]" />
 
-            <div className="absolute right-[6%] top-[12%] -z-10 h-[420px] w-[420px] rounded-full bg-sky-100/50 blur-[100px]" />
+            <div className="absolute left-[16%] top-[18%] -z-10 h-[420px] w-[420px] rounded-full bg-emerald-400/10 blur-[90px]" />
+
+            <div className="absolute right-[0%] top-[6%] -z-10 h-[520px] w-[520px] rounded-full bg-white/80 blur-[90px]" />
+
             <div
               className="
-    absolute
-    left-[-2%]
-    top-[10%]
-    z-10
-    h-[520px]
-    w-[240px]
-    rounded-[3rem]
-    bg-gradient-to-b
-    from-white
-    via-[#f6f8fb]
-    to-[#eef6f1]
-    opacity-80
-    blur-[40px]
-  "
-            />
+      absolute
+      right-[2%]
+      top-[8%]
+      z-10
+      h-[520px]
+      w-[520px]
+      overflow-hidden
+      rounded-full
+      bg-gradient-to-br
+      from-emerald-50
+      via-white
+      to-emerald-100/70
+      shadow-[inset_0_0_0_1px_rgba(255,255,255,.75)]
+    "
+            >
+              <img
+                src={heroAthlete}
+                alt="Pessoa usando o SingulFit"
+                className="
+        h-full
+        w-full
+        scale-[1.08]
+        object-cover
+        object-[58%_50%]
+        opacity-95
+      "
+              />
+            </div>
 
             <motion.img
               src={mockupPhone}
               alt="Demonstração do SingulFit no WhatsApp"
               className="
-                absolute
-                left-[-1%]
-                top-[12%]
-                z-30
-                w-[270px]
-                object-contain
-                drop-shadow-[0_45px_90px_rgba(15,23,42,.22)]
-                xl:w-[290px]
-              "
-              animate={{ y: [0, -10, 0] }}
+      absolute
+      left-[3%]
+      top-[4%]
+      z-40
+      w-[340px]
+      object-contain
+      drop-shadow-[0_38px_80px_rgba(15,23,42,.24)]
+      xl:left-[4%]
+      xl:w-[360px]
+    "
+              animate={{ y: [0, -8, 0] }}
               transition={{
                 duration: 6,
                 repeat: Infinity,
                 ease: "easeInOut",
               }}
-            />
-
-            <img
-              src={heroAthlete}
-              alt="Pessoa usando o SingulFit"
-              className="
-                absolute
-                right-[9%]
-                top-[3%]
-                z-20
-                h-[560px]
-                w-auto
-                object-contain
-                drop-shadow-[0_30px_60px_rgba(15,23,42,.12)]
-              "
             />
 
             {/* CARD DESEMPENHO */}
@@ -298,27 +302,27 @@ export default function Hero({ data }: HeroProps) {
               animate={{ opacity: 1, x: 0, y: 0 }}
               transition={{ delay: 0.55, duration: 0.55 }}
               className="
-                absolute
-                left-[28%]
-                top-[58%]
-                z-20
-                w-[230px]
-                rounded-[1.6rem]
-                border
-                border-white/20
-                bg-zinc-950/88
-                p-3
-                text-white
-                shadow-[0_30px_70px_-25px_rgba(0,0,0,0.55)]
-                backdrop-blur-xl
-              "
+      absolute
+      right-[17%]
+      top-[46%]
+      z-50
+      w-[255px]
+      rounded-[1.5rem]
+      border
+      border-white/15
+      bg-zinc-950/88
+      p-5
+      text-white
+      shadow-[0_35px_80px_-30px_rgba(0,0,0,.65)]
+      backdrop-blur-2xl
+    "
             >
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-bold">Desempenho semanal</h3>
                 <TrendingUp className="h-4 w-4 text-emerald-300" />
               </div>
 
-              <div className="mt-4 space-y-4">
+              <div className="mt-4 space-y-3.5">
                 {[
                   ["Treinos", "5 / 6", "78%"],
                   ["Adesão", "92%", "92%"],
@@ -327,7 +331,7 @@ export default function Hero({ data }: HeroProps) {
                 ].map(([label, value, width]) => (
                   <div key={label}>
                     <div className="mb-1.5 flex items-center justify-between text-xs">
-                      <span className="text-white/75">{label}</span>
+                      <span className="text-white/72">{label}</span>
                       <span className="font-bold text-white">{value}</span>
                     </div>
 
@@ -349,26 +353,26 @@ export default function Hero({ data }: HeroProps) {
               animate={{ opacity: 1, x: 0, y: 0 }}
               transition={{ delay: 0.7, duration: 0.55 }}
               className="
-                absolute
-                right-[2%]
-                top-[64%]
-                z-50
-                w-[240px]
-                rounded-[1.8rem]
-                border
-                border-white/70
-                bg-white/96
-                p-2
-                shadow-[0_35px_90px_-35px_rgba(15,23,42,0.28)]
-                backdrop-blur-2xl
-              "
+      absolute
+      right-[6%]
+      top-[68%]
+      z-50
+      w-[360px]
+      rounded-[1.7rem]
+      border
+      border-white/80
+      bg-white/95
+      p-6
+      shadow-[0_35px_90px_-38px_rgba(15,23,42,.35)]
+      backdrop-blur-2xl
+    "
             >
               <div className="mb-5 flex items-center justify-between">
                 <h3 className="text-[15px] font-extrabold tracking-[-0.02em] text-zinc-950">
                   Evolução de peso
                 </h3>
 
-                <span className="rounded-full border bg-emerald-100 px-3 py-1 text-[11px] font-semibold tracking-wide text-emerald-800">
+                <span className="rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-[11px] font-bold text-emerald-800">
                   Ver mais
                 </span>
               </div>
@@ -380,22 +384,30 @@ export default function Hero({ data }: HeroProps) {
                   ["80,9 kg", "Semana 8"],
                 ].map(([value, label]) => (
                   <div key={label}>
-                    <div className="text-[15px] font-black text-zinc-950">
+                    <div className="text-sm font-black text-zinc-950">
                       {value}
                     </div>
 
-                    <div className="mt-1 text-[12px] uppercase tracking-wide text-zinc-500">
+                    <div className="mt-1 text-[11px] text-zinc-500">
                       {label}
                     </div>
                   </div>
                 ))}
               </div>
 
-              <div className="relative mt-6 h-[70px]">
+              <div className="relative mt-5 h-[72px]">
                 <svg
-                  viewBox="0 0 320 70"
+                  viewBox="0 0 320 72"
                   className="absolute inset-0 h-full w-full"
                 >
+                  <path
+                    d="M20 18 C90 18,130 28,170 35 C220 42,270 50,300 60"
+                    fill="none"
+                    stroke="#DDEAE4"
+                    strokeWidth="7"
+                    strokeLinecap="round"
+                  />
+
                   <path
                     d="M20 18 C90 18,130 28,170 35 C220 42,270 50,300 60"
                     fill="none"
@@ -404,9 +416,30 @@ export default function Hero({ data }: HeroProps) {
                     strokeLinecap="round"
                   />
 
-                  <circle cx="20" cy="18" r="4.5" fill="#0f5c43" stroke="white" strokeWidth="2" />
-                  <circle cx="170" cy="35" r="4.5" fill="#0f5c43" stroke="white" strokeWidth="2" />
-                  <circle cx="300" cy="60" r="4.5" fill="#0f5c43" stroke="white" strokeWidth="2" />
+                  <circle
+                    cx="20"
+                    cy="18"
+                    r="4.5"
+                    fill="#0B7A5A"
+                    stroke="white"
+                    strokeWidth="2"
+                  />
+                  <circle
+                    cx="170"
+                    cy="35"
+                    r="4.5"
+                    fill="#0B7A5A"
+                    stroke="white"
+                    strokeWidth="2"
+                  />
+                  <circle
+                    cx="300"
+                    cy="60"
+                    r="4.5"
+                    fill="#0B7A5A"
+                    stroke="white"
+                    strokeWidth="2"
+                  />
                 </svg>
               </div>
             </motion.div>
@@ -430,7 +463,9 @@ export default function Hero({ data }: HeroProps) {
                   Finalmente encontrei algo que entende minha rotina de verdade.
                 </p>
 
-                <p className="mt-2 text-[12px] uppercase tracking-[0.14em] text-white/55">— Juliana R.</p>
+                <p className="mt-2 text-[12px] uppercase tracking-[0.14em] text-white/55">
+                  — Juliana R.
+                </p>
               </div>
             </div>
 
@@ -440,7 +475,9 @@ export default function Hero({ data }: HeroProps) {
               </div>
 
               <div>
-                <div className="text-[2.1rem] leading-none font-black">4.500+</div>
+                <div className="text-[2.1rem] leading-none font-black">
+                  4.500+
+                </div>
                 <p className="text-sm leading-6 text-white/70">
                   pessoas já começaram com o SingulFit
                 </p>
@@ -453,7 +490,9 @@ export default function Hero({ data }: HeroProps) {
               </div>
 
               <div>
-                <div className="text-[1.3rem] tracking-[-0.02em] font-black">Resultados reais</div>
+                <div className="text-[1.3rem] tracking-[-0.02em] font-black">
+                  Resultados reais
+                </div>
                 <p className="text-sm leading-7 text-white/70">
                   mais energia, foco e consistência todos os dias
                 </p>
