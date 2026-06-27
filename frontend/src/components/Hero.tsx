@@ -89,13 +89,13 @@ export default function Hero({ data }: HeroProps) {
     items-center
     gap-14
     xl:gap-20
-    lg:grid-cols-[0.9fr_1.1fr]
+    lg:grid-cols-[0.8fr_1.2fr]
   "
         >
           <motion.div
             initial="hidden"
             animate="visible"
-            className="relative z-20 mx-auto max-w-[640px] text-center lg:mx-0 lg:max-w-[620px] lg:text-left"
+            className="relative z-20 mx-auto max-w-[640px] text-center lg:mx-0 lg:max-w-[560px] lg:text-left"
           >
             <motion.div
               variants={fadeUp}
@@ -107,7 +107,7 @@ export default function Hero({ data }: HeroProps) {
 
             <motion.h1
               variants={fadeUp}
-              className="mx-auto max-w-[760px] text-[3.35rem] font-black leading-[0.90] tracking-[-0.07em] text-zinc-950 sm:text-[4.25rem] lg:max-w-[680px] lg:text-[5rem] xl:text-[5.35rem] "
+              className="mx-auto max-w-[760px] text-[3.35rem] font-black leading-[0.88] tracking-[-0.07em] text-zinc-950 sm:text-[4.25rem] lg:max-w-[680px] lg:text-[5rem] xl:text-[5.05rem] "
             >
               Nutrição inteligente
               <span className="block text-zinc-950">no WhatsApp.</span>
@@ -118,14 +118,14 @@ export default function Hero({ data }: HeroProps) {
 
             <motion.p
               variants={fadeUp}
-              className="mx-auto mt-8 max-w-[620px] text-[1.05rem] leading-8 text-zinc-600 sm:text-lg lg:mx-0"
+              className="mx-auto mt-8 max-w-[560px] text-[1.05rem] leading-8 text-zinc-600 sm:text-lg lg:mx-0"
             >
               {data.subtitle}
             </motion.p>
 
             <motion.div
               variants={fadeUp}
-              className="mt-10 grid grid-cols-1 gap-x-8 gap-y-6 sm:grid-cols-2 xl:grid-cols-2"
+              className="mt-8 grid grid-cols-1 gap-x-10 gap-y-5 sm:grid-cols-2 xl:grid-cols-2"
             >
               {benefitItems.map((item) => {
                 const Icon = item.icon;
@@ -180,7 +180,7 @@ export default function Hero({ data }: HeroProps) {
 
             <motion.div
               variants={fadeUp}
-              className="mt-12 flex flex-col items-stretch gap-4 sm:flex-row sm:items-center sm:justify-center lg:justify-start"
+              className="mt-14 flex flex-col items-stretch gap-4 sm:flex-row sm:items-center sm:justify-center lg:justify-start"
             >
               <Button
                 size="lg"
@@ -208,7 +208,7 @@ export default function Hero({ data }: HeroProps) {
 
             <motion.div
               variants={fadeUp}
-              className="mt-10 flex flex-col items-center gap-4 sm:flex-row lg:justify-start"
+              className="mt-8 flex flex-col items-center gap-4 sm:flex-row lg:justify-start"
             >
               <div className="flex -space-x-3">
                 {avatarInitials.map((initial, index) => (
@@ -270,8 +270,8 @@ export default function Hero({ data }: HeroProps) {
       right-[4%]
       top-[5%]
       z-10
-      h-[500px]
-      w-[500px]
+      h-[520px]
+      w-[520px]
       overflow-hidden
       rounded-full
       bg-gradient-to-br
@@ -289,7 +289,7 @@ export default function Hero({ data }: HeroProps) {
         w-full
         scale-[1.02]
         object-cover
-        object-[60%_50%]
+        object-[57%_48%]
         opacity-95
       "
               />
@@ -300,10 +300,10 @@ export default function Hero({ data }: HeroProps) {
               alt="Demonstração do SingulFit no WhatsApp"
               className="
       absolute
-      left-[-1%]
-      top-[7%]
+      left-[-2%]
+      top-[10%]
       z-40
-      w-[285px]
+      w-[255px]
       object-contain
       drop-shadow-[0_38px_80px_rgba(15,23,42,.24)]
       xl:left-[4%]
@@ -325,15 +325,15 @@ export default function Hero({ data }: HeroProps) {
               transition={{ delay: 0.55, duration: 0.55 }}
               className="
       absolute
-      right-[18%]
-      top-[49%]
+      right-[16%]
+      top-[44%]
       z-50
-      w-[215px]
+      w-[180px]
       rounded-[1.5rem]
       border
       border-white/15
       bg-zinc-950/88
-      p-4
+      p-3
       text-white
       shadow-[0_35px_80px_-30px_rgba(0,0,0,.65)]
       backdrop-blur-2xl
@@ -376,21 +376,21 @@ export default function Hero({ data }: HeroProps) {
               transition={{ delay: 0.7, duration: 0.55 }}
               className="
       absolute
-      right-[7%]
-      top-[71%]
+      right-[4%]
+      top-[66%]
       z-50
-      w-[275px]
+      w-[235px]
       rounded-[1.7rem]
       border
       border-white/80
       bg-white/95
-      p-4
+      p-3
       shadow-[0_35px_90px_-38px_rgba(15,23,42,.35)]
       backdrop-blur-2xl
     "
             >
               <div className="mb-5 flex items-center justify-between">
-                <h3 className="text-[12px] font-extrabold tracking-[-0.02em] text-zinc-950">
+                <h3 className="text-[10px] font-extrabold tracking-[-0.02em] text-zinc-950">
                   Evolução de peso
                 </h3>
 
@@ -406,7 +406,7 @@ export default function Hero({ data }: HeroProps) {
                   ["80,9 kg", "Semana 8"],
                 ].map(([value, label]) => (
                   <div key={label}>
-                    <div className="text-[12px] font-black text-zinc-950">
+                    <div className="text-[10px] font-black text-zinc-950">
                       {value}
                     </div>
 
@@ -417,7 +417,7 @@ export default function Hero({ data }: HeroProps) {
                 ))}
               </div>
 
-              <div className="relative mt-3 h-[52px]">
+              <div className="relative mt-3 h-[36px]">
                 <svg
                   viewBox="0 0 320 72"
                   className="absolute inset-0 h-full w-full"
@@ -485,7 +485,7 @@ export default function Hero({ data }: HeroProps) {
                   Finalmente encontrei algo que entende minha rotina de verdade.
                 </p>
 
-                <p className="mt-2 text-[12px] uppercase tracking-[0.14em] text-white/55">
+                <p className="mt-2 text-[10px] uppercase tracking-[0.14em] text-white/55">
                   — Juliana R.
                 </p>
               </div>
