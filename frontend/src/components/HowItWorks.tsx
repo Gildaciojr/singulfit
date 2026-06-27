@@ -206,98 +206,162 @@ export default function HowItWorks() {
         </div>
 
         <motion.div
-          initial={{ opacity: 0, y: 22 }}
+          initial={{ opacity: 0, y: 18 }}
           whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, amount: 0.25 }}
-          transition={{ duration: 0.55 }}
-          className="mt-16 grid gap-0 overflow-hidden rounded-[1.75rem] border border-zinc-200/80 bg-white/75 shadow-[0_22px_60px_-42px_rgba(15,23,42,.18)] backdrop-blur-2xl md:grid-cols-3 lg:mt-18"
+          viewport={{ once: true }}
+          transition={{ duration: 0.5 }}
+          className="
+    mt-14
+    flex
+    flex-wrap
+    items-center
+    justify-center
+    gap-4
+    lg:gap-5
+  "
         >
           <div
             className="
-    flex
-    flex-col
+    group
+    inline-flex
     items-center
-    justify-center
-    border-b
-    border-zinc-100
-    px-8
-    py-7
-    text-center
+    gap-3
+    rounded-full
+    border
+    border-zinc-200
+    bg-white/80
+    px-5
+    py-3
+    backdrop-blur-xl
+    shadow-[0_10px_35px_-24px_rgba(15,23,42,.18)]
     transition-all
     duration-300
-    hover:bg-emerald-50/30
-    md:border-b-0
-    md:border-r
+    hover:-translate-y-0.5
+    hover:border-emerald-200
+    hover:shadow-[0_16px_40px_-26px_rgba(6,78,59,.18)]
   "
           >
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">
-              TEMPO MÉDIO
-            </p>
-
-            <div className="text-[2rem] font-black tracking-[-0.04em] text-zinc-950">
-              8 s
+            <div
+              className="
+      flex
+      h-10
+      w-10
+      items-center
+      justify-center
+      rounded-full
+      bg-emerald-50
+      text-emerald-700
+      text-lg
+      font-bold
+    "
+            >
+              ⚡
             </div>
 
-            <div className="mt-1.5 text-[13px] leading-6 text-zinc-400">
-              Análise concluída em poucos segundos
+            <div className="text-left">
+              <div className="text-xl font-black tracking-[-0.04em] text-zinc-950">
+                8 s
+              </div>
+
+              <div className="text-[13px] text-zinc-500">
+                Análise instantânea
+              </div>
             </div>
           </div>
 
           <div
             className="
-    flex
-    flex-col
+    group
+    inline-flex
     items-center
-    justify-center
-    border-b
-    border-zinc-100
-    px-8
-    py-7
-    text-center
+    gap-3
+    rounded-full
+    border
+    border-zinc-200
+    bg-white/80
+    px-5
+    py-3
+    backdrop-blur-xl
+    shadow-[0_10px_35px_-24px_rgba(15,23,42,.18)]
     transition-all
     duration-300
-    hover:bg-emerald-50/30
-    md:border-b-0
-    md:border-r
+    hover:-translate-y-0.5
+    hover:border-emerald-200
+    hover:shadow-[0_16px_40px_-26px_rgba(6,78,59,.18)]
   "
           >
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">
-              ANÁLISES
-            </p>
-
-            <div className="text-[2rem] font-black tracking-[-0.04em] text-emerald-800">
-              8.500+
+            <div
+              className="
+      flex
+      h-10
+      w-10
+      items-center
+      justify-center
+      rounded-full
+      bg-emerald-50
+      text-emerald-700
+      text-lg
+      font-bold
+    "
+            >
+              📊
             </div>
 
-            <div className="mt-1.5 text-[13px] leading-6 text-zinc-400">
-              Refeições analisadas com inteligência artificial
+            <div className="text-left">
+              <div className="text-xl font-black tracking-[-0.04em] text-emerald-800">
+                8.500+
+              </div>
+
+              <div className="text-[13px] text-zinc-500">
+                Refeições analisadas
+              </div>
             </div>
           </div>
 
           <div
             className="
-    flex
-    flex-col
+    group
+    inline-flex
     items-center
-    justify-center
-    px-8
-    py-7
-    text-center
+    gap-3
+    rounded-full
+    border
+    border-zinc-200
+    bg-white/80
+    px-5
+    py-3
+    backdrop-blur-xl
+    shadow-[0_10px_35px_-24px_rgba(15,23,42,.18)]
     transition-all
     duration-300
-    hover:bg-emerald-50/30
+    hover:-translate-y-0.5
+    hover:border-emerald-200
+    hover:shadow-[0_16px_40px_-26px_rgba(6,78,59,.18)]
   "
           >
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">
-              DISPONIBILIDADE
-            </p>
-
-            <div className="text-[2rem] font-black tracking-[-0.04em] text-zinc-950">
-              24/7
+            <div
+              className="
+      flex
+      h-10
+      w-10
+      items-center
+      justify-center
+      rounded-full
+      bg-emerald-50
+      text-emerald-700
+      text-lg
+      font-bold
+    "
+            >
+              🕒
             </div>
 
-            <div className="mt-1.5 text-[13px] leading-6 text-zinc-400">
-              Sempre disponível para acompanhar sua evolução
+            <div className="text-left">
+              <div className="text-xl font-black tracking-[-0.04em] text-zinc-950">
+                24/7
+              </div>
+
+              <div className="text-[13px] text-zinc-500">Sempre disponível</div>
             </div>
           </div>
         </motion.div>
