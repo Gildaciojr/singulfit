@@ -266,32 +266,50 @@ export default function Hero({ data }: HeroProps) {
 
             <div
               className="
-      absolute
-      right-[0%]
-      top-[6%]
-      z-10
-      h-[500px]
-      w-[500px]
-      overflow-hidden
-      rounded-[3rem]
-      bg-gradient-to-br
-      from-emerald-50
-      via-white
-      to-emerald-100/70
-      shadow-[inset_0_0_0_1px_rgba(255,255,255,.75)]
-    "
+    absolute
+    right-[0%]
+    top-[6%]
+    z-10
+    h-[500px]
+    w-[500px]
+    overflow-hidden
+    rounded-[3.2rem]
+  "
             >
               <img
                 src={heroAthlete}
                 alt="Pessoa usando o SingulFit"
                 className="
-        h-full
-        w-full
-        object-cover
-        object-[58%_48%]
-        scale-[1.03]
-        opacity-95
-      "
+      h-full
+      w-full
+      object-cover
+      object-[58%_48%]
+      scale-[1.04]
+      opacity-100
+    "
+              />
+
+              {/* Integração suave com o background */}
+              <div
+                className="
+      absolute
+      inset-0
+      pointer-events-none
+      rounded-[3.2rem]
+      bg-[radial-gradient(circle_at_center,transparent_58%,rgba(247,248,252,0.18)_76%,rgba(247,248,252,0.62)_92%,#f7f8fc_100%)]
+    "
+              />
+
+              {/* Glow muito sutil */}
+              <div
+                className="
+      absolute
+      -inset-8
+      -z-10
+      rounded-[4rem]
+      bg-emerald-100/30
+      blur-[70px]
+    "
               />
             </div>
 
@@ -300,15 +318,15 @@ export default function Hero({ data }: HeroProps) {
               alt="Demonstração do SingulFit no WhatsApp"
               className="
       absolute
-      left-[-18%]
-      top-[4%]
+      left-[-8%]
+      top-[1%]
       z-40
-      w-[292px]
+      w-[300px]
       object-contain
       mix-blend-multiply
       drop-shadow-[0_38px_80px_rgba(15,23,42,.24)]
-      xl:left-[-15%]
-      xl:w-[305px]
+      xl:left-[-6%]
+      xl:w-[315px]
     "
               animate={{ y: [0, -8, 0] }}
               transition={{
@@ -326,8 +344,8 @@ export default function Hero({ data }: HeroProps) {
               transition={{ delay: 0.55, duration: 0.55 }}
               className="
       absolute
-      right-[24%]
-      top-[73%]
+      right-[27%]
+      top-[84%]
       z-50
       w-[175px]
       rounded-[1.35rem]
@@ -379,8 +397,8 @@ export default function Hero({ data }: HeroProps) {
               transition={{ delay: 0.7, duration: 0.55 }}
               className="
       absolute
-      right-[-2%]
-      top-[73%]
+      right-[0%]
+      top-[84%]
       z-50
       w-[205px]
       rounded-[1.45rem]
