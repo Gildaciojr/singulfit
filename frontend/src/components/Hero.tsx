@@ -79,30 +79,31 @@ const avatarInitials = ["A", "J", "M", "R", "L"];
 
 export default function Hero({ data }: HeroProps) {
   return (
-    <section className="relative overflow-hidden pt-28 pb-28 lg:pt-32 lg:pb-32">
-      <div className="absolute inset-0 -z-30 bg-[#f8f7f3]" />
+    <section className="relative overflow-hidden pt-24 pb-20 sm:pt-28 sm:pb-24 lg:pt-36 lg:pb-28">
+      <div className="absolute inset-0 -z-30 bg-[#f7f8fc]" />
 
-      <div className="absolute inset-0 -z-20 bg-[radial-gradient(900px_520px_at_64%_18%,rgba(34,120,84,0.14),transparent_62%),radial-gradient(760px_460px_at_10%_18%,rgba(6,78,59,0.08),transparent_60%),linear-gradient(180deg,rgba(255,255,255,0.92),rgba(255,255,255,0.72))]" />
+      <div className="absolute inset-0 -z-20 bg-[radial-gradient(circle_at_72%_18%,rgba(16,185,129,0.12),transparent_30%),radial-gradient(circle_at_20%_22%,rgba(6,95,70,0.06),transparent_34%),linear-gradient(180deg,#f7f8fc_0%,#f4f6fb_48%,#eef6f1_100%)]" />
 
-      <div className="absolute inset-0 -z-10 opacity-[0.035] bg-[linear-gradient(to_right,#111_1px,transparent_1px),linear-gradient(to_bottom,#111_1px,transparent_1px)] bg-[size:56px_56px]" />
+      <div className="absolute inset-0 -z-10 opacity-[0.018] bg-[linear-gradient(to_right,#111827_1px,transparent_1px),linear-gradient(to_bottom,#111827_1px,transparent_1px)] bg-[size:72px_72px]" />
 
-      <div className="container mx-auto max-w-[1500px] px-6">
+      <div className="mx-auto w-full max-w-[1540px] px-6 sm:px-8 xl:px-10">
         <div
           className="
     grid
     items-center
-    gap-11
-    lg:grid-cols-[0.95fr_1.05fr]
+    gap-14
+    xl:gap-20
+    lg:grid-cols-[0.9fr_1.1fr]
   "
         >
           <motion.div
             initial="hidden"
             animate="visible"
-            className="relative z-20 text-center lg:text-left"
+            className="relative z-20 mx-auto max-w-[640px] text-center lg:mx-0 lg:max-w-[620px] lg:text-left"
           >
             <motion.div
               variants={fadeUp}
-              className="mb-7 inline-flex items-center gap-2 rounded-full border border-emerald-900/10 bg-white/85 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-900 shadow-sm backdrop-blur-xl"
+              className="mb-8 inline-flex items-center gap-2 rounded-full border border-emerald-900/8 bg-white/80 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.24em] text-emerald-900 shadow-[0_10px_30px_-18px_rgba(6,78,59,0.22)] backdrop-blur-2xl"
             >
               <Sparkles className="h-3.5 w-3.5" />
               {data.badge}
@@ -110,23 +111,23 @@ export default function Hero({ data }: HeroProps) {
 
             <motion.h1
               variants={fadeUp}
-              className="mx-auto max-w-4xl text-5xl font-black leading-[0.94] tracking-[-0.065em] text-zinc-950 md:text-7xl lg:mx-0 lg:text-[5.25rem]"
+              className="mx-auto max-w-[760px] text-[3.35rem] font-black leading-[0.90] tracking-[-0.07em] text-zinc-950 sm:text-[4.25rem] lg:max-w-[680px] lg:text-[5rem] xl:text-[5.35rem] "
             >
               Nutrição inteligente
               <span className="block text-zinc-950">no WhatsApp.</span>
-              <span className="block text-emerald-800">Você quem evolui.</span>
+              <span className="mt-2 block text-emerald-800">Você quem evolui.</span>
             </motion.h1>
 
             <motion.p
               variants={fadeUp}
-              className="mx-auto mt-7 max-w-2xl text-base leading-8 text-zinc-600 md:text-lg lg:mx-0"
+              className="mx-auto mt-8 max-w-[620px] text-[1.05rem] leading-8 text-zinc-600 sm:text-lg lg:mx-0"
             >
               {data.subtitle}
             </motion.p>
 
             <motion.div
               variants={fadeUp}
-              className="mt-9 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+              className="mt-10 grid grid-cols-1 gap-x-8 gap-y-6 sm:grid-cols-2 xl:grid-cols-2"
             >
               {benefitItems.map((item) => {
                 const Icon = item.icon;
@@ -134,17 +135,17 @@ export default function Hero({ data }: HeroProps) {
                 return (
                   <div
                     key={`${item.title}-${item.description}`}
-                    className="flex items-center gap-3 text-left"
+                    className="group flex items-start gap-4 rounded-2xl p-3 transition-all duration-300 hover:bg-white/55 hover:shadow-[0_12px_40px_-25px_rgba(15,23,42,.22)]"
                   >
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-900">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-900 shadow-[0_10px_30px_-20px_rgba(6,78,59,.35)]">
                       <Icon className="h-5 w-5" />
                     </div>
 
                     <div>
-                      <div className="text-xs font-semibold leading-5 text-zinc-700">
+                      <div className="text-[13px] font-semibold leading-6 text-zinc-800">
                         {item.title}
                       </div>
-                      <div className="text-xs leading-5 text-zinc-500">
+                      <div className="text-[13px] leading-6 text-zinc-500">
                         {item.description}
                       </div>
                     </div>
@@ -155,11 +156,11 @@ export default function Hero({ data }: HeroProps) {
 
             <motion.div
               variants={fadeUp}
-              className="mt-10 flex flex-col items-center gap-3 sm:flex-row sm:justify-center lg:justify-start"
+              className="mt-12 flex flex-col items-stretch gap-4 sm:flex-row sm:items-center sm:justify-center lg:justify-start"
             >
               <Button
                 size="lg"
-                className="group h-14 rounded-2xl bg-emerald-900 px-8 text-base font-bold text-white shadow-[0_18px_45px_-18px_rgba(6,78,59,0.55)] hover:bg-emerald-950"
+                className="group h-14 rounded-2xl bg-gradient-to-r from-emerald-900 via-emerald-800 to-emerald-900 px-9 text-base font-bold text-white shadow-[0_22px_55px_-22px_rgba(6,78,59,.45)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_28px_60px_-18px_rgba(6,78,59,.55)]"
                 onClick={() => window.location.assign(data.cta.link)}
               >
                 {data.cta.label}
@@ -169,7 +170,7 @@ export default function Hero({ data }: HeroProps) {
               <Button
                 variant="outline"
                 size="lg"
-                className="h-14 rounded-2xl border-zinc-200 bg-white/85 px-8 text-base font-semibold text-zinc-900 shadow-sm backdrop-blur-xl hover:bg-white"
+                className="w-full sm:w-auto h-14 rounded-2xl border-zinc-200/80 bg-white/70 px-9 text-base font-semibold text-zinc-900 shadow-[0_12px_35px_-25px_rgba(15,23,42,.22)] transition-all duration-300 hover:bg-white hover:-translate-y-0.5"
                 onClick={() =>
                   document
                     .getElementById("how-it-works")
@@ -183,13 +184,13 @@ export default function Hero({ data }: HeroProps) {
 
             <motion.div
               variants={fadeUp}
-              className="mt-8 flex flex-col items-center gap-4 sm:flex-row lg:justify-start"
+              className="mt-10 flex flex-col items-center gap-4 sm:flex-row lg:justify-start"
             >
               <div className="flex -space-x-3">
                 {avatarInitials.map((initial, index) => (
                   <div
                     key={`${initial}-${index}`}
-                    className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-emerald-900 text-sm font-bold text-white shadow-sm"
+                    className="flex h-11 w-11 ring-2 ring-white items-center justify-center rounded-full border-2 border-white bg-emerald-900 text-sm font-bold text-white shadow-sm"
                   >
                     {initial}
                   </div>
@@ -205,13 +206,13 @@ export default function Hero({ data }: HeroProps) {
                     />
                   ))}
 
-                  <span className="ml-2 text-sm font-black text-zinc-950">
+                  <span className="ml-2 text-base font-black text-zinc-950">
                     4.9
                   </span>
                 </div>
 
-                <p className="mt-1 text-sm text-zinc-600">
-                  Mais de 8.500 pessoas já começaram sua evolução
+                <p className="mt-1 text-[15px] leading-6 text-zinc-600">
+                  Mais de 4.500 pessoas já começaram sua evolução
                 </p>
               </div>
             </motion.div>
@@ -227,30 +228,30 @@ export default function Hero({ data }: HeroProps) {
               relative
               mx-auto
               hidden
-              h-[620px]
+              h-[680px]
               w-full
-              max-w-[820px]
+              max-w-[860px]
               lg:block
             "
           >
-            <div className="absolute left-[20%] top-[48%] -z-10 h-[560px] w-[560px] -translate-x-1/2 rounded-full bg-emerald-800/10 blur-2xl" />
+            <div className="absolute left-[18%] top-[34%] -z-10 h-[500px] w-[500px] -translate-x-1/2 rounded-full bg-emerald-500/12 blur-[85px]" />
 
-            <div className="absolute right-[-2%] top-[7%] h-[560px] w-[560px] rounded-full bg-emerald-900/5 blur-2xl" />
-
+            <div className="absolute right-[6%] top-[12%] -z-10 h-[420px] w-[420px] rounded-full bg-sky-100/50 blur-[100px]" />
             <div
               className="
     absolute
-    left-[-8%]
-    top-[3%]
+    left-[-2%]
+    top-[10%]
     z-10
-    h-[620px]
-    w-[320px]
-    rounded-[4rem]
+    h-[520px]
+    w-[240px]
+    rounded-[3rem]
     bg-gradient-to-b
-    from-[#f6f4fb]
-    via-[#f2f1f8]
-    to-[#f6f4fb]
-    blur-[50px]
+    from-white
+    via-[#f6f8fb]
+    to-[#eef6f1]
+    opacity-80
+    blur-[40px]
   "
             />
 
@@ -259,15 +260,13 @@ export default function Hero({ data }: HeroProps) {
               alt="Demonstração do SingulFit no WhatsApp"
               className="
                 absolute
-                left-[-8%]
-                top-[3%]
-                z-20
-                w-[300px]
-                mix-blend-darken
-                -translate-x-1/1
+                left-[-1%]
+                top-[12%]
+                z-30
+                w-[270px]
                 object-contain
-                drop-shadow-[0_42px_80px_rgba(15,23,42,0.28)]
-                xl:w-[320px]
+                drop-shadow-[0_45px_90px_rgba(15,23,42,.22)]
+                xl:w-[290px]
               "
               animate={{ y: [0, -10, 0] }}
               transition={{
@@ -282,16 +281,13 @@ export default function Hero({ data }: HeroProps) {
               alt="Pessoa usando o SingulFit"
               className="
                 absolute
-                right-[0%]
+                right-[9%]
                 top-[3%]
-                z-10
-                h-[600px]
+                z-20
+                h-[560px]
                 w-auto
-                -translate-x-1/1
                 object-contain
-                rounded-[1.8rem]
-                opacity-100
-                drop-shadow-[0_35px_70px_rgba(15,23,42,0.16)]
+                drop-shadow-[0_30px_60px_rgba(15,23,42,.12)]
               "
             />
 
@@ -303,8 +299,8 @@ export default function Hero({ data }: HeroProps) {
               transition={{ delay: 0.55, duration: 0.55 }}
               className="
                 absolute
-                left-[35%]
-                top-[72%]
+                left-[28%]
+                top-[58%]
                 z-20
                 w-[230px]
                 rounded-[1.6rem]
@@ -354,10 +350,10 @@ export default function Hero({ data }: HeroProps) {
               transition={{ delay: 0.7, duration: 0.55 }}
               className="
                 absolute
-                right-[0%]
-                top-[76%]
+                right-[2%]
+                top-[64%]
                 z-50
-                w-[248px]
+                w-[240px]
                 rounded-[1.8rem]
                 border
                 border-white/70
@@ -367,28 +363,28 @@ export default function Hero({ data }: HeroProps) {
                 backdrop-blur-2xl
               "
             >
-              <div className="mb-4 flex items-center justify-between">
-                <h3 className="text-sm font-black text-zinc-950">
+              <div className="mb-5 flex items-center justify-between">
+                <h3 className="text-[15px] font-extrabold tracking-[-0.02em] text-zinc-950">
                   Evolução de peso
                 </h3>
 
-                <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-900">
+                <span className="rounded-full border bg-emerald-100 px-3 py-1 text-[11px] font-semibold tracking-wide text-emerald-800">
                   Ver mais
                 </span>
               </div>
 
-              <div className="grid grid-cols-3 gap-3 text-center">
+              <div className="grid grid-cols-3 gap-4 text-center">
                 {[
                   ["84,0 kg", "Semana 1"],
                   ["82,8 kg", "Semana 4"],
                   ["80,9 kg", "Semana 8"],
                 ].map(([value, label]) => (
                   <div key={label}>
-                    <div className="text-sm font-black text-zinc-950">
+                    <div className="text-[15px] font-black text-zinc-950">
                       {value}
                     </div>
 
-                    <div className="mt-1 text-[11px] text-zinc-500">
+                    <div className="mt-1 text-[12px] uppercase tracking-wide text-zinc-500">
                       {label}
                     </div>
                   </div>
@@ -403,14 +399,14 @@ export default function Hero({ data }: HeroProps) {
                   <path
                     d="M20 18 C90 18,130 28,170 35 C220 42,270 50,300 60"
                     fill="none"
-                    stroke="#0f5c43"
-                    strokeWidth="3"
+                    stroke="#0B7A5A"
+                    strokeWidth="2.5"
                     strokeLinecap="round"
                   />
 
-                  <circle cx="20" cy="18" r="4" fill="#0f5c43" />
-                  <circle cx="170" cy="35" r="4" fill="#0f5c43" />
-                  <circle cx="300" cy="60" r="4" fill="#0f5c43" />
+                  <circle cx="20" cy="18" r="4.5" fill="#0f5c43" stroke="white" strokeWidth="2" />
+                  <circle cx="170" cy="35" r="4.5" fill="#0f5c43" stroke="white" strokeWidth="2" />
+                  <circle cx="300" cy="60" r="4.5" fill="#0f5c43" stroke="white" strokeWidth="2" />
                 </svg>
               </div>
             </motion.div>
@@ -421,20 +417,20 @@ export default function Hero({ data }: HeroProps) {
           initial={{ opacity: 0, y: 24 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.55, duration: 0.65 }}
-          className="mt-8 overflow-hidden rounded-[2rem] bg-gradient-to-r from-zinc-950 via-emerald-950 to-zinc-950 p-6 text-white shadow-[0_35px_90px_-45px_rgba(0,0,0,0.65)] lg:mt-2 lg:p-7"
+          className="mt-14 overflow-hidden rounded-[2.25rem] border border-white/10 bg-gradient-to-r from-zinc-950 via-[#08261f] to-zinc-950 p-6 py-5 text-white shadow-[0_45px_90px_-45px_rgba(15,23,42,.45)] lg:px-8 lg:py-6"
         >
-          <div className="grid gap-6 lg:grid-cols-4 lg:items-center">
+          <div className="grid grid-cols-1 items-start gap-6 sm:grid-cols-2 lg:grid-cols-4 lg:items-center lg:gap-8">
             <div className="flex items-center gap-4 lg:border-r lg:border-white/10 lg:pr-6">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-400/15 text-emerald-300">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400/20 to-emerald-500/10  shadow-[0_12px_30px_-18px_rgba(16,185,129,.45)]">
                 <Sparkles className="h-6 w-6" />
               </div>
 
               <div>
-                <p className="text-sm font-medium leading-6 text-white/90">
+                <p className="text-[15px] font-medium leading-7 text-white/90">
                   Finalmente encontrei algo que entende minha rotina de verdade.
                 </p>
 
-                <p className="mt-2 text-xs text-white/55">— Juliana R.</p>
+                <p className="mt-2 text-[12px] uppercase tracking-[0.14em] text-white/55">— Juliana R.</p>
               </div>
             </div>
 
@@ -444,7 +440,7 @@ export default function Hero({ data }: HeroProps) {
               </div>
 
               <div>
-                <div className="text-3xl font-black">8.500+</div>
+                <div className="text-[2.1rem] leading-none font-black">4.500+</div>
                 <p className="text-sm leading-6 text-white/70">
                   pessoas já começaram com o SingulFit
                 </p>
@@ -457,8 +453,8 @@ export default function Hero({ data }: HeroProps) {
               </div>
 
               <div>
-                <div className="text-xl font-black">Resultados reais</div>
-                <p className="text-sm leading-6 text-white/70">
+                <div className="text-[1.3rem] tracking-[-0.02em] font-black">Resultados reais</div>
+                <p className="text-sm leading-7 text-white/70">
                   mais energia, foco e consistência todos os dias
                 </p>
               </div>
@@ -471,7 +467,7 @@ export default function Hero({ data }: HeroProps) {
 
               <div>
                 <div className="text-xl font-black">Segurança e confiança</div>
-                <p className="text-sm leading-6 text-white/70">
+                <p className="text-sm leading-7 text-white/70">
                   tecnologia para cuidar da sua privacidade e bem-estar
                 </p>
               </div>
