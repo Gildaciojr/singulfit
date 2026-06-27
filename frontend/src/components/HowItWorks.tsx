@@ -1,7 +1,6 @@
 "use client";
 
 import { motion } from "framer-motion";
-import mockupPhone from "@/assets/mockups/mockup-phone.png";
 import {
   Camera,
   CheckCircle2,
@@ -122,18 +121,6 @@ export default function HowItWorks() {
 
             <div className="absolute left-1/2 top-1/2 h-[500px] w-[500px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/35" />
 
-            <motion.img
-              src={mockupPhone}
-              alt="Demonstração da análise nutricional no WhatsApp"
-              className="relative z-20 w-full max-w-[395px] drop-shadow-[0_55px_110px_rgba(15,23,42,.24)]"
-              animate={{ y: [0, -9, 0] }}
-              transition={{
-                duration: 6,
-                repeat: Infinity,
-                ease: "easeInOut",
-              }}
-            />
-
             <motion.div
               initial={{ opacity: 0, x: -24, y: 14 }}
               whileInView={{ opacity: 1, x: 0, y: 0 }}
@@ -173,14 +160,14 @@ export default function HowItWorks() {
               whileInView={{ opacity: 1, x: 0, y: 0 }}
               viewport={{ once: true }}
               transition={{ delay: 0.38, duration: 0.5 }}
-              className="absolute bottom-[4%] right-[2%] z-30 hidden w-[235px] rounded-[1.35rem] border border-zinc-200 bg-white/92 p-4 shadow-[0_30px_70px_-32px_rgba(0,0,0,0.34)] backdrop-blur-2xl lg:block"
+              className="absolute bottom-[4%] top-[58%] z-30 hidden w-[220px] rounded-[1.35rem] border border-zinc-200 bg-white/92 p-4 shadow-[0_30px_70px_-32px_rgba(0,0,0,0.34)] backdrop-blur-2xl transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_35px_80px_-34px_rgba(15,23,42,.28)] lg:block"
             >
               <div className="mb-4 flex items-center justify-between">
                 <div>
                   <div className="text-xs font-semibold text-zinc-500">
                     Análise concluída
                   </div>
-                  <div className="mt-1 text-2xl font-black text-zinc-950">
+                  <div className="mt-1 text-[1.35rem] font-black text-zinc-950">
                     520 kcal
                   </div>
                 </div>
