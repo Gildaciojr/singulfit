@@ -1,9 +1,10 @@
 "use client";
 
-import { motion, AnimatePresence } from "framer-motion";
-import { Button } from "@/components/ui/button";
-import { ArrowRight, Sparkles, ShieldCheck, CheckCircle2 } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { ArrowRight, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
+
+import { Button } from "@/components/ui/button";
 
 export default function StickyCTA() {
   const [isVisible, setIsVisible] = useState(false);
@@ -11,7 +12,11 @@ export default function StickyCTA() {
 
   useEffect(() => {
     const handleScroll = () => {
-      setIsVisible(window.scrollY > 500);
+      const scroll = window.scrollY;
+
+      // Hero já saiu
+      // Pricing ainda não chegou
+      setIsVisible(scroll > 900 && scroll < 4300);
     };
 
     handleScroll();
@@ -46,15 +51,34 @@ export default function StickyCTA() {
     };
   }, []);
 
+  const scrollToPricing = () => {
+    document.getElementById("pricing")?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  };
+
   return (
     <AnimatePresence>
       {isVisible && !footerInView && (
         <motion.div
-          initial={{ y: 90, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          exit={{ y: 90, opacity: 0 }}
+          initial={{
+            opacity: 0,
+            y: 80,
+            scale: 0.96,
+          }}
+          animate={{
+            opacity: 1,
+            y: 0,
+            scale: 1,
+          }}
+          exit={{
+            opacity: 0,
+            y: 80,
+            scale: 0.96,
+          }}
           transition={{
-            duration: 0.45,
+            duration: 0.42,
             ease: [0.22, 1, 0.36, 1],
           }}
           className="
@@ -62,130 +86,125 @@ export default function StickyCTA() {
             bottom-5
             left-1/2
             z-50
-            w-[94%]
-            max-w-2xl
+            w-[90%]
+            max-w-[470px]
             -translate-x-1/2
           "
         >
-          <motion.div
-            animate={{
-              y: [0, -3, 0],
-            }}
-            transition={{
-              duration: 5,
-              repeat: Infinity,
-              ease: "easeInOut",
-            }}
-          >
+          <div className="relative">
+            {/* Glow discreto */}
             <div
               className="
-                overflow-hidden
-                rounded-[2rem]
+                absolute
+                inset-0
+                -z-10
+                rounded-full
+                bg-emerald-400/10
+                blur-2xl
+              "
+            />
+
+            <div
+              className="
+                relative
+                flex
+                items-center
+                justify-between
+                gap-3
+                rounded-full
                 border
-                border-zinc-200
-                bg-white/92
-                backdrop-blur-2xl
-                shadow-[0_30px_80px_-35px_rgba(0,0,0,0.28)]
+                border-white/70
+                bg-white/72
+                px-3
+                py-3
+                shadow-[0_20px_50px_-28px_rgba(15,23,42,.28)]
+                backdrop-blur-[28px]
+                supports-[backdrop-filter]:bg-white/70
               "
             >
-              {/* LIGHT */}
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(6,95,70,0.06),transparent_60%)]" />
+              {/* ESQUERDA */}
 
-              {/* TOP BAR */}
-              <div className="border-b border-zinc-100 px-4 py-2">
+              <div className="flex min-w-0 items-center gap-3">
                 <div
                   className="
-                    inline-flex
+                    flex
+                    h-10
+                    w-10
+                    shrink-0
                     items-center
-                    gap-2
+                    justify-center
                     rounded-full
                     bg-emerald-50
-                    px-3
-                    py-1
-                    text-[10px]
-                    font-bold
-                    uppercase
-                    tracking-[0.18em]
-                    text-emerald-900
+                    text-emerald-800
                   "
                 >
-                  <Sparkles className="h-3 w-3" />
-                  SingulFit AI
+                  <Sparkles className="h-4 w-4" />
+                </div>
+
+                <div className="min-w-0">
+                  <p
+                    className="
+                      truncate
+                      text-[13px]
+                      font-semibold
+                      tracking-[-0.02em]
+                      text-zinc-900
+                      sm:text-sm
+                    "
+                  >
+                    Pronto para começar sua evolução?
+                  </p>
+
+                  <p
+                    className="
+                      hidden
+                      text-[11px]
+                      text-zinc-500
+                      sm:block
+                    "
+                  >
+                    Escolha seu plano e comece agora.
+                  </p>
                 </div>
               </div>
 
-              <div className="relative px-4 py-4 md:px-5">
-                <div className="flex items-center gap-4">
-                  <div
-                    className="
-                      flex
-                      h-12
-                      w-12
-                      shrink-0
-                      items-center
-                      justify-center
-                      rounded-2xl
-                      bg-emerald-900
-                      text-white
-                    "
-                  >
-                    <ShieldCheck className="h-5 w-5" />
-                  </div>
+              {/* DIREITA */}
 
-                  <div className="min-w-0 flex-1">
-                    <h3 className="truncate text-sm font-bold text-zinc-950 md:text-base">
-                      Comece sua evolução hoje
-                    </h3>
+              <Button
+                size="sm"
+                onClick={scrollToPricing}
+                className="
+                  group
+                  h-10
+                  shrink-0
+                  rounded-full
+                  bg-emerald-900
+                  px-4
+                  font-semibold
+                  text-white
+                  shadow-none
+                  transition-all
+                  duration-300
+                  hover:bg-emerald-950
+                "
+              >
+                <span className="hidden sm:inline">Ver planos</span>
 
-                    <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-zinc-500">
-                      <div className="flex items-center gap-1">
-                        <CheckCircle2 className="h-3 w-3 text-emerald-700" />
-                        IA nutricional
-                      </div>
+                <span className="sm:hidden">Planos</span>
 
-                      <div className="flex items-center gap-1">
-                        <CheckCircle2 className="h-3 w-3 text-emerald-700" />
-                        WhatsApp
-                      </div>
-
-                      <div className="flex items-center gap-1">
-                        <CheckCircle2 className="h-3 w-3 text-emerald-700" />
-                        Acesso imediato
-                      </div>
-                    </div>
-                  </div>
-
-                  <Button
-                    size="sm"
-                    className="
-                      group
-                      rounded-2xl
-                      bg-emerald-900
-                      px-5
-                      text-white
-                      hover:bg-emerald-950
-                    "
-                    onClick={() =>
-                      document.getElementById("pricing")?.scrollIntoView({
-                        behavior: "smooth",
-                      })
-                    }
-                  >
-                    Começar
-                    <ArrowRight
-                      className="
-                        h-4
-                        w-4
-                        transition-transform
-                        duration-300
-                        group-hover:translate-x-1
-                      "
-                    />
-                  </Button>
-                </div>
-              </div>
+                <ArrowRight
+                  className="
+                    ml-2
+                    h-4
+                    w-4
+                    transition-transform
+                    duration-300
+                    group-hover:translate-x-1
+                  "
+                />
+              </Button>
             </div>
-          </motion.div>
+          </div>
         </motion.div>
       )}
     </AnimatePresence>

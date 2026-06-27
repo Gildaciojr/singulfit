@@ -490,67 +490,69 @@ export default function Hero({ data }: HeroProps) {
         </div>
 
         <motion.div
-          initial={{ opacity: 0, y: 24 }}
+          initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.55, duration: 0.65 }}
-          className="mt-14 overflow-hidden rounded-[2.25rem] border border-white/10 bg-gradient-to-r from-zinc-950 via-[#08261f] to-zinc-950 p-6 py-5 text-white shadow-[0_45px_90px_-45px_rgba(15,23,42,.45)] lg:px-8 lg:py-6"
+          transition={{ delay: 0.55, duration: 0.6 }}
+          className="mt-8 overflow-hidden rounded-[1.6rem] border border-emerald-950/10 bg-gradient-to-r from-zinc-950/95 via-[#08261f]/95 to-zinc-950/95 p-5 py-4 text-white shadow-[0_28px_70px_-48px_rgba(15,23,42,.45)] lg:px-6 lg:py-4"
         >
-          <div className="grid grid-cols-1 items-start gap-6 sm:grid-cols-2 lg:grid-cols-4 lg:items-center lg:gap-8">
-            <div className="flex items-center gap-4 lg:border-r lg:border-white/10 lg:pr-6">
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400/20 to-emerald-500/10  shadow-[0_12px_30px_-18px_rgba(16,185,129,.45)]">
-                <Sparkles className="h-6 w-6" />
+          <div className="grid grid-cols-1 items-center gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:gap-5">
+            <div className="flex items-center gap-3 lg:border-r lg:border-white/10 lg:pr-5">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-400/12 text-emerald-300">
+                <Sparkles className="h-5 w-5" />
               </div>
 
               <div>
-                <p className="text-[15px] font-medium leading-7 text-white/90">
+                <p className="text-[12px] font-medium leading-5 text-white/88">
                   Finalmente encontrei algo que entende minha rotina de verdade.
                 </p>
 
-                <p className="mt-2 text-[10px] uppercase tracking-[0.14em] text-white/55">
-                  — Juliana R.
+                <p className="mt-1 text-[10px] uppercase tracking-[0.14em] text-white/45">
+                  — Saray R.
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-4 lg:border-r lg:border-white/10 lg:px-6">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-400/15 text-emerald-300">
-                <MessageCircle className="h-6 w-6" />
+            <div className="flex items-center gap-3 lg:border-r lg:border-white/10 lg:px-5">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-400/12 text-emerald-300">
+                <MessageCircle className="h-5 w-5" />
               </div>
 
               <div>
                 <div className="text-[2.1rem] leading-none font-black">
-                  4.500+
+                  +4.500
                 </div>
                 <p className="text-sm leading-6 text-white/70">
-                  pessoas já começaram com o SingulFit
+                  pessoas já fazem parte da SingulFit
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-4 lg:border-r lg:border-white/10 lg:px-6">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-400/15 text-emerald-300">
-                <Target className="h-6 w-6" />
+            <div className="flex items-center gap-3 lg:border-r lg:border-white/10 lg:px-5">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-400/12 text-emerald-300">
+                <Target className="h-5 w-5" />
               </div>
 
               <div>
-                <div className="text-[1.3rem] tracking-[-0.02em] font-black">
+                <div className="text-[15px] font-black tracking-[-0.02em]">
                   Resultados reais
                 </div>
-                <p className="text-sm leading-7 text-white/70">
-                  mais energia, foco e consistência todos os dias
+                <p className="mt-1 text-[12px] leading-5 text-white/62">
+                  mais foco e consistência
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-4 lg:px-6">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-400/15 text-emerald-300">
-                <Shield className="h-6 w-6" />
+            <div className="flex items-center gap-3 lg:px-5">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-400/12 text-emerald-300">
+                <Shield className="h-5 w-5" />
               </div>
 
               <div>
-                <div className="text-xl font-black">Segurança e confiança</div>
-                <p className="text-sm leading-7 text-white/70">
-                  tecnologia para cuidar da sua privacidade e bem-estar
+                <div className="text-[15px] font-black tracking-[-0.02em]">
+                  Privacidade
+                </div>
+                <p className="mt-1 text-[12px] leading-5 text-white/62">
+                  dados protegidos
                 </p>
               </div>
             </div>
