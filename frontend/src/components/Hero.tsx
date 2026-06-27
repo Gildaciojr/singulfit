@@ -55,23 +55,19 @@ const visualIn = {
 const benefitItems = [
   {
     icon: MessageCircle,
-    title: "Converse de forma simples",
-    description: "natural",
+    title: "Conversa de forma natural",
   },
   {
     icon: Sparkles,
-    title: "IA que entende seu",
-    description: "contexto",
+    title: "IA que te compreende",
   },
   {
     icon: BarChart3,
-    title: "Análises precisas e",
-    description: "personalizadas",
+    title: "Análises personalizadas",
   },
   {
     icon: Shield,
-    title: "Privacidade total",
-    description: "e dados seguros",
+    title: "Segurança e privacidade total",
   },
 ];
 
@@ -136,21 +132,47 @@ export default function Hero({ data }: HeroProps) {
 
                 return (
                   <div
-                    key={`${item.title}-${item.description}`}
-                    className="group flex items-start gap-4 rounded-2xl p-3 transition-all duration-300 hover:bg-white/55 hover:shadow-[0_12px_40px_-25px_rgba(15,23,42,.22)]"
+                    key={item.title}
+                    className="
+        flex
+        items-center
+        gap-4
+        rounded-2xl
+        py-2
+        transition-all
+        duration-300
+      "
                   >
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-900 shadow-[0_10px_30px_-20px_rgba(6,78,59,.35)]">
-                      <Icon className="h-5 w-5" />
+                    <div
+                      className="
+          flex
+          h-14
+          w-14
+          shrink-0
+          items-center
+          justify-center
+          rounded-2xl
+          bg-gradient-to-br
+          from-emerald-50
+          to-emerald-100
+          text-emerald-900
+          shadow-[0_12px_28px_-18px_rgba(6,78,59,.28)]
+        "
+                    >
+                      <Icon className="h-6 w-6" />
                     </div>
 
-                    <div>
-                      <div className="text-[13px] font-semibold leading-6 text-zinc-800">
-                        {item.title}
-                      </div>
-                      <div className="text-[13px] leading-6 text-zinc-500">
-                        {item.description}
-                      </div>
-                    </div>
+                    <span
+                      className="
+          text-[15px]
+          font-semibold
+          leading-6
+          tracking-[-0.015em]
+          text-zinc-800
+        "
+                    >
+                      {item.title}
+                    </span>
                   </div>
                 );
               })}
@@ -236,20 +258,20 @@ export default function Hero({ data }: HeroProps) {
     lg:block
   "
           >
-            <div className="absolute right-[2%] top-[7%] z-0 h-[520px] w-[520px] rounded-full bg-emerald-100/55 blur-[1px]" />
+            <div className="absolute right-[2%] top-[7%] z-0 h-[470px] w-[470px] rounded-full bg-emerald-100/55 blur-[1px]" />
 
             <div className="absolute left-[16%] top-[18%] -z-10 h-[420px] w-[420px] rounded-full bg-emerald-400/10 blur-[90px]" />
 
-            <div className="absolute right-[0%] top-[6%] -z-10 h-[520px] w-[520px] rounded-full bg-white/80 blur-[90px]" />
+            <div className="absolute right-[0%] top-[6%] -z-10 h-[470px] w-[470px] rounded-full bg-white/80 blur-[90px]" />
 
             <div
               className="
       absolute
-      right-[2%]
-      top-[8%]
+      right-[4%]
+      top-[5%]
       z-10
-      h-[520px]
-      w-[520px]
+      h-[500px]
+      w-[500px]
       overflow-hidden
       rounded-full
       bg-gradient-to-br
@@ -265,9 +287,9 @@ export default function Hero({ data }: HeroProps) {
                 className="
         h-full
         w-full
-        scale-[1.08]
+        scale-[1.02]
         object-cover
-        object-[58%_50%]
+        object-[60%_50%]
         opacity-95
       "
               />
@@ -278,14 +300,14 @@ export default function Hero({ data }: HeroProps) {
               alt="Demonstração do SingulFit no WhatsApp"
               className="
       absolute
-      left-[3%]
-      top-[4%]
+      left-[-1%]
+      top-[7%]
       z-40
-      w-[340px]
+      w-[285px]
       object-contain
       drop-shadow-[0_38px_80px_rgba(15,23,42,.24)]
       xl:left-[4%]
-      xl:w-[360px]
+      xl:w-[305px]
     "
               animate={{ y: [0, -8, 0] }}
               transition={{
@@ -303,15 +325,15 @@ export default function Hero({ data }: HeroProps) {
               transition={{ delay: 0.55, duration: 0.55 }}
               className="
       absolute
-      right-[17%]
-      top-[46%]
+      right-[18%]
+      top-[49%]
       z-50
-      w-[255px]
+      w-[215px]
       rounded-[1.5rem]
       border
       border-white/15
       bg-zinc-950/88
-      p-5
+      p-4
       text-white
       shadow-[0_35px_80px_-30px_rgba(0,0,0,.65)]
       backdrop-blur-2xl
@@ -322,7 +344,7 @@ export default function Hero({ data }: HeroProps) {
                 <TrendingUp className="h-4 w-4 text-emerald-300" />
               </div>
 
-              <div className="mt-4 space-y-3.5">
+              <div className="mt-3 space-y-3">
                 {[
                   ["Treinos", "5 / 6", "78%"],
                   ["Adesão", "92%", "92%"],
@@ -354,37 +376,37 @@ export default function Hero({ data }: HeroProps) {
               transition={{ delay: 0.7, duration: 0.55 }}
               className="
       absolute
-      right-[6%]
-      top-[68%]
+      right-[7%]
+      top-[71%]
       z-50
-      w-[360px]
+      w-[275px]
       rounded-[1.7rem]
       border
       border-white/80
       bg-white/95
-      p-6
+      p-4
       shadow-[0_35px_90px_-38px_rgba(15,23,42,.35)]
       backdrop-blur-2xl
     "
             >
               <div className="mb-5 flex items-center justify-between">
-                <h3 className="text-[15px] font-extrabold tracking-[-0.02em] text-zinc-950">
+                <h3 className="text-[12px] font-extrabold tracking-[-0.02em] text-zinc-950">
                   Evolução de peso
                 </h3>
 
-                <span className="rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-[11px] font-bold text-emerald-800">
+                <span className="rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800">
                   Ver mais
                 </span>
               </div>
 
-              <div className="grid grid-cols-3 gap-4 text-center">
+              <div className="grid grid-cols-3 gap-2 text-center">
                 {[
                   ["84,0 kg", "Semana 1"],
                   ["82,8 kg", "Semana 4"],
                   ["80,9 kg", "Semana 8"],
                 ].map(([value, label]) => (
                   <div key={label}>
-                    <div className="text-sm font-black text-zinc-950">
+                    <div className="text-[12px] font-black text-zinc-950">
                       {value}
                     </div>
 
@@ -395,7 +417,7 @@ export default function Hero({ data }: HeroProps) {
                 ))}
               </div>
 
-              <div className="relative mt-5 h-[72px]">
+              <div className="relative mt-3 h-[52px]">
                 <svg
                   viewBox="0 0 320 72"
                   className="absolute inset-0 h-full w-full"
