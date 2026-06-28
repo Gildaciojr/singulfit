@@ -65,64 +65,94 @@ export default function MoreFeatures({ data }: Props) {
           </p>
         </div>
 
-        {/* GRID */}
-        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-          {data.items.map((item, index) => {
-            const Icon = iconMap[item.icon as keyof typeof iconMap];
+        {/* FEATURES LIST */}
+        <div className="mx-auto mt-14 max-w-3xl">
+          <div className="grid gap-x-20 gap-y-1 md:grid-cols-2 lg:gap-x-24">
+            {data.items.map((item, index) => {
+              const Icon = iconMap[item.icon as keyof typeof iconMap];
 
-            if (!Icon) return null;
+              if (!Icon) return null;
 
-            return (
-              <motion.div
-                key={index}
-                initial={isMobile ? false : { opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                whileHover={!isMobile ? { y: -5 } : {}}
-                transition={{
-                  duration: 0.4,
-                  delay: index * 0.05,
-                }}
-                className="
-group
-relative
-overflow-hidden
-rounded-[1.75rem]
-border
-border-zinc-200
-bg-white
-p-6
-transition-all
-duration-300
-hover:border-emerald-200
-hover:shadow-[0_20px_50px_-30px_rgba(0,0,0,0.18)]
-"
-              >
-                {/* ICON */}
-                <div
-                  className="
-    mb-5
-    flex h-12 w-12 items-center justify-center
-    rounded-xl
-    bg-emerald-50
-    text-emerald-800
-  "
+              return (
+                <motion.div
+                  key={index}
+                  initial={isMobile ? false : { opacity: 0, y: 18 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{
+                    duration: 0.4,
+                    delay: index * 0.05,
+                  }}
+                  className="group
+                  cursor-default"
                 >
-                  <Icon className="h-5 w-5" />
-                </div>
+                  <div
+                    className="
+                      flex
+                      items-center
+                      gap-4
+                      py-4
+                      transition-all
+                      duration-300
+                      group-hover:translate-x-1
+                    "
+                  >
+                    <div
+                      className="
+                        flex
+                        h-9
+                        w-9
+                        shrink-0
+                        items-center
+                        justify-center
+                        rounded-full
+                        border
+                        border-emerald-100
+                        bg-white
+                        text-emerald-700
+                        shadow-[0_8px_22px_-18px_rgba(6,78,59,.18)]
+                        transition-all
+                        duration-300
+                        group-hover:border-emerald-200
+                        group-hover:bg-emerald-50
+                        group-hover:shadow-[0_12px_28px_-18px_rgba(6,78,59,.25)]
+                      "
+                    >
+                      <Icon className="h-[15px] w-[15px] stroke-[2.1]" />
+                    </div>
 
-                {/* TITLE */}
-                <h3 className="text-lg font-bold text-zinc-950">
-                  {item.title}
-                </h3>
+                    <div className="min-w-0 flex-1">
+                      <h3
+                        className="
+                          text-[16px]
+                          font-semibold
+                          tracking-[-0.025em]
+                          text-zinc-900
+                          transition-colors
+                          duration-300
+                          group-hover:text-emerald-900
+                        "
+                      >
+                        {item.title}
+                      </h3>
+                    </div>
+                  </div>
 
-                {/* DESCRIPTION */}
-                <p className="mt-5 text-[15px] leading-8 text-zinc-600">
-                  {item.description}
-                </p>
-              </motion.div>
-            );
-          })}
+                  <div
+                    className="
+                      ml-[60px]
+                      h-px
+                      w-auto
+                      bg-gradient-to-r
+                      from-zinc-100
+                      via-zinc-50
+                      to-transparent
+                    "
+                  />
+                </motion.div>
+              );
+            })}
+          </div>
         </div>
 
         {/* TRUST STRIP */}
@@ -164,8 +194,8 @@ hover:shadow-[0_20px_50px_-30px_rgba(0,0,0,0.18)]
             <div
               className="
       flex
-      h-10
-      w-10
+      h-9
+      w-9
       items-center
       justify-center
       rounded-full
@@ -209,8 +239,8 @@ hover:shadow-[0_20px_50px_-30px_rgba(0,0,0,0.18)]
             <div
               className="
       flex
-      h-10
-      w-10
+      h-9
+      w-9
       items-center
       justify-center
       rounded-full
@@ -258,8 +288,8 @@ hover:shadow-[0_20px_50px_-30px_rgba(0,0,0,0.18)]
             <div
               className="
       flex
-      h-10
-      w-10
+      h-9
+      w-9
       items-center
       justify-center
       rounded-full
@@ -307,8 +337,8 @@ hover:shadow-[0_20px_50px_-30px_rgba(0,0,0,0.18)]
             <div
               className="
       flex
-      h-10
-      w-10
+      h-9
+      w-9
       items-center
       justify-center
       rounded-full

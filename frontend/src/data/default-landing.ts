@@ -8,21 +8,21 @@ const iconMap = { Shield };
 
 export const landingData: LandingData = {
   hero: {
-    badge: "IA que entende você. Resultados que transformam.",
-    title: "Nutrição inteligente no WhatsApp. Você quem evolui.",
+    badge: "Inteligência nutricional que evolui com você.",
+    title: "Nutrição inteligente. Sua evolução começa agora.",
     subtitle:
-      "Análise da sua alimentação, contexto que evolui com você e acompanhamento contínuo para alcançar seus objetivos com clareza e consistência.",
+      "Fotografe suas refeições, converse naturalmente pelo WhatsApp e receba orientações inteligentes que evoluem junto com sua rotina.",
     cta: {
       label: "Começar agora no WhatsApp",
       link: checkoutPath("PREMIUM"),
     },
     metrics: [
       {
-        value: "8.500+",
+        value: "+4.500",
         label: "pessoas já evoluíram",
       },
       {
-        value: "87%",
+        value: "88%",
         label: "aderência média",
       },
       {
@@ -82,7 +82,7 @@ export const landingData: LandingData = {
       },
       {
         quote:
-          "Muito mais simples do que qualquer outro app. Uso todos os dias.",
+          "Nunca consegui manter uma rotina tão simples. Uso todos os dias.",
         name: "Carlos Eduardo",
         role: "Usuário há 6 meses",
       },
@@ -118,13 +118,13 @@ export const landingData: LandingData = {
         "Sim. Basta enviar fotos ou informações da refeição para receber análises e orientações.",
     },
     {
-      question: "Funciona para emagrecimento?",
+      question: "A SingulFit serve apenas para emagrecimento?",
       answer:
-        "Sim. A plataforma auxilia tanto emagrecimento quanto ganho de massa e melhora de hábitos.",
+        "Não. Nosso agente se adapta conforme seus objetivos, seja emagrecimento, ganho de massa, melhora da qualidade alimentar e treinos.",
     },
     {
       question: "Posso cancelar quando quiser?",
-      answer: "Sim. Sem fidelidade e sem burocracia.",
+      answer: "Sim e sem burocracia.",
     },
     {
       question: "Meus dados são protegidos?",
@@ -138,18 +138,18 @@ export const landingData: LandingData = {
     items: [
       {
         icon: "MessageSquare",
-        title: "Nutrição via WhatsApp",
+        title: "Converse naturalmente",
         description: "Envie refeições como conversa comum.",
       },
       {
         icon: "Activity",
-        title: "Análise instantânea",
+        title: "Resposta em segundos",
         description: "Receba feedback em segundos.",
       },
       {
         icon: "Target",
         title: "Objetivos personalizados",
-        description: "A IA adapta recomendações ao seu perfil.",
+        description: "Se adapta as recomendações ao seu perfil.",
       },
       {
         icon: "TrendingUp",
@@ -158,7 +158,7 @@ export const landingData: LandingData = {
       },
       {
         icon: "ClipboardCheck",
-        title: "Rotina estruturada",
+        title: "Hábitos consistentes",
         description: "Mais consistência sem complicação.",
       },
       {
@@ -179,7 +179,7 @@ export const landingData: LandingData = {
       { label: "FAQ", target: "faq" },
     ],
     cta: {
-      label: "Começar no WhatsApp",
+      label: "Começar agora",
       target: "pricing",
     },
   },
