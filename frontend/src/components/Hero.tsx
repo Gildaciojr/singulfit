@@ -692,7 +692,7 @@ export default function Hero({ data }: HeroProps) {
                 className="
                   pointer-events-none
                   absolute
-                  right-[-82px]
+                  right-[-55px]
                   top-[8px]
                   z-10
                   h-[505px]
@@ -752,9 +752,9 @@ export default function Hero({ data }: HeroProps) {
                 pointer-events-none
                 absolute
                 left-1/2
-                top-[220px]
+                top-[170px]
                 z-40
-                w-[214px]
+                w-[240px]
                 -translate-x-1/2
                 select-none
                 object-contain
@@ -763,74 +763,6 @@ export default function Hero({ data }: HeroProps) {
                 min-[390px]:w-[232px]
               "
             />
-
-            <motion.div
-              initial={{ opacity: 0, x: -18, y: 14 }}
-              animate={{ opacity: 1, x: 0, y: 0 }}
-              transition={{ delay: 0.38, duration: 0.55 }}
-              className="
-                absolute
-                left-1
-                top-[356px]
-                z-50
-                w-[158px]
-                rounded-[1.45rem]
-                border
-                border-white/80
-                bg-white/88
-                p-3.5
-                shadow-[0_28px_70px_-36px_rgba(15,23,42,.28)]
-                backdrop-blur-2xl
-                min-[390px]:left-3
-                min-[390px]:w-[170px]
-              "
-            >
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-800">
-                <Sparkles className="h-5 w-5" />
-              </div>
-
-              <h3 className="mt-3 text-[13px] font-black leading-tight tracking-[-0.025em] text-zinc-950">
-                IA no seu ritmo
-              </h3>
-
-              <p className="mt-1.5 text-[11px] leading-5 text-zinc-600">
-                Orientações personalizadas para sua rotina.
-              </p>
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, x: 18, y: 14 }}
-              animate={{ opacity: 1, x: 0, y: 0 }}
-              transition={{ delay: 0.48, duration: 0.55 }}
-              className="
-                absolute
-                right-1
-                top-[356px]
-                z-50
-                w-[158px]
-                rounded-[1.45rem]
-                border
-                border-white/80
-                bg-white/88
-                p-3.5
-                shadow-[0_28px_70px_-36px_rgba(15,23,42,.28)]
-                backdrop-blur-2xl
-                min-[390px]:right-3
-                min-[390px]:w-[170px]
-              "
-            >
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-800">
-                <MessageCircle className="h-5 w-5" />
-              </div>
-
-              <h3 className="mt-3 text-[13px] font-black leading-tight tracking-[-0.025em] text-zinc-950">
-                WhatsApp como guia
-              </h3>
-
-              <p className="mt-1.5 text-[11px] leading-5 text-zinc-600">
-                Converse, fotografe e receba respostas claras.
-              </p>
-            </motion.div>
 
             <motion.div
               initial={{ opacity: 0, y: 18 }}
@@ -846,7 +778,7 @@ export default function Hero({ data }: HeroProps) {
                 border
                 border-white/75
                 bg-white/90
-                shadow-[0_30px_78px_-44px_rgba(15,23,42,.3)]
+                shadow-[0_20px_50px_-38px_rgba(15,23,42,.3)]
                 backdrop-blur-2xl
               "
             >
