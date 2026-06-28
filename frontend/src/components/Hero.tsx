@@ -636,11 +636,11 @@ export default function Hero({ data }: HeroProps) {
                 pointer-events-none
                 absolute
                 inset-x-[-44px]
-                top-[-28px]
-                h-[430px]
+                top-[-12px]
+                h-[500px]
                 rounded-full
                 bg-emerald-100/70
-                blur-[120px]
+                blur-[145px]
               "
             />
 
@@ -677,7 +677,7 @@ export default function Hero({ data }: HeroProps) {
                 absolute
                 inset-x-0
                 top-0
-                h-[500px]
+                h-[540px]
                 overflow-hidden
                 rounded-[2.25rem]
                 border
@@ -692,14 +692,14 @@ export default function Hero({ data }: HeroProps) {
                 className="
                   pointer-events-none
                   absolute
-                  right-[-12px]
-                  top-[9px]
+                  right-[-62px]
+                  top-0
                   z-10
-                  w-[430px]
-                  h-[520px]
+                  w-[470px]
+                  h-[540px]
                   select-none
                   object-cover
-                  object-[54%_22%]
+                  object-[58%_18%]
                   min-[390px]:right-[-38px]
                   min-[390px]:w-[410px]
                 "
@@ -712,10 +712,10 @@ export default function Hero({ data }: HeroProps) {
                   inset-y-0
                   left-0
                   z-20
-                  w-[34%]
+                  w-[18%]
                   bg-gradient-to-r
                   from-white
-                  via-white/72
+                  via-white/35
                   to-transparent
                 "
               />
@@ -727,10 +727,10 @@ export default function Hero({ data }: HeroProps) {
                   inset-x-0
                   bottom-0
                   z-20
-                  h-44
+                  h-36
                   bg-gradient-to-t
                   from-[#f7f8fc]
-                  via-[#f7f8fc]/58
+                  via-[#f7f8fc]/28
                   to-transparent
                 "
               />
@@ -751,14 +751,14 @@ export default function Hero({ data }: HeroProps) {
               className="
                 pointer-events-none
                 absolute
-                left-[49%]
-                top-[205px]
+                left-[44%]
+                top-[228px]
                 z-40
-                w-[255px]
+                w-[292px]
                 -translate-x-1/2
                 select-none
                 object-contain
-                drop-shadow-[0_54px_120px_rgba(15,23,42,.3)]
+                drop-shadow-[0_72px_150px_rgba(15,23,42,.34)]
                 min-[390px]:top-[210px]
                 min-[390px]:w-[232px]
               "
@@ -771,7 +771,7 @@ export default function Hero({ data }: HeroProps) {
               className="
                 absolute
                 inset-x-1
-                top-[505px]
+                top-[530px]
                 z-30
                 overflow-hidden
                 rounded-[1.65rem]
