@@ -529,8 +529,7 @@ export default function Hero({ data }: HeroProps) {
       relative
       mx-auto
       w-full
-      max-w-[390px]
-      px-4
+      max-w-[430px]
     "
           >
             {/* Background Glow */}
@@ -538,40 +537,47 @@ export default function Hero({ data }: HeroProps) {
             <div
               className="
     absolute
-    left-1/2
-    top-6
-    h-[420px]
-    w-[420px]
-    -translate-x-1/2
+    inset-x-0
+    top-2
+    flex
+    justify-center
+    pointer-events-none
+  "
+            >
+              <div
+                className="
+      h-[420px]
+      w-[420px]
+      rounded-full
+      bg-emerald-100/55
+      blur-[135px]
+    "
+              />
+            </div>
+
+            <div
+              className="
+    absolute
+    right-[-90px]
+    top-[45px]
+    h-[250px]
+    w-[250px]
     rounded-full
-    bg-emerald-100/60
-    blur-[120px]
+    bg-emerald-300/20
+    blur-[115px]
   "
             />
 
             <div
               className="
     absolute
-    right-[-70px]
-    top-[60px]
-    h-[240px]
-    w-[240px]
+    left-[-80px]
+    bottom-[25px]
+    h-[230px]
+    w-[230px]
     rounded-full
-    bg-emerald-300/25
-    blur-[100px]
-  "
-            />
-
-            <div
-              className="
-    absolute
-    left-[-60px]
-    bottom-[40px]
-    h-[220px]
-    w-[220px]
-    rounded-full
-    bg-white/70
-    blur-[90px]
+    bg-white/85
+    blur-[95px]
   "
             />
 
@@ -581,12 +587,12 @@ export default function Hero({ data }: HeroProps) {
               className="
     relative
     mx-auto
-    h-[350px]
+    h-[420px]
     w-full
     overflow-hidden
-    rounded-[2.6rem]
+    rounded-[2.8rem]
     bg-gradient-to-br
-    from-[#fbfbfd]
+    from-[#fcfcfd]
     via-[#f8fafb]
     to-[#eef8f4]
   "
@@ -596,14 +602,14 @@ export default function Hero({ data }: HeroProps) {
                 alt="Pessoa utilizando SingulFit"
                 className="
       absolute
-      right-[-18px]
-      top-0
+      right-[-48px]
+      bottom-0
       h-full
-      w-[90%]
+      w-[95%]
       object-cover
-      object-[52%_center]
-      select-none
+      object-[54%_center]
       pointer-events-none
+      select-none
     "
               />
 
@@ -614,10 +620,10 @@ export default function Hero({ data }: HeroProps) {
       absolute
       inset-x-0
       bottom-0
-      h-36
+      h-44
       bg-gradient-to-t
       from-[#f8f9fc]
-      via-[#f8f9fc]/55
+      via-[#f8f9fc]/25
       to-transparent
     "
               />
@@ -629,10 +635,10 @@ export default function Hero({ data }: HeroProps) {
       absolute
       inset-y-0
       left-0
-      w-24
+      w-40
       bg-gradient-to-r
       from-[#f8f9fc]
-      via-[#f8f9fc]/35
+      via-[#f8f9fc]/15
       to-transparent
     "
               />
@@ -645,7 +651,7 @@ export default function Hero({ data }: HeroProps) {
               alt="WhatsApp"
               animate={{
                 y: [0, -8, 0],
-                rotate: [0, 0.35, 0],
+                rotate: [0, 0.25, 0],
               }}
               transition={{
                 duration: 8,
@@ -654,13 +660,13 @@ export default function Hero({ data }: HeroProps) {
               }}
               className="
     absolute
-    right-[-8px]
-    top-[8px]
-    w-[290px]
-    drop-shadow-[0_65px_130px_rgba(15,23,42,.34)]
+    right-[-42px]
+    top-[18px]
+    w-[305px]
+    z-20
     pointer-events-none
     select-none
-    z-20
+    drop-shadow-[0_70px_150px_rgba(15,23,42,.32)]
   "
             />
           </div>
@@ -690,13 +696,13 @@ export default function Hero({ data }: HeroProps) {
             <div
               className="
       ml-3
-      w-[88%]
+      w-[90%]
       rounded-[1.55rem]
       border
       border-white/80
       bg-white/88
-      px-4.5
-      py-3.5
+      px-4
+      py-3
       backdrop-blur-2xl
       shadow-[0_32px_70px_-34px_rgba(15,23,42,.26)]
     "
@@ -754,14 +760,14 @@ export default function Hero({ data }: HeroProps) {
             <div
               className="
     mr-2
-    w-[92%]
+    w-[90%]
     self-end
     rounded-[1.55rem]
     border
     border-white/80
     bg-white/82
-    px-4.5
-    py-3.5
+    px-4
+    py-3
     backdrop-blur-2xl
     shadow-[0_32px_70px_-34px_rgba(15,23,42,.26)]
   "
@@ -817,7 +823,7 @@ export default function Hero({ data }: HeroProps) {
             </div>
           </motion.div>
 
-          <div className="mx-auto -mt-6 w-full max-w-[350px] lg:hidden">
+          <div className="mx-auto -mt-6 w-full max-w-[390px] lg:hidden">
             <div
               className="
       overflow-hidden
