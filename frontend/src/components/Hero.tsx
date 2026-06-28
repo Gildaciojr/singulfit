@@ -692,15 +692,15 @@ export default function Hero({ data }: HeroProps) {
                 className="
                   pointer-events-none
                   absolute
-                  right-[-55px]
-                  top-[8px]
+                  right-[-35px]
+                  top-[9px]
                   z-10
                   h-[505px]
                   w-[390px]
                   select-none
                   object-cover
                   object-[57%_30%]
-                  min-[390px]:right-[-58px]
+                  min-[390px]:right-[-38px]
                   min-[390px]:w-[410px]
                 "
               />
@@ -755,7 +755,7 @@ export default function Hero({ data }: HeroProps) {
                 top-[170px]
                 z-40
                 w-[240px]
-                -translate-x-1/2
+                -translate-x-[60%]
                 select-none
                 object-contain
                 drop-shadow-[0_54px_120px_rgba(15,23,42,.3)]
