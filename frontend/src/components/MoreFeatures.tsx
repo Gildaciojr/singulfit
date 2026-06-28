@@ -51,7 +51,7 @@ export default function MoreFeatures({ data }: Props) {
       <div className="container mx-auto max-w-7xl px-6">
         {/* HEADER */}
         <div className="mx-auto mb-16 max-w-3xl text-center">
-          <div className="inline-flex items-center rounded-full border border-emerald-100 bg-white px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-900">
+          <div className="inline-flex items-center rounded-full border border-zinc-200 bg-white/70 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-800">
             {data.subtitle ?? "Funcionalidades"}
           </div>
 
@@ -66,7 +66,7 @@ export default function MoreFeatures({ data }: Props) {
         </div>
 
         {/* FEATURES LIST */}
-        <div className="mx-auto mt-14 max-w-3xl">
+        <div className="mx-auto mt-20 max-w-[860px]">
           <div className="grid gap-x-20 gap-y-1 md:grid-cols-2 lg:gap-x-24">
             {data.items.map((item, index) => {
               const Icon = iconMap[item.icon as keyof typeof iconMap];
@@ -94,22 +94,22 @@ export default function MoreFeatures({ data }: Props) {
                       py-4
                       transition-all
                       duration-300
-                      group-hover:translate-x-1
+                      group-hover:translate-x-[3px]
                     "
                   >
                     <div
                       className="
                         flex
-                        h-9
-                        w-9
+                        h-8
+                        w-8
                         shrink-0
                         items-center
                         justify-center
                         rounded-full
                         border
-                        border-emerald-100
-                        bg-white
-                        text-emerald-700
+                        border-zinc-200
+                        bg-white/70
+                        text-emerald-800
                         shadow-[0_8px_22px_-18px_rgba(6,78,59,.18)]
                         transition-all
                         duration-300
@@ -118,7 +118,7 @@ export default function MoreFeatures({ data }: Props) {
                         group-hover:shadow-[0_12px_28px_-18px_rgba(6,78,59,.25)]
                       "
                     >
-                      <Icon className="h-[15px] w-[15px] stroke-[2.1]" />
+                      <Icon className="h-[14px] w-[14px] stroke-[2.2]" />
                     </div>
 
                     <div className="min-w-0 flex-1">
@@ -140,7 +140,7 @@ export default function MoreFeatures({ data }: Props) {
 
                   <div
                     className="
-                      ml-[60px]
+                      ml-[48px]
                       h-px
                       w-auto
                       bg-gradient-to-r
@@ -194,8 +194,8 @@ export default function MoreFeatures({ data }: Props) {
             <div
               className="
       flex
-      h-9
-      w-9
+      h-8
+      w-8
       items-center
       justify-center
       rounded-full
@@ -239,8 +239,8 @@ export default function MoreFeatures({ data }: Props) {
             <div
               className="
       flex
-      h-9
-      w-9
+      h-8
+      w-8
       items-center
       justify-center
       rounded-full
@@ -288,8 +288,8 @@ export default function MoreFeatures({ data }: Props) {
             <div
               className="
       flex
-      h-9
-      w-9
+      h-8
+      w-8
       items-center
       justify-center
       rounded-full
@@ -337,8 +337,8 @@ export default function MoreFeatures({ data }: Props) {
             <div
               className="
       flex
-      h-9
-      w-9
+      h-8
+      w-8
       items-center
       justify-center
       rounded-full

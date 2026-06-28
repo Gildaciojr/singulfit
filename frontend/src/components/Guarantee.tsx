@@ -15,7 +15,7 @@ export default function Guarantee() {
         {" "}
         <div className=" relative overflow-hidden rounded-[2.5rem] border border-zinc-200 bg-white p-8 shadow-[0_35px_80px_-35px_rgba(0,0,0,0.18)] lg:p-12 ">
           {" "}
-          <div className="grid items-center gap-10 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="grid items-center gap-10 lg:grid-cols-[1.18fr_0.82fr]">
             {/* LADO ESQUERDO */}
 
             <div>
@@ -59,7 +59,7 @@ export default function Guarantee() {
               </h2>
 
               <p className="mt-7 max-w-2xl text-lg leading-8 text-zinc-600">
-                Experimente a plataforma durante 07 dias completos. Se não fizer
+                Experimente a plataforma durante 7 dias completos. Se não fizer
                 sentido para sua rotina, basta cancelar.
               </p>
 
@@ -68,31 +68,31 @@ export default function Guarantee() {
                 miúdas.
               </p>
 
-              <div className="mt-8 grid gap-4 sm:grid-cols-2">
+              <div className="mt-9 grid gap-x-8 gap-y-4 sm:grid-cols-2">
                 <div className="flex items-center gap-3">
-                  <CheckCircle2 className="h-5 w-5 text-emerald-700" />
-                  <span className="font-medium text-zinc-700">
+                  <CheckCircle2 className="h-[18px] w-[18px] text-emerald-700" />
+                  <span className="font-semibold text-zinc-700">
                     Garantia de 07 dias
                   </span>
                 </div>
 
                 <div className="flex items-center gap-3">
                   <CheckCircle2 className="h-5 w-5 text-emerald-700" />
-                  <span className="font-medium text-zinc-700">
+                  <span className="font-semibold text-zinc-700">
                     Cancelamento simples
                   </span>
                 </div>
 
                 <div className="flex items-center gap-3">
                   <CheckCircle2 className="h-5 w-5 text-emerald-700" />
-                  <span className="font-medium text-zinc-700">
+                  <span className="font-semibold text-zinc-700">
                     Reembolso integral
                   </span>
                 </div>
 
                 <div className="flex items-center gap-3">
                   <CheckCircle2 className="h-5 w-5 text-emerald-700" />
-                  <span className="font-medium text-zinc-700">
+                  <span className="font-semibold text-zinc-700">
                     Sem burocracia
                   </span>
                 </div>
@@ -105,17 +105,23 @@ export default function Guarantee() {
       mt-10
       inline-flex
       items-center
-      gap-2
-      rounded-2xl
-      bg-emerald-900
-      px-8
-      py-4
-      font-bold
+      gap-2.5
+      rounded-[1.15rem]
+      bg-gradient-to-r
+      from-emerald-950
+      via-emerald-900
+      to-emerald-800
+      px-7
+      py-3.5
+      text-[15px]
+      font-semibold
+      tracking-[-0.01em]
       text-white
-      shadow-[0_20px_45px_-18px_rgba(6,78,59,0.55)]
+      shadow-[0_22px_48px_-22px_rgba(6,78,59,.45)]
       transition-all
       duration-300
-      hover:bg-emerald-950
+      hover:-translate-y-0.5
+      hover:shadow-[0_28px_56px_-22px_rgba(6,78,59,.55)]
     "
               >
                 Começar sem risco
@@ -134,15 +140,15 @@ export default function Guarantee() {
             {/* CARD DIREITO */}
 
             <motion.div
-              animate={{ y: [0, -6, 0] }}
+              animate={{ y: [0, -4, 0] }}
               transition={{
                 duration: 5,
                 repeat: Infinity,
                 ease: "easeInOut",
               }}
-              className="relative"
+              className="relative max-w-md mx-auto lg:ml-auto"
             >
-              <div className="absolute inset-0 rounded-full bg-emerald-500/20 blur-[100px]" />
+              <div className="absolute inset-0 rounded-full bg-emerald-500/15 blur-[80px]" />
 
               <div
                 className="
@@ -155,61 +161,159 @@ export default function Guarantee() {
       from-emerald-950
       via-emerald-900
       to-emerald-800
-      p-8
+      px-7
+      py-6
       text-white
-      shadow-[0_40px_100px_-35px_rgba(6,78,59,0.55)]
+      shadow-[0_32px_70px_-34px_rgba(6,78,59,0.40)]
+      lg:px-8
+      lg:py-7
     "
               >
+                <div className="flex items-center gap-4">
+                  <div
+                    className="
+      flex
+      h-12
+      w-12
+      shrink-0
+      items-center
+      justify-center
+      rounded-xl
+      border
+      border-white/10
+      bg-white/10
+      backdrop-blur-md
+    "
+                  >
+                    <BadgeCheck className="h-5 w-5 text-white" />
+                  </div>
+
+                  <div className="min-w-0">
+                    <div
+                      className="
+        text-[11px]
+        font-semibold
+        uppercase
+        tracking-[0.22em]
+        text-emerald-200/90
+      "
+                    >
+                      Garantia
+                    </div>
+
+                    <div
+                      className="
+        mt-1
+        text-lg
+        font-bold
+        tracking-[-0.03em]
+        text-white
+      "
+                    >
+                      SingulFit
+                    </div>
+                  </div>
+                </div>
+
                 <div
                   className="
-        flex
-        h-14
-        w-14
-        items-center
-        justify-center
-        rounded-2xl
-        bg-white/10
-      "
+    mt-8
+    flex
+    items-end
+    gap-3
+  "
                 >
-                  <BadgeCheck className="h-7 w-7 text-white" />
-                </div>
-
-                <div className="mt-8 text-xs uppercase tracking-[0.28em] text-white/60">
-                  Garantia SingulFit
-                </div>
-
-                <div className="mt-4">
-                  <div className="text-[5rem] font-black leading-none tracking-[-0.06em]">
-                    07
+                  <div
+                    className="
+      text-[5.2rem]
+      lg:text-[5.6rem]
+      font-black
+      leading-[0.85]
+      tracking-[-0.08em]
+      text-white
+    "
+                  >
+                    7
                   </div>
 
-                  <div className="text-xl font-semibold text-white/90">
-                    dias
+                  <div className="pb-2">
+                    <div
+                      className="
+        text-[11px]
+        font-semibold
+        uppercase
+        tracking-[0.22em]
+        text-emerald-200
+      "
+                    >
+                      dias de
+                    </div>
+
+                    <div
+                      className="
+        text-[1.5rem]
+        font-bold
+        tracking-[-0.03em]
+        text-white
+      "
+                    >
+                      garantia
+                    </div>
                   </div>
                 </div>
 
-                <div className="mt-8 border-t border-white/10 pt-6">
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-3">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-300" />
-                      <span className="text-sm text-white/85">
-                        Teste completo da plataforma
-                      </span>
-                    </div>
+                <div className="mt-7 border-t border-white/10 pt-5">
+                  <div className="space-y-4">
+                    {[
+                      "Teste completo da plataforma",
+                      "Reembolso integral garantido",
+                      "Cancelamento simples e imediato",
+                    ].map((item) => (
+                      <div
+                        key={item}
+                        className="
+          flex
+          items-center
+          gap-3
+          rounded-xl
+          border
+          border-white/5
+          bg-white/[0.04]
+          px-3.5
+          py-3
+          transition-all
+          duration-300
+          hover:border-emerald-400/20
+          hover:bg-white/[0.06]
+        "
+                      >
+                        <div
+                          className="
+            flex
+            h-7
+            w-7
+            shrink-0
+            items-center
+            justify-center
+            rounded-full
+            bg-emerald-400/15
+          "
+                        >
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" />
+                        </div>
 
-                    <div className="flex items-center gap-3">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-300" />
-                      <span className="text-sm text-white/85">
-                        Reembolso integral
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-300" />
-                      <span className="text-sm text-white/85">
-                        Processo simples e rápido
-                      </span>
-                    </div>
+                        <span
+                          className="
+            text-[14px]
+            font-semibold
+            leading-6
+            text-white/90
+          "
+                        >
+                          {item}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
