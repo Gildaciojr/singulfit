@@ -677,7 +677,7 @@ export default function Hero({ data }: HeroProps) {
                 absolute
                 inset-x-0
                 top-0
-                h-[470px]
+                h-[500px]
                 overflow-hidden
                 rounded-[2.25rem]
                 border
@@ -692,14 +692,14 @@ export default function Hero({ data }: HeroProps) {
                 className="
                   pointer-events-none
                   absolute
-                  right-[-35px]
+                  right-[-12px]
                   top-[9px]
                   z-10
-                  h-[505px]
-                  w-[390px]
+                  w-[430px]
+                  h-[520px]
                   select-none
                   object-cover
-                  object-[57%_30%]
+                  object-[54%_22%]
                   min-[390px]:right-[-38px]
                   min-[390px]:w-[410px]
                 "
@@ -712,7 +712,7 @@ export default function Hero({ data }: HeroProps) {
                   inset-y-0
                   left-0
                   z-20
-                  w-[46%]
+                  w-[34%]
                   bg-gradient-to-r
                   from-white
                   via-white/72
@@ -751,11 +751,11 @@ export default function Hero({ data }: HeroProps) {
               className="
                 pointer-events-none
                 absolute
-                left-1/2
-                top-[170px]
+                left-[49%]
+                top-[205px]
                 z-40
-                w-[240px]
-                -translate-x-[60%]
+                w-[255px]
+                -translate-x-1/2
                 select-none
                 object-contain
                 drop-shadow-[0_54px_120px_rgba(15,23,42,.3)]
@@ -771,7 +771,7 @@ export default function Hero({ data }: HeroProps) {
               className="
                 absolute
                 inset-x-1
-                top-[540px]
+                top-[505px]
                 z-30
                 overflow-hidden
                 rounded-[1.65rem]
