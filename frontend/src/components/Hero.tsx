@@ -7,7 +7,6 @@ import heroAthlete from "@/assets/images/hero-athlete.png";
 import {
   ArrowRight,
   BarChart3,
-  CheckCircle2,
   MessageCircle,
   Play,
   Shield,
@@ -518,367 +517,397 @@ export default function Hero({ data }: HeroProps) {
           animate="visible"
           variants={visualIn}
           className="
-    relative
-    mt-3
-    overflow-hidden
-    lg:hidden
-  "
+            relative
+            mx-auto
+            mt-8
+            w-full
+            max-w-[430px]
+            lg:hidden
+          "
         >
+          <motion.div
+            variants={fadeUp}
+            className="
+              flex
+              flex-col
+              gap-3
+              px-1
+            "
+          >
+            <Button
+              size="lg"
+              className="group h-14 w-full rounded-2xl bg-gradient-to-r from-emerald-900 via-emerald-800 to-emerald-900 px-6 text-[15px] font-bold text-white shadow-[0_22px_55px_-22px_rgba(6,78,59,.48)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_28px_60px_-18px_rgba(6,78,59,.55)]"
+              onClick={() => window.location.assign(data.cta.link)}
+            >
+              <MessageCircle className="h-5 w-5" />
+              {data.cta.label}
+              <ArrowRight className="h-5 w-5 transition-transform duration-300 group-hover:translate-x-1" />
+            </Button>
+
+            <Button
+              variant="outline"
+              size="lg"
+              className="h-14 w-full rounded-2xl border-emerald-900/10 bg-white/75 px-6 text-[15px] font-bold text-emerald-950 shadow-[0_14px_38px_-28px_rgba(15,23,42,.24)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-0.5 hover:bg-white"
+              onClick={() =>
+                document
+                  .getElementById("how-it-works")
+                  ?.scrollIntoView({ behavior: "smooth" })
+              }
+            >
+              <Play className="h-4 w-4" />
+              Ver como funciona
+            </Button>
+          </motion.div>
+
+          <motion.div
+            variants={fadeUp}
+            className="
+              mt-5
+              grid
+              grid-cols-2
+              gap-3
+              px-1
+            "
+          >
+            {benefitItems.map((item) => {
+              const Icon = item.icon;
+
+              return (
+                <div
+                  key={item.title}
+                  className="
+                    flex
+                    min-h-[72px]
+                    items-center
+                    gap-3
+                    rounded-[1.25rem]
+                    border
+                    border-white/80
+                    bg-white/72
+                    px-3.5
+                    py-3
+                    shadow-[0_18px_42px_-34px_rgba(15,23,42,.28)]
+                    backdrop-blur-2xl
+                  "
+                >
+                  <div
+                    className="
+                      flex
+                      h-10
+                      w-10
+                      shrink-0
+                      items-center
+                      justify-center
+                      rounded-2xl
+                      bg-emerald-50
+                      text-emerald-800
+                    "
+                  >
+                    <Icon className="h-5 w-5" />
+                  </div>
+
+                  <span
+                    className="
+                      text-[12px]
+                      font-extrabold
+                      leading-[1.2]
+                      tracking-[-0.02em]
+                      text-emerald-950
+                    "
+                  >
+                    {item.title}
+                  </span>
+                </div>
+              );
+            })}
+          </motion.div>
+
           <div
             className="
-      relative
-      mx-auto
-      w-full
-      max-w-[430px]
-    "
+              relative
+              mt-6
+              min-h-[760px]
+              overflow-visible
+              px-1
+            "
           >
-            {/* Background Glow */}
-
             <div
               className="
-    absolute
-    inset-x-0
-    top-2
-    flex
-    justify-center
-    pointer-events-none
-  "
-            >
-              <div
-                className="
-      h-[420px]
-      w-[420px]
-      rounded-full
-      bg-emerald-100/55
-      blur-[135px]
-    "
-              />
-            </div>
-
-            <div
-              className="
-    absolute
-    right-[-90px]
-    top-[45px]
-    h-[250px]
-    w-[250px]
-    rounded-full
-    bg-emerald-300/20
-    blur-[115px]
-  "
+                pointer-events-none
+                absolute
+                inset-x-[-44px]
+                top-[-28px]
+                h-[430px]
+                rounded-full
+                bg-emerald-100/70
+                blur-[120px]
+              "
             />
 
             <div
               className="
-    absolute
-    left-[-80px]
-    bottom-[25px]
-    h-[230px]
-    w-[230px]
-    rounded-full
-    bg-white/85
-    blur-[95px]
-  "
+                pointer-events-none
+                absolute
+                right-[-86px]
+                top-[42px]
+                h-[310px]
+                w-[310px]
+                rounded-full
+                bg-emerald-300/20
+                blur-[90px]
+              "
             />
-
-            {/* Atleta */}
 
             <div
               className="
-    relative
-    mx-auto
-    h-[420px]
-    w-full
-    overflow-hidden
-    rounded-[2.8rem]
-    bg-gradient-to-br
-    from-[#fcfcfd]
-    via-[#f8fafb]
-    to-[#eef8f4]
-  "
+                pointer-events-none
+                absolute
+                left-[-72px]
+                top-[330px]
+                h-[260px]
+                w-[260px]
+                rounded-full
+                bg-white/90
+                blur-[82px]
+              "
+            />
+
+            <div
+              className="
+                absolute
+                inset-x-0
+                top-0
+                h-[470px]
+                overflow-hidden
+                rounded-[2.25rem]
+                border
+                border-white/80
+                bg-[radial-gradient(circle_at_76%_26%,rgba(16,185,129,0.18),transparent_28%),linear-gradient(135deg,#ffffff_0%,#f7faf9_44%,#eaf7f2_100%)]
+                shadow-[0_34px_90px_-52px_rgba(15,23,42,.3)]
+              "
             >
               <img
                 src={heroAthlete}
                 alt="Pessoa utilizando SingulFit"
                 className="
-      absolute
-      right-[-48px]
-      bottom-0
-      h-full
-      w-[95%]
-      object-cover
-      object-[54%_center]
-      pointer-events-none
-      select-none
-    "
+                  pointer-events-none
+                  absolute
+                  right-[-82px]
+                  top-[8px]
+                  z-10
+                  h-[505px]
+                  w-[390px]
+                  select-none
+                  object-cover
+                  object-[57%_30%]
+                  min-[390px]:right-[-58px]
+                  min-[390px]:w-[410px]
+                "
               />
-
-              {/* Fade inferior */}
 
               <div
                 className="
-      absolute
-      inset-x-0
-      bottom-0
-      h-44
-      bg-gradient-to-t
-      from-[#f8f9fc]
-      via-[#f8f9fc]/25
-      to-transparent
-    "
+                  pointer-events-none
+                  absolute
+                  inset-y-0
+                  left-0
+                  z-20
+                  w-[46%]
+                  bg-gradient-to-r
+                  from-white
+                  via-white/72
+                  to-transparent
+                "
               />
-
-              {/* Fade lateral */}
 
               <div
                 className="
-      absolute
-      inset-y-0
-      left-0
-      w-40
-      bg-gradient-to-r
-      from-[#f8f9fc]
-      via-[#f8f9fc]/15
-      to-transparent
-    "
+                  pointer-events-none
+                  absolute
+                  inset-x-0
+                  bottom-0
+                  z-20
+                  h-44
+                  bg-gradient-to-t
+                  from-[#f7f8fc]
+                  via-[#f7f8fc]/58
+                  to-transparent
+                "
               />
             </div>
 
-            {/* Mockup */}
-
             <motion.img
               src={mockupPhone}
-              alt="WhatsApp"
+              alt="Demonstração do SingulFit no WhatsApp"
               animate={{
-                y: [0, -8, 0],
-                rotate: [0, 0.25, 0],
+                y: [0, -7, 0],
+                rotate: [0, 0.2, 0],
               }}
               transition={{
-                duration: 8,
+                duration: 7.5,
                 repeat: Infinity,
                 ease: "easeInOut",
               }}
               className="
-    absolute
-    right-[-42px]
-    top-[18px]
-    w-[305px]
-    z-20
-    pointer-events-none
-    select-none
-    drop-shadow-[0_70px_150px_rgba(15,23,42,.32)]
-  "
+                pointer-events-none
+                absolute
+                left-1/2
+                top-[220px]
+                z-40
+                w-[214px]
+                -translate-x-1/2
+                select-none
+                object-contain
+                drop-shadow-[0_54px_120px_rgba(15,23,42,.3)]
+                min-[390px]:top-[210px]
+                min-[390px]:w-[232px]
+              "
             />
-          </div>
 
-          {/* Floating Cards */}
-
-          <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{
-              delay: 0.35,
-              duration: 0.55,
-            }}
-            className="
-    relative
-    z-30
-    -mt-32
-    flex
-    w-full
-    max-w-[390px]
-    mx-auto
-    px-2
-    flex-col
-    gap-4
-  "
-          >
-            <div
+            <motion.div
+              initial={{ opacity: 0, x: -18, y: 14 }}
+              animate={{ opacity: 1, x: 0, y: 0 }}
+              transition={{ delay: 0.38, duration: 0.55 }}
               className="
-      ml-3
-      w-[90%]
-      rounded-[1.55rem]
-      border
-      border-white/80
-      bg-white/88
-      px-4
-      py-3
-      backdrop-blur-2xl
-      shadow-[0_32px_70px_-34px_rgba(15,23,42,.26)]
-    "
+                absolute
+                left-1
+                top-[356px]
+                z-50
+                w-[158px]
+                rounded-[1.45rem]
+                border
+                border-white/80
+                bg-white/88
+                p-3.5
+                shadow-[0_28px_70px_-36px_rgba(15,23,42,.28)]
+                backdrop-blur-2xl
+                min-[390px]:left-3
+                min-[390px]:w-[170px]
+              "
             >
-              <div
-                className="
-        flex
-        items-center
-        gap-4
-      "
-              >
-                <div
-                  className="
-          flex
-          h-10
-          w-10
-          shrink-0
-          items-center
-          justify-center
-          rounded-2xl
-          bg-emerald-50
-          text-emerald-700
-        "
-                >
-                  <Sparkles className="h-5 w-5" />
-                </div>
-
-                <div className="min-w-0">
-                  <div
-                    className="
-      text-[16px]
-      font-semibold
-      tracking-[-0.035em]
-      leading-tight
-      text-zinc-900
-    "
-                  >
-                    IA entende seu contexto
-                  </div>
-
-                  <div
-                    className="
-      mt-2
-      text-[14px]
-      leading-[1.45]
-      text-zinc-500
-    "
-                  >
-                    Recomendações personalizadas em tempo real.
-                  </div>
-                </div>
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-800">
+                <Sparkles className="h-5 w-5" />
               </div>
-            </div>
 
-            <div
+              <h3 className="mt-3 text-[13px] font-black leading-tight tracking-[-0.025em] text-zinc-950">
+                IA no seu ritmo
+              </h3>
+
+              <p className="mt-1.5 text-[11px] leading-5 text-zinc-600">
+                Orientações personalizadas para sua rotina.
+              </p>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, x: 18, y: 14 }}
+              animate={{ opacity: 1, x: 0, y: 0 }}
+              transition={{ delay: 0.48, duration: 0.55 }}
               className="
-    mr-2
-    w-[90%]
-    self-end
-    rounded-[1.55rem]
-    border
-    border-white/80
-    bg-white/82
-    px-4
-    py-3
-    backdrop-blur-2xl
-    shadow-[0_32px_70px_-34px_rgba(15,23,42,.26)]
-  "
+                absolute
+                right-1
+                top-[356px]
+                z-50
+                w-[158px]
+                rounded-[1.45rem]
+                border
+                border-white/80
+                bg-white/88
+                p-3.5
+                shadow-[0_28px_70px_-36px_rgba(15,23,42,.28)]
+                backdrop-blur-2xl
+                min-[390px]:right-3
+                min-[390px]:w-[170px]
+              "
             >
-              <div
-                className="
-      flex
-      items-center
-      gap-4
-    "
-              >
-                <div
-                  className="
-        flex
-        h-10
-        w-10
-        shrink-0
-        items-center
-        justify-center
-        rounded-2xl
-        bg-emerald-50
-        text-emerald-700
-      "
-                >
-                  <CheckCircle2 className="h-5 w-5" />
-                </div>
-
-                <div className="min-w-0">
-                  <div
-                    className="
-          text-[16px]
-          font-semibold
-          tracking-[-0.035em]
-          leading-tight
-          text-zinc-900
-        "
-                  >
-                    Tudo pelo WhatsApp
-                  </div>
-
-                  <div
-                    className="
-          mt-2
-          text-[14px]
-          leading-[1.45]
-          text-zinc-500
-        "
-                  >
-                    Sem instalar aplicativos ou aprender outra plataforma.
-                  </div>
-                </div>
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-800">
+                <MessageCircle className="h-5 w-5" />
               </div>
-            </div>
-          </motion.div>
 
-          <div className="mx-auto -mt-6 w-full max-w-[390px] lg:hidden">
-            <div
+              <h3 className="mt-3 text-[13px] font-black leading-tight tracking-[-0.025em] text-zinc-950">
+                WhatsApp como guia
+              </h3>
+
+              <p className="mt-1.5 text-[11px] leading-5 text-zinc-600">
+                Converse, fotografe e receba respostas claras.
+              </p>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.58, duration: 0.6 }}
               className="
-      overflow-hidden
-      rounded-[1.75rem]
-      border
-      border-white/75
-      bg-white/88
-      backdrop-blur-2xl
-      shadow-[0_30px_70px_-36px_rgba(15,23,42,.18)]
-    "
+                absolute
+                inset-x-1
+                top-[540px]
+                z-30
+                overflow-hidden
+                rounded-[1.65rem]
+                border
+                border-white/75
+                bg-white/90
+                shadow-[0_30px_78px_-44px_rgba(15,23,42,.3)]
+                backdrop-blur-2xl
+              "
             >
-              {data.metrics.map((metric, index) => (
-                <div
-                  key={metric.label}
-                  className={`
-          flex
-          items-center
-          justify-between
-          px-6
-          py-4
-          transition-colors
-          duration-300
-          hover:bg-emerald-50/40
-          ${index !== data.metrics.length - 1 ? "border-b border-zinc-100" : ""}
-        `}
-                >
-                  <div className="min-w-0">
-                    <div
-                      className="
-              text-[13px]
-              font-medium
-              tracking-[-0.02em]
-              text-zinc-500
-            "
-                    >
+              <div className="grid grid-cols-1">
+                {data.metrics.map((metric, index) => (
+                  <div
+                    key={metric.label}
+                    className={`
+                      flex
+                      items-center
+                      justify-between
+                      px-5
+                      py-4
+                      ${index !== data.metrics.length - 1 ? "border-b border-zinc-100" : ""}
+                    `}
+                  >
+                    <span className="text-[12px] font-semibold tracking-[-0.01em] text-zinc-500">
                       {metric.label}
-                    </div>
-                  </div>
+                    </span>
 
-                  <div
-                    className="
-            text-[22px]
-            font-black
-            tracking-[-0.05em]
-            text-emerald-900
-          "
-                  >
-                    {metric.value}
+                    <span className="text-[21px] font-black tracking-[-0.045em] text-emerald-900">
+                      {metric.value}
+                    </span>
                   </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-3 border-t border-white/10 bg-gradient-to-r from-emerald-950 via-emerald-900 to-emerald-950 text-white">
+                <div className="flex min-h-[84px] flex-col justify-center gap-1 px-3.5">
+                  <MessageCircle className="h-5 w-5 text-emerald-200" />
+                  <span className="text-[13px] font-black leading-tight">
+                    +4.500
+                  </span>
+                  <span className="text-[10px] leading-tight text-white/68">
+                    pessoas
+                  </span>
                 </div>
-              ))}
-            </div>
+
+                <div className="flex min-h-[84px] flex-col justify-center gap-1 border-x border-white/10 px-3.5">
+                  <Target className="h-5 w-5 text-emerald-200" />
+                  <span className="text-[12px] font-black leading-tight">
+                    Resultados reais
+                  </span>
+                  <span className="text-[10px] leading-tight text-white/68">
+                    mais consistência
+                  </span>
+                </div>
+
+                <div className="flex min-h-[84px] flex-col justify-center gap-1 px-3.5">
+                  <Shield className="h-5 w-5 text-emerald-200" />
+                  <span className="text-[12px] font-black leading-tight">
+                    Privacidade
+                  </span>
+                  <span className="text-[10px] leading-tight text-white/68">
+                    dados protegidos
+                  </span>
+                </div>
+              </div>
+            </motion.div>
           </div>
         </motion.div>
-
         <motion.div
           initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
