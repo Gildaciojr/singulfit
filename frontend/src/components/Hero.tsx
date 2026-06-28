@@ -350,12 +350,12 @@ export default function Hero({ data }: HeroProps) {
       w-[175px]
       rounded-[1.35rem]
       border
-      border-white/15
+      border-white/60
       bg-zinc-950/88
       p-2.5
       text-white
       shadow-[0_30px_70px_-32px_rgba(0,0,0,.62)]
-      backdrop-blur-2xl
+      backdrop-blur-xl
     "
             >
               <div className="flex items-center justify-between gap-3">
@@ -489,11 +489,247 @@ export default function Hero({ data }: HeroProps) {
           </motion.div>
         </div>
 
+        {/* HERO MOBILE */}
+
+        <motion.div
+          initial="hidden"
+          animate="visible"
+          variants={visualIn}
+          className="
+    relative
+    mt-8
+    flex
+    flex-col
+    items-center
+    lg:hidden
+  "
+        >
+          <div className="relative mx-auto w-full max-w-[390px]">
+            {/* Glow */}
+
+            <div
+              className="
+      absolute
+      left-1/2
+      top-10
+      h-[260px]
+      w-[260px]
+      -translate-x-1/2
+      rounded-full
+      bg-emerald-100/70
+      blur-[55px]
+    "
+            />
+
+            {/* Atleta */}
+
+            <div
+              className="
+      relative
+      mx-auto
+      h-[420px]
+      w-full
+      overflow-hidden
+      rounded-[2.6rem]
+    "
+            >
+              <img
+                src={heroAthlete}
+                alt="Pessoa utilizando SingulFit"
+                className="
+        h-full
+        w-full
+        object-cover
+        object-center
+      "
+              />
+
+              <div
+                className="
+        absolute
+        inset-0
+        bg-gradient-to-t
+        from-[#f7f8fc]
+        via-transparent
+        to-transparent
+      "
+              />
+            </div>
+
+            {/* Mockup */}
+
+            <motion.img
+              src={mockupPhone}
+              alt="WhatsApp"
+              animate={{ y: [0, -8, 0] }}
+              transition={{
+                duration: 7,
+                repeat: Infinity,
+                ease: "easeInOut",
+              }}
+              className="
+      absolute
+      left-1/2
+      top-[68px]
+      w-[205px]
+      -translate-x-1/2
+      drop-shadow-[0_35px_70px_rgba(15,23,42,.28)]
+    "
+            />
+          </div>
+          <motion.div
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.35, duration: 0.55 }}
+            className="
+    mt-7
+    flex
+    w-full
+    max-w-[360px]
+    mx-auto
+    flex-col
+    gap-3
+  "
+          >
+            <div
+              className="
+      flex
+      items-center
+      gap-3
+      rounded-2xl
+      border
+      border-white/70
+      bg-white/85
+      px-4
+      py-3
+      backdrop-blur-xl
+      shadow-[0_40px_90px_-35px_rgba(15,23,42,.28)]
+    "
+            >
+              <div
+                className="
+        flex
+        h-10
+        w-10
+        shrink-0
+        items-center
+        justify-center
+        rounded-full
+        bg-emerald-50
+        text-emerald-700
+      "
+              >
+                <Sparkles className="h-5 w-5" />
+              </div>
+
+              <div>
+                <div className="text-sm font-bold text-zinc-900">
+                  IA entende seu contexto
+                </div>
+
+                <div className="text-xs text-zinc-500">
+                  Recomendações personalizadas em tempo real.
+                </div>
+              </div>
+            </div>
+
+            <div
+              className="
+      flex
+      items-center
+      gap-3
+      rounded-2xl
+      border
+      border-white/70
+      bg-white/85
+      px-4
+      py-3
+      backdrop-blur-xl
+      shadow-[0_18px_45px_-28px_rgba(15,23,42,.16)]
+    "
+            >
+              <div
+                className="
+        flex
+        h-10
+        w-10
+        shrink-0
+        items-center
+        justify-center
+        rounded-full
+        bg-emerald-50
+        text-emerald-700
+      "
+              >
+                <CheckCircle2 className="h-5 w-5" />
+              </div>
+
+              <div>
+                <div className="text-sm font-bold text-zinc-900">
+                  Tudo pelo WhatsApp
+                </div>
+
+                <div className="text-xs text-zinc-500">
+                  Sem instalar aplicativos ou aprender outra plataforma.
+                </div>
+              </div>
+            </div>
+          </motion.div>
+          <div className="mx-auto mt-6 w-full max-w-[360px] lg:hidden">
+            <div
+              className="
+      overflow-hidden
+      rounded-[1.8rem]
+      border
+      border-zinc-200/70
+      bg-white/85
+      backdrop-blur-xl
+      shadow-[0_24px_60px_-36px_rgba(15,23,42,.16)]
+    "
+            >
+              {data.metrics.map((metric, index) => (
+                <div
+                  key={metric.label}
+                  className={`
+          flex
+          items-center
+          justify-between
+          px-5
+          py-4
+          ${index !== data.metrics.length - 1 ? "border-b border-zinc-100" : ""}
+        `}
+                >
+                  <span
+                    className="
+            text-[13px]
+            font-medium
+            text-zinc-500
+          "
+                  >
+                    {metric.label}
+                  </span>
+
+                  <span
+                    className="
+            text-[22px]
+            font-black
+            tracking-[-0.04em]
+            text-emerald-900
+          "
+                  >
+                    {metric.value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </motion.div>
+
         <motion.div
           initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.55, duration: 0.6 }}
-          className="mt-8 overflow-hidden rounded-[1.6rem] border border-emerald-950/10 bg-gradient-to-r from-zinc-950/95 via-[#08261f]/95 to-zinc-950/95 p-5 py-4 text-white shadow-[0_28px_70px_-48px_rgba(15,23,42,.45)] lg:px-6 lg:py-4"
+          className="hidden lg:block mt-6 overflow-hidden rounded-[1.6rem] border border-emerald-950/10 bg-gradient-to-r from-zinc-950/95 via-[#08261f]/95 to-zinc-950/95 p-5 py-4 text-white shadow-[0_28px_70px_-48px_rgba(15,23,42,.45)] lg:px-6 lg:py-4"
         >
           <div className="grid grid-cols-1 items-center gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:gap-5">
             <div className="flex items-center gap-3 lg:border-r lg:border-white/10 lg:pr-5">
