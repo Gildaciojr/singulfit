@@ -519,55 +519,59 @@ export default function Hero({ data }: HeroProps) {
           variants={visualIn}
           className="
     relative
-    mt-5
-    flex
-    flex-col
-    items-center
+    mt-3
+    overflow-hidden
     lg:hidden
   "
         >
-          <div className="relative mx-auto w-full max-w-[335px]">
-            {/* Glow */}
+          <div
+            className="
+      relative
+      mx-auto
+      w-full
+      max-w-[390px]
+      px-4
+    "
+          >
+            {/* Background Glow */}
 
             <div
               className="
     absolute
     left-1/2
-    top-0
-    h-[360px]
-    w-[360px]
+    top-6
+    h-[420px]
+    w-[420px]
     -translate-x-1/2
     rounded-full
-    bg-emerald-200/35
-    blur-[95px]
+    bg-emerald-100/60
+    blur-[120px]
   "
             />
 
             <div
               className="
     absolute
-    left-1/2
-    top-16
-    h-[250px]
-    w-[250px]
-    -translate-x-1/2
+    right-[-70px]
+    top-[60px]
+    h-[240px]
+    w-[240px]
     rounded-full
-    bg-white/40
-    blur-[70px]
+    bg-emerald-300/25
+    blur-[100px]
   "
             />
 
             <div
               className="
     absolute
-    bottom-4
-    left-1/2
-    h-[180px]
-    w-[260px]
-    -translate-x-1/2
+    left-[-60px]
+    bottom-[40px]
+    h-[220px]
+    w-[220px]
     rounded-full
-    bg-emerald-300/20
-    blur-[80px]
+    bg-white/70
+    blur-[90px]
   "
             />
 
@@ -575,35 +579,62 @@ export default function Hero({ data }: HeroProps) {
 
             <div
               className="
-      relative
-      mx-auto
-      h-[355px]
-      sm:h-[380px]
-      w-full
-      overflow-hidden
-      rounded-[2.8rem]
-    "
+    relative
+    mx-auto
+    h-[350px]
+    w-full
+    overflow-hidden
+    rounded-[2.6rem]
+    bg-gradient-to-br
+    from-[#fbfbfd]
+    via-[#f8fafb]
+    to-[#eef8f4]
+  "
             >
               <img
                 src={heroAthlete}
                 alt="Pessoa utilizando SingulFit"
                 className="
-        h-full
-        w-full
-        object-cover
-        object-[48%_center]
-      "
+      absolute
+      right-[-18px]
+      top-0
+      h-full
+      w-[90%]
+      object-cover
+      object-[52%_center]
+      select-none
+      pointer-events-none
+    "
               />
+
+              {/* Fade inferior */}
 
               <div
                 className="
-        absolute
-        inset-0
-        bg-gradient-to-t
-        from-[#f7f8fc]
-        via-[#f7f8fc]/30
-        to-transparent
-      "
+      absolute
+      inset-x-0
+      bottom-0
+      h-36
+      bg-gradient-to-t
+      from-[#f8f9fc]
+      via-[#f8f9fc]/55
+      to-transparent
+    "
+              />
+
+              {/* Fade lateral */}
+
+              <div
+                className="
+      absolute
+      inset-y-0
+      left-0
+      w-24
+      bg-gradient-to-r
+      from-[#f8f9fc]
+      via-[#f8f9fc]/35
+      to-transparent
+    "
               />
             </div>
 
@@ -613,8 +644,8 @@ export default function Hero({ data }: HeroProps) {
               src={mockupPhone}
               alt="WhatsApp"
               animate={{
-                y: [0, -10, 0],
-                rotate: [0, 0.4, 0],
+                y: [0, -8, 0],
+                rotate: [0, 0.35, 0],
               }}
               transition={{
                 duration: 8,
@@ -622,88 +653,128 @@ export default function Hero({ data }: HeroProps) {
                 ease: "easeInOut",
               }}
               className="
-      absolute
-      left-1/2
-      top-[22px]
-      w-[252px]
-      -translate-x-1/2
-      drop-shadow-[0_55px_120px_rgba(15,23,42,.32)]
-    "
+    absolute
+    right-[-8px]
+    top-[8px]
+    w-[290px]
+    drop-shadow-[0_65px_130px_rgba(15,23,42,.34)]
+    pointer-events-none
+    select-none
+    z-20
+  "
             />
           </div>
+
+          {/* Floating Cards */}
+
           <motion.div
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.35, duration: 0.55 }}
+            transition={{
+              delay: 0.35,
+              duration: 0.55,
+            }}
             className="
-    -mt-12
+    relative
+    z-30
+    -mt-32
     flex
     w-full
-    max-w-[345px]
+    max-w-[390px]
     mx-auto
+    px-2
     flex-col
-    gap-3
+    gap-4
   "
           >
             <div
               className="
-      flex
-      items-center
-      gap-4
-      rounded-[1.4rem]
+      ml-3
+      w-[88%]
+      rounded-[1.55rem]
       border
-      border-white/70
-      bg-white/85
-      px-5
-      py-4
-      backdrop-blur-xl
-      shadow-[0_24px_55px_-28px_rgba(15,23,42,.20)]
+      border-white/80
+      bg-white/88
+      px-4.5
+      py-3.5
+      backdrop-blur-2xl
+      shadow-[0_32px_70px_-34px_rgba(15,23,42,.26)]
     "
             >
               <div
                 className="
         flex
-        h-10
-        w-10
-        shrink-0
         items-center
-        justify-center
-        rounded-2xl
-        bg-emerald-50
-        text-emerald-700
+        gap-4
       "
               >
-                <Sparkles className="h-5 w-5" />
-              </div>
-
-              <div>
-                <div className="text-[14px] font-semibold tracking-[-0.02em] text-zinc-900">
-                  IA entende seu contexto
+                <div
+                  className="
+          flex
+          h-10
+          w-10
+          shrink-0
+          items-center
+          justify-center
+          rounded-2xl
+          bg-emerald-50
+          text-emerald-700
+        "
+                >
+                  <Sparkles className="h-5 w-5" />
                 </div>
 
-                <div className="text-[13px] leading-5 text-zinc-500">
-                  Recomendações personalizadas em tempo real.
+                <div className="min-w-0">
+                  <div
+                    className="
+      text-[16px]
+      font-semibold
+      tracking-[-0.035em]
+      leading-tight
+      text-zinc-900
+    "
+                  >
+                    IA entende seu contexto
+                  </div>
+
+                  <div
+                    className="
+      mt-2
+      text-[14px]
+      leading-[1.45]
+      text-zinc-500
+    "
+                  >
+                    Recomendações personalizadas em tempo real.
+                  </div>
                 </div>
               </div>
             </div>
 
             <div
               className="
-      flex
-      items-center
-      gap-4
-      rounded-[1.4rem]
-      border
-      border-white/70
-      bg-white/85
-      px-5
-      py-[16px]
-      backdrop-blur-xl
-      shadow-[0_24px_55px_-28px_rgba(15,23,42,.20)]
-    "
+    mr-2
+    w-[92%]
+    self-end
+    rounded-[1.55rem]
+    border
+    border-white/80
+    bg-white/82
+    px-4.5
+    py-3.5
+    backdrop-blur-2xl
+    shadow-[0_32px_70px_-34px_rgba(15,23,42,.26)]
+  "
             >
               <div
                 className="
+      flex
+      items-center
+      gap-4
+    "
+              >
+                <div
+                  className="
         flex
         h-10
         w-10
@@ -714,68 +785,88 @@ export default function Hero({ data }: HeroProps) {
         bg-emerald-50
         text-emerald-700
       "
-              >
-                <CheckCircle2 className="h-5 w-5" />
-              </div>
-
-              <div>
-                <div className="text-[13px] font-semibold tracking-[-0.02em] text-zinc-900">
-                  Tudo pelo WhatsApp
+                >
+                  <CheckCircle2 className="h-5 w-5" />
                 </div>
 
-                <div className="text-[12px] leading-5 text-zinc-500">
-                  Sem instalar aplicativos ou aprender outra plataforma.
+                <div className="min-w-0">
+                  <div
+                    className="
+          text-[16px]
+          font-semibold
+          tracking-[-0.035em]
+          leading-tight
+          text-zinc-900
+        "
+                  >
+                    Tudo pelo WhatsApp
+                  </div>
+
+                  <div
+                    className="
+          mt-2
+          text-[14px]
+          leading-[1.45]
+          text-zinc-500
+        "
+                  >
+                    Sem instalar aplicativos ou aprender outra plataforma.
+                  </div>
                 </div>
               </div>
             </div>
           </motion.div>
 
-          <div className="mx-auto mt-5 w-full max-w-[345px] lg:hidden">
+          <div className="mx-auto -mt-6 w-full max-w-[350px] lg:hidden">
             <div
               className="
       overflow-hidden
-      divide-y
-      divide-zinc-100
-      rounded-[1.5rem]
+      rounded-[1.75rem]
       border
-      border-zinc-200/70
-      bg-white/85
-      backdrop-blur-xl
-      shadow-[0_22px_55px_-34px_rgba(15,23,42,.15)]
+      border-white/75
+      bg-white/88
+      backdrop-blur-2xl
+      shadow-[0_30px_70px_-36px_rgba(15,23,42,.18)]
     "
             >
-              {data.metrics.map((metric) => (
+              {data.metrics.map((metric, index) => (
                 <div
                   key={metric.label}
-                  className="
+                  className={`
           flex
           items-center
           justify-between
-          px-5
-          py-3
-        "
+          px-6
+          py-4
+          transition-colors
+          duration-300
+          hover:bg-emerald-50/40
+          ${index !== data.metrics.length - 1 ? "border-b border-zinc-100" : ""}
+        `}
                 >
-                  <span
-                    className="
-            text-[12px]
-            font-medium
-            tracking-[-0.01em]
-            text-zinc-500
-          "
-                  >
-                    {metric.label}
-                  </span>
+                  <div className="min-w-0">
+                    <div
+                      className="
+              text-[13px]
+              font-medium
+              tracking-[-0.02em]
+              text-zinc-500
+            "
+                    >
+                      {metric.label}
+                    </div>
+                  </div>
 
-                  <span
+                  <div
                     className="
-            text-[20px]
+            text-[22px]
             font-black
-            tracking-[-0.04em]
+            tracking-[-0.05em]
             text-emerald-900
           "
                   >
                     {metric.value}
-                  </span>
+                  </div>
                 </div>
               ))}
             </div>
