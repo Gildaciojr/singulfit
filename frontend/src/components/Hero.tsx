@@ -626,7 +626,7 @@ export default function Hero({ data }: HeroProps) {
             className="
               relative
               mt-6
-              min-h-[790px]
+              min-h-[860px]
               overflow-visible
               px-1
             "
@@ -677,7 +677,7 @@ export default function Hero({ data }: HeroProps) {
                 absolute
                 inset-x-0
                 top-0
-                h-[560px]
+                h-[480px]
                 overflow-hidden
                 rounded-[2.25rem]
                 border
@@ -692,16 +692,16 @@ export default function Hero({ data }: HeroProps) {
                 className="
                   pointer-events-none
                   absolute
-                  right-[-8px]
+                  right-[-34px]
                   top-0
                   z-10
-                  w-[560px]
-                  h-[520px]
+                  w-[470px]
+                  h-[480px]
                   select-none
                   object-cover
-                  object-[50%_18%]
+                  object-[56%_18%]
                   min-[390px]:right-[-18px]
-                  min-[390px]:w-[500px]
+                  min-[390px]:w-[440px]
                 "
               />
 
@@ -712,7 +712,7 @@ export default function Hero({ data }: HeroProps) {
                   inset-y-0
                   left-0
                   z-20
-                  w-[10%]
+                  w-[6%]
                   bg-gradient-to-r
                   from-white
                   via-white/35
@@ -751,17 +751,17 @@ export default function Hero({ data }: HeroProps) {
               className="
                 pointer-events-none
                 absolute
-                left-[50%]
-                top-[255px]
+                left-[51%]
+                top-[320px]
                 z-40
-                w-[270px]
+                w-[248px]
                 -translate-x-1/2
                 select-none
                 object-contain
                 drop-shadow-[0_72px_150px_rgba(15,23,42,.34)]
                 min-[390px]:left-[50%]
-                min-[390px]:top-[245px]
-                min-[390px]:w-[255px]
+                min-[390px]:top-[300px]
+                min-[390px]:w-[240px]
               "
             />
 
@@ -772,7 +772,7 @@ export default function Hero({ data }: HeroProps) {
               className="
                 absolute
                 inset-x-1
-                top-[550px]
+                top-[585px]
                 z-30
                 overflow-hidden
                 rounded-[1.65rem]
