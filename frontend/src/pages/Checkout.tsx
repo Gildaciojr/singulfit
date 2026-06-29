@@ -50,7 +50,7 @@ import {
   saveCheckoutSession,
 } from "@/lib/checkout-storage";
 import { useCheckoutStatus } from "@/hooks/useCheckoutStatus";
-import singulfitLogo from "@/assets/images/singulfit-logo.webp";
+import singulfitLogo from "@/assets/images/singulfit-logo.png";
 
 type RegisterFormState = {
   firstName: string;

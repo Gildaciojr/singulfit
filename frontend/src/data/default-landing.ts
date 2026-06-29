@@ -1,6 +1,6 @@
 import { LandingData } from "@/engine/landing.types";
 import { checkoutPath, COMMERCIAL_PLANS } from "@/lib/commercial-plans";
-import singulfitLogo from "@/assets/images/singulfit-logo.webp";
+import singulfitLogo from "@/assets/images/singulfit-logo.png";
 
 import { Shield } from "lucide-react";
 
