@@ -626,7 +626,7 @@ export default function Hero({ data }: HeroProps) {
             className="
               relative
               mt-6
-              min-h-[860px]
+              min-h-[950px]
               overflow-visible
               px-1
             "
@@ -752,16 +752,15 @@ export default function Hero({ data }: HeroProps) {
                 pointer-events-none
                 absolute
                 left-[50%]
-                top-[250px]
+                top-[390px]
                 z-40
-                w-[270px]
+                w-[210px]
                 -translate-x-1/2
                 select-none
                 object-contain
-                drop-shadow-[0_72px_150px_rgba(15,23,42,.34)]
-                min-[390px]:left-[50%]
-                min-[390px]:top-[300px]
-                min-[390px]:w-[240px]
+                drop-shadow-[0_52px_110px_rgba(15,23,42,.28)]
+                min-[390px]:top-[390px]
+                min-[390px]:w-[218px]
               "
             />
 
@@ -772,7 +771,7 @@ export default function Hero({ data }: HeroProps) {
               className="
                 absolute
                 inset-x-1
-                top-[585px]
+                top-[675px]
                 z-30
                 overflow-hidden
                 rounded-[1.65rem]
