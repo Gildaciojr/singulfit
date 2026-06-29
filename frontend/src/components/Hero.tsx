@@ -521,7 +521,7 @@ export default function Hero({ data }: HeroProps) {
             mx-auto
             mt-8
             w-full
-            max-w-[430px]
+            max-w-[470px]
             lg:hidden
           "
         >
@@ -695,11 +695,11 @@ export default function Hero({ data }: HeroProps) {
                   right-[-34px]
                   top-0
                   z-10
-                  w-[470px]
+                  w-[400px]
                   h-[480px]
                   select-none
                   object-cover
-                  object-[56%_18%]
+                  object-[50%_18%]
                   min-[390px]:right-[-18px]
                   min-[390px]:w-[440px]
                 "
@@ -751,10 +751,10 @@ export default function Hero({ data }: HeroProps) {
               className="
                 pointer-events-none
                 absolute
-                left-[51%]
-                top-[320px]
+                left-[50%]
+                top-[250px]
                 z-40
-                w-[248px]
+                w-[270px]
                 -translate-x-1/2
                 select-none
                 object-contain
