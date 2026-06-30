@@ -189,19 +189,19 @@ export class PagBankWebhookService {
     receivedHeaders: PagBankWebhookHeaders['receivedHeaders'],
   ): void {
     const secret = this.configService
-      .get<string>('PAGBANK_WEBHOOK_SECRET')
+      .get<string>('PAGBANK_TOKEN')
       ?.trim();
 
     if (!secret) {
       this.logAuthenticationDiagnostic({
-        condition: 'missing_pagbank_webhook_secret',
+        condition: 'missing_pagbank_token',
         rawBody,
         receivedHeaders,
         secretLoaded: false,
         xAuthenticityToken: authenticityToken,
       });
       throw new ServiceUnavailableException(
-        'PAGBANK_WEBHOOK_SECRET não configurado',
+        'PAGBANK_TOKEN não configurado',
       );
     }
 

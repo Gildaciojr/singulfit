@@ -24,7 +24,7 @@ interface WebhookAuthDiagnosticLog {
 }
 
 describe('PagBankWebhookService', () => {
-  const secret = 'webhook-test-secret';
+  const pagBankToken = 'pagbank-account-token';
 
   afterEach(() => {
     jest.restoreAllMocks();
@@ -85,7 +85,9 @@ describe('PagBankWebhookService', () => {
     };
     const service = new PagBankWebhookService(
       {
-        get: jest.fn().mockReturnValue(secret),
+        get: jest.fn((key: string) =>
+          key === 'PAGBANK_TOKEN' ? pagBankToken : undefined,
+        ),
       } as unknown as ConfigService,
       webhookEventsService as unknown as WebhookEventsService,
       webhookProcessorService as unknown as WebhookProcessorService,
@@ -107,7 +109,7 @@ describe('PagBankWebhookService', () => {
   function signedPayload(payload: object) {
     const rawBody = Buffer.from(JSON.stringify(payload));
     const authenticityToken = createHash('sha256')
-      .update(secret)
+      .update(pagBankToken)
       .update('-')
       .update(rawBody)
       .digest('hex');
@@ -258,7 +260,7 @@ describe('PagBankWebhookService', () => {
 
     const diagnostic = parseDiagnosticLog(loggerWarn);
     const expectedToken = createHash('sha256')
-      .update(secret)
+      .update(pagBankToken)
       .update('-')
       .update(rawBody)
       .digest('hex');
