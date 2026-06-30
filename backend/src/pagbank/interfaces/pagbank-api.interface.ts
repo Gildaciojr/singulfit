@@ -17,6 +17,7 @@ export interface PagBankCreateOrderRequest {
     quantity: number;
     unit_amount: number;
   }>;
+  notification_urls?: string[];
   qr_codes?: Array<{
     amount: {
       value: number;

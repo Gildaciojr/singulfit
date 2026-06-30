@@ -95,6 +95,7 @@ describe('PagBankGateway', () => {
     }
 
     const body = JSON.parse(request.body) as {
+      notification_urls: string[];
       qr_codes: Array<{
         amount: {
           value: number;
@@ -102,6 +103,9 @@ describe('PagBankGateway', () => {
       }>;
     };
 
+    expect(body.notification_urls).toEqual([
+      'https://api.singulfit.com.br/api/v1/webhooks/pagbank',
+    ]);
     expect(body.qr_codes[0].amount.value).toBe(1990);
   });
 
@@ -272,6 +276,7 @@ describe('PagBankGateway', () => {
     }
 
     const body = JSON.parse(request.body) as {
+      notification_urls: string[];
       charges: Array<{
         payment_method: {
           type: string;
@@ -285,6 +290,9 @@ describe('PagBankGateway', () => {
       }>;
     };
 
+    expect(body.notification_urls).toEqual([
+      'https://api.singulfit.com.br/api/v1/webhooks/pagbank',
+    ]);
     expect(body.charges[0].payment_method).toEqual(
       expect.objectContaining({
         type: 'CREDIT_CARD',

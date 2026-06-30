@@ -26,6 +26,9 @@ import {
 @Injectable()
 export class PagBankGateway implements PaymentGateway {
   readonly provider = PaymentProvider.PAGBANK;
+  private readonly notificationUrl =
+    process.env.PAGBANK_NOTIFICATION_URL?.trim() ||
+    'https://api.singulfit.com.br/api/v1/webhooks/pagbank';
 
   constructor(private readonly configService: ConfigService) {}
 
@@ -230,6 +233,7 @@ export class PagBankGateway implements PaymentGateway {
           unit_amount: input.amountInCents,
         },
       ],
+      notification_urls: [this.notificationUrl],
       qr_codes: [
         {
           amount: {
@@ -260,6 +264,7 @@ export class PagBankGateway implements PaymentGateway {
           unit_amount: input.amountInCents,
         },
       ],
+      notification_urls: [this.notificationUrl],
       charges: [
         {
           reference_id: input.externalReference,
