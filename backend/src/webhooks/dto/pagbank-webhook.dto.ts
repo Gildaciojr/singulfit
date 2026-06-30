@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import type { IncomingHttpHeaders } from 'node:http';
 
 export interface PagBankWebhookPayload {
   id: string;
@@ -10,4 +11,5 @@ export interface PagBankWebhookPayload {
 export interface PagBankWebhookHeaders {
   authenticityToken?: string;
   requestId?: string;
+  receivedHeaders?: IncomingHttpHeaders;
 }

@@ -1,4 +1,4 @@
-import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PaymentProvider, WebhookStatus } from '@prisma/client';
 import { createHash } from 'node:crypto';
@@ -12,8 +12,23 @@ import {
   WebhookProcessorService,
 } from './webhook-processor.service';
 
+interface WebhookAuthDiagnosticLog {
+  condition: string;
+  expectedToken: string | null;
+  receivedHeaders: Record<string, string | string[]>;
+  rawBodyLength: number;
+  rawBodyPreview: string;
+  secretLoaded: boolean;
+  suppliedToken: string | null;
+  xAuthenticityToken: string | null;
+}
+
 describe('PagBankWebhookService', () => {
   const secret = 'webhook-test-secret';
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
 
   function createSubject(options?: {
     duplicated?: boolean;
@@ -172,7 +187,10 @@ describe('PagBankWebhookService', () => {
     ).not.toHaveBeenCalled();
   });
 
-  it('rejects an invalid authenticity token', async () => {
+  it('logs a malformed authenticity token before rejecting it', async () => {
+    const loggerWarn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
     const subject = createSubject();
     const rawBody = Buffer.from(
       JSON.stringify({
@@ -183,11 +201,97 @@ describe('PagBankWebhookService', () => {
 
     await expect(
       subject.service.handle(rawBody, {
-        authenticityToken: '0'.repeat(64),
+        authenticityToken: 'invalid-token',
+        receivedHeaders: {
+          authorization: 'Bearer sensitive-token',
+          'x-authenticity-token': 'invalid-token',
+          'x-request-id': 'request-invalid-token',
+        },
       }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    const diagnostic = parseDiagnosticLog(loggerWarn);
+
+    expect(diagnostic).toEqual(
+      expect.objectContaining({
+        condition: 'missing_or_invalid_authenticity_token',
+        expectedToken: null,
+        rawBodyLength: rawBody.length,
+        rawBodyPreview: rawBody.toString('utf8'),
+        secretLoaded: true,
+        suppliedToken: 'invalid-token',
+        xAuthenticityToken: 'invalid-token',
+      }),
+    );
+    expect(diagnostic.receivedHeaders.authorization).toBe('[masked]');
+    expect(diagnostic.receivedHeaders['x-authenticity-token']).toBe(
+      'invalid-token',
+    );
     expect(
       subject.webhookEventsService.recordInTransaction,
     ).not.toHaveBeenCalled();
   });
+
+  it('logs a mismatched authenticity token before rejecting it', async () => {
+    const loggerWarn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const subject = createSubject();
+    const rawBody = Buffer.from(
+      JSON.stringify({
+        id: 'CHAR_TEST',
+        status: 'PAID',
+      }),
+    );
+    const suppliedToken = '0'.repeat(64);
+
+    await expect(
+      subject.service.handle(rawBody, {
+        authenticityToken: suppliedToken,
+        receivedHeaders: {
+          cookie: 'sensitive-cookie',
+          'x-authenticity-token': suppliedToken,
+          'x-request-id': 'request-mismatched-token',
+        },
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    const diagnostic = parseDiagnosticLog(loggerWarn);
+    const expectedToken = createHash('sha256')
+      .update(secret)
+      .update('-')
+      .update(rawBody)
+      .digest('hex');
+
+    expect(diagnostic).toEqual(
+      expect.objectContaining({
+        condition: 'authenticity_token_mismatch',
+        expectedToken,
+        rawBodyLength: rawBody.length,
+        rawBodyPreview: rawBody.toString('utf8'),
+        secretLoaded: true,
+        suppliedToken,
+        xAuthenticityToken: suppliedToken,
+      }),
+    );
+    expect(diagnostic.receivedHeaders.cookie).toBe('[masked]');
+    expect(diagnostic.receivedHeaders['x-authenticity-token']).toBe(
+      suppliedToken,
+    );
+    expect(
+      subject.webhookEventsService.recordInTransaction,
+    ).not.toHaveBeenCalled();
+  });
+
+  function parseDiagnosticLog(
+    loggerWarn: jest.SpyInstance<void, Parameters<Logger['warn']>>,
+  ): WebhookAuthDiagnosticLog {
+    const message = loggerWarn.mock.calls[0]?.[0];
+
+    if (typeof message !== 'string') {
+      throw new Error('O diagnóstico do webhook deveria ser uma string JSON');
+    }
+
+    return JSON.parse(message) as WebhookAuthDiagnosticLog;
+  }
 });

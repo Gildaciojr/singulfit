@@ -26,6 +26,7 @@ export class WebhooksController {
     return this.pagBankWebhookService.handle(request.rawBody, {
       authenticityToken,
       requestId,
+      receivedHeaders: request.headers,
     });
   }
 }
