@@ -188,6 +188,7 @@ export class PagBankWebhookService {
 
     const expectedToken = createHash('sha256')
       .update(secret, 'utf8')
+      .update('-', 'utf8')
       .update(rawBody)
       .digest('hex');
     const suppliedBuffer = Buffer.from(suppliedToken, 'hex');

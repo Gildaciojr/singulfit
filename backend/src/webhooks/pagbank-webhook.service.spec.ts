@@ -93,6 +93,7 @@ describe('PagBankWebhookService', () => {
     const rawBody = Buffer.from(JSON.stringify(payload));
     const authenticityToken = createHash('sha256')
       .update(secret)
+      .update('-')
       .update(rawBody)
       .digest('hex');
 
