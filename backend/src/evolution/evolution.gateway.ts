@@ -2,6 +2,7 @@ import {
   BadRequestException,
   BadGatewayException,
   Injectable,
+  Logger,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -15,6 +16,8 @@ import {
 
 @Injectable()
 export class EvolutionGateway {
+  private readonly logger = new Logger(EvolutionGateway.name);
+
   constructor(private readonly configService: ConfigService) {}
 
   getInstanceName(): string {
@@ -84,24 +87,30 @@ export class EvolutionGateway {
     }
 
     let response: Response;
+    const url = `${this.getBaseUrl()}/message/sendText/${encodeURIComponent(instanceName)}`;
+    const requestPayload = {
+      number,
+      text,
+    };
+
+    this.logger.debug(
+      `Evolution sendText request: ${JSON.stringify({
+        url,
+        payload: requestPayload,
+      })}`,
+    );
 
     try {
-      response = await fetch(
-        `${this.getBaseUrl()}/message/sendText/${encodeURIComponent(instanceName)}`,
-        {
-          method: 'POST',
-          headers: {
-            apikey: this.getRequiredConfig('EVOLUTION_API_KEY'),
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-          },
-          body: JSON.stringify({
-            number,
-            text,
-          }),
-          signal: AbortSignal.timeout(20_000),
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          apikey: this.getRequiredConfig('EVOLUTION_API_KEY'),
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
         },
-      );
+        body: JSON.stringify(requestPayload),
+        signal: AbortSignal.timeout(20_000),
+      });
     } catch {
       throw new BadGatewayException(
         'Não foi possível enviar a mensagem pela Evolution API',
@@ -109,6 +118,13 @@ export class EvolutionGateway {
     }
 
     const payload = await this.readJson(response);
+    this.logger.debug(
+      `Evolution sendText response: ${JSON.stringify({
+        status: response.status,
+        headers: this.relevantResponseHeaders(response),
+        body: payload,
+      })}`,
+    );
 
     if (!response.ok) {
       throw new BadGatewayException(
@@ -160,6 +176,31 @@ export class EvolutionGateway {
         'Evolution API retornou uma resposta inválida',
       );
     }
+  }
+
+  private relevantResponseHeaders(response: Response): Record<string, string> {
+    const headerNames = [
+      'content-type',
+      'content-length',
+      'date',
+      'request-id',
+      'x-request-id',
+      'x-correlation-id',
+      'x-ratelimit-limit',
+      'x-ratelimit-remaining',
+      'x-ratelimit-reset',
+    ];
+    const headers: Record<string, string> = {};
+
+    for (const headerName of headerNames) {
+      const value = response.headers.get(headerName);
+
+      if (value) {
+        headers[headerName] = value;
+      }
+    }
+
+    return headers;
   }
 
   private parseConnectionState(
