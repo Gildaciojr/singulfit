@@ -15,11 +15,14 @@ describe('EvolutionSendService', () => {
     const current = {
       id: 'outbound-id',
       userId: 'user-id',
+      conversationId: 'conversation-id',
       content: 'Resposta nutricional',
       status: options?.status ?? OutboundMessageStatus.PENDING,
       leaseExpiresAt: null,
       conversation: {
+        id: 'conversation-id',
         phoneNumber: '+5511999999999',
+        remoteJid: null,
       },
     };
     const transaction = {
@@ -48,6 +51,9 @@ describe('EvolutionSendService', () => {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         findUniqueOrThrow: jest.fn().mockResolvedValue(finalMessage),
       },
+      conversation: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
     };
     const gateway = {
       sendText: options?.gatewayFailure
@@ -58,6 +64,7 @@ describe('EvolutionSendService', () => {
             )
         : jest.fn().mockResolvedValue({
             externalMessageId: 'external-id',
+            remoteJid: '5511999999999@s.whatsapp.net',
           }),
     };
     const accessService = {
@@ -105,6 +112,15 @@ describe('EvolutionSendService', () => {
     expect(subject.gateway.sendText).toHaveBeenCalledWith({
       number: '+5511999999999',
       text: 'Resposta nutricional',
+    });
+    expect(subject.prisma.conversation.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'conversation-id',
+        remoteJid: null,
+      },
+      data: {
+        remoteJid: '5511999999999@s.whatsapp.net',
+      },
     });
   });
 

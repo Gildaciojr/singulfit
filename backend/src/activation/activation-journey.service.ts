@@ -282,20 +282,29 @@ export class ActivationJourneyService {
         number: message.phone,
         text: message.content,
       });
+      const deliveryData: Prisma.ActivationEventUpdateManyMutationInput = {
+        deliveryStatus: ActivationDeliveryStatus.SENT,
+        sentAt: new Date(),
+        externalMessageId: sent.externalMessageId,
+        leaseExpiresAt: null,
+        failedAt: null,
+        errorMessage: null,
+      };
+
+      if (sent.remoteJid) {
+        await this.conversations.linkRemoteJid(userId, sent.remoteJid);
+        deliveryData.metadata = {
+          ...message.metadata,
+          evolutionRemoteJid: sent.remoteJid,
+        } satisfies Prisma.InputJsonObject;
+      }
 
       await this.prisma.activationEvent.updateMany({
         where: {
           id: event.id,
           deliveryStatus: ActivationDeliveryStatus.SENDING,
         },
-        data: {
-          deliveryStatus: ActivationDeliveryStatus.SENT,
-          sentAt: new Date(),
-          externalMessageId: sent.externalMessageId,
-          leaseExpiresAt: null,
-          failedAt: null,
-          errorMessage: null,
-        },
+        data: deliveryData,
       });
 
       if (kind === ActivationEventKind.FLOW_MESSAGE && eventCode === 'D0') {

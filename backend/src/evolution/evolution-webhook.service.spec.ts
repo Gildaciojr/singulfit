@@ -4,6 +4,7 @@ import { EventBusService } from '../event-bus/event-bus.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { MediaService } from '../storage/media.service';
 import { UsersService } from '../users/users.service';
+import { ConversationsService } from '../whatsapp/conversations.service';
 import { MessagesService } from '../whatsapp/messages.service';
 import { EvolutionGateway } from './evolution.gateway';
 import { EvolutionWebhookService } from './evolution-webhook.service';
@@ -14,6 +15,7 @@ describe('EvolutionWebhookService', () => {
     userFound?: boolean;
     duplicated?: boolean;
     subscriptionStatus?: SubscriptionStatus;
+    remoteConversationFound?: boolean;
   }) {
     const evolutionGateway = {
       validateWebhookSecret: jest.fn(),
@@ -34,6 +36,22 @@ describe('EvolutionWebhookService', () => {
         id: 'subscription-id',
         status: options?.subscriptionStatus ?? SubscriptionStatus.ACTIVE,
       }),
+    };
+    const conversationsService = {
+      findActiveByRemoteJid: jest.fn().mockResolvedValue(
+        options?.remoteConversationFound
+          ? {
+              id: 'conversation-id',
+              phoneNumber: '+5511999999999',
+              user: {
+                id: 'user-id',
+                phone: '11999999999',
+                phoneE164: '+5511999999999',
+              },
+            }
+          : null,
+      ),
+      linkRemoteJid: jest.fn().mockResolvedValue(undefined),
     };
     const messagesService = {
       createInbound: jest.fn().mockResolvedValue({
@@ -76,6 +94,7 @@ describe('EvolutionWebhookService', () => {
       evolutionGateway as unknown as EvolutionGateway,
       usersService as unknown as UsersService,
       subscriptionsService as unknown as SubscriptionsService,
+      conversationsService as unknown as ConversationsService,
       messagesService as unknown as MessagesService,
       mediaService as unknown as MediaService,
       prisma as unknown as PrismaService,
@@ -87,6 +106,7 @@ describe('EvolutionWebhookService', () => {
       evolutionGateway,
       usersService,
       subscriptionsService,
+      conversationsService,
       messagesService,
       mediaService,
       eventBus,
@@ -293,6 +313,39 @@ describe('EvolutionWebhookService', () => {
       reason: 'USER_NOT_FOUND',
     });
     expect(subject.messagesService.createInbound).not.toHaveBeenCalled();
+  });
+
+  it('links an inbound LID-style remote JID through the saved conversation', async () => {
+    const subject = createSubject({
+      remoteConversationFound: true,
+      userFound: false,
+    });
+    const payload = webhook({
+      conversation: 'Oi',
+    });
+    payload.data.key.remoteJid = '556296552178@s.whatsapp.net';
+    payload.data.addressingMode = 'lid';
+
+    const result = await subject.service.processQueuedEntry(
+      'singulfit',
+      payload.data,
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        received: true,
+        processed: true,
+        messageId: 'message-id',
+        userId: 'user-id',
+      }),
+    );
+    expect(subject.usersService.findByWhatsAppPhone).not.toHaveBeenCalled();
+    expect(subject.messagesService.createInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phoneNumber: '+5511999999999',
+        remoteJid: '556296552178@s.whatsapp.net',
+      }),
+    );
   });
 
   it('rejects a malformed message event', async () => {

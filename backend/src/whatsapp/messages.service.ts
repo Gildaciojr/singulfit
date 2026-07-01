@@ -128,6 +128,7 @@ export class MessagesService {
       {
         phoneNumber: data.phoneNumber,
         subscriptionId: data.subscriptionId,
+        remoteJid: data.remoteJid,
       },
     );
     const existing = await this.findExternalMessage(

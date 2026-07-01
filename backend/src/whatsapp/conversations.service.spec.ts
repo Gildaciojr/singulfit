@@ -35,6 +35,7 @@ describe('ConversationsService', () => {
           userId: 'user-id',
           subscriptionId: undefined,
           phoneNumber: '+5511999999999',
+          remoteJid: undefined,
         },
       }),
     );

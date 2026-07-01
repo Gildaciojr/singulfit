@@ -1305,6 +1305,7 @@ model Conversation {
   userId         String
   subscriptionId String?
   phoneNumber    String
+  remoteJid      String?
   status         ConversationStatus @default(ACTIVE)
   startedAt      DateTime           @default(now())
   lastMessageAt  DateTime?
@@ -1322,6 +1323,7 @@ model Conversation {
   @@index([userId, status])
   @@index([subscriptionId])
   @@index([phoneNumber, status])
+  @@index([remoteJid, status])
   @@index([lastMessageAt])
   @@map("conversations")
 }
@@ -3191,3 +3193,4 @@ model PilotManualCheck {
   @@index([checkedByUserId, checkedAt])
   @@map("pilot_manual_checks")
 }
+

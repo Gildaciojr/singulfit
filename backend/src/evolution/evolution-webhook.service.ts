@@ -12,6 +12,7 @@ import { INTERNAL_EVENT } from '../event-bus/event-bus.constants';
 import { MediaService } from '../storage/media.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { UsersService } from '../users/users.service';
+import { ConversationsService } from '../whatsapp/conversations.service';
 import { MessagesService } from '../whatsapp/messages.service';
 import { EvolutionGateway } from './evolution.gateway';
 import { PrismaService } from '../prisma/prisma.service';
@@ -27,6 +28,7 @@ export class EvolutionWebhookService {
     private readonly evolutionGateway: EvolutionGateway,
     private readonly usersService: UsersService,
     private readonly subscriptionsService: SubscriptionsService,
+    private readonly conversationsService: ConversationsService,
     private readonly messagesService: MessagesService,
     private readonly mediaService: MediaService,
     private readonly prisma: PrismaService,
@@ -247,14 +249,19 @@ export class EvolutionWebhookService {
       };
     }
 
+    const conversationByRemoteJid =
+      await this.conversationsService.findActiveByRemoteJid(
+        inboundMessage.remoteJid,
+      );
     const phoneNumber = phoneFromRemoteJid(inboundMessage.remoteJid);
     this.logger.log(
       `Evolution inbound phoneFromRemoteJid: ${JSON.stringify({
         phoneNumber,
+        foundByRemoteJid: conversationByRemoteJid !== null,
       })}`,
     );
 
-    if (!phoneNumber) {
+    if (!conversationByRemoteJid && !phoneNumber) {
       return {
         received: true,
         processed: false,
@@ -267,7 +274,11 @@ export class EvolutionWebhookService {
         phoneNumber,
       })}`,
     );
-    const user = await this.usersService.findByWhatsAppPhone(phoneNumber);
+    const user =
+      conversationByRemoteJid?.user ??
+      (phoneNumber
+        ? await this.usersService.findByWhatsAppPhone(phoneNumber)
+        : null);
     this.logger.log(
       `Evolution inbound findByWhatsAppPhone result: ${JSON.stringify({
         found: user !== null,
@@ -285,6 +296,24 @@ export class EvolutionWebhookService {
       };
     }
 
+    if (!conversationByRemoteJid) {
+      await this.conversationsService.linkRemoteJid(
+        user.id,
+        inboundMessage.remoteJid,
+      );
+    }
+
+    const inboundPhoneNumber =
+      conversationByRemoteJid?.phoneNumber ?? phoneNumber;
+
+    if (!inboundPhoneNumber) {
+      return {
+        received: true,
+        processed: false,
+        reason: 'MESSAGE_IGNORED',
+      };
+    }
+
     const subscription =
       await this.subscriptionsService.getMessagingSubscription(user.id);
     this.logger.log(
@@ -298,7 +327,7 @@ export class EvolutionWebhookService {
     const persisted = await this.messagesService.createInbound({
       userId: user.id,
       subscriptionId: subscription?.id,
-      phoneNumber,
+      phoneNumber: inboundPhoneNumber,
       instanceName: inboundMessage.instanceName,
       externalMessageId: inboundMessage.externalMessageId,
       type: MessageType[inboundMessage.messageType],

@@ -49,6 +49,18 @@ export class EvolutionSendService {
         },
       });
 
+      if (sent.remoteJid) {
+        await this.prisma.conversation.updateMany({
+          where: {
+            id: claimed.message.conversationId,
+            remoteJid: null,
+          },
+          data: {
+            remoteJid: sent.remoteJid,
+          },
+        });
+      }
+
       return this.getMessage(claimed.message.id);
     } catch (error: unknown) {
       await this.prisma.outboundMessage.updateMany({
@@ -92,7 +104,9 @@ export class EvolutionSendService {
           include: {
             conversation: {
               select: {
+                id: true,
                 phoneNumber: true,
+                remoteJid: true,
               },
             },
           },
@@ -149,7 +163,9 @@ export class EvolutionSendService {
             include: {
               conversation: {
                 select: {
+                  id: true,
                   phoneNumber: true,
+                  remoteJid: true,
                 },
               },
             },
@@ -177,7 +193,9 @@ export class EvolutionSendService {
           include: {
             conversation: {
               select: {
+                id: true,
                 phoneNumber: true,
+                remoteJid: true,
               },
             },
           },
@@ -203,7 +221,9 @@ export class EvolutionSendService {
       include: {
         conversation: {
           select: {
+            id: true,
             phoneNumber: true,
+            remoteJid: true,
           },
         },
       },

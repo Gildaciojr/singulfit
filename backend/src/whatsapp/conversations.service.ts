@@ -92,13 +92,70 @@ export class ConversationsService {
     return conversation;
   }
 
+  async findActiveByRemoteJid(remoteJid: string) {
+    const normalizedRemoteJid = this.normalizeRemoteJid(remoteJid);
+
+    if (!normalizedRemoteJid) {
+      return null;
+    }
+
+    return this.prisma.conversation.findFirst({
+      where: {
+        remoteJid: normalizedRemoteJid,
+        status: ConversationStatus.ACTIVE,
+      },
+      include: conversationDetails,
+      orderBy: {
+        updatedAt: 'desc',
+      },
+    });
+  }
+
+  async linkRemoteJid(userId: string, remoteJid: string): Promise<void> {
+    const normalizedRemoteJid = this.normalizeRemoteJid(remoteJid);
+
+    if (!normalizedRemoteJid) {
+      return;
+    }
+
+    const activeConversation = await this.prisma.conversation.findFirst({
+      where: {
+        userId,
+        status: ConversationStatus.ACTIVE,
+      },
+      select: {
+        id: true,
+        remoteJid: true,
+      },
+      orderBy: {
+        updatedAt: 'desc',
+      },
+    });
+
+    if (!activeConversation || activeConversation.remoteJid) {
+      return;
+    }
+
+    await this.prisma.conversation.updateMany({
+      where: {
+        id: activeConversation.id,
+        remoteJid: null,
+      },
+      data: {
+        remoteJid: normalizedRemoteJid,
+      },
+    });
+  }
+
   async getOrCreateActive(
     userId: string,
     options?: {
       phoneNumber?: string;
       subscriptionId?: string;
+      remoteJid?: string;
     },
   ) {
+    const remoteJid = this.normalizeRemoteJid(options?.remoteJid);
     const activeConversation = await this.prisma.conversation.findFirst({
       where: {
         userId,
@@ -108,16 +165,21 @@ export class ConversationsService {
     });
 
     if (activeConversation) {
-      if (
+      const shouldUpdateSubscription =
         options?.subscriptionId &&
-        activeConversation.subscriptionId !== options.subscriptionId
-      ) {
+        activeConversation.subscriptionId !== options.subscriptionId;
+      const shouldUpdateRemoteJid = remoteJid && !activeConversation.remoteJid;
+
+      if (shouldUpdateSubscription || shouldUpdateRemoteJid) {
         return this.prisma.conversation.update({
           where: {
             id: activeConversation.id,
           },
           data: {
-            subscriptionId: options.subscriptionId,
+            ...(shouldUpdateSubscription
+              ? { subscriptionId: options.subscriptionId }
+              : {}),
+            ...(shouldUpdateRemoteJid ? { remoteJid } : {}),
           },
           include: conversationDetails,
         });
@@ -157,6 +219,7 @@ export class ConversationsService {
           userId: user.id,
           subscriptionId: options?.subscriptionId,
           phoneNumber,
+          remoteJid,
         },
         include: conversationDetails,
       });
@@ -170,5 +233,13 @@ export class ConversationsService {
 
       throw error;
     }
+  }
+
+  private normalizeRemoteJid(
+    remoteJid: string | undefined,
+  ): string | undefined {
+    const normalizedRemoteJid = remoteJid?.trim().toLowerCase();
+
+    return normalizedRemoteJid || undefined;
   }
 }

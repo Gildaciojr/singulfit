@@ -208,6 +208,10 @@ export class EvolutionGateway {
         ? nestedData.key
         : undefined;
     const externalMessageId = typeof key?.id === 'string' ? key.id.trim() : '';
+    const remoteJid =
+      typeof key?.remoteJid === 'string' && key.remoteJid.trim()
+        ? key.remoteJid.trim()
+        : undefined;
 
     if (!externalMessageId) {
       throw new BadGatewayException(
@@ -217,6 +221,7 @@ export class EvolutionGateway {
 
     return {
       externalMessageId,
+      ...(remoteJid ? { remoteJid } : {}),
     };
   }
 

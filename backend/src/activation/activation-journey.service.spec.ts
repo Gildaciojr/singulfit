@@ -41,6 +41,9 @@ describe('ActivationJourneyService', () => {
         externalMessageId: 'evolution-message-id',
       }),
     };
+    const conversations = {
+      linkRemoteJid: jest.fn().mockResolvedValue(undefined),
+    };
     const events = {
       record: jest.fn().mockResolvedValue({ id: 'system-event-id' }),
     };
@@ -51,7 +54,7 @@ describe('ActivationJourneyService', () => {
       prisma as unknown as PrismaService,
       {} as ActivationService,
       new ActivationScoreService(),
-      {} as ConversationsService,
+      conversations as unknown as ConversationsService,
       evolution as unknown as EvolutionGateway,
       events as unknown as EventService,
       onboarding as unknown as ActivationOnboardingService,
@@ -87,6 +90,7 @@ describe('ActivationJourneyService', () => {
       prisma,
       transaction,
       evolution,
+      conversations,
       events,
       onboarding,
     };
@@ -217,6 +221,10 @@ describe('ActivationJourneyService', () => {
       deliveryStatus: ActivationDeliveryStatus.PENDING,
       leaseExpiresAt: null,
     });
+    setup.evolution.sendText.mockResolvedValue({
+      externalMessageId: 'evolution-message-id',
+      remoteJid: '5511999999999@s.whatsapp.net',
+    });
 
     await setup.testable.sendMessage(
       'activation-id',
@@ -232,6 +240,10 @@ describe('ActivationJourneyService', () => {
       number: '+5511999999999',
       text: expect.stringContaining('Ana'),
     });
+    expect(setup.conversations.linkRemoteJid).toHaveBeenCalledWith(
+      'user-id',
+      '5511999999999@s.whatsapp.net',
+    );
     expect(setup.prisma.activationEvent.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({

@@ -10,6 +10,7 @@ export interface EvolutionSendTextInput {
 
 export interface EvolutionSendTextResult {
   externalMessageId: string;
+  remoteJid?: string;
 }
 
 export interface EvolutionInboundMessage {
