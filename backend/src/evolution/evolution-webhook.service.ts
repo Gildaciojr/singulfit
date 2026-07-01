@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import {
   MediaType,
   MessageType,
@@ -22,6 +22,7 @@ import {
 
 @Injectable()
 export class EvolutionWebhookService {
+  private readonly logger = new Logger(EvolutionWebhookService.name);
   constructor(
     private readonly evolutionGateway: EvolutionGateway,
     private readonly usersService: UsersService,
@@ -212,6 +213,27 @@ export class EvolutionWebhookService {
     entry: unknown,
   ): Promise<EvolutionWebhookResult> {
     const inboundMessage = this.parseInboundMessage(instanceName, entry);
+    const entryRecord = this.asRecord(entry);
+    const keyRecord = this.asRecord(entryRecord?.key);
+    const remoteJidAlt =
+      this.optionalString(entryRecord?.remoteJidAlt) ??
+      this.optionalString(keyRecord?.remoteJidAlt);
+    const participant =
+      this.optionalString(entryRecord?.participant) ??
+      this.optionalString(keyRecord?.participant);
+    const addressingMode =
+      this.optionalString(entryRecord?.addressingMode) ??
+      this.optionalString(keyRecord?.addressingMode);
+
+    this.logger.log(
+      `Evolution inbound parsed: ${JSON.stringify({
+        remoteJid: inboundMessage?.remoteJid,
+        remoteJidAlt,
+        participant,
+        addressingMode,
+        externalMessageId: inboundMessage?.externalMessageId,
+      })}`,
+    );
 
     if (
       !inboundMessage ||
@@ -226,6 +248,11 @@ export class EvolutionWebhookService {
     }
 
     const phoneNumber = phoneFromRemoteJid(inboundMessage.remoteJid);
+    this.logger.log(
+      `Evolution inbound phoneFromRemoteJid: ${JSON.stringify({
+        phoneNumber,
+      })}`,
+    );
 
     if (!phoneNumber) {
       return {
@@ -235,7 +262,20 @@ export class EvolutionWebhookService {
       };
     }
 
+    this.logger.log(
+      `Evolution inbound findByWhatsAppPhone before query: ${JSON.stringify({
+        phoneNumber,
+      })}`,
+    );
     const user = await this.usersService.findByWhatsAppPhone(phoneNumber);
+    this.logger.log(
+      `Evolution inbound findByWhatsAppPhone result: ${JSON.stringify({
+        found: user !== null,
+        userId: user?.id,
+        phone: user?.phone,
+        phoneE164: user?.phoneE164,
+      })}`,
+    );
 
     if (!user) {
       return {
@@ -247,6 +287,14 @@ export class EvolutionWebhookService {
 
     const subscription =
       await this.subscriptionsService.getMessagingSubscription(user.id);
+    this.logger.log(
+      `Evolution inbound messaging subscription result: ${JSON.stringify({
+        found: subscription !== null,
+        subscriptionId: subscription?.id,
+        status: subscription?.status,
+      })}`,
+    );
+    this.logger.log('Evolution inbound: Chamando createInbound');
     const persisted = await this.messagesService.createInbound({
       userId: user.id,
       subscriptionId: subscription?.id,
@@ -261,6 +309,11 @@ export class EvolutionWebhookService {
       mimeType: inboundMessage.mimeType,
       fileSize: inboundMessage.fileSize,
     });
+    this.logger.log(
+      `Evolution inbound createInbound result: ${JSON.stringify({
+        messageId: persisted.message.id,
+      })}`,
+    );
     const mediaFile = await this.storeMediaIfPresent(
       user.id,
       persisted.message.conversationId,
@@ -580,6 +633,10 @@ export class EvolutionWebhookService {
 
   private asRecord(value: unknown): Record<string, unknown> | undefined {
     return this.isRecord(value) ? value : undefined;
+  }
+
+  private optionalString(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim() ? value.trim() : undefined;
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {
