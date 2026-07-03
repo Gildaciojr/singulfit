@@ -158,6 +158,8 @@ export class PaymentsService {
       providerPaymentId: string;
       approvedAt: Date;
       statusDetail?: string;
+      cardBrand?: string;
+      cardLastFour?: string;
     },
   ) {
     const payment = await transaction.payment.findUnique({
@@ -189,6 +191,8 @@ export class PaymentsService {
         providerPaymentId: input.providerPaymentId,
         statusDetail: input.statusDetail,
         approvedAt: input.approvedAt,
+        cardBrand: input.cardBrand,
+        cardLastFour: input.cardLastFour,
       },
     });
 

@@ -25,6 +25,9 @@ describe('ActivationJourneyService', () => {
       user: {
         findUniqueOrThrow: jest.fn(),
       },
+      subscription: {
+        findFirst: jest.fn(),
+      },
       activationEvent: {
         findUnique: jest.fn(),
         findFirst: jest.fn().mockResolvedValue(null),
@@ -42,6 +45,7 @@ describe('ActivationJourneyService', () => {
       }),
     };
     const conversations = {
+      getOrCreateActive: jest.fn().mockResolvedValue({ id: 'conversation-id' }),
       linkRemoteJid: jest.fn().mockResolvedValue(undefined),
     };
     const events = {
@@ -50,9 +54,14 @@ describe('ActivationJourneyService', () => {
     const onboarding = {
       start: jest.fn().mockResolvedValue({ id: 'onboarding-id' }),
     };
+    const activationService = {
+      reconcile: jest.fn(),
+      abandon: jest.fn(),
+      snapshot: jest.fn().mockResolvedValue({ id: 'snapshot-id' }),
+    };
     const service = new ActivationJourneyService(
       prisma as unknown as PrismaService,
-      {} as ActivationService,
+      activationService as unknown as ActivationService,
       new ActivationScoreService(),
       conversations as unknown as ConversationsService,
       evolution as unknown as EvolutionGateway,
@@ -93,6 +102,7 @@ describe('ActivationJourneyService', () => {
       conversations,
       events,
       onboarding,
+      activationService,
     };
   }
 
@@ -124,6 +134,48 @@ describe('ActivationJourneyService', () => {
     ).resolves.toBe(3);
   });
 
+  it('selects D0 before any later due flow message', async () => {
+    const setup = subject();
+    setup.prisma.activationEvent.findUnique.mockImplementation(
+      ({ where }: { where: { idempotencyKey: string } }) =>
+        Promise.resolve(
+          where.idempotencyKey.endsWith(':D0')
+            ? null
+            : {
+                deliveryStatus: ActivationDeliveryStatus.SENT,
+                leaseExpiresAt: null,
+              },
+        ),
+    );
+
+    await expect(
+      setup.testable.dueFlow(
+        {
+          id: 'activation-id',
+          paidAt: new Date('2026-06-01T12:00:00.000Z'),
+        },
+        new Date('2026-06-04T12:00:00.000Z'),
+      ),
+    ).resolves.toBe(0);
+  });
+
+  it('does not select D0 or later flow messages while D0 has an active lease', async () => {
+    const setup = subject();
+    setup.prisma.activationEvent.findUnique.mockResolvedValue({
+      deliveryStatus: ActivationDeliveryStatus.SENDING,
+      leaseExpiresAt: new Date('2026-06-04T12:01:00.000Z'),
+    });
+
+    await expect(
+      setup.testable.dueFlow(
+        {
+          id: 'activation-id',
+          paidAt: new Date('2026-06-01T12:00:00.000Z'),
+        },
+        new Date('2026-06-04T12:00:00.000Z'),
+      ),
+    ).resolves.toBeNull();
+  });
   it('selects the highest due recovery milestone exactly once', async () => {
     const setup = subject();
     setup.prisma.activationEvent.findUnique.mockResolvedValue(null);
@@ -254,6 +306,85 @@ describe('ActivationJourneyService', () => {
     );
   });
 
+  it('sends D0 after payment when an active conversation can be created and whatsappConnectedAt is still null', async () => {
+    const setup = subject();
+    const paidAt = new Date('2026-06-14T12:00:00.000Z');
+    const activation = {
+      id: 'activation-id',
+      userId: 'user-id',
+      currentStage: ActivationStage.PAID,
+      score: 20,
+      riskLevel: ActivationRiskLevel.LOW,
+      registeredAt: new Date('2026-06-14T11:00:00.000Z'),
+      paidAt,
+      whatsappConnectedAt: null,
+      firstMessageSentAt: null,
+      firstMealReceivedAt: null,
+      firstAnalysisCompletedAt: null,
+      firstRecommendationDeliveredAt: null,
+      firstCoachInteractionAt: null,
+      firstValueAt: null,
+      activatedAt: null,
+      abandonedAt: null,
+      lastProgressAt: paidAt,
+      createdAt: paidAt,
+      updatedAt: paidAt,
+    };
+    setup.activationService.reconcile.mockResolvedValue(activation);
+    setup.prisma.subscription.findFirst.mockResolvedValue({
+      id: 'subscription-id',
+    });
+    setup.prisma.activationEvent.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 'recent-event-id' });
+    setup.prisma.activationEvent.findUnique.mockResolvedValue(null);
+    setup.prisma.activationEvent.upsert.mockResolvedValue({
+      id: 'event-id',
+    });
+    setup.transaction.activationEvent.findUnique.mockResolvedValue({
+      id: 'event-id',
+      deliveryStatus: ActivationDeliveryStatus.PENDING,
+      leaseExpiresAt: null,
+    });
+    setup.prisma.user.findUniqueOrThrow.mockResolvedValue({
+      name: 'Ana Silva',
+      phone: '11999999999',
+      phoneE164: '+5511999999999',
+      activation: {
+        currentStage: ActivationStage.PAID,
+        score: 20,
+        riskLevel: ActivationRiskLevel.LOW,
+      },
+      behavioralProfile: null,
+      goalClassification: null,
+      contextSnapshots: [],
+      recommendations: [],
+      coachProfile: null,
+    });
+
+    await setup.service.processUser('user-id', paidAt);
+
+    expect(setup.conversations.getOrCreateActive).toHaveBeenCalledWith(
+      'user-id',
+      { subscriptionId: 'subscription-id' },
+    );
+    expect(setup.evolution.sendText).toHaveBeenCalledTimes(1);
+    expect(setup.evolution.sendText).toHaveBeenCalledWith({
+      number: '+5511999999999',
+      text: expect.stringContaining('Olá Ana.'),
+    });
+    expect(setup.prisma.activationEvent.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { idempotencyKey: 'activation-id:flow:D0' },
+      }),
+    );
+    expect(setup.onboarding.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-id',
+        activationId: 'activation-id',
+      }),
+    );
+  });
   it('does not resend D0 when the activation event was already sent', async () => {
     const setup = subject();
     setup.prisma.user.findUniqueOrThrow.mockResolvedValue({

@@ -75,6 +75,8 @@ export interface CanonicalGatewayPayment {
   amountInCents: number;
   currency: string;
   approvedAt?: Date;
+  cardBrand?: string;
+  cardLastFour?: string;
 }
 
 export interface PaymentGateway {

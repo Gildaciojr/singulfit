@@ -94,17 +94,19 @@ export class ActivationJourneyService {
       return activation;
     }
 
-    if (
-      activation.paidAt &&
-      !activation.whatsappConnectedAt &&
-      (await this.ensureConversation(userId))
-    ) {
-      activation = await this.activationService.reconcile(userId, at);
+    let conversationReady = Boolean(activation.whatsappConnectedAt);
+
+    if (activation.paidAt && !conversationReady) {
+      conversationReady = await this.ensureConversation(userId);
+
+      if (conversationReady) {
+        activation = await this.activationService.reconcile(userId, at);
+      }
     }
 
     if (
       activation.paidAt &&
-      activation.whatsappConnectedAt &&
+      conversationReady &&
       !(await this.hasRecentActivationMessage(userId, at))
     ) {
       const flow = await this.dueFlow(activation, at);
@@ -180,12 +182,25 @@ export class ActivationJourneyService {
       return null;
     }
 
+    const d0 = await this.prisma.activationEvent.findUnique({
+      where: { idempotencyKey: `${activation.id}:flow:D0` },
+      select: { deliveryStatus: true, leaseExpiresAt: true },
+    });
+
+    if (this.isDeliverableFlowEvent(d0, at)) {
+      return 0;
+    }
+
+    if (d0?.deliveryStatus !== ActivationDeliveryStatus.SENT) {
+      return null;
+    }
+
     const elapsedDays = Math.floor(
       (at.getTime() - activation.paidAt.getTime()) / 86_400_000,
     );
-    const due = ACTIVATION_FLOW_DAYS.filter((day) => day <= elapsedDays).sort(
-      (left, right) => right - left,
-    );
+    const due = ACTIVATION_FLOW_DAYS.filter(
+      (day) => day > 0 && day <= elapsedDays,
+    ).sort((left, right) => right - left);
 
     for (const day of due) {
       const existing = await this.prisma.activationEvent.findUnique({
@@ -193,18 +208,28 @@ export class ActivationJourneyService {
         select: { deliveryStatus: true, leaseExpiresAt: true },
       });
 
-      if (
-        !existing ||
-        existing.deliveryStatus === ActivationDeliveryStatus.FAILED ||
-        existing.deliveryStatus === ActivationDeliveryStatus.PENDING ||
-        (existing.deliveryStatus === ActivationDeliveryStatus.SENDING &&
-          (!existing.leaseExpiresAt || existing.leaseExpiresAt <= at))
-      ) {
+      if (this.isDeliverableFlowEvent(existing, at)) {
         return day;
       }
     }
 
     return null;
+  }
+
+  private isDeliverableFlowEvent(
+    event: {
+      deliveryStatus: ActivationDeliveryStatus | null;
+      leaseExpiresAt: Date | null;
+    } | null,
+    at: Date,
+  ): boolean {
+    return (
+      !event ||
+      event.deliveryStatus === ActivationDeliveryStatus.FAILED ||
+      event.deliveryStatus === ActivationDeliveryStatus.PENDING ||
+      (event.deliveryStatus === ActivationDeliveryStatus.SENDING &&
+        (!event.leaseExpiresAt || event.leaseExpiresAt <= at))
+    );
   }
 
   private async dueRecovery(

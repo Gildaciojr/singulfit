@@ -9,14 +9,15 @@ import {
   Prisma,
 } from '@prisma/client';
 import { BillingService } from '../billing/billing.service';
-import type { PaymentGateway } from './gateways/payment-gateway.interface';
 import { CreditCardPaymentsService } from './credit-card-payments.service';
+import type { PaymentGateway } from './gateways/payment-gateway.interface';
+import { PaymentSettlementService } from './payment-settlement.service';
 import { PaymentsService } from './payments.service';
 
 describe('CreditCardPaymentsService', () => {
   const encryptedCard = 'encrypted-card-payload-'.repeat(8);
 
-  it('creates a PagBank credit card charge and persists the approved payment', async () => {
+  it('creates a PagBank credit card charge and settles the approved payment through the official flow', async () => {
     const approvedAt = new Date('2026-06-06T18:30:00.000Z');
     const billingService = {
       getOrCreateInitialInvoice: jest.fn().mockResolvedValue({
@@ -63,7 +64,11 @@ describe('CreditCardPaymentsService', () => {
     const paymentsService = {
       findCurrentByInvoiceId: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue(createdPayment),
-      updateStatus: jest.fn().mockResolvedValue(approvedPayment),
+      findById: jest.fn().mockResolvedValue(approvedPayment),
+      updateStatus: jest.fn(),
+    };
+    const paymentSettlementService = {
+      settlePagBankPayment: jest.fn().mockResolvedValue('APPROVED'),
     };
     const createCreditCardPayment = jest.fn().mockResolvedValue({
       providerOrderId: 'ORDE_TEST',
@@ -87,6 +92,7 @@ describe('CreditCardPaymentsService', () => {
         get: jest.fn(),
       } as unknown as ConfigService,
       gateway,
+      paymentSettlementService as unknown as PaymentSettlementService,
     );
 
     const result = await service.create('user-id', {
@@ -109,6 +115,7 @@ describe('CreditCardPaymentsService', () => {
     );
     expect(createCreditCardPayment).toHaveBeenCalledWith(
       expect.objectContaining({
+        amountInCents: 4990,
         encryptedCard,
         holder: {
           name: 'Usuário de Teste',
@@ -117,17 +124,20 @@ describe('CreditCardPaymentsService', () => {
         installments: 1,
       }),
     );
-    expect(paymentsService.updateStatus).toHaveBeenCalledWith(
-      'payment-id',
-      expect.objectContaining({
-        status: PaymentStatus.APPROVED,
-        providerOrderId: 'ORDE_TEST',
-        providerPaymentId: 'CHAR_TEST',
-        approvedAt: approvedAt.toISOString(),
-        cardBrand: 'visa',
-        cardLastFour: '1111',
-      }),
-    );
+    expect(paymentSettlementService.settlePagBankPayment).toHaveBeenCalledWith({
+      providerOrderId: 'ORDE_TEST',
+      providerPaymentId: 'CHAR_TEST',
+      externalReference: 'pay_reference',
+      status: 'APPROVED',
+      statusDetail: 'SUCESSO',
+      amountInCents: 4990,
+      currency: Currency.BRL,
+      approvedAt,
+      cardBrand: 'visa',
+      cardLastFour: '1111',
+    });
+    expect(paymentsService.updateStatus).not.toHaveBeenCalled();
+    expect(paymentsService.findById).toHaveBeenCalledWith('payment-id');
   });
 
   it('blocks a new credit card charge while another payment is active', async () => {
@@ -162,6 +172,9 @@ describe('CreditCardPaymentsService', () => {
       updateStatus: jest.fn(),
     };
     const createCreditCardPayment = jest.fn();
+    const paymentSettlementService = {
+      settlePagBankPayment: jest.fn(),
+    };
     const gateway: PaymentGateway = {
       provider: PaymentProvider.PAGBANK,
       createPixPayment: jest.fn(),
@@ -175,6 +188,7 @@ describe('CreditCardPaymentsService', () => {
         get: jest.fn(),
       } as unknown as ConfigService,
       gateway,
+      paymentSettlementService as unknown as PaymentSettlementService,
     );
 
     await expect(
@@ -189,6 +203,9 @@ describe('CreditCardPaymentsService', () => {
 
     expect(paymentsService.create).not.toHaveBeenCalled();
     expect(createCreditCardPayment).not.toHaveBeenCalled();
+    expect(
+      paymentSettlementService.settlePagBankPayment,
+    ).not.toHaveBeenCalled();
   });
 
   it('returns the configured PagBank public key', () => {
@@ -204,6 +221,9 @@ describe('CreditCardPaymentsService', () => {
         createCreditCardPayment: jest.fn(),
         getPayment: jest.fn(),
       },
+      {
+        settlePagBankPayment: jest.fn(),
+      } as unknown as PaymentSettlementService,
     );
 
     expect(service.getPublicKey()).toBe('public-key-value');

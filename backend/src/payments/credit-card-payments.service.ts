@@ -22,6 +22,7 @@ import type {
   PaymentGateway,
   PaymentGatewayCustomer,
 } from './gateways/payment-gateway.interface';
+import { PaymentSettlementService } from './payment-settlement.service';
 import { PaymentsService } from './payments.service';
 
 @Injectable()
@@ -38,6 +39,7 @@ export class CreditCardPaymentsService {
     private readonly configService: ConfigService,
     @Inject(PAGBANK_PAYMENT_GATEWAY)
     private readonly paymentGateway: PaymentGateway,
+    private readonly paymentSettlementService: PaymentSettlementService,
   ) {}
 
   getPublicKey(): string {
@@ -93,10 +95,11 @@ export class CreditCardPaymentsService {
       );
     }
 
+    const amountInCents = this.toCents(payment.amount);
     const gatewayPayment = await this.paymentGateway.createCreditCardPayment({
       idempotencyKey: payment.idempotencyKey,
       externalReference: payment.externalReference,
-      amountInCents: this.toCents(payment.amount),
+      amountInCents,
       customer,
       item: {
         referenceId: subscription.plan.type,
@@ -110,12 +113,28 @@ export class CreditCardPaymentsService {
       installments: data.installments,
     });
 
+    if (gatewayPayment.status === 'APPROVED') {
+      await this.paymentSettlementService.settlePagBankPayment({
+        providerOrderId: gatewayPayment.providerOrderId,
+        providerPaymentId: gatewayPayment.providerPaymentId,
+        externalReference: payment.externalReference,
+        status: gatewayPayment.status,
+        statusDetail: gatewayPayment.statusDetail,
+        amountInCents,
+        currency: payment.currency,
+        approvedAt: gatewayPayment.approvedAt,
+        cardBrand: gatewayPayment.cardBrand,
+        cardLastFour: gatewayPayment.cardLastFour,
+      });
+
+      return this.toResponse(await this.paymentsService.findById(payment.id));
+    }
+
     const updatedPayment = await this.paymentsService.updateStatus(payment.id, {
       status: this.toPaymentStatus(gatewayPayment.status),
       providerOrderId: gatewayPayment.providerOrderId,
       providerPaymentId: gatewayPayment.providerPaymentId,
       statusDetail: gatewayPayment.statusDetail,
-      approvedAt: gatewayPayment.approvedAt?.toISOString(),
       cardBrand: gatewayPayment.cardBrand,
       cardLastFour: gatewayPayment.cardLastFour,
     });
