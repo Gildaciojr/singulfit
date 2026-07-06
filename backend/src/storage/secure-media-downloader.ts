@@ -28,6 +28,11 @@ export class SecureMediaDownloader {
     const url = this.validateUrl(sourceUrl);
     const address = await this.resolvePublicAddress(url.hostname);
     const pinnedLookup: LookupFunction = (_hostname, _options, callback) => {
+      if (_options.all) {
+        callback(null, [address]);
+        return;
+      }
+
       callback(null, address.address, address.family);
     };
 
