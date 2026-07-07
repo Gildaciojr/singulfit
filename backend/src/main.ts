@@ -2,12 +2,28 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import { json, urlencoded } from 'express';
 import helmet from 'helmet';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createRequire } from 'node:module';
 import { apiRuntime } from './production/runtime-mode';
 
 interface ProxyAwareHttpServer {
   set(setting: 'trust proxy', value: number): void;
+}
+
+type RawBodyRequest = IncomingMessage & {
+  rawBody?: Buffer;
+};
+
+function rawBodySaver(
+  request: IncomingMessage,
+  _response: ServerResponse,
+  buffer: Buffer,
+): void {
+  if (buffer.length > 0) {
+    (request as RawBodyRequest).rawBody = Buffer.from(buffer);
+  }
 }
 
 export async function bootstrapApi() {
@@ -20,19 +36,24 @@ export async function bootstrapApi() {
   ) as typeof import('./app.module');
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bodyParser: false,
     rawBody: true,
   });
 
-  // Permite receber payloads maiores (ex.: imagens Base64 da Evolution)
-  // preservando o rawBody utilizado na validação do webhook do PagBank.
-  app.useBodyParser('json', {
-    limit: '10mb',
-  });
+  app.use(
+    json({
+      limit: '10mb',
+      verify: rawBodySaver,
+    }),
+  );
 
-  app.useBodyParser('urlencoded', {
-    extended: true,
-    limit: '10mb',
-  });
+  app.use(
+    urlencoded({
+      extended: true,
+      limit: '10mb',
+      verify: rawBodySaver,
+    }),
+  );
 
   const configService = app.get(ConfigService);
 
