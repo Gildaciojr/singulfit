@@ -416,13 +416,15 @@ export class EvolutionWebhookService {
       );
     }
 
+    const rootMessage = this.asRecord(entry.message);
+    const rootBase64 = this.optionalString(rootMessage?.base64);
     const message = this.unwrapMessage(entry.message);
 
     if (!message) {
       return null;
     }
 
-    const parsedContent = this.parseMessageContent(message);
+    const parsedContent = this.parseMessageContent(message, rootBase64);
 
     if (!parsedContent) {
       return null;
@@ -440,6 +442,7 @@ export class EvolutionWebhookService {
 
   private parseMessageContent(
     message: Record<string, unknown>,
+    rootBase64?: string,
   ): Pick<
     EvolutionInboundMessage,
     | 'messageType'
@@ -469,13 +472,13 @@ export class EvolutionWebhookService {
     const image = this.asRecord(message.imageMessage);
 
     if (image) {
-      return this.parseMedia('IMAGE', image, '[Imagem]');
+      return this.parseMedia('IMAGE', image, '[Imagem]', rootBase64);
     }
 
     const audio = this.asRecord(message.audioMessage);
 
     if (audio) {
-      return this.parseMedia('AUDIO', audio, '[Áudio]');
+      return this.parseMedia('AUDIO', audio, '[Áudio]', rootBase64);
     }
 
     const document = this.asRecord(message.documentMessage);
@@ -485,7 +488,7 @@ export class EvolutionWebhookService {
         typeof document.fileName === 'string' && document.fileName.trim()
           ? `[Documento] ${document.fileName.trim()}`
           : '[Documento]';
-      return this.parseMedia('DOCUMENT', document, fallback);
+      return this.parseMedia('DOCUMENT', document, fallback, rootBase64);
     }
 
     return null;
@@ -495,6 +498,7 @@ export class EvolutionWebhookService {
     messageType: 'IMAGE' | 'AUDIO' | 'DOCUMENT',
     media: Record<string, unknown>,
     fallbackContent: string,
+    rootBase64?: string,
   ): Pick<
     EvolutionInboundMessage,
     | 'messageType'
@@ -517,10 +521,11 @@ export class EvolutionWebhookService {
       typeof media.mimetype === 'string' && media.mimetype.trim()
         ? media.mimetype.trim()
         : undefined;
-    const mediaBase64 =
+    const nestedBase64 =
       typeof media.base64 === 'string' && media.base64.trim()
         ? media.base64.trim()
         : undefined;
+    const mediaBase64 = nestedBase64 ?? rootBase64;
     const originalFileName =
       typeof media.fileName === 'string' && media.fileName.trim()
         ? media.fileName.trim()
