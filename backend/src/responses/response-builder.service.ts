@@ -22,6 +22,7 @@ import { AIResponseEvaluationService } from '../ai-quality/ai-response-evaluatio
 import { RecommendationService } from '../recommendations/recommendation.service';
 import { LongitudinalService } from '../longitudinal/longitudinal.service';
 import { AdaptiveIntelligenceSignals } from '../adaptive-intelligence/interfaces/adaptive-intelligence.interface';
+import { NutritionConversationShadowPipelineService } from './nutrition-conversation-shadow-pipeline.service';
 
 @Injectable()
 export class ResponseBuilderService {
@@ -35,6 +36,7 @@ export class ResponseBuilderService {
     private readonly responseEvaluation: AIResponseEvaluationService,
     private readonly recommendationService: RecommendationService,
     private readonly longitudinal: LongitudinalService,
+    private readonly nutritionConversationShadowPipeline: NutritionConversationShadowPipelineService,
   ) {}
 
   async buildNutritionResponse(mealAnalysisId: string) {
@@ -184,6 +186,18 @@ export class ResponseBuilderService {
 
       await this.publishOutbound(transaction, outbound);
 
+      this.nutritionConversationShadowPipeline.execute({
+        conversation: {
+          analysis,
+          context,
+          recommendations,
+          coach,
+          behavior,
+          longitudinal,
+        },
+        legacyText: decision.finalContent,
+      });
+
       return outbound;
     });
   }
@@ -318,6 +332,7 @@ export class ResponseBuilderService {
       reason: string;
     }>,
     nutrition: Array<{
+      id: string;
       title: string;
       rationale: string;
       action: string;
@@ -337,11 +352,17 @@ export class ResponseBuilderService {
     );
     const merged = [
       ...adaptiveProactive.map((recommendation) => ({
+        recommendationId: recommendation.id,
         title: recommendation.title,
         rationale: recommendation.reason,
         action: recommendation.description,
       })),
-      ...nutrition,
+      ...nutrition.map((recommendation) => ({
+        recommendationId: recommendation.id,
+        title: recommendation.title,
+        rationale: recommendation.rationale,
+        action: recommendation.action,
+      })),
     ];
     const seen = new Set<string>();
 

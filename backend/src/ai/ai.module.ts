@@ -6,6 +6,7 @@ import { AIService } from './ai.service';
 import { OpenAIGateway } from './openai.gateway';
 import { PromptService } from './prompt.service';
 import { AIRecoveryService } from './ai-recovery.service';
+import { ConversationAIService } from './conversation-ai.service';
 
 @Module({
   imports: [ConfigModule, EntitlementsModule],
@@ -15,7 +16,15 @@ import { AIRecoveryService } from './ai-recovery.service';
     PromptService,
     AIUsageService,
     AIRecoveryService,
+    ConversationAIService,
   ],
-  exports: [AIService, PromptService, AIUsageService, AIRecoveryService],
+  exports: [
+    OpenAIGateway,
+    ConversationAIService,
+    AIService,
+    PromptService,
+    AIUsageService,
+    AIRecoveryService,
+  ],
 })
 export class AIModule {}

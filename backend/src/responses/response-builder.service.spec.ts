@@ -17,6 +17,7 @@ import { AIResponseEvaluationService } from '../ai-quality/ai-response-evaluatio
 import { AIResponseEvaluationType, AIResponseRiskLevel } from '@prisma/client';
 import { RecommendationService } from '../recommendations/recommendation.service';
 import { LongitudinalService } from '../longitudinal/longitudinal.service';
+import { NutritionConversationShadowPipelineService } from './nutrition-conversation-shadow-pipeline.service';
 
 describe('ResponseBuilderService', () => {
   function createSubject() {
@@ -67,6 +68,7 @@ describe('ResponseBuilderService', () => {
       nutritionRecommendation: {
         findMany: jest.fn().mockResolvedValue([
           {
+            id: 'nutrition-recommendation-id',
             title: 'Ajuste prático',
             rationale: 'Histórico recente',
             action: 'Inclua vegetais.',
@@ -272,6 +274,9 @@ describe('ResponseBuilderService', () => {
         monthlyReview: null,
       }),
     };
+    const nutritionConversationShadowPipeline = {
+      execute: jest.fn().mockResolvedValue(undefined),
+    };
     const service = new ResponseBuilderService(
       prisma as unknown as PrismaService,
       formatter as unknown as NutritionResponseFormatter,
@@ -282,6 +287,7 @@ describe('ResponseBuilderService', () => {
       responseEvaluation as unknown as AIResponseEvaluationService,
       recommendationService as unknown as RecommendationService,
       longitudinal as unknown as LongitudinalService,
+      nutritionConversationShadowPipeline as unknown as NutritionConversationShadowPipelineService,
     );
 
     return {
@@ -296,6 +302,7 @@ describe('ResponseBuilderService', () => {
       responseEvaluation,
       recommendationService,
       longitudinal,
+      nutritionConversationShadowPipeline,
       outbound,
       analysis,
     };
@@ -365,6 +372,32 @@ describe('ResponseBuilderService', () => {
         }),
       }),
     );
+    expect(
+      subject.nutritionConversationShadowPipeline.execute,
+    ).toHaveBeenCalledWith({
+      conversation: {
+        analysis: subject.analysis,
+        context: expect.objectContaining({ userId: 'user-id' }),
+        recommendations: expect.any(Array),
+        coach: expect.objectContaining({ consistencyScore: 72 }),
+        behavior: expect.objectContaining({ stage: 'ACTION' }),
+        longitudinal: expect.objectContaining({
+          profile: expect.objectContaining({ historySize: 8 }),
+        }),
+      },
+      legacyText: 'Resposta nutricional',
+    });
+    expect(subject.formatter.format).toHaveReturnedWith('Resposta nutricional');
+    expect(subject.formatter.format).toHaveBeenCalledTimes(1);
+    expect(
+      subject.nutritionConversationShadowPipeline.execute,
+    ).toHaveBeenCalledTimes(1);
+    expect(subject.transaction.outboundMessage.upsert).toHaveBeenCalledTimes(1);
+    expect(subject.eventBus.publish).toHaveBeenCalledTimes(1);
+    expect(subject.eventBus.publish.mock.invocationCallOrder[0]).toBeLessThan(
+      subject.nutritionConversationShadowPipeline.execute.mock
+        .invocationCallOrder[0],
+    );
     expect(subject.recommendationService.refreshForUser).toHaveBeenCalledWith(
       'user-id',
     );
@@ -381,6 +414,22 @@ describe('ResponseBuilderService', () => {
     );
   });
 
+  it('does not await Shadow completion before producing the official response', async () => {
+    const subject = createSubject();
+    subject.nutritionConversationShadowPipeline.execute.mockReturnValue(
+      new Promise<void>(() => undefined),
+    );
+
+    await expect(
+      subject.service.buildNutritionResponse('analysis-id'),
+    ).resolves.toBe(subject.outbound);
+    expect(subject.formatter.format).toHaveReturnedWith('Resposta nutricional');
+    expect(subject.transaction.outboundMessage.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ content: 'Resposta nutricional' }),
+      }),
+    );
+  });
   it('replaces a risky response with the safe fallback before publishing', async () => {
     const subject = createSubject();
     subject.responseEvaluation.evaluate.mockReturnValue({
