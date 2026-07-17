@@ -6,248 +6,182 @@ import { TestimonialsData } from "@/engine/landing.types";
 import {
   ArrowRight,
   BadgeCheck,
-  CheckCircle2,
-  Play,
+  MessageCircle,
   Quote,
   ShieldCheck,
   Sparkles,
+  TrendingUp,
 } from "lucide-react";
 
 type Props = {
   data: TestimonialsData;
 };
 
+const experienceItems = [
+  {
+    title: "Acompanhamento que entende você",
+    description: "Respostas personalizadas e humanas via WhatsApp.",
+    icon: MessageCircle,
+  },
+  {
+    title: "Nutrição adaptada à sua rotina",
+    description: "A IA considera seu dia, seus treinos e seus hábitos.",
+    icon: Sparkles,
+  },
+  {
+    title: "Evolução contínua e consistente",
+    description: "Pequenos ajustes diários que geram grandes mudanças.",
+    icon: TrendingUp,
+  },
+];
+
 export default function Testimonials({ data }: Props) {
   const sectionRef = useRef<HTMLElement | null>(null);
-  const isInView = useInView(sectionRef, { margin: "-18%" });
+  const isInView = useInView(sectionRef, {
+    margin: "-12%",
+    once: true,
+  });
   const hasVideos = data.videos.length > 0;
 
   return (
     <section
       ref={sectionRef}
       id="testimonials"
-      className="relative overflow-hidden py-16 lg:py-20"
+      className="relative overflow-hidden py-16 sm:py-24 lg:py-28"
     >
-      <div className="absolute inset-0 -z-20 bg-[radial-gradient(800px_500px_at_50%_0%,rgba(34,120,84,0.08),transparent_70%)]" />
-      <div className="absolute inset-0 -z-10 opacity-[0.03] bg-[linear-gradient(to_right,#111_1px,transparent_1px),linear-gradient(to_bottom,#111_1px,transparent_1px)] bg-[size:56px_56px]" />
+      <div className="pointer-events-none absolute inset-0 -z-20 bg-[radial-gradient(950px_650px_at_75%_25%,rgba(16,185,129,0.08),transparent_72%)]" />
 
-      <div className="container mx-auto max-w-7xl px-6">
-        <motion.div
-          initial={{ opacity: 0, y: 24 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, amount: 0.25 }}
-          transition={{ duration: 0.55 }}
-          className="mx-auto mb-20 max-w-[780px] text-center"
-        >
-          <div
-            className="
-    inline-flex
-    items-center
-    gap-2
-    rounded-full
-    border
-    border-emerald-100
-    bg-white/85
-    px-4
-    py-2
-    backdrop-blur-xl
-    shadow-[0_12px_35px_-24px_rgba(15,23,42,.12)]
-  "
-          >
-            <Sparkles className="h-3.5 w-3.5 text-emerald-700" />
+      <div className="pointer-events-none absolute inset-0 -z-10 opacity-[0.015] bg-[linear-gradient(to_right,#111_1px,transparent_1px),linear-gradient(to_bottom,#111_1px,transparent_1px)] bg-[size:72px_72px]" />
 
-            <span
-              className="
-      text-[11px]
-      font-semibold
-      uppercase
-      tracking-[0.20em]
-      text-emerald-900
-    "
-            >
-              Pessoas reais • Resultados reais
-            </span>
-          </div>
-
-          <h2
-            className="
-    mt-7
-    text-4xl
-    font-black
-    leading-[1.05]
-    tracking-[-0.055em]
-    text-zinc-950
-    md:text-6xl
-  "
-          >
-            Quem usa,
-            <span className="block text-emerald-800">continua usando.</span>
-          </h2>
-
-          <p
-            className="
-    mx-auto
-    mt-7
-    max-w-[650px]
-    text-[18px]
-    leading-9
-    text-zinc-600
-  "
-          >
-            A melhor prova de que uma tecnologia funciona é quando ela se torna
-            parte da rotina. Veja como pessoas comuns transformaram sua
-            alimentação apenas conversando naturalmente pelo WhatsApp.
-          </p>
-        </motion.div>
-
-        <div className="grid items-start gap-8 lg:grid-cols-[0.72fr_1.28fr]">
+      <div className="container mx-auto max-w-[1440px] px-5 sm:px-6 lg:px-8">
+        <div className="grid items-start gap-10 lg:grid-cols-[0.70fr_1.30fr] lg:gap-12 xl:grid-cols-[0.66fr_1.34fr] xl:gap-16">
           <motion.aside
-            initial={{ opacity: 0, x: -24 }}
+            initial={{ opacity: 0, x: -18 }}
             whileInView={{ opacity: 1, x: 0 }}
-            viewport={{ once: true, amount: 0.25 }}
-            transition={{ duration: 0.55 }}
-            className="space-y-6 lg:sticky lg:top-24"
+            viewport={{ once: true, amount: 0.2 }}
+            transition={{
+              duration: 0.5,
+              ease: [0.22, 1, 0.36, 1],
+            }}
+            className="lg:sticky lg:top-24"
           >
-            <div
-              className="
-      overflow-hidden
-      rounded-[2rem]
-      border
-      border-zinc-200/70
-      bg-white/82
-      p-7
-      backdrop-blur-2xl
-      shadow-[0_28px_70px_-42px_rgba(15,23,42,.18)]
-    "
-            >
-              <div
-                className="
-        inline-flex
-        items-center
-        gap-2
-        rounded-full
-        border
-        border-emerald-100
-        bg-emerald-50/80
-        px-3.5
-        py-1.5
-      "
-              >
-                <Sparkles className="h-3.5 w-3.5 text-emerald-700" />
+            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-white px-4 py-2 shadow-[0_12px_28px_-22px_rgba(15,23,42,.12)]">
+              <Sparkles className="h-3.5 w-3.5 text-emerald-700" />
 
-                <span
-                  className="
-          text-[11px]
-          font-semibold
-          uppercase
-          tracking-[0.18em]
-          text-emerald-900
-        "
-                >
-                  Experiência simples
-                </span>
-              </div>
+              <span className="text-[11px] font-bold uppercase tracking-[0.20em] text-emerald-900">
+                Experiências reais
+              </span>
+            </div>
 
-              <h3
-                className="
-        mt-6
-        text-[2rem]
-        font-black
-        leading-[1.05]
-        tracking-[-0.05em]
-        text-zinc-950
-      "
-              >
-                Uma conversa.
-                <br />
-                Todo o acompanhamento.
-              </h3>
+            <h2 className="mt-8 max-w-[560px] text-[2.8rem] font-black leading-[0.96] tracking-[-0.065em] text-zinc-950 sm:text-5xl lg:text-[3.25rem] xl:text-[3.65rem]">
+              Resultados reais.
+              <span className="mt-1 block">
+                Histórias que{" "}
+                <span className="text-emerald-800">inspiram.</span>
+              </span>
+            </h2>
 
-              <p
-                className="
-        mt-5
-        text-[15px]
-        leading-8
-        text-zinc-600
-      "
-              >
-                A SingulFit elimina aplicativos complexos, planilhas e cadastros
-                intermináveis. Você simplesmente conversa pelo WhatsApp enquanto
-                a IA acompanha sua evolução.
-              </p>
+            <p className="mt-6 max-w-[510px] text-[17px] leading-8 text-zinc-600">
+              Pessoas reais, com rotinas reais, conquistando resultados reais
+              com a SingulFit.
+            </p>
 
-              <div className="mt-8 space-y-3">
-                {[
-                  "Conversa totalmente natural",
-                  "Nutrição adaptada ao seu contexto",
-                  "Evolução acompanhada diariamente",
-                ].map((item) => (
-                  <div
-                    key={item}
+            <div className="mt-9 space-y-3.5">
+              {experienceItems.map((item, index) => {
+                const Icon = item.icon;
+
+                return (
+                  <motion.div
+                    key={item.title}
+                    initial={{ opacity: 0, y: 12 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, amount: 0.35 }}
+                    transition={{
+                      duration: 0.32,
+                      delay: 0.08 + index * 0.06,
+                      ease: [0.22, 1, 0.36, 1],
+                    }}
                     className="
-            flex
-            items-center
-            gap-3
-            rounded-2xl
-            border
-            border-zinc-100
-            bg-zinc-50/70
-            px-4
-            py-3.5
-            transition-all
-            duration-300
-            hover:border-emerald-100
-            hover:bg-emerald-50/40
-          "
+      group
+      flex
+      items-center
+      gap-4
+      rounded-[1.35rem]
+      border
+      border-zinc-200/80
+      bg-white
+      px-5
+      py-4
+      shadow-[0_10px_24px_-20px_rgba(15,23,42,.10)]
+      transition-all
+      duration-300
+      hover:-translate-y-0.5
+      hover:border-emerald-200
+      hover:shadow-[0_18px_36px_-24px_rgba(6,78,59,.12)]
+    "
                   >
                     <div
                       className="
-              flex
-              h-8
-              w-8
-              items-center
-              justify-center
-              rounded-full
-              bg-emerald-100
-            "
+        flex
+        h-11
+        w-11
+        shrink-0
+        items-center
+        justify-center
+        rounded-2xl
+        bg-emerald-50
+        text-emerald-800
+        transition-colors
+        duration-300
+        group-hover:bg-emerald-100
+      "
                     >
-                      <CheckCircle2 className="h-4 w-4 text-emerald-800" />
+                      <Icon className="h-5 w-5" />
                     </div>
 
-                    <span
-                      className="
-              text-[15px]
-              font-medium
-              text-zinc-700
-            "
-                    >
-                      {item}
-                    </span>
-                  </div>
-                ))}
-              </div>
+                    <div className="min-w-0">
+                      <h3 className="text-[15px] font-bold leading-5 text-zinc-950">
+                        {item.title}
+                      </h3>
+
+                      <p className="mt-1 text-[13px] leading-6 text-zinc-500">
+                        {item.description}
+                      </p>
+                    </div>
+                  </motion.div>
+                );
+              })}
             </div>
 
-            <div
+            <motion.div
+              initial={{ opacity: 0, y: 14 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{
+                duration: 0.4,
+                delay: 0.22,
+                ease: [0.22, 1, 0.36, 1],
+              }}
               className="
+    mt-9
     overflow-hidden
-    rounded-[1.5rem]
+    rounded-[1.6rem]
     border
-    border-emerald-100
-    bg-gradient-to-r
+    border-emerald-100/80
+    bg-gradient-to-br
     from-emerald-50
     via-white
-    to-emerald-50/60
-    p-5
-    shadow-[0_16px_45px_-30px_rgba(6,78,59,.12)]
+    to-white
+    p-6
+    shadow-[0_16px_36px_-28px_rgba(6,78,59,.10)]
   "
             >
               <div className="flex items-start gap-4">
                 <div
                   className="
         flex
-        h-11
-        w-11
+        h-12
+        w-12
         shrink-0
         items-center
         justify-center
@@ -259,13 +193,13 @@ export default function Testimonials({ data }: Props) {
                   <Quote className="h-4 w-4" />
                 </div>
 
-                <div>
+                <div className="min-w-0">
                   <div
                     className="
           text-[11px]
-          font-semibold
+          font-bold
           uppercase
-          tracking-[0.18em]
+          tracking-[0.22em]
           text-emerald-700
         "
                   >
@@ -274,11 +208,12 @@ export default function Testimonials({ data }: Props) {
 
                   <p
                     className="
-          mt-2
-          text-[15px]
+          mt-3
+          text-[16px]
           font-semibold
-          leading-7
-          text-zinc-800
+          leading-8
+          tracking-[-0.01em]
+          text-zinc-900
         "
                   >
                     A melhor tecnologia é aquela que desaparece.
@@ -287,409 +222,365 @@ export default function Testimonials({ data }: Props) {
                   </p>
                 </div>
               </div>
-            </div>
-          </motion.aside>
-          <div className="space-y-8">
-            <div
-              className="
-    inline-flex
-    items-center
-    gap-2
-    rounded-full
-    border
-    border-emerald-100
-    bg-emerald-50/80
-    px-3.5
-    py-1.5
-  "
-            >
-              <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-
-              <span
-                className="
-      text-[11px]
-      font-semibold
-      uppercase
-      tracking-[0.18em]
-      text-emerald-900
-    "
-              >
-                Depoimentos verificados
-              </span>
-            </div>
-
-            <div className="flex gap-5 overflow-x-auto pb-2 no-scrollbar">
-              {data.videos.map((video, index) => (
-                <motion.div
-                  key={`${video.src}-${index}`}
-                  initial={{ opacity: 0, y: 28 }}
-                  animate={isInView ? { opacity: 1, y: 0 } : {}}
-                  transition={{ delay: index * 0.06 }}
-                  className="min-w-[310px] md:min-w-[385px]"
-                >
-                  <motion.div
-                    whileHover={{
-                      y: -4,
-                    }}
-                    transition={{ duration: 0.25 }}
-                    className="
-            group
-            relative
-            overflow-hidden
-            rounded-[1.2rem]
-            border
-            border-white/10
-            bg-zinc-950
-            shadow-[0_45px_90px_-42px_rgba(15,23,42,.45)]
-          "
-                  >
-                    <div
-                      className="
-              absolute
-              left-4
-              top-4
-              z-20
-              rounded-full
-              bg-white/90
-              px-4
-              py-1.5
-              text-[10px]
-              font-bold
-              uppercase
-              tracking-[0.16em]
-              text-emerald-900
-            "
-                    >
-                      Caso real
-                    </div>
-
-                    <video
-                      src={video.src}
-                      poster={video.poster}
-                      autoPlay={isInView}
-                      loop
-                      muted
-                      playsInline
-                      className="
-              h-[240px]
-              w-full
-              object-cover
-              transition
-              duration-700
-              group-hover:scale-105
-            "
-                    />
-
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/35 to-transparent" />
-
-                    <div className="absolute inset-0 z-10 flex items-center justify-center">
-                      <motion.div
-                        whileHover={{ scale: 1.08 }}
-                        className="
-                flex
-                h-14
-                w-14
-                items-center
-                justify-center
-                rounded-full
-                bg-white/92
-                shadow-[0_18px_40px_-18px_rgba(0,0,0,.30)]
-              "
-                      >
-                        <Play className="h-4 w-4 fill-current text-emerald-900" />
-                      </motion.div>
-                    </div>
-
-                    <div className="absolute bottom-0 left-0 right-0 z-10 px-6 py-5">
-                      <div className="flex items-end justify-between gap-4">
-                        <div>
-                          <div className="text-[15px] font-bold text-white">
-                            {video.person.name}
-                          </div>
-
-                          <div className="mt-1 text-[12px] text-white/70">
-                            {video.person.age} anos • Usuária SingulFit
-                          </div>
-                        </div>
-
-                        <div
-                          className="
-                  rounded-full
-                  border
-                  border-white/20
-                  bg-white/12
-                  px-3
-                  py-1
-                  text-[10px]
-                  font-bold
-                  uppercase
-                  tracking-[0.18em]
-                  text-white
-                  backdrop-blur-md
-                "
-                        >
-                          Vídeo
-                        </div>
-                      </div>
-                    </div>
-                  </motion.div>
-                </motion.div>
-              ))}
-            </div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 18 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.45 }}
-              className="flex justify-center"
-            >
-              <div
-                className="
-      inline-flex
-      items-center
-      gap-4
-      rounded-full
-      border
-      border-zinc-200
-      bg-white/90
-      px-5
-      py-3
-      backdrop-blur-xl
-      shadow-[0_18px_40px_-28px_rgba(0,0,0,0.18)]
-    "
-              >
-                <div
-                  className="
-        flex
-        h-10
-        w-10
-        items-center
-        justify-center
-        rounded-full
-        bg-emerald-50
-      "
-                >
-                  <Sparkles className="h-4 w-4 text-emerald-800" />
-                </div>
-
-                <div>
-                  <div className="text-sm font-bold text-zinc-950">
-                    Nutrição inteligente via WhatsApp
-                  </div>
-
-                  <div className="mt-1 text-xs text-zinc-500">
-                    Sem aplicativos extras • Simples • Natural
-                  </div>
-                </div>
-
-                <div
-                  className="
-        hidden
-        md:inline-flex
-        items-center
-        rounded-full
-        bg-emerald-900
-        px-3
-        py-1.5
-        text-[10px]
-        font-bold
-        uppercase
-        tracking-[0.18em]
-        text-white
-      "
-                >
-                  WhatsApp First
-                </div>
-              </div>
             </motion.div>
+          </motion.aside>
+          <div className="relative space-y-8">
+            <div className="flex justify-center lg:justify-start">
+              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-white px-4 py-2 shadow-[0_12px_28px_-22px_rgba(15,23,42,.12)]">
+                <span className="h-2 w-2 rounded-full bg-emerald-500" />
 
-            <div className="grid gap-4 md:grid-cols-2">
-              {data.comments.map((item, index) => (
-                <motion.div
-                  key={`${item.name}-${index}`}
-                  initial={{ opacity: 0, y: 20 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ delay: index * 0.04 }}
-                  whileHover={{ y: -4 }}
-                  className="
-        group
-        rounded-[1.5rem]
-        border
-        border-zinc-200
-        bg-white
-        p-5
-        shadow-[0_18px_40px_-30px_rgba(0,0,0,0.18)]
-        transition-all
-      "
-                >
-                  <div className="mb-4 flex items-center justify-between">
-                    <div
-                      className="
-            flex
-            h-10
-            w-10
-            items-center
-            justify-center
-            rounded-2xl
-            bg-emerald-50
-            text-emerald-900
-          "
-                    >
-                      <Quote className="h-4 w-4" />
-                    </div>
-
-                    <div
-                      className="
-            rounded-full
-            bg-zinc-100
-            px-3
-            py-1
-            text-[10px]
-            font-bold
-            uppercase
-            tracking-[0.18em]
-            text-zinc-500
-          "
-                    >
-                      Verificado
-                    </div>
-                  </div>
-
-                  <p
-                    className="
-          text-sm
-          leading-7
-          text-zinc-700
-        "
-                  >
-                    {item.quote}
-                  </p>
-
-                  <div className="mt-5">
-                    <div className="font-bold text-zinc-950">{item.name}</div>
-
-                    <div className="mt-1 text-xs text-zinc-500">
-                      {item.role}
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
+                <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-900">
+                  Depoimentos verificados
+                </span>
+              </div>
             </div>
 
-            <motion.div
-              initial={{ opacity: 0, y: 18 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.45 }}
-              className="
+            <div className="relative isolate overflow-hidden px-1 pb-10 pt-6 sm:px-3 sm:pb-14 lg:min-h-[720px] lg:px-5 lg:pb-20 lg:pt-10">
+              <div className="pointer-events-none absolute left-1/2 top-[44%] -z-20 h-[480px] w-[620px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-300/18 blur-[180px]" />
+
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 900 720"
+                preserveAspectRatio="none"
+                className="pointer-events-none absolute inset-0 -z-10 hidden h-full w-full lg:block"
+              >
+                <path
+                  d="M58 124 C 220 62, 340 170, 470 118 S 720 50, 842 132"
+                  fill="none"
+                  stroke="rgba(16,185,129,0.16)"
+                  strokeWidth="1.5"
+                  strokeDasharray="5 9"
+                />
+
+                <path
+                  d="M86 334 C 240 252, 360 410, 514 318 S 722 236, 844 348"
+                  fill="none"
+                  stroke="rgba(16,185,129,0.13)"
+                  strokeWidth="1.5"
+                  strokeDasharray="4 10"
+                />
+
+                <path
+                  d="M98 556 C 264 482, 382 628, 540 536 S 726 470, 830 574"
+                  fill="none"
+                  stroke="rgba(16,185,129,0.11)"
+                  strokeWidth="1.5"
+                  strokeDasharray="5 10"
+                />
+
+                <circle cx="58" cy="124" r="4" fill="rgba(16,185,129,0.24)" />
+                <circle cx="470" cy="118" r="4" fill="rgba(16,185,129,0.20)" />
+                <circle cx="842" cy="132" r="4" fill="rgba(16,185,129,0.24)" />
+
+                <circle cx="86" cy="334" r="4" fill="rgba(16,185,129,0.20)" />
+                <circle cx="514" cy="318" r="4" fill="rgba(16,185,129,0.18)" />
+                <circle cx="844" cy="348" r="4" fill="rgba(16,185,129,0.20)" />
+
+                <circle cx="98" cy="556" r="4" fill="rgba(16,185,129,0.18)" />
+                <circle cx="540" cy="536" r="4" fill="rgba(16,185,129,0.16)" />
+                <circle cx="830" cy="574" r="4" fill="rgba(16,185,129,0.18)" />
+              </svg>
+
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-16 bg-gradient-to-b from-white via-white/75 to-transparent sm:h-20" />
+
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-20 bg-gradient-to-t from-white via-white/80 to-transparent sm:h-28" />
+
+              <div className="relative z-10 grid gap-5 md:grid-cols-2 md:gap-6 lg:grid-cols-12 lg:gap-x-7 lg:gap-y-7">
+                {data.comments.map((item, index) => {
+                  const placementClasses = [
+                    "lg:col-span-4 lg:col-start-1 lg:translate-y-0",
+                    "lg:col-span-4 lg:col-start-7 lg:translate-y-16",
+                    "lg:col-span-4 lg:col-start-2 lg:translate-y-8",
+                    "lg:col-span-4 lg:col-start-8 lg:translate-y-28",
+                    "lg:col-span-4 lg:col-start-3 lg:translate-y-18",
+                  ];
+
+                  const placementClass =
+                    placementClasses[index % placementClasses.length];
+
+                  const rotations = [-1.8, 1.5, -0.9, 1.9, -1.2];
+
+                  const rotation = rotations[index % rotations.length];
+
+                  const initials = item.name
+                    .split(" ")
+                    .filter(Boolean)
+                    .slice(0, 2)
+                    .map((part) => part.charAt(0).toUpperCase())
+                    .join("");
+
+                  return (
+                    <motion.article
+                      key={`${item.name}-${index}`}
+                      initial={{ opacity: 0, y: 22 }}
+                      whileInView={{ opacity: 1, y: 0 }}
+                      viewport={{ once: true, amount: 0.2 }}
+                      transition={{
+                        duration: 0.45,
+                        delay: Math.min(index * 0.07, 0.28),
+                        ease: [0.22, 1, 0.36, 1],
+                      }}
+                      whileHover={{
+                        y: -5,
+                        rotate: rotation,
+                        scale: 1.015,
+                      }}
+                      className={`
+    group
     relative
     overflow-hidden
-    rounded-[2rem]
+    rounded-[1.6rem]
+    border
+    border-white/80
+    bg-white/95
+    backdrop-blur-md
+    p-6
+    shadow-[0_28px_60px_-36px_rgba(15,23,42,.16)]
+    transition-all
+    duration-500
+    hover:border-emerald-100
+    hover:shadow-[0_55px_110px_-52px_rgba(16,185,129,.18)]
+    sm:p-7
+    ${placementClass}
+  `}
+                    >
+                      <div className="pointer-events-none absolute inset-0 rounded-[inherit] bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,.08),transparent_62%)] opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
+
+                      <div className="relative z-10">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700">
+                            <Quote className="h-5 w-5" />
+                          </div>
+
+                          <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-100 bg-white px-3 py-1.5 shadow-[0_8px_20px_-16px_rgba(15,23,42,.20)]">
+                            <BadgeCheck className="h-3.5 w-3.5 text-emerald-700" />
+
+                            <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-800">
+                              Verificado
+                            </span>
+                          </div>
+                        </div>
+
+                        <p className="mt-7 text-[15px] leading-8 text-zinc-700">
+                          “{item.quote}”
+                        </p>
+
+                        <div className="mt-7 flex items-center gap-3.5">
+                          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-white bg-gradient-to-br from-emerald-100 via-white to-emerald-50 text-[13px] font-black tracking-[-0.02em] text-emerald-900 shadow-[0_15px_35px_-22px_rgba(16,185,129,.30)]">
+                            {initials || "SF"}
+                          </div>
+
+                          <div className="min-w-0">
+                            <div className="truncate text-[15px] font-bold text-zinc-950">
+                              {item.name}
+                            </div>
+
+                            <div className="mt-1 truncate text-[13px] text-zinc-500">
+                              {item.role}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.article>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 22 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{
+              duration: 0.55,
+              ease: [0.22, 1, 0.36, 1],
+            }}
+            className="
+    relative
+    isolate
+    overflow-hidden
+    rounded-[2.4rem]
+    border
+    border-zinc-800
     bg-gradient-to-br
     from-zinc-950
     via-zinc-900
     to-emerald-950
-    p-8
-    text-white
-    shadow-[0_40px_100px_-45px_rgba(0,0,0,0.65)]
+    px-7
+    py-8
+    shadow-[0_50px_120px_-55px_rgba(0,0,0,.70)]
+    sm:px-10
+    sm:py-10
+    lg:px-14
+    lg:py-14
   "
-            >
-              <div
-                className="
-      absolute
-      right-0
-      top-0
-      h-40
-      w-40
-      rounded-full
-      bg-emerald-500/10
-      blur-[80px]
-    "
-              />
+          >
+            <div className="absolute -right-20 top-0 h-72 w-72 rounded-full bg-emerald-500/10 blur-[120px]" />
 
-              <div className="relative z-10">
+            <div className="absolute bottom-0 left-0 h-52 w-52 rounded-full bg-emerald-400/5 blur-[90px]" />
+
+            <div className="relative z-10 grid items-center gap-12 lg:grid-cols-[1fr_340px]">
+              <div>
                 <div
                   className="
-        mb-4
-        inline-flex
-        items-center
-        gap-2
-        rounded-full
-        bg-white/10
-        px-4
-        py-2
-        text-xs
-        font-bold
-        uppercase
-        tracking-[0.18em]
-      "
+          inline-flex
+          items-center
+          gap-2
+          rounded-full
+          border
+          border-white/10
+          bg-white/8
+          px-4
+          py-2
+          backdrop-blur-xl
+        "
                 >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  Comece hoje
+                  <Sparkles className="h-4 w-4 text-emerald-300" />
+
+                  <span className="text-[11px] font-bold uppercase tracking-[0.20em] text-white/90">
+                    Comece hoje
+                  </span>
                 </div>
 
                 <h3
                   className="
-        max-w-2xl
-        text-4xl
-        font-black
-        tracking-[-0.05em]
-      "
+          mt-10
+          max-w-[520px]
+          text-[2rem]
+          font-black
+          leading-[1.02]
+          tracking-[-0.055em]
+          text-white
+          sm:text-[2.6rem]
+        "
                 >
-                  Sua evolução começa na próxima mensagem.
+                  Sua evolução começa
+                  <span className="block text-emerald-300">
+                    na próxima mensagem.
+                  </span>
                 </h3>
 
                 <p
                   className="
-        mt-4
-        max-w-xl
-        text-sm
-        leading-7
-        text-white/75
-      "
+          mt-6
+          max-w-[560px]
+          text-[16px]
+          leading-8
+          text-white/72
+        "
                 >
-                  Em menos de um minuto você pode iniciar sua jornada, receber
-                  orientações e começar a construir consistência diretamente
-                  pelo WhatsApp.
+                  Em menos de um minuto você inicia sua jornada, recebe
+                  orientações personalizadas e passa a ter um coach disponível
+                  diretamente no WhatsApp.
                 </p>
 
-                <div className="mt-7">
+                <div className="mt-9 flex flex-wrap items-center gap-4">
                   <a
                     href="#pricing"
                     className="
-          group
-          inline-flex
-          h-12
-          items-center
-          justify-center
-          gap-2
-          rounded-2xl
-          bg-white
-          px-6
-          text-sm
-          font-bold
-          text-zinc-950
-          transition-all
-          hover:scale-[1.02]
-        "
+            group
+            inline-flex
+            h-14
+            items-center
+            justify-center
+            gap-3
+            rounded-2xl
+            bg-white
+            px-8
+            text-[15px]
+            font-bold
+            text-zinc-950
+            shadow-[0_20px_45px_-22px_rgba(255,255,255,.35)]
+            transition-all
+            duration-300
+            hover:-translate-y-0.5
+          "
                   >
-                    Ver planos
+                    Começar agora
                     <ArrowRight
                       className="
-            h-4
-            w-4
-            transition-transform
-            duration-300
-            group-hover:translate-x-1
-          "
+              h-4
+              w-4
+              transition-transform
+              duration-300
+              group-hover:translate-x-1
+              shadow-[0_28px_60px_-28px_rgba(255,255,255,.35)]
+            "
                     />
                   </a>
+
+                  <div
+                    className="
+            inline-flex
+            items-center
+            gap-2
+            rounded-full
+            border
+            border-white/10
+            bg-white/6
+            px-4
+            py-3
+            backdrop-blur-xl
+          "
+                  >
+                    <BadgeCheck className="h-4 w-4 text-emerald-300" />
+
+                    <span className="text-sm font-medium text-white/80">
+                      Ativação imediata
+                    </span>
+                  </div>
                 </div>
               </div>
-            </motion.div>
-          </div>
+
+              <div className="relative hidden lg:flex justify-center">
+                <div className="relative">
+                  <div className="absolute inset-0 scale-110 rounded-full bg-emerald-400/20 blur-[110px]" />
+
+                  <div
+                    className="
+            relative
+            flex
+            h-[420px]
+            w-[210px]
+            items-center
+            justify-center
+            rounded-[2.6rem]
+            border
+            border-white/10
+            bg-zinc-900
+            shadow-[0_40px_90px_-40px_rgba(0,0,0,.75)]
+          "
+                  >
+                    <div
+                      className="
+              flex
+              h-[88%]
+              w-[84%]
+              flex-col
+              justify-center
+              rounded-[2rem]
+              bg-gradient-to-b
+              from-emerald-500
+              to-emerald-700
+              p-6
+            "
+                    >
+                      <div className="text-center">
+                        <div className="text-sm text-white/80">SingulFit</div>
+
+                        <div className="mt-5 text-5xl">💬</div>
+
+                        <div className="mt-6 text-lg font-bold text-white">
+                          Seu coach já está esperando.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </motion.div>
         </div>
       </div>
     </section>
