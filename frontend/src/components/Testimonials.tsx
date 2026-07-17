@@ -255,8 +255,8 @@ export default function Testimonials({ data }: Props) {
                 <path
                   d="M86 334 C 240 252, 360 410, 514 318 S 722 236, 844 348"
                   fill="none"
-                  stroke="rgba(16,185,129,0.13)"
-                  strokeWidth="1.5"
+                  stroke="rgba(16,185,129,0.18)"
+                  strokeWidth="2"
                   strokeDasharray="4 10"
                 />
 
@@ -335,7 +335,7 @@ export default function Testimonials({ data }: Props) {
     bg-white/95
     backdrop-blur-md
     p-6
-    shadow-[0_28px_60px_-36px_rgba(15,23,42,.16)]
+    shadow-[0_20px_45px_-28px_rgba(15,23,42,.12)]
     transition-all
     duration-500
     hover:border-emerald-100
@@ -405,8 +405,8 @@ export default function Testimonials({ data }: Props) {
     border-zinc-800
     bg-gradient-to-br
     from-zinc-950
-    via-zinc-900
-    to-emerald-950
+    via-[#111315]
+    to-[#0A3F35]
     px-7
     py-8
     shadow-[0_50px_120px_-55px_rgba(0,0,0,.70)]
@@ -424,36 +424,36 @@ export default function Testimonials({ data }: Props) {
               <div>
                 <div
                   className="
-          inline-flex
-          items-center
-          gap-2
-          rounded-full
-          border
-          border-white/10
-          bg-white/8
-          px-4
-          py-2
-          backdrop-blur-xl
-        "
+      inline-flex
+      items-center
+      gap-2
+      rounded-full
+      border
+      border-white/10
+      bg-white/5
+      px-5
+      py-2.5
+      backdrop-blur-xl
+    "
                 >
                   <Sparkles className="h-4 w-4 text-emerald-300" />
 
-                  <span className="text-[11px] font-bold uppercase tracking-[0.20em] text-white/90">
+                  <span className="text-[11px] font-bold uppercase tracking-[0.22em] text-white/90">
                     Comece hoje
                   </span>
                 </div>
 
                 <h3
                   className="
-          mt-10
-          max-w-[520px]
-          text-[2rem]
-          font-black
-          leading-[1.02]
-          tracking-[-0.055em]
-          text-white
-          sm:text-[2.6rem]
-        "
+      mt-8
+      max-w-[560px]
+      text-[2.35rem]
+      font-black
+      leading-[0.96]
+      tracking-[-0.06em]
+      text-white
+      sm:text-[3rem]
+    "
                 >
                   Sua evolução começa
                   <span className="block text-emerald-300">
@@ -463,72 +463,98 @@ export default function Testimonials({ data }: Props) {
 
                 <p
                   className="
-          mt-6
-          max-w-[560px]
-          text-[16px]
-          leading-8
-          text-white/72
-        "
+      mt-6
+      max-w-[500px]
+      text-[17px]
+      leading-8
+      text-white/88
+    "
                 >
                   Em menos de um minuto você inicia sua jornada, recebe
-                  orientações personalizadas e passa a ter um coach disponível
-                  diretamente no WhatsApp.
+                  orientações personalizadas e passa a contar com um coach
+                  inteligente disponível diretamente no WhatsApp.
                 </p>
 
                 <div className="mt-9 flex flex-wrap items-center gap-4">
                   <a
                     href="#pricing"
                     className="
-            group
-            inline-flex
-            h-14
-            items-center
-            justify-center
-            gap-3
-            rounded-2xl
-            bg-white
-            px-8
-            text-[15px]
-            font-bold
-            text-zinc-950
-            shadow-[0_20px_45px_-22px_rgba(255,255,255,.35)]
-            transition-all
-            duration-300
-            hover:-translate-y-0.5
-          "
+        group
+        inline-flex
+        h-14
+        items-center
+        justify-center
+        gap-3
+        rounded-2xl
+        bg-white
+        px-8
+        text-[15px]
+        font-bold
+        text-zinc-950
+        shadow-[0_25px_55px_-24px_rgba(255,255,255,.35)]
+        transition-all
+        duration-300
+        hover:-translate-y-1
+      "
                   >
                     Começar agora
                     <ArrowRight
                       className="
-              h-4
-              w-4
-              transition-transform
-              duration-300
-              group-hover:translate-x-1
-              shadow-[0_28px_60px_-28px_rgba(255,255,255,.35)]
-            "
+          h-4
+          w-4
+          transition-transform
+          duration-300
+          group-hover:translate-x-1
+        "
                     />
                   </a>
 
                   <div
                     className="
-            inline-flex
-            items-center
-            gap-2
-            rounded-full
-            border
-            border-white/10
-            bg-white/6
-            px-4
-            py-3
-            backdrop-blur-xl
-          "
+        inline-flex
+        items-center
+        gap-2
+        rounded-full
+        border
+        border-white/10
+        bg-white/5
+        px-4
+        py-3
+        backdrop-blur-xl
+      "
                   >
                     <BadgeCheck className="h-4 w-4 text-emerald-300" />
 
-                    <span className="text-sm font-medium text-white/80">
+                    <span className="text-sm font-medium text-white/85">
                       Ativação imediata
                     </span>
+                  </div>
+                </div>
+
+                <div
+                  className="
+      mt-8
+      flex
+      flex-wrap
+      items-center
+      gap-6
+      text-[13px]
+      text-white/65
+    "
+                >
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4 text-emerald-300" />
+                    Seguro e privado
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-emerald-300" />
+                    Resposta em segundos
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <BadgeCheck className="h-4 w-4 text-emerald-300" />
+                    Sem burocracia
                   </div>
                 </div>
               </div>
