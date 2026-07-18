@@ -400,7 +400,7 @@ export default function Testimonials({ data }: Props) {
     relative
     isolate
     overflow-hidden
-    rounded-[2.4rem]
+    rounded-[2.6rem]
     border
     border-zinc-800
     bg-gradient-to-br
@@ -409,18 +409,18 @@ export default function Testimonials({ data }: Props) {
     to-[#0A3F35]
     px-7
     py-8
-    shadow-[0_50px_120px_-55px_rgba(0,0,0,.70)]
+    shadow-[0_55px_140px_-60px_rgba(0,0,0,.72)]
     sm:px-10
     sm:py-10
-    lg:px-14
-    lg:py-14
+    lg:py-16
+    xl:px-20
   "
           >
             <div className="absolute -right-20 top-0 h-72 w-72 rounded-full bg-emerald-500/10 blur-[120px]" />
 
             <div className="absolute bottom-0 left-0 h-52 w-52 rounded-full bg-emerald-400/5 blur-[90px]" />
 
-            <div className="relative z-10 grid items-center gap-12 lg:grid-cols-[1fr_340px]">
+            <div className="relative z-10 grid items-center gap-10 xl:gap-16 lg:grid-cols-[minmax(0,1fr)_420px] xl:grid-cols-[minmax(0,1fr)_480px] xl:gap-16">
               <div>
                 <div
                   className="

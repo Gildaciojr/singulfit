@@ -74,7 +74,10 @@ const avatarInitials = ["A", "J", "M", "R", "L"];
 
 export default function Hero({ data }: HeroProps) {
   return (
-    <section className="relative overflow-hidden pt-24 pb-20 sm:pt-28 sm:pb-24 lg:pt-36 lg:pb-28">
+    <section
+      id="hero"
+      className="relative overflow-hidden pt-24 pb-20 sm:pt-28 sm:pb-24 lg:pt-36 lg:pb-28"
+    >
       <div className="absolute inset-0 -z-30 bg-[#f7f8fc]" />
 
       <div className="absolute inset-0 -z-20 bg-[radial-gradient(circle_at_72%_18%,rgba(16,185,129,0.12),transparent_30%),radial-gradient(circle_at_20%_22%,rgba(6,95,70,0.06),transparent_34%),linear-gradient(180deg,#f7f8fc_0%,#f4f6fb_48%,#eef6f1_100%)]" />

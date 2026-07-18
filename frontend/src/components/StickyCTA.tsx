@@ -7,16 +7,42 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 
 export default function StickyCTA() {
-  const [isVisible, setIsVisible] = useState(false);
   const [footerInView, setFooterInView] = useState(false);
+  const [canRender, setCanRender] = useState(false);
+  const [lastTrigger, setLastTrigger] = useState(0);
 
   useEffect(() => {
     const handleScroll = () => {
-      const scroll = window.scrollY;
+      const hero = document.getElementById("hero");
+      const pricing = document.getElementById("pricing");
 
-      // Hero já saiu
-      // Pricing ainda não chegou
-      setIsVisible(scroll > 900 && scroll < 4300);
+      if (!hero || !pricing) return;
+
+      const heroBottom = hero.getBoundingClientRect().bottom + window.scrollY;
+
+      const pricingTop = pricing.getBoundingClientRect().top + window.scrollY;
+
+      const current = window.scrollY + window.innerHeight * 0.5;
+
+      const insideRange = current > heroBottom && current < pricingTop;
+
+      if (!insideRange) {
+        setCanRender(false);
+        return;
+      }
+
+      const now = Date.now();
+
+      if (now - lastTrigger < 18000) {
+        return;
+      }
+
+      setLastTrigger(now);
+      setCanRender(true);
+
+      window.setTimeout(() => {
+        setCanRender(false);
+      }, 4200);
     };
 
     handleScroll();
@@ -49,7 +75,7 @@ export default function StickyCTA() {
         observer.disconnect();
       }
     };
-  }, []);
+  }, [lastTrigger]);
 
   const scrollToPricing = () => {
     document.getElementById("pricing")?.scrollIntoView({
@@ -60,7 +86,7 @@ export default function StickyCTA() {
 
   return (
     <AnimatePresence>
-      {isVisible && !footerInView && (
+      {canRender && !footerInView && (
         <motion.div
           initial={{
             opacity: 0,

@@ -21,7 +21,7 @@ export default function FAQ({ data }: Props) {
   );
 
   return (
-    <section id="faq" className="relative overflow-hidden py-14 lg:py-20">
+    <section id="faq" className="relative overflow-hidden py-20 lg:py-28">
       <div className="absolute inset-0 -z-20 bg-[radial-gradient(800px_500px_at_50%_0%,rgba(34,120,84,0.08),transparent_70%)]" />
 
       <div className="absolute inset-0 -z-10 opacity-[0.03] bg-[linear-gradient(to_right,#111_1px,transparent_1px),linear-gradient(to_bottom,#111_1px,transparent_1px)] bg-[size:56px_56px]" />
@@ -32,7 +32,7 @@ export default function FAQ({ data }: Props) {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 0.45 }}
-          className="mx-auto mb-20 max-w-4xl text-center"
+          className="mx-auto mb-14 lg:mb-20 max-w-4xl text-center"
         >
           <div
             className="
@@ -60,11 +60,12 @@ export default function FAQ({ data }: Props) {
           <h2
             className="
               mt-7
-              text-5xl
+              text-4xl
               font-black
               tracking-[-0.06em]
               text-zinc-950
-              md:text-7xl
+              sm:text-5xl
+              lg:text-7xl
             "
           >
             Tudo o que você precisa saber.
@@ -75,8 +76,12 @@ export default function FAQ({ data }: Props) {
               mx-auto
               mt-7
               max-w-3xl
-              text-lg
-              leading-9
+              text-base
+              leading-8
+
+              sm:text-lg
+              sm:leading-9
+
               text-zinc-600
             "
           >
@@ -110,7 +115,7 @@ export default function FAQ({ data }: Props) {
     group
     mb-4
     overflow-hidden
-    rounded-[1.75rem]
+    rounded-[1.5rem]
     border
     transition-all
     duration-300
@@ -134,18 +139,22 @@ export default function FAQ({ data }: Props) {
                 >
                   <AccordionTrigger
                     className="
-                      px-7
-                      py-7
+                      px-5
+                      py-6
+
+                      sm:px-7
+                      sm:py-7
                       text-left
                       hover:no-underline
                     "
                   >
-                    <div className="flex w-full items-center justify-between gap-8">
+                    <div className="flex w-full items-center justify-between gap-4 sm:gap-8">
                       <span
                         className={`
-                          text-[1.12rem]
+                          text-base
+                          sm:text-[1.08rem]
+                          lg:text-[1.12rem]
                           font-bold
-                          tracking-[-0.03em]
                           leading-relaxed
                           tracking-[-0.02em]
                           transition-colors
@@ -164,8 +173,10 @@ export default function FAQ({ data }: Props) {
                         className={`
                           shrink-0
                           flex
-                          h-11
-                          w-11
+                          h-10
+                          w-10
+                          sm:h-11
+                          sm:w-11
                           items-center
                           justify-center
                           rounded-full
@@ -200,14 +211,20 @@ export default function FAQ({ data }: Props) {
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.25 }}
                       className="
-  mx-7
-  mb-7
+  mx-5
+  mb-5
   rounded-2xl
   border
   border-emerald-100
   bg-white/80
-  px-6
-  py-5
+  px-5
+  py-4
+
+  sm:mx-7
+  sm:mb-7
+  sm:px-6
+  sm:py-5
+
   text-[15px]
   leading-8
   text-zinc-600

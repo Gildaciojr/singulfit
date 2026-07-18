@@ -286,38 +286,49 @@ export default function Footer() {
           </div>
         </motion.div>
 
-        <div className="mt-20 border-t border-zinc-200/70 pt-8">
+        <div className="relative mt-20 border-t border-zinc-200/60 pt-8">
+          <div
+            className="
+      pointer-events-none
+      absolute
+      left-1/2
+      top-0
+      h-px
+      w-[280px]
+      -translate-x-1/2
+      bg-gradient-to-r
+      from-transparent
+      via-emerald-300/35
+      to-transparent
+      sm:w-[420px]
+    "
+          />
+
           <div
             className="
       flex
       flex-col
       items-center
-      gap-8
+      gap-10
       lg:flex-row
+      lg:items-start
       lg:justify-between
     "
           >
             {/* Marca */}
 
-            <div className="text-center lg:text-left">
-              <div
-                className="
-          text-lg
-          font-black
-          tracking-[-0.03em]
-          text-zinc-950
-        "
-              >
-                SingulFit
-              </div>
+            <div className="flex flex-col items-center lg:items-start">
+              <img src={singulfitLogo} alt="SingulFit" className="h-9 w-auto" />
 
               <p
                 className="
-          mt-1
-          text-sm
-          leading-6
-          text-zinc-500
-        "
+      mt-4
+      max-w-[250px]
+      text-[15px]
+      font-medium
+      leading-6
+      text-zinc-500
+    "
               >
                 Nutrição inteligente.
                 <br />
@@ -334,22 +345,27 @@ export default function Footer() {
         gap-3
         rounded-full
         border
-        border-zinc-200
-        bg-white/75
-        px-5
-        py-3
-        backdrop-blur-xl
+        border-zinc-200/60
+        bg-white/60
+        px-4
+        py-2.5
+        shadow-[0_12px_30px_-22px_rgba(15,23,42,.10)]
+        backdrop-blur-2xl
+
+        transition-all
+        duration-300
+        hover:-translate-y-0.5
       "
             >
               <div
                 className="
           flex
-          h-9
-          w-9
+          h-8
+          w-8
           items-center
           justify-center
           rounded-full
-          bg-emerald-50
+          bg-emerald-50/80
         "
               >
                 <Lock className="h-4 w-4 text-emerald-800" />
@@ -371,30 +387,32 @@ export default function Footer() {
             <nav
               className="
         flex
-        flex-wrap
         items-center
         justify-center
-        gap-6
-        text-sm
+        gap-8
+        text-[15px]
+        font-medium
+        text-zinc-600
+
       "
             >
               <a
                 href="#pricing"
-                className="transition-colors hover:text-emerald-800"
+                className="relative transition-all duration-300 hover:-translate-y-0.5 hover:text-emerald-700"
               >
                 Planos
               </a>
 
               <a
                 href="#faq"
-                className="transition-colors hover:text-emerald-800"
+                className="relative transition-all duration-300 hover:-translate-y-0.5 hover:text-emerald-700"
               >
                 FAQ
               </a>
 
               <a
                 href="#guarantee"
-                className="transition-colors hover:text-emerald-800"
+                className="relative transition-all duration-300 hover:-translate-y-0.5 hover:text-emerald-700"
               >
                 Garantia
               </a>
@@ -405,13 +423,16 @@ export default function Footer() {
 
           <div
             className="
-      mt-8
+            relative
+      mt-10
       border-t
-      border-zinc-100
-      pt-6
+      border-zinc-200/60
+      pt-8
+      pb-2
       text-center
       text-xs
-      text-zinc-400
+      tracking-[0.02em]
+      text-zinc-400/70
     "
           >
             © {new Date().getFullYear()} SingulFit • Todos os direitos
