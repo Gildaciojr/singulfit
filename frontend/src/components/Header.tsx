@@ -105,7 +105,7 @@ export default function Header({ data }: Props) {
               className="flex min-h-11 items-center gap-3"
               type="button"
             >
-              <img src={data.logo} alt="SingulFit" className="h-11 w-auto" />
+              <img src={data.logo} alt="SingulFit" className="h-16 w-auto" />
 
               <div className="hidden sm:block text-left">
                 <div className="text-[1.45rem] font-black tracking-[-0.03em] text-zinc-950">
@@ -249,7 +249,7 @@ export default function Header({ data }: Props) {
                 <img
                   src={data.logo}
                   alt="SingulFit"
-                  className="h-12 w-auto object-contain"
+                  className="h-16 w-auto object-contain"
                 />
 
                 <button

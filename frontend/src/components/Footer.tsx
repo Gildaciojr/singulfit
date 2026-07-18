@@ -26,7 +26,7 @@ export default function Footer() {
           transition={{ duration: 0.45 }}
           className="flex flex-col items-center"
         >
-          <img src={singulfitLogo} alt="SingulFit" className="h-10 w-auto" />
+          <img src={singulfitLogo} alt="SingulFit" className="h-16 w-auto" />
 
           <div
             className="
@@ -318,7 +318,7 @@ export default function Footer() {
             {/* Marca */}
 
             <div className="flex flex-col items-center lg:items-start">
-              <img src={singulfitLogo} alt="SingulFit" className="h-9 w-auto" />
+              <img src={singulfitLogo} alt="SingulFit" className="h-16 w-auto" />
 
               <p
                 className="

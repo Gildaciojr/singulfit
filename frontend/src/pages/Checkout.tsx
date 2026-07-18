@@ -528,7 +528,7 @@ function PlanSummary({
         <img
           src={singulfitLogo}
           alt="SingulFit"
-          className="h-12 w-auto"
+          className="h-18 w-auto"
         />
         <div>
           <div className="text-2xl font-black tracking-[-0.04em]">
