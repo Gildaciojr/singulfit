@@ -565,12 +565,12 @@ export default function Hero({ data }: HeroProps) {
           <motion.div
             variants={fadeUp}
             className="
-              mt-5
-              grid
-              grid-cols-2
-              gap-3
-              px-1
-            "
+    mt-6
+    grid
+    grid-cols-2
+    gap-2.5
+    px-1
+  "
           >
             {benefitItems.map((item) => {
               const Icon = item.icon;
@@ -579,44 +579,57 @@ export default function Hero({ data }: HeroProps) {
                 <div
                   key={item.title}
                   className="
-                    flex
-                    min-h-[72px]
-                    items-center
-                    gap-3
-                    rounded-[1.25rem]
-                    border
-                    border-white/80
-                    bg-white/72
-                    px-3.5
-                    py-3
-                    shadow-[0_18px_42px_-34px_rgba(15,23,42,.28)]
-                    backdrop-blur-2xl
-                  "
+          flex
+          h-[58px]
+          items-center
+          gap-2.5
+
+          rounded-2xl
+
+          border
+          border-white/70
+
+          bg-white/78
+
+          px-3
+
+          shadow-[0_14px_34px_-28px_rgba(15,23,42,.18)]
+
+          backdrop-blur-xl
+
+          transition-all
+          duration-300
+        "
                 >
                   <div
                     className="
-                      flex
-                      h-10
-                      w-10
-                      shrink-0
-                      items-center
-                      justify-center
-                      rounded-2xl
-                      bg-emerald-50
-                      text-emerald-800
-                    "
+            flex
+            h-9
+            w-9
+            shrink-0
+            items-center
+            justify-center
+
+            rounded-xl
+
+            bg-gradient-to-br
+            from-emerald-50
+            to-emerald-100
+
+            text-emerald-800
+          "
                   >
-                    <Icon className="h-5 w-5" />
+                    <Icon className="h-4.5 w-4.5" />
                   </div>
 
                   <span
                     className="
-                      text-[12px]
-                      font-extrabold
-                      leading-[1.2]
-                      tracking-[-0.02em]
-                      text-emerald-950
-                    "
+            text-[11px]
+            font-bold
+            leading-[1.2]
+            tracking-[-0.02em]
+            text-zinc-800
+          "
                   >
                     {item.title}
                   </span>
@@ -627,67 +640,77 @@ export default function Hero({ data }: HeroProps) {
 
           <div
             className="
-              relative
-              mt-6
-              min-h-[880px]
-              overflow-visible
-              px-1
-            "
+    relative
+    mt-5
+    min-h-[760px]
+    overflow-visible
+    px-0
+    isolate
+  "
           >
+            {/* ===================== HERO SHOWCASE ===================== */}
+
             <div
               className="
-                pointer-events-none
-                absolute
-                inset-x-[-44px]
-                top-[-12px]
-                h-[500px]
-                rounded-full
-                bg-emerald-100/70
-                blur-[145px]
-              "
+    pointer-events-none
+    absolute
+    left-1/2
+    top-[-30px]
+    z-0
+    h-[620px]
+    w-[620px]
+    -translate-x-1/2
+    rounded-full
+    bg-[radial-gradient(circle,rgba(16,185,129,.22)_0%,rgba(16,185,129,.11)_36%,rgba(16,185,129,.05)_58%,transparent_78%)]
+    blur-[105px]
+  "
             />
 
             <div
               className="
-                pointer-events-none
-                absolute
-                right-[-86px]
-                top-[42px]
-                h-[310px]
-                w-[310px]
-                rounded-full
-                bg-emerald-300/20
-                blur-[90px]
-              "
+    pointer-events-none
+    absolute
+    right-[-90px]
+    top-[70px]
+    z-0
+    h-[320px]
+    w-[320px]
+    rounded-full
+    bg-emerald-300/20
+    blur-[120px]
+  "
             />
 
             <div
               className="
-                pointer-events-none
-                absolute
-                left-[-72px]
-                top-[330px]
-                h-[260px]
-                w-[260px]
-                rounded-full
-                bg-white/90
-                blur-[82px]
-              "
+    pointer-events-none
+    absolute
+    left-[-60px]
+    top-[250px]
+    z-0
+    h-[220px]
+    w-[220px]
+    rounded-full
+    bg-white
+    opacity-80
+    blur-[95px]
+  "
             />
 
             <div
               className="
-                absolute
-                inset-x-0
-                top-0
-                h-[520px]
-                overflow-hidden
-                rounded-[2.25rem]
-                border
-                border-white/80
-                bg-[radial-gradient(circle_at_76%_26%,rgba(16,185,129,0.18),transparent_28%),linear-gradient(135deg,#ffffff_0%,#f7faf9_44%,#eaf7f2_100%)]
-                shadow-[0_34px_90px_-52px_rgba(15,23,42,.3)]
-              "
+    absolute
+    inset-x-0
+    top-0
+    z-10
+    h-[560px]
+    overflow-visible
+    rounded-[2.8rem]
+    border
+    border-white/70
+    bg-[linear-gradient(180deg,#ffffff_0%,#fbfcfc_28%,#f2faf6_62%,#edf7f2_100%)]
+    shadow-[0_45px_110px_-48px_rgba(15,23,42,.30)]
+  "
             >
               <img
                 src={heroAthlete}
@@ -695,19 +718,25 @@ export default function Hero({ data }: HeroProps) {
                 className="
                   pointer-events-none
                   absolute
-                  right-[-12px]
-                  top-[-8px]
-
+                  bottom-[-18px]
+                  right-[-118px]
                   z-10
-
-                  w-[445px]
-                  h-[520px]
+                  h-[590px]
+                  w-[515px]
+                  max-w-none
                   select-none
                   object-cover
-                  object-[52%_18%]
+                  object-[48%_18%]
 
-                  min-[390px]:right-[0px]
-                  min-[390px]:w-[470px]
+                  min-[360px]:right-[-105px]
+                  min-[360px]:w-[525px]
+
+                  min-[390px]:right-[-92px]
+                  min-[390px]:h-[600px]
+                  min-[390px]:w-[545px]
+
+                  min-[430px]:right-[-72px]
+                  min-[430px]:w-[560px]
                 "
               />
 
@@ -718,10 +747,22 @@ export default function Hero({ data }: HeroProps) {
                   inset-y-0
                   left-0
                   z-20
-                  w-[6%]
-                  bg-gradient-to-r
-                  from-white
-                  via-white/35
+                  w-[48%]
+                  bg-[linear-gradient(90deg,rgba(255,255,255,.98)_0%,rgba(255,255,255,.84)_30%,rgba(247,250,248,.46)_68%,transparent_100%)]
+                "
+              />
+
+              <div
+                className="
+                  pointer-events-none
+                  absolute
+                  inset-x-0
+                  top-0
+                  z-20
+                  h-24
+                  bg-gradient-to-b
+                  from-white/55
+                  via-white/12
                   to-transparent
                 "
               />
@@ -733,11 +774,36 @@ export default function Hero({ data }: HeroProps) {
                   inset-x-0
                   bottom-0
                   z-20
-                  h-28
-                  bg-gradient-to-t
-                  from-[#f7f8fc]
-                  via-[#f7f8fc]/28
-                  to-transparent
+                  h-40
+                  bg-[linear-gradient(0deg,#eef7f2_0%,rgba(238,247,242,.88)_26%,rgba(238,247,242,.32)_62%,transparent_100%)]
+                "
+              />
+
+              <div
+                className="
+                  pointer-events-none
+                  absolute
+                  right-[-16px]
+                  top-[70px]
+                  z-20
+                  h-[360px]
+                  w-[280px]
+                  rounded-full
+                  bg-[radial-gradient(circle,rgba(16,185,129,.12)_0%,rgba(16,185,129,.045)_48%,transparent_72%)]
+                  blur-[30px]
+                "
+              />
+
+              <div
+                className="
+                  pointer-events-none
+                  absolute
+                  inset-0
+                  z-30
+                  rounded-[2.8rem]
+                  ring-1
+                  ring-inset
+                  ring-white/55
                 "
               />
             </div>
@@ -746,100 +812,228 @@ export default function Hero({ data }: HeroProps) {
               src={mockupPhone}
               alt="Demonstração do SingulFit no WhatsApp"
               animate={{
-                y: [0, -7, 0],
-                rotate: [0, 0.2, 0],
+                y: [0, -10, 0],
+                rotate: [-0.6, 0.6, -0.6],
               }}
               transition={{
-                duration: 7.5,
+                duration: 6.5,
                 repeat: Infinity,
                 ease: "easeInOut",
               }}
               className="
-                pointer-events-none
-                absolute
-                left-[50%]
-                top-[330px]
-                z-40
-                w-[232px]
-                -translate-x-1/2
-                select-none
-                object-contain
-                drop-shadow-[0_52px_110px_rgba(15,23,42,.28)]
-                min-[390px]:top-[332px]
-                min-[390px]:w-[242px]
-              "
+    pointer-events-none
+    absolute
+
+    left-[38%]
+    top-[92px]
+
+    z-40
+
+    w-[260px]
+
+    -translate-x-1/2
+
+    select-none
+    object-contain
+
+    drop-shadow-[0_65px_120px_rgba(15,23,42,.32)]
+
+    min-[390px]:left-[39%]
+    min-[390px]:top-[88px]
+    min-[390px]:w-[275px]
+
+    min-[430px]:left-[40%]
+    min-[430px]:w-[290px]
+  "
             />
 
             <motion.div
-              initial={{ opacity: 0, y: 18 }}
+              initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.58, duration: 0.6 }}
+              transition={{ delay: 0.65, duration: 0.65 }}
               className="
-                absolute
-                inset-x-1
-                top-[610px]
-                z-30
-                overflow-hidden
-                rounded-[1.65rem]
-                border
-                border-white/75
-                bg-white/90
-                shadow-[0_20px_50px_-38px_rgba(15,23,42,.3)]
-                backdrop-blur-2xl
-              "
+    absolute
+
+    inset-x-4
+
+    top-[532px]
+
+    z-50
+
+    overflow-hidden
+
+    rounded-[1.65rem]
+
+    border
+    border-white/80
+
+    bg-white/92
+
+    backdrop-blur-2xl
+
+    shadow-[0_24px_60px_-38px_rgba(15,23,42,.22)]
+  "
             >
               <div className="grid grid-cols-1">
                 {data.metrics.map((metric, index) => (
                   <div
                     key={metric.label}
                     className={`
-                      flex
-                      items-center
-                      justify-between
-                      px-5
-                      py-4
-                      ${index !== data.metrics.length - 1 ? "border-b border-zinc-100" : ""}
-                    `}
+          flex
+          items-center
+          justify-between
+
+          px-5
+          py-3.5
+
+          ${
+            index !== data.metrics.length - 1
+              ? "border-b border-zinc-100/80"
+              : ""
+          }
+        `}
                   >
-                    <span className="text-[12px] font-semibold tracking-[-0.01em] text-zinc-500">
+                    <span
+                      className="
+            text-[11px]
+            font-semibold
+            tracking-[-0.01em]
+            text-zinc-500
+          "
+                    >
                       {metric.label}
                     </span>
 
-                    <span className="text-[21px] font-black tracking-[-0.045em] text-emerald-900">
+                    <span
+                      className="
+            text-[19px]
+            font-black
+            tracking-[-0.04em]
+            text-emerald-900
+          "
+                    >
                       {metric.value}
                     </span>
                   </div>
                 ))}
               </div>
 
-              <div className="grid grid-cols-3 border-t border-white/10 bg-gradient-to-r from-emerald-950 via-emerald-900 to-emerald-950 text-white">
-                <div className="flex min-h-[84px] flex-col justify-center gap-1 px-3.5">
-                  <MessageCircle className="h-5 w-5 text-emerald-200" />
-                  <span className="text-[13px] font-black leading-tight">
+              <div
+                className="
+    grid
+    grid-cols-3
+
+    border-t
+    border-zinc-100
+
+    bg-gradient-to-r
+    from-emerald-950
+    via-emerald-900
+    to-emerald-950
+
+    text-white
+  "
+              >
+                <div
+                  className="
+      flex
+      min-h-[72px]
+      flex-col
+      justify-center
+      gap-1
+      px-3
+    "
+                >
+                  <MessageCircle className="h-4 w-4 text-emerald-200" />
+
+                  <span
+                    className="
+        text-[12px]
+        font-black
+        leading-none
+      "
+                  >
                     +4.500
                   </span>
-                  <span className="text-[10px] leading-tight text-white/68">
+
+                  <span
+                    className="
+        text-[10px]
+        leading-none
+        text-white/65
+      "
+                  >
                     pessoas
                   </span>
                 </div>
 
-                <div className="flex min-h-[84px] flex-col justify-center gap-1 border-x border-white/10 px-3.5">
-                  <Target className="h-5 w-5 text-emerald-200" />
-                  <span className="text-[12px] font-black leading-tight">
+                <div
+                  className="
+      flex
+      min-h-[72px]
+      flex-col
+      justify-center
+      gap-1
+
+      border-x
+      border-white/10
+
+      px-3
+    "
+                >
+                  <Target className="h-4 w-4 text-emerald-200" />
+
+                  <span
+                    className="
+        text-[11px]
+        font-black
+        leading-tight
+      "
+                  >
                     Resultados reais
                   </span>
-                  <span className="text-[10px] leading-tight text-white/68">
-                    mais consistência
+
+                  <span
+                    className="
+        text-[10px]
+        leading-none
+        text-white/65
+      "
+                  >
+                    consistência
                   </span>
                 </div>
 
-                <div className="flex min-h-[84px] flex-col justify-center gap-1 px-3.5">
-                  <Shield className="h-5 w-5 text-emerald-200" />
-                  <span className="text-[12px] font-black leading-tight">
+                <div
+                  className="
+      flex
+      min-h-[72px]
+      flex-col
+      justify-center
+      gap-1
+      px-3
+    "
+                >
+                  <Shield className="h-4 w-4 text-emerald-200" />
+
+                  <span
+                    className="
+        text-[11px]
+        font-black
+        leading-tight
+      "
+                  >
                     Privacidade
                   </span>
-                  <span className="text-[10px] leading-tight text-white/68">
-                    dados protegidos
+
+                  <span
+                    className="
+        text-[10px]
+        leading-none
+        text-white/65
+      "
+                  >
+                    protegida
                   </span>
                 </div>
               </div>
