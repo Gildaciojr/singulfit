@@ -703,7 +703,7 @@ export default function Hero({ data }: HeroProps) {
     inset-x-0
     top-0
     z-10
-    h-[560px]
+    h-[520px]
     overflow-visible
     rounded-[2.8rem]
     border
@@ -718,25 +718,30 @@ export default function Hero({ data }: HeroProps) {
                 className="
                   pointer-events-none
                   absolute
-                  bottom-[-18px]
-                  right-[-118px]
+
+                  bottom-[-8px]
+                  right-[-62px]
+
                   z-10
-                  h-[590px]
-                  w-[515px]
+
+                  h-[555px]
+                  w-[470px]
+
                   max-w-none
                   select-none
+
                   object-cover
-                  object-[48%_18%]
+                  object-[46%_16%]
 
-                  min-[360px]:right-[-105px]
-                  min-[360px]:w-[525px]
+                  min-[360px]:right-[-56px]
+                  min-[360px]:w-[485px]
 
-                  min-[390px]:right-[-92px]
-                  min-[390px]:h-[600px]
-                  min-[390px]:w-[545px]
+                  min-[390px]:right-[-48px]
+                  min-[390px]:h-[570px]
+                  min-[390px]:w-[500px]
 
-                  min-[430px]:right-[-72px]
-                  min-[430px]:w-[560px]
+                  min-[430px]:right-[-36px]
+                  min-[430px]:w-[520px]
                 "
               />
 
@@ -824,26 +829,30 @@ export default function Hero({ data }: HeroProps) {
     pointer-events-none
     absolute
 
-    left-[38%]
-    top-[92px]
+    left-[31%]
+    top-[100px]
 
     z-40
 
-    w-[260px]
+    w-[220px]
 
     -translate-x-1/2
 
     select-none
     object-contain
 
-    drop-shadow-[0_65px_120px_rgba(15,23,42,.32)]
+    drop-shadow-[0_58px_110px_rgba(15,23,42,.28)]
 
-    min-[390px]:left-[39%]
-    min-[390px]:top-[88px]
-    min-[390px]:w-[275px]
+    min-[360px]:left-[32%]
+    min-[360px]:w-[230px]
 
-    min-[430px]:left-[40%]
-    min-[430px]:w-[290px]
+    min-[390px]:left-[33%]
+    min-[390px]:top-[106px]
+    min-[390px]:w-[240px]
+
+    min-[430px]:left-[34%]
+    min-[430px]:top-[104px]
+    min-[430px]:w-[255px]
   "
             />
 
