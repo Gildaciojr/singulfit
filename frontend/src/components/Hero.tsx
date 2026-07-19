@@ -629,7 +629,7 @@ export default function Hero({ data }: HeroProps) {
 
   z-10
 
-  h-[540px]
+  h-[575px]
 
   overflow-visible
 
@@ -655,8 +655,8 @@ export default function Hero({ data }: HeroProps) {
 
                   z-10
 
-                  h-[540px]
-                  w-[485px]
+                  h-[510px]
+                  w-[460px]
 
                   max-w-none
                   select-none
@@ -668,11 +668,11 @@ export default function Hero({ data }: HeroProps) {
                   min-[360px]:w-[485px]
 
                   min-[390px]:right-[-48px]
-                  min-[390px]:h-[570px]
-                  min-[390px]:w-[500px]
+                  min-[390px]:h-[545px]
+                  min-[390px]:w-[480px]
 
                   min-[430px]:right-[-36px]
-                  min-[430px]:w-[520px]
+                  min-[430px]:w-[500px]
                 "
               />
 
@@ -760,12 +760,12 @@ export default function Hero({ data }: HeroProps) {
     pointer-events-none
     absolute
 
-    left-[34%]
-    top-[118px]
+    left-[35%]
+    top-[90px]
 
     z-40
 
-    w-[235px]
+    w-[228px]
 
     -translate-x-1/2
 
@@ -790,7 +790,7 @@ export default function Hero({ data }: HeroProps) {
           <motion.div
             variants={fadeUp}
             className="
-              mt-4
+              mt-8
               grid
               grid-cols-2
               gap-3
