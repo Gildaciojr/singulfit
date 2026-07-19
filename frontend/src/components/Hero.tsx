@@ -562,87 +562,10 @@ export default function Hero({ data }: HeroProps) {
             </Button>
           </motion.div>
 
-          <motion.div
-            variants={fadeUp}
-            className="
-    mt-6
-    grid
-    grid-cols-2
-    gap-2.5
-    px-1
-  "
-          >
-            {benefitItems.map((item) => {
-              const Icon = item.icon;
-
-              return (
-                <div
-                  key={item.title}
-                  className="
-          flex
-          h-[58px]
-          items-center
-          gap-2.5
-
-          rounded-2xl
-
-          border
-          border-white/70
-
-          bg-white/78
-
-          px-3
-
-          shadow-[0_14px_34px_-28px_rgba(15,23,42,.18)]
-
-          backdrop-blur-xl
-
-          transition-all
-          duration-300
-        "
-                >
-                  <div
-                    className="
-            flex
-            h-9
-            w-9
-            shrink-0
-            items-center
-            justify-center
-
-            rounded-xl
-
-            bg-gradient-to-br
-            from-emerald-50
-            to-emerald-100
-
-            text-emerald-800
-          "
-                  >
-                    <Icon className="h-4.5 w-4.5" />
-                  </div>
-
-                  <span
-                    className="
-            text-[11px]
-            font-bold
-            leading-[1.2]
-            tracking-[-0.02em]
-            text-zinc-800
-          "
-                  >
-                    {item.title}
-                  </span>
-                </div>
-              );
-            })}
-          </motion.div>
-
           <div
             className="
     relative
     mt-5
-    min-h-[760px]
     overflow-visible
     px-0
     isolate
@@ -703,7 +626,7 @@ export default function Hero({ data }: HeroProps) {
     inset-x-0
     top-0
     z-10
-    h-[520px]
+    h-[540px]
     overflow-visible
     rounded-[2.8rem]
     border
@@ -719,19 +642,19 @@ export default function Hero({ data }: HeroProps) {
                   pointer-events-none
                   absolute
 
-                  bottom-[-8px]
-                  right-[-62px]
+                  bottom-0
+                  right-[-42px]
 
                   z-10
 
-                  h-[555px]
-                  w-[470px]
+                  h-[540px]
+                  w-[485px]
 
                   max-w-none
                   select-none
 
                   object-cover
-                  object-[46%_16%]
+                  object-[47%_15%]
 
                   min-[360px]:right-[-56px]
                   min-[360px]:w-[485px]
@@ -829,12 +752,12 @@ export default function Hero({ data }: HeroProps) {
     pointer-events-none
     absolute
 
-    left-[31%]
-    top-[100px]
+    left-[34%]
+    top-[118px]
 
     z-40
 
-    w-[220px]
+    w-[235px]
 
     -translate-x-1/2
 
@@ -843,211 +766,91 @@ export default function Hero({ data }: HeroProps) {
 
     drop-shadow-[0_58px_110px_rgba(15,23,42,.28)]
 
-    min-[360px]:left-[32%]
-    min-[360px]:w-[230px]
+    min-[360px]:left-[35%]
+    min-[360px]:w-[245px]
 
-    min-[390px]:left-[33%]
-    min-[390px]:top-[106px]
-    min-[390px]:w-[240px]
+    min-[390px]:left-[36%]
+    min-[390px]:top-[116px]
+    min-[390px]:w-[255px]
 
-    min-[430px]:left-[34%]
-    min-[430px]:top-[104px]
-    min-[430px]:w-[255px]
+    min-[430px]:left-[37%]
+    min-[430px]:top-[114px]
+    min-[430px]:w-[270px]
   "
             />
-
-            <motion.div
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.65, duration: 0.65 }}
-              className="
-    absolute
-
-    inset-x-4
-
-    top-[532px]
-
-    z-50
-
-    overflow-hidden
-
-    rounded-[1.65rem]
-
-    border
-    border-white/80
-
-    bg-white/92
-
-    backdrop-blur-2xl
-
-    shadow-[0_24px_60px_-38px_rgba(15,23,42,.22)]
-  "
-            >
-              <div className="grid grid-cols-1">
-                {data.metrics.map((metric, index) => (
-                  <div
-                    key={metric.label}
-                    className={`
-          flex
-          items-center
-          justify-between
-
-          px-5
-          py-3.5
-
-          ${
-            index !== data.metrics.length - 1
-              ? "border-b border-zinc-100/80"
-              : ""
-          }
-        `}
-                  >
-                    <span
-                      className="
-            text-[11px]
-            font-semibold
-            tracking-[-0.01em]
-            text-zinc-500
-          "
-                    >
-                      {metric.label}
-                    </span>
-
-                    <span
-                      className="
-            text-[19px]
-            font-black
-            tracking-[-0.04em]
-            text-emerald-900
-          "
-                    >
-                      {metric.value}
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              <div
-                className="
-    grid
-    grid-cols-3
-
-    border-t
-    border-zinc-100
-
-    bg-gradient-to-r
-    from-emerald-950
-    via-emerald-900
-    to-emerald-950
-
-    text-white
-  "
-              >
-                <div
-                  className="
-      flex
-      min-h-[72px]
-      flex-col
-      justify-center
-      gap-1
-      px-3
-    "
-                >
-                  <MessageCircle className="h-4 w-4 text-emerald-200" />
-
-                  <span
-                    className="
-        text-[12px]
-        font-black
-        leading-none
-      "
-                  >
-                    +4.500
-                  </span>
-
-                  <span
-                    className="
-        text-[10px]
-        leading-none
-        text-white/65
-      "
-                  >
-                    pessoas
-                  </span>
-                </div>
-
-                <div
-                  className="
-      flex
-      min-h-[72px]
-      flex-col
-      justify-center
-      gap-1
-
-      border-x
-      border-white/10
-
-      px-3
-    "
-                >
-                  <Target className="h-4 w-4 text-emerald-200" />
-
-                  <span
-                    className="
-        text-[11px]
-        font-black
-        leading-tight
-      "
-                  >
-                    Resultados reais
-                  </span>
-
-                  <span
-                    className="
-        text-[10px]
-        leading-none
-        text-white/65
-      "
-                  >
-                    consistência
-                  </span>
-                </div>
-
-                <div
-                  className="
-      flex
-      min-h-[72px]
-      flex-col
-      justify-center
-      gap-1
-      px-3
-    "
-                >
-                  <Shield className="h-4 w-4 text-emerald-200" />
-
-                  <span
-                    className="
-        text-[11px]
-        font-black
-        leading-tight
-      "
-                  >
-                    Privacidade
-                  </span>
-
-                  <span
-                    className="
-        text-[10px]
-        leading-none
-        text-white/65
-      "
-                  >
-                    protegida
-                  </span>
-                </div>
-              </div>
-            </motion.div>
           </div>
+          <motion.div
+            variants={fadeUp}
+            className="
+              mt-4
+              grid
+              grid-cols-2
+              gap-3
+              px-1
+            "
+          >
+            {benefitItems.map((item) => {
+              const Icon = item.icon;
+
+              return (
+                <div
+                  key={item.title}
+                  className="
+                    flex
+                    items-center
+                    gap-3
+
+                    rounded-[1.45rem]
+
+                    border
+                    border-white/80
+
+                    bg-white/90
+
+                    px-4
+                    py-3
+
+                    shadow-[0_16px_42px_-30px_rgba(15,23,42,.14)]
+
+                    backdrop-blur-xl
+                  "
+                >
+                  <div
+                    className="
+                      flex
+                      h-11
+                      w-11
+                      shrink-0
+                      items-center
+                      justify-center
+
+                      rounded-2xl
+
+                      bg-gradient-to-br
+                      from-emerald-50
+                      to-emerald-100
+
+                      text-emerald-800
+                    "
+                  >
+                    <Icon className="h-5 w-5" />
+                  </div>
+
+                  <span
+                    className="
+                      text-[13px]
+                      font-semibold
+                      leading-[1.15]
+                      tracking-[-0.02em]
+                      text-zinc-900
+                    "
+                  >
+                    {item.title}
+                  </span>
+                </div>
+              );
+            })}
+          </motion.div>
         </motion.div>
         <motion.div
           initial={{ opacity: 0, y: 18 }}
