@@ -775,15 +775,16 @@ export default function Hero({ data }: HeroProps) {
     drop-shadow-[0_58px_110px_rgba(15,23,42,.28)]
 
     min-[360px]:left-[35%]
-    min-[360px]:w-[245px]
+    min-[360px]:top-[92px]
+    min-[360px]:w-[236px]
 
     min-[390px]:left-[36%]
-    min-[390px]:top-[116px]
-    min-[390px]:w-[255px]
+    min-[390px]:top-[94px]
+    min-[390px]:w-[245px]
 
     min-[430px]:left-[37%]
-    min-[430px]:top-[114px]
-    min-[430px]:w-[270px]
+    min-[430px]:top-[96px]
+    min-[430px]:w-[255px]
   "
             />
           </div>
