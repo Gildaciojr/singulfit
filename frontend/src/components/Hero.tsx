@@ -593,34 +593,29 @@ export default function Hero({ data }: HeroProps) {
                   z-10
                   overflow-visible
                   flex
-                  items-end
+                  items-center
                   justify-center
                 "
               >
-                {/* IMAGEM DA MULHER (Alinhada à direita, tocando a base e subindo até o topo) */}
+                {/* IMAGEM DA MULHER (Agora preenchendo o card inteiro e com as bordas arredondadas iguais às do card) */}
                 <img
                   src={heroAthlete}
                   alt="Pessoa utilizando SingulFit"
                   className="
                     pointer-events-none
                     absolute
-                    bottom-0
-                    right-[-25px]
+                    inset-0
                     z-10
-                    h-[102%]
-                    w-auto
-                    max-w-[70%]
+                    h-full
+                    w-full
+                    rounded-[2.8rem]
                     select-none
                     object-cover
-                    object-right-bottom
-                    min-[360px]:right-[-20px]
-                    min-[390px]:right-[-15px]
-                    min-[390px]:max-w-[65%]
-                    min-[430px]:right-[-5px]
+                    object-right
                   "
                 />
 
-                {/* MOCKUP DO CELULAR (Alinhado à esquerda, flutuando ao lado da moça) */}
+                {/* MOCKUP DO CELULAR (Flutuando limpo à esquerda) */}
                 <motion.img
                   src={mockupPhone}
                   alt="Demonstração do SingulFit no WhatsApp"
@@ -636,27 +631,28 @@ export default function Hero({ data }: HeroProps) {
                   className="
                     pointer-events-none
                     absolute
-                    left-[-15px]
-                    top-[12%]
+                    left-[-10px]
+                    top-[8%]
                     z-20
                     w-[210px]
                     select-none
                     object-contain
                     drop-shadow-[0_45px_90px_rgba(15,23,42,.35)]
-                    min-[360px]:left-[-10px]
-                    min-[360px]:w-[220px]
-                    min-[390px]:left-[0px]
+                    min-[360px]:left-[-5px]
+                    min-[360px]:w-[230px]
+                    min-[390px]:left-[5px]
                     min-[390px]:w-[245px]
-                    min-[430px]:left-[10px]
+                    min-[430px]:left-[15px]
                     min-[430px]:w-[260px]
                   "
                 />
               </div>
 
               {/* GRADIENTES INTERNOS */}
-              <div className="pointer-events-none absolute inset-y-0 left-0 z-15 w-[48%] bg-[linear-gradient(90deg,rgba(255,255,255,.98)_0%,rgba(255,255,255,.64)_40%,transparent_100%)]" />
-              <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-24 bg-gradient-to-b from-white/70 via-white/20 to-transparent" />
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 h-32 bg-[linear-gradient(0deg,#eef7f2_0%,rgba(238,247,242,.88)_30%,rgba(238,247,242,.20)_70%,transparent_100%)]" />
+              {/* Este gradiente esquerdo foi ajustado para "esfumar" o fundo da foto da mulher de forma suave, dando destaque ao celular */}
+              <div className="pointer-events-none absolute inset-y-0 left-0 z-15 w-[70%] rounded-l-[2.8rem] bg-gradient-to-r from-white via-white/90 to-transparent" />
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-24 rounded-t-[2.8rem] bg-gradient-to-b from-white/70 via-white/20 to-transparent" />
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 h-32 rounded-b-[2.8rem] bg-[linear-gradient(0deg,#eef7f2_0%,rgba(238,247,242,.95)_30%,rgba(238,247,242,.20)_70%,transparent_100%)]" />
               <div className="pointer-events-none absolute right-[-16px] top-[70px] z-20 h-[360px] w-[280px] rounded-full bg-[radial-gradient(circle,rgba(16,185,129,.12)_0%,rgba(16,185,129,.045)_48%,transparent_72%)] blur-[30px]" />
               <div className="pointer-events-none absolute inset-0 z-40 rounded-[2.8rem] ring-1 ring-inset ring-white/55" />
             </div>
