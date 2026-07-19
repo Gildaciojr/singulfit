@@ -643,49 +643,109 @@ export default function Hero({ data }: HeroProps) {
   shadow-[0_45px_110px_-48px_rgba(15,23,42,.30)]
 "
             >
-              <img
-                src={heroAthlete}
-                alt="Pessoa utilizando SingulFit"
+              <div
                 className="
-                  pointer-events-none
-                  absolute
+  absolute
 
-                  bottom-0
-                  right-[-42px]
+  inset-x-0
+  top-0
+  bottom-0
 
-                  z-10
+  z-10
 
-                  h-[510px]
-                  w-[460px]
+  overflow-visible
 
-                  max-w-none
-                  select-none
+  flex
+  items-end
+  justify-center
+"
+              >
+                <img
+                  src={heroAthlete}
+                  alt="Pessoa utilizando SingulFit"
+                  className="
+      pointer-events-none
+      absolute
 
-                  object-cover
-                  object-[47%_15%]
+      bottom-0
+      right-[-42px]
 
-                  min-[360px]:right-[-56px]
-                  min-[360px]:w-[485px]
+      h-[510px]
+      w-[460px]
 
-                  min-[390px]:right-[-48px]
-                  min-[390px]:h-[545px]
-                  min-[390px]:w-[480px]
+      max-w-none
+      select-none
 
-                  min-[430px]:right-[-36px]
-                  min-[430px]:w-[500px]
-                "
-              />
+      object-cover
+      object-[47%_15%]
+
+      min-[360px]:right-[-56px]
+      min-[360px]:w-[485px]
+
+      min-[390px]:right-[-48px]
+      min-[390px]:h-[545px]
+      min-[390px]:w-[480px]
+
+      min-[430px]:right-[-36px]
+      min-[430px]:w-[500px]
+    "
+                />
+
+                <motion.img
+                  src={mockupPhone}
+                  alt="Demonstração do SingulFit no WhatsApp"
+                  animate={{
+                    y: [0, -10, 0],
+                    rotate: [-0.6, 0.6, -0.6],
+                  }}
+                  transition={{
+                    duration: 6.5,
+                    repeat: Infinity,
+                    ease: "easeInOut",
+                  }}
+                  className="
+      pointer-events-none
+      absolute
+
+      left-[35%]
+      top-[90px]
+
+      z-20
+
+      w-[228px]
+
+      -translate-x-1/2
+
+      select-none
+      object-contain
+
+      drop-shadow-[0_58px_110px_rgba(15,23,42,.28)]
+
+      min-[360px]:left-[35%]
+      min-[360px]:top-[92px]
+      min-[360px]:w-[236px]
+
+      min-[390px]:left-[36%]
+      min-[390px]:top-[94px]
+      min-[390px]:w-[245px]
+
+      min-[430px]:left-[37%]
+      min-[430px]:top-[96px]
+      min-[430px]:w-[255px]
+    "
+                />
+              </div>
 
               <div
                 className="
-                  pointer-events-none
-                  absolute
-                  inset-y-0
-                  left-0
-                  z-20
-                  w-[48%]
-                  bg-[linear-gradient(90deg,rgba(255,255,255,.98)_0%,rgba(255,255,255,.84)_30%,rgba(247,250,248,.46)_68%,transparent_100%)]
-                "
+    pointer-events-none
+    absolute
+    inset-y-0
+    left-0
+    z-30
+    w-[48%]
+    bg-[linear-gradient(90deg,rgba(255,255,255,.98)_0%,rgba(255,255,255,.84)_30%,rgba(247,250,248,.46)_68%,transparent_100%)]
+  "
               />
 
               <div
@@ -743,50 +803,6 @@ export default function Hero({ data }: HeroProps) {
                 "
               />
             </div>
-
-            <motion.img
-              src={mockupPhone}
-              alt="Demonstração do SingulFit no WhatsApp"
-              animate={{
-                y: [0, -10, 0],
-                rotate: [-0.6, 0.6, -0.6],
-              }}
-              transition={{
-                duration: 6.5,
-                repeat: Infinity,
-                ease: "easeInOut",
-              }}
-              className="
-    pointer-events-none
-    absolute
-
-    left-[35%]
-    top-[90px]
-
-    z-40
-
-    w-[228px]
-
-    -translate-x-1/2
-
-    select-none
-    object-contain
-
-    drop-shadow-[0_58px_110px_rgba(15,23,42,.28)]
-
-    min-[360px]:left-[35%]
-    min-[360px]:top-[92px]
-    min-[360px]:w-[236px]
-
-    min-[390px]:left-[36%]
-    min-[390px]:top-[94px]
-    min-[390px]:w-[245px]
-
-    min-[430px]:left-[37%]
-    min-[430px]:top-[96px]
-    min-[430px]:w-[255px]
-  "
-            />
           </div>
           <motion.div
             variants={fadeUp}
