@@ -597,7 +597,7 @@ export default function Hero({ data }: HeroProps) {
                   justify-center
                 "
               >
-                {/* IMAGEM DA MULHER (Agora preenchendo o card inteiro e com as bordas arredondadas iguais às do card) */}
+                {/* IMAGEM DA MULHER */}
                 <img
                   src={heroAthlete}
                   alt="Pessoa utilizando SingulFit"
@@ -611,39 +611,35 @@ export default function Hero({ data }: HeroProps) {
                     rounded-[2.8rem]
                     select-none
                     object-cover
-                    object-right
+                    object-[85%_center] {/* Ajustado para focar mais no ombro/perfil */}
                   "
                 />
 
-                {/* MOCKUP DO CELULAR (Flutuando limpo à esquerda) */}
+                {/* MOCKUP DO CELULAR */}
                 <motion.img
                   src={mockupPhone}
                   alt="Demonstração do SingulFit no WhatsApp"
                   animate={{
-                    y: [0, -10, 0],
-                    rotate: [-0.6, 0.6, -0.6],
+                    y: [0, -12, 0], // Movimento um pouco mais suave
+                    rotate: [-0.5, 0.5, -0.5],
                   }}
                   transition={{
-                    duration: 6.5,
+                    duration: 7, // Ligeiramente mais lento para elegância
                     repeat: Infinity,
                     ease: "easeInOut",
                   }}
                   className="
                     pointer-events-none
                     absolute
-                    left-[-10px]
-                    top-[8%]
+                    left-[-15px] // Um pouco mais para a esquerda para dar respiro
+                    top-[10%]
                     z-20
-                    w-[210px]
+                    w-[220px]
                     select-none
                     object-contain
-                    drop-shadow-[0_45px_90px_rgba(15,23,42,.35)]
-                    min-[360px]:left-[-5px]
-                    min-[360px]:w-[230px]
-                    min-[390px]:left-[5px]
+                    drop-shadow-[0_25px_30px_rgba(0,0,0,0.25)] // Sombra mais natural
+                    min-[390px]:left-[0px]
                     min-[390px]:w-[245px]
-                    min-[430px]:left-[15px]
-                    min-[430px]:w-[260px]
                   "
                 />
               </div>
