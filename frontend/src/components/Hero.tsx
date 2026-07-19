@@ -562,7 +562,7 @@ export default function Hero({ data }: HeroProps) {
           </motion.div>
 
           <div className="relative mt-5 pb-8 overflow-visible px-0 isolate">
-            {/* ===================== HERO SHOWCASE ===================== */}
+            {/* ===================== HERO SHOWCASE (MOBILE) ===================== */}
 
             {/* Background Blurs */}
             <div className="pointer-events-none absolute left-1/2 top-[-30px] z-0 h-[620px] w-[620px] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgba(16,185,129,.22)_0%,rgba(16,185,129,.11)_36%,rgba(16,185,129,.05)_58%,transparent_78%)] blur-[105px]" />
@@ -572,56 +572,55 @@ export default function Hero({ data }: HeroProps) {
             {/* CONTAINER PRINCIPAL */}
             <div
               className="
-        relative
-        z-10
-        h-[575px]
-        overflow-visible
-        rounded-[2.8rem]
-        border
-        border-white/70
-        bg-[linear-gradient(180deg,#ffffff_0%,#fbfcfc_28%,#f2faf6_62%,#edf7f2_100%)]
-        shadow-[0_45px_110px_-48px_rgba(15,23,42,.30)]
-      "
+                relative
+                z-10
+                h-[520px]
+                min-[390px]:h-[560px]
+                overflow-visible
+                rounded-[2.8rem]
+                border
+                border-white/70
+                bg-[linear-gradient(180deg,#ffffff_0%,#fbfcfc_28%,#f2faf6_62%,#edf7f2_100%)]
+                shadow-[0_45px_110px_-48px_rgba(15,23,42,.30)]
+              "
             >
               <div
                 className="
-          absolute
-          inset-x-0
-          top-0
-          bottom-0
-          z-10
-          overflow-visible
-          flex
-          items-end
-          justify-center
-        "
+                  absolute
+                  inset-x-0
+                  top-0
+                  bottom-0
+                  z-10
+                  overflow-visible
+                  flex
+                  items-end
+                  justify-center
+                "
               >
-                {/* IMAGEM DA MULHER COM SUAS CLASSES ORIGINAIS */}
+                {/* IMAGEM DA MULHER (Alinhada à direita, tocando a base e subindo até o topo) */}
                 <img
                   src={heroAthlete}
                   alt="Pessoa utilizando SingulFit"
                   className="
-            pointer-events-none
-            absolute
-            bottom-0
-            right-[-42px]
-            h-[510px]
-            w-[460px]
-            max-w-none
-            select-none
-            object-cover
-            object-[47%_15%]
-            min-[360px]:right-[-56px]
-            min-[360px]:w-[485px]
-            min-[390px]:right-[-48px]
-            min-[390px]:h-[545px]
-            min-[390px]:w-[480px]
-            min-[430px]:right-[-36px]
-            min-[430px]:w-[500px]
-          "
+                    pointer-events-none
+                    absolute
+                    bottom-0
+                    right-[-25px]
+                    z-10
+                    h-[102%]
+                    w-auto
+                    max-w-[70%]
+                    select-none
+                    object-cover
+                    object-right-bottom
+                    min-[360px]:right-[-20px]
+                    min-[390px]:right-[-15px]
+                    min-[390px]:max-w-[65%]
+                    min-[430px]:right-[-5px]
+                  "
                 />
 
-                {/* MOCKUP DO CELULAR COM SUAS CLASSES ORIGINAIS */}
+                {/* MOCKUP DO CELULAR (Alinhado à esquerda, flutuando ao lado da moça) */}
                 <motion.img
                   src={mockupPhone}
                   alt="Demonstração do SingulFit no WhatsApp"
@@ -635,35 +634,31 @@ export default function Hero({ data }: HeroProps) {
                     ease: "easeInOut",
                   }}
                   className="
-            pointer-events-none
-            absolute
-            left-[35%]
-            top-[90px]
-            z-20
-            w-[228px]
-            -translate-x-1/2
-            select-none
-            object-contain
-            drop-shadow-[0_58px_110px_rgba(15,23,42,.28)]
-            min-[360px]:left-[35%]
-            min-[360px]:top-[92px]
-            min-[360px]:w-[236px]
-            min-[390px]:left-[36%]
-            min-[390px]:top-[94px]
-            min-[390px]:w-[245px]
-            min-[430px]:left-[37%]
-            min-[430px]:top-[96px]
-            min-[430px]:w-[255px]
-          "
+                    pointer-events-none
+                    absolute
+                    left-[-15px]
+                    top-[12%]
+                    z-20
+                    w-[210px]
+                    select-none
+                    object-contain
+                    drop-shadow-[0_45px_90px_rgba(15,23,42,.35)]
+                    min-[360px]:left-[-10px]
+                    min-[360px]:w-[220px]
+                    min-[390px]:left-[0px]
+                    min-[390px]:w-[245px]
+                    min-[430px]:left-[10px]
+                    min-[430px]:w-[260px]
+                  "
                 />
               </div>
 
               {/* GRADIENTES INTERNOS */}
-              <div className="pointer-events-none absolute inset-y-0 left-0 z-30 w-[48%] bg-[linear-gradient(90deg,rgba(255,255,255,.98)_0%,rgba(255,255,255,.84)_30%,rgba(247,250,248,.46)_68%,transparent_100%)]" />
-              <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-24 bg-gradient-to-b from-white/55 via-white/12 to-transparent" />
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-40 bg-[linear-gradient(0deg,#eef7f2_0%,rgba(238,247,242,.88)_26%,rgba(238,247,242,.32)_62%,transparent_100%)]" />
+              <div className="pointer-events-none absolute inset-y-0 left-0 z-15 w-[48%] bg-[linear-gradient(90deg,rgba(255,255,255,.98)_0%,rgba(255,255,255,.64)_40%,transparent_100%)]" />
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-24 bg-gradient-to-b from-white/70 via-white/20 to-transparent" />
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 h-32 bg-[linear-gradient(0deg,#eef7f2_0%,rgba(238,247,242,.88)_30%,rgba(238,247,242,.20)_70%,transparent_100%)]" />
               <div className="pointer-events-none absolute right-[-16px] top-[70px] z-20 h-[360px] w-[280px] rounded-full bg-[radial-gradient(circle,rgba(16,185,129,.12)_0%,rgba(16,185,129,.045)_48%,transparent_72%)] blur-[30px]" />
-              <div className="pointer-events-none absolute inset-0 z-30 rounded-[2.8rem] ring-1 ring-inset ring-white/55" />
+              <div className="pointer-events-none absolute inset-0 z-40 rounded-[2.8rem] ring-1 ring-inset ring-white/55" />
             </div>
           </div>
 
