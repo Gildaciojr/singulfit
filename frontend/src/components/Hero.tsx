@@ -566,10 +566,13 @@ export default function Hero({ data }: HeroProps) {
             className="
     relative
     mt-5
+
+    pb-16
+
     overflow-visible
     px-0
     isolate
-  "
+"
           >
             {/* ===================== HERO SHOWCASE ===================== */}
 
@@ -622,18 +625,23 @@ export default function Hero({ data }: HeroProps) {
 
             <div
               className="
-    absolute
-    inset-x-0
-    top-0
-    z-10
-    h-[540px]
-    overflow-visible
-    rounded-[2.8rem]
-    border
-    border-white/70
-    bg-[linear-gradient(180deg,#ffffff_0%,#fbfcfc_28%,#f2faf6_62%,#edf7f2_100%)]
-    shadow-[0_45px_110px_-48px_rgba(15,23,42,.30)]
-  "
+  relative
+
+  z-10
+
+  h-[540px]
+
+  overflow-visible
+
+  rounded-[2.8rem]
+
+  border
+  border-white/70
+
+  bg-[linear-gradient(180deg,#ffffff_0%,#fbfcfc_28%,#f2faf6_62%,#edf7f2_100%)]
+
+  shadow-[0_45px_110px_-48px_rgba(15,23,42,.30)]
+"
             >
               <img
                 src={heroAthlete}
