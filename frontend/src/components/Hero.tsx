@@ -749,7 +749,7 @@ export default function Hero({ data }: HeroProps) {
         select-none
         object-contain
 
-        [filter:drop-shadow(0_18px_28px_rgba(15,23,42,.14))_drop-shadow(0_0_18px_rgba(238,247,242,.65))]
+        drop-shadow-[0_22px_36px_rgba(15,23,42,.16)]
 
         [mask-image:radial-gradient(ellipse_at_center,black_84%,rgba(0,0,0,.96)_88%,rgba(0,0,0,.70)_94%,transparent_100%)]
         [-webkit-mask-image:radial-gradient(ellipse_at_center,black_84%,rgba(0,0,0,.96)_88%,rgba(0,0,0,.70)_94%,transparent_100%)]
