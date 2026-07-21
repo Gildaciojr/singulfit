@@ -348,7 +348,7 @@ export default function Hero({ data }: HeroProps) {
       w-[300px]
       object-contain
       mix-blend-multiply
-      drop-shadow-[0_38px_80px_rgba(15,23,42,.24)]
+      drop-shadow-[0_26px_42px_rgba(15,23,42,.20)]
       xl:left-[-6%]
       xl:w-[315px]
     "
@@ -637,14 +637,17 @@ export default function Hero({ data }: HeroProps) {
                 className="
         pointer-events-none
         absolute
-        right-[-10px]
-        top-[72px]
+        right-[-30px]
+        top-[40px]
         z-0
-        h-[360px]
-        w-[280px]
+
+        h-[470px]
+        w-[390px]
+
         rounded-full
-        bg-[radial-gradient(circle,rgba(16,185,129,.15)_0%,rgba(16,185,129,.055)_48%,transparent_72%)]
-        blur-[32px]
+
+        bg-[radial-gradient(circle,rgba(16,185,129,.20)_0%,rgba(16,185,129,.10)_38%,rgba(16,185,129,.035)_68%,transparent_86%)]
+        blur-[58px]
       "
               />
 
@@ -755,13 +758,16 @@ export default function Hero({ data }: HeroProps) {
         select-none
         object-contain
 
-        drop-shadow-[0_34px_54px_rgba(15,23,42,.28)]
+        drop-shadow-[0_28px_48px_rgba(15,23,42,.22)]
+
+        [mask-image:radial-gradient(circle_at_center,black_90%,transparent_100%)]
+        [-webkit-mask-image:radial-gradient(circle_at_center,black_90%,transparent_100%)]
 
         min-[360px]:left-[3.5%]
         min-[360px]:top-[10.5%]
 
         min-[390px]:left-[4%]
-        min-[390px]:top-[11%]
+        min-[390px]:top-[10.5%]
 
         min-[430px]:left-[4.5%]
         min-[430px]:top-[10%]
