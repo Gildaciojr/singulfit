@@ -737,27 +737,27 @@ export default function Hero({ data }: HeroProps) {
                 className="
         pointer-events-none
         absolute
-        left-[1.5%]
-        bottom-[2%]
+        left-[0%]
+        bottom-[0%]
 
         z-30
 
-    w-[182px]
+    w-[170px]
 
-    min-[360px]:left-[2%]
-    min-[360px]:w-[186px]
+    min-[360px]:left-[0.8%]
+    min-[360px]:w-[174px]
 
-    min-[390px]:left-[2.8%]
-    min-[390px]:w-[190px]
+    min-[390px]:left-[1.5%]
+    min-[390px]:w-[178px]
 
-    min-[430px]:left-[3.4%]
-    min-[430px]:w-[194px]
+    min-[430px]:left-[2.2%]
+    min-[430px]:w-[182px]
 
     h-auto
 
     select-none
 
-    drop-shadow-[0_30px_55px_rgba(15,23,42,.22)]
+    drop-shadow-[0_24px_46px_rgba(15,23,42,.18)]
 
     [image-rendering:-webkit-optimize-contrast]
     [transform:translateZ(0)]
