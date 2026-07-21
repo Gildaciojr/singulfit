@@ -561,96 +561,226 @@ export default function Hero({ data }: HeroProps) {
             </Button>
           </motion.div>
 
-          <div className="relative mt-5 pb-8 overflow-visible px-0 isolate">
+          <div className="relative mt-5 isolate px-0 pb-8">
             {/* ===================== HERO SHOWCASE (MOBILE) ===================== */}
 
-            {/* Background Blurs */}
-            <div className="pointer-events-none absolute left-1/2 top-[-30px] z-0 h-[620px] w-[620px] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgba(16,185,129,.22)_0%,rgba(16,185,129,.11)_36%,rgba(16,185,129,.05)_58%,transparent_78%)] blur-[105px]" />
-            <div className="pointer-events-none absolute right-[-90px] top-[70px] z-0 h-[320px] w-[320px] rounded-full bg-emerald-300/20 blur-[120px]" />
-            <div className="pointer-events-none absolute left-[-60px] top-[250px] z-0 h-[220px] w-[220px] rounded-full bg-white opacity-80 blur-[95px]" />
-
-            {/* CONTAINER PRINCIPAL */}
+            {/* Background blurs */}
             <div
               className="
-                relative
-                z-10
-                h-[480px] /* Altura levemente ajustada para a modelo vazar melhor */
-                min-[390px]:h-[520px]
-                overflow-visible /* Essencial para a cabeça e o celular saírem do card */
-                rounded-[2.8rem]
-                border
-                border-white/70
-                bg-[linear-gradient(180deg,#ffffff_0%,#fbfcfc_28%,#f2faf6_62%,#edf7f2_100%)]
-                shadow-[0_45px_110px_-48px_rgba(15,23,42,.30)]
-              "
+      pointer-events-none
+      absolute
+      left-1/2
+      top-[-30px]
+      z-0
+      h-[620px]
+      w-[620px]
+      -translate-x-1/2
+      rounded-full
+      bg-[radial-gradient(circle,rgba(16,185,129,.22)_0%,rgba(16,185,129,.11)_36%,rgba(16,185,129,.05)_58%,transparent_78%)]
+      blur-[105px]
+    "
+            />
+
+            <div
+              className="
+      pointer-events-none
+      absolute
+      right-[-55px]
+      top-[70px]
+      z-0
+      h-[280px]
+      w-[280px]
+      rounded-full
+      bg-emerald-300/20
+      blur-[120px]
+    "
+            />
+
+            <div
+              className="
+      pointer-events-none
+      absolute
+      left-[-60px]
+      top-[250px]
+      z-0
+      h-[220px]
+      w-[220px]
+      rounded-full
+      bg-white
+      opacity-80
+      blur-[95px]
+    "
+            />
+
+            {/* Container principal */}
+            <div
+              className="
+      relative
+      z-10
+      h-[490px]
+      w-full
+      isolate
+      overflow-hidden
+      rounded-[2.8rem]
+      border
+      border-white/70
+      bg-[linear-gradient(180deg,#ffffff_0%,#fbfcfc_28%,#f2faf6_62%,#edf7f2_100%)]
+      shadow-[0_45px_110px_-48px_rgba(15,23,42,.30)]
+
+      min-[360px]:h-[505px]
+      min-[390px]:h-[520px]
+      min-[430px]:h-[540px]
+    "
             >
+              {/* Glow interno atrás da atleta */}
               <div
                 className="
-                  absolute
-                  inset-x-0
-                  top-0
-                  bottom-0
-                  z-10
-                  overflow-visible
-                "
-              >
-                {/* IMAGEM DA MULHER (Recortada em PNG) */}
-                <img
-                  src={heroAthlete}
-                  alt="Pessoa utilizando SingulFit"
-                  className="
-                    pointer-events-none
-                    absolute
-                    bottom-0 /* Fixa a imagem na base do card */
-                    right-[-5%] /* Puxa um pouco para a direita */
-                    z-10
-                    h-[115%] /* <--- O SEGREDO: Mais alto que o card para a cabeça vazar pelo topo */
-                    w-auto
-                    max-w-[105%] /* Permite que o braço dela ocupe um bom espaço */
-                    select-none
-                    object-contain
-                    object-bottom /* Garante que o corte da cintura fique perfeito na base */
-                  "
-                />
+        pointer-events-none
+        absolute
+        right-[-10px]
+        top-[72px]
+        z-0
+        h-[360px]
+        w-[280px]
+        rounded-full
+        bg-[radial-gradient(circle,rgba(16,185,129,.15)_0%,rgba(16,185,129,.055)_48%,transparent_72%)]
+        blur-[32px]
+      "
+              />
 
-                {/* MOCKUP DO CELULAR (Recortado em PNG) */}
-                <motion.img
-                  src={mockupPhone}
-                  alt="Demonstração do SingulFit no WhatsApp"
-                  animate={{
-                    y: [0, -12, 0],
-                    rotate: [-0.5, 0.5, -0.5],
-                  }}
-                  transition={{
-                    duration: 7,
-                    repeat: Infinity,
-                    ease: "easeInOut",
-                  }}
-                  className="
-                    pointer-events-none
-                    absolute
-                    left-[-25px] /* Celular vazando para fora da esquerda */
-                    top-[12%]
-                    z-20
-                    w-[210px]
-                    select-none
-                    object-contain
-                    drop-shadow-[0_25px_35px_rgba(0,0,0,0.30)] /* Sombra real do celular flutuando */
-                    min-[390px]:left-[-15px]
-                    min-[390px]:w-[245px]
-                  "
-                />
-              </div>
+              {/* Atleta */}
+              <img
+                src={heroAthlete}
+                alt="Pessoa utilizando SingulFit"
+                className="
+        pointer-events-none
+        absolute
+        bottom-0
+        right-[-9%]
+        z-10
 
-              {/* GRADIENTES INTERNOS */}
-              {/* Removi o gradiente que esfumava o fundo da foto retangular, pois agora temos um PNG limpo */}
-              <div className="pointer-events-none absolute inset-x-0 top-0 z-0 h-24 rounded-t-[2.8rem] bg-gradient-to-b from-white/70 via-white/20 to-transparent" />
+        h-[101%]
+        w-auto
+        max-w-none
 
-              {/* Este gradiente inferior é importante para dar um fade suave na cintura dela, integrando com a borda de baixo */}
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 h-32 rounded-b-[2.8rem] bg-[linear-gradient(0deg,#eef7f2_0%,rgba(238,247,242,.95)_30%,rgba(238,247,242,.20)_70%,transparent_100%)]" />
+        select-none
+        object-contain
+        object-right-bottom
 
-              <div className="pointer-events-none absolute right-[-16px] top-[70px] z-0 h-[360px] w-[280px] rounded-full bg-[radial-gradient(circle,rgba(16,185,129,.12)_0%,rgba(16,185,129,.045)_48%,transparent_72%)] blur-[30px]" />
-              <div className="pointer-events-none absolute inset-0 z-40 rounded-[2.8rem] ring-1 ring-inset ring-white/55" />
+        min-[360px]:right-[-7%]
+        min-[360px]:h-[102%]
+
+        min-[390px]:right-[-6%]
+        min-[390px]:h-[103%]
+
+        min-[430px]:right-[-5%]
+        min-[430px]:h-[104%]
+      "
+              />
+
+              <div
+                className="
+    pointer-events-none
+    absolute
+    inset-y-0
+    left-0
+    z-20
+
+    w-[26%]
+
+    bg-[linear-gradient(
+      90deg,
+      rgba(255,255,255,.92)_0%,
+      rgba(255,255,255,.42)_45%,
+      transparent_100%
+    )]
+  "
+              />
+
+              {/* Suavização superior */}
+              <div
+                className="
+        pointer-events-none
+        absolute
+        inset-x-0
+        top-0
+        z-20
+        h-20
+        rounded-t-[2.8rem]
+        bg-gradient-to-b
+        from-white/60
+        via-white/15
+        to-transparent
+      "
+              />
+
+              {/* Integração inferior da atleta com o card */}
+              <div
+                className="
+        pointer-events-none
+        absolute
+        inset-x-0
+        bottom-0
+        z-30
+        h-24
+        rounded-b-[2.8rem]
+        bg-[linear-gradient(0deg,#eef7f2_0%,rgba(238,247,242,.88)_28%,rgba(238,247,242,.20)_70%,transparent_100%)]
+      "
+              />
+
+              {/* Mockup principal do WhatsApp */}
+              <motion.img
+                src={mockupPhone}
+                alt="Demonstração do SingulFit no WhatsApp"
+                animate={{
+                  y: [0, -8, 0],
+                  rotate: [-0.4, 0.4, -0.4],
+                }}
+                transition={{
+                  duration: 7,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                }}
+                className="
+        pointer-events-none
+        absolute
+        left-[3%]
+        top-[11%]
+        z-40
+
+        w-[40%]
+        min-w-[150px]
+        max-w-[180px]
+
+        select-none
+        object-contain
+
+        drop-shadow-[0_34px_54px_rgba(15,23,42,.28)]
+
+        min-[360px]:left-[3.5%]
+        min-[360px]:top-[10.5%]
+
+        min-[390px]:left-[4%]
+        min-[390px]:top-[11%]
+
+        min-[430px]:left-[4.5%]
+        min-[430px]:top-[10%]
+      "
+              />
+
+              {/* Acabamento da borda */}
+              <div
+                className="
+        pointer-events-none
+        absolute
+        inset-0
+        z-50
+        rounded-[2.8rem]
+        ring-1
+        ring-inset
+        ring-white/60
+      "
+              />
             </div>
           </div>
 
