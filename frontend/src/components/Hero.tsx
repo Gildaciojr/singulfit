@@ -740,7 +740,7 @@ export default function Hero({ data }: HeroProps) {
         left-[3%]
         bottom-[2%]
 
-        z-45
+        z-30
 
         w-[43.5%]
         min-w-[162px]
