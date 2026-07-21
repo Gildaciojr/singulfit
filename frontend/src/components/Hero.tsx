@@ -748,7 +748,8 @@ export default function Hero({ data }: HeroProps) {
         pointer-events-none
         absolute
         left-[3%]
-        top-[11%]
+        bottom-[8%]
+
         z-40
 
         w-[40%]
@@ -758,19 +759,16 @@ export default function Hero({ data }: HeroProps) {
         select-none
         object-contain
 
-        drop-shadow-[0_28px_48px_rgba(15,23,42,.22)]
+        drop-shadow-[0_26px_42px_rgba(15,23,42,.20)]
 
-        [mask-image:radial-gradient(circle_at_center,black_90%,transparent_100%)]
-        [-webkit-mask-image:radial-gradient(circle_at_center,black_90%,transparent_100%)]
+        [mask-image:linear-gradient(to_right,transparent_0%,black_8%,black_92%,transparent_100%)]
+        [-webkit-mask-image:linear-gradient(to_right,transparent_0%,black_8%,black_92%,transparent_100%)]
 
         min-[360px]:left-[3.5%]
-        min-[360px]:top-[10.5%]
 
         min-[390px]:left-[4%]
-        min-[390px]:top-[10.5%]
 
         min-[430px]:left-[4.5%]
-        min-[430px]:top-[10%]
       "
               />
 
