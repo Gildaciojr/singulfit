@@ -737,21 +737,21 @@ export default function Hero({ data }: HeroProps) {
                 className="
         pointer-events-none
         absolute
-        left-[0%]
-        bottom-[0%]
+        left-[-2px]
+        bottom-[-0.5%]
 
         z-30
 
-    w-[170px]
+    w-[164px]
 
     min-[360px]:left-[0.8%]
-    min-[360px]:w-[174px]
+    min-[360px]:w-[168px]
 
     min-[390px]:left-[1.5%]
-    min-[390px]:w-[178px]
+    min-[390px]:w-[172px]
 
     min-[430px]:left-[2.2%]
-    min-[430px]:w-[182px]
+    min-[430px]:w-[176px]
 
     h-auto
 
