@@ -738,18 +738,18 @@ export default function Hero({ data }: HeroProps) {
         pointer-events-none
         absolute
         left-[3%]
-        bottom-[5%]
+        bottom-[2%]
 
-        z-40
+        z-45
 
-        w-[42%]
-        min-w-[158px]
-        max-w-[188px]
+        w-[43.5%]
+        min-w-[162px]
+        max-w-[194px]
 
         select-none
         object-contain
 
-        drop-shadow-[0_22px_36px_rgba(15,23,42,.16)]
+        [filter:drop-shadow(0_18px_28px_rgba(15,23,42,.14))_drop-shadow(0_0_18px_rgba(238,247,242,.65))]
 
         [mask-image:radial-gradient(ellipse_at_center,black_84%,rgba(0,0,0,.96)_88%,rgba(0,0,0,.70)_94%,transparent_100%)]
         [-webkit-mask-image:radial-gradient(ellipse_at_center,black_84%,rgba(0,0,0,.96)_88%,rgba(0,0,0,.70)_94%,transparent_100%)]
