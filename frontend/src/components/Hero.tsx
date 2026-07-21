@@ -574,9 +574,9 @@ export default function Hero({ data }: HeroProps) {
               className="
                 relative
                 z-10
-                h-[520px]
-                min-[390px]:h-[560px]
-                overflow-visible
+                h-[480px] /* Altura levemente ajustada para a modelo vazar melhor */
+                min-[390px]:h-[520px]
+                overflow-visible /* Essencial para a cabeça e o celular saírem do card */
                 rounded-[2.8rem]
                 border
                 border-white/70
@@ -592,64 +592,64 @@ export default function Hero({ data }: HeroProps) {
                   bottom-0
                   z-10
                   overflow-visible
-                  flex
-                  items-center
-                  justify-center
                 "
               >
-                {/* IMAGEM DA MULHER */}
+                {/* IMAGEM DA MULHER (Recortada em PNG) */}
                 <img
                   src={heroAthlete}
                   alt="Pessoa utilizando SingulFit"
                   className="
                     pointer-events-none
                     absolute
-                    inset-0
+                    bottom-0 /* Fixa a imagem na base do card */
+                    right-[-5%] /* Puxa um pouco para a direita */
                     z-10
-                    h-full
-                    w-full
-                    rounded-[2.8rem]
+                    h-[115%] /* <--- O SEGREDO: Mais alto que o card para a cabeça vazar pelo topo */
+                    w-auto
+                    max-w-[105%] /* Permite que o braço dela ocupe um bom espaço */
                     select-none
-                    object-cover
-                    object-[85%_center] {/* Ajustado para focar mais no ombro/perfil */}
+                    object-contain
+                    object-bottom /* Garante que o corte da cintura fique perfeito na base */
                   "
                 />
 
-                {/* MOCKUP DO CELULAR */}
+                {/* MOCKUP DO CELULAR (Recortado em PNG) */}
                 <motion.img
                   src={mockupPhone}
                   alt="Demonstração do SingulFit no WhatsApp"
                   animate={{
-                    y: [0, -12, 0], // Movimento um pouco mais suave
+                    y: [0, -12, 0],
                     rotate: [-0.5, 0.5, -0.5],
                   }}
                   transition={{
-                    duration: 7, // Ligeiramente mais lento para elegância
+                    duration: 7,
                     repeat: Infinity,
                     ease: "easeInOut",
                   }}
                   className="
                     pointer-events-none
                     absolute
-                    left-[-15px] // Um pouco mais para a esquerda para dar respiro
-                    top-[10%]
+                    left-[-25px] /* Celular vazando para fora da esquerda */
+                    top-[12%]
                     z-20
-                    w-[220px]
+                    w-[210px]
                     select-none
                     object-contain
-                    drop-shadow-[0_25px_30px_rgba(0,0,0,0.25)] // Sombra mais natural
-                    min-[390px]:left-[0px]
+                    drop-shadow-[0_25px_35px_rgba(0,0,0,0.30)] /* Sombra real do celular flutuando */
+                    min-[390px]:left-[-15px]
                     min-[390px]:w-[245px]
                   "
                 />
               </div>
 
               {/* GRADIENTES INTERNOS */}
-              {/* Este gradiente esquerdo foi ajustado para "esfumar" o fundo da foto da mulher de forma suave, dando destaque ao celular */}
-              <div className="pointer-events-none absolute inset-y-0 left-0 z-15 w-[70%] rounded-l-[2.8rem] bg-gradient-to-r from-white via-white/90 to-transparent" />
-              <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-24 rounded-t-[2.8rem] bg-gradient-to-b from-white/70 via-white/20 to-transparent" />
+              {/* Removi o gradiente que esfumava o fundo da foto retangular, pois agora temos um PNG limpo */}
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-0 h-24 rounded-t-[2.8rem] bg-gradient-to-b from-white/70 via-white/20 to-transparent" />
+
+              {/* Este gradiente inferior é importante para dar um fade suave na cintura dela, integrando com a borda de baixo */}
               <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 h-32 rounded-b-[2.8rem] bg-[linear-gradient(0deg,#eef7f2_0%,rgba(238,247,242,.95)_30%,rgba(238,247,242,.20)_70%,transparent_100%)]" />
-              <div className="pointer-events-none absolute right-[-16px] top-[70px] z-20 h-[360px] w-[280px] rounded-full bg-[radial-gradient(circle,rgba(16,185,129,.12)_0%,rgba(16,185,129,.045)_48%,transparent_72%)] blur-[30px]" />
+
+              <div className="pointer-events-none absolute right-[-16px] top-[70px] z-0 h-[360px] w-[280px] rounded-full bg-[radial-gradient(circle,rgba(16,185,129,.12)_0%,rgba(16,185,129,.045)_48%,transparent_72%)] blur-[30px]" />
               <div className="pointer-events-none absolute inset-0 z-40 rounded-[2.8rem] ring-1 ring-inset ring-white/55" />
             </div>
           </div>
