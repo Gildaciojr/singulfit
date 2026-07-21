@@ -348,7 +348,7 @@ export default function Hero({ data }: HeroProps) {
       w-[300px]
       object-contain
       mix-blend-multiply
-      drop-shadow-[0_26px_42px_rgba(15,23,42,.20)]
+      drop-shadow-[0_22px_36px_rgba(15,23,42,.16)]
       xl:left-[-6%]
       xl:w-[315px]
     "
@@ -732,37 +732,27 @@ export default function Hero({ data }: HeroProps) {
               />
 
               {/* Mockup principal do WhatsApp */}
-              <motion.img
+              <img
                 src={mockupPhone}
-                alt="Demonstração do SingulFit no WhatsApp"
-                animate={{
-                  y: [0, -8, 0],
-                  rotate: [-0.4, 0.4, -0.4],
-                }}
-                transition={{
-                  duration: 7,
-                  repeat: Infinity,
-                  ease: "easeInOut",
-                }}
                 className="
         pointer-events-none
         absolute
         left-[3%]
-        bottom-[8%]
+        bottom-[5%]
 
         z-40
 
-        w-[40%]
-        min-w-[150px]
-        max-w-[180px]
+        w-[42%]
+        min-w-[158px]
+        max-w-[188px]
 
         select-none
         object-contain
 
-        drop-shadow-[0_26px_42px_rgba(15,23,42,.20)]
+        drop-shadow-[0_22px_36px_rgba(15,23,42,.16)]
 
-        [mask-image:linear-gradient(to_right,transparent_0%,black_8%,black_92%,transparent_100%)]
-        [-webkit-mask-image:linear-gradient(to_right,transparent_0%,black_8%,black_92%,transparent_100%)]
+        [mask-image:radial-gradient(ellipse_at_center,black_84%,rgba(0,0,0,.96)_88%,rgba(0,0,0,.70)_94%,transparent_100%)]
+        [-webkit-mask-image:radial-gradient(ellipse_at_center,black_84%,rgba(0,0,0,.96)_88%,rgba(0,0,0,.70)_94%,transparent_100%)]
 
         min-[360px]:left-[3.5%]
 
