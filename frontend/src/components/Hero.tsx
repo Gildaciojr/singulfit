@@ -742,24 +742,27 @@ export default function Hero({ data }: HeroProps) {
 
         z-30
 
-        w-[43.5%]
-        min-w-[162px]
-        max-w-[194px]
+    w-[182px]
 
-        select-none
-        object-contain
+    min-[360px]:left-[3.5%]
+    min-[360px]:w-[186px]
 
-        drop-shadow-[0_22px_36px_rgba(15,23,42,.16)]
+    min-[390px]:left-[4%]
+    min-[390px]:w-[190px]
 
-        [mask-image:radial-gradient(ellipse_at_center,black_84%,rgba(0,0,0,.96)_88%,rgba(0,0,0,.70)_94%,transparent_100%)]
-        [-webkit-mask-image:radial-gradient(ellipse_at_center,black_84%,rgba(0,0,0,.96)_88%,rgba(0,0,0,.70)_94%,transparent_100%)]
+    min-[430px]:left-[4.5%]
+    min-[430px]:w-[194px]
 
-        min-[360px]:left-[3.5%]
+    h-auto
 
-        min-[390px]:left-[4%]
+    select-none
 
-        min-[430px]:left-[4.5%]
-      "
+    drop-shadow-[0_22px_36px_rgba(15,23,42,.16)]
+
+    [image-rendering:-webkit-optimize-contrast]
+    [transform:translateZ(0)]
+    [backface-visibility:hidden]
+  "
               />
 
               {/* Acabamento da borda */}
