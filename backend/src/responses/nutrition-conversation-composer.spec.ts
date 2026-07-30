@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
+  ConversationCentralIntent,
+  ConversationDialogueProfile,
+} from './conversation-composition.contract';
+import type {
   DecisionPlan,
   SelectedDecision,
 } from './conversation-decision.contract';
@@ -70,10 +74,27 @@ function selected(candidateId: string, order: number): SelectedDecision {
 function plan(
   ids: readonly string[],
   mandatoryDecisionIds: readonly string[] = [],
+  dialogueProfile: ConversationDialogueProfile = 'DETAILED_ANALYSIS',
 ): DecisionPlan {
+  const centralIntents: Readonly<
+    Record<ConversationDialogueProfile, ConversationCentralIntent>
+  > = {
+    ACKNOWLEDGE_ONLY: 'RECOGNIZE',
+    ACKNOWLEDGE_AND_ADJUST: 'ADJUST',
+    REFLECT_AND_ASK: 'CLARIFY',
+    TEACH_BRIEFLY: 'TEACH',
+    RECOVERY: 'RECOVER',
+    CELEBRATE: 'CELEBRATE',
+    DETAILED_ANALYSIS: 'ANALYZE',
+    CLARIFY_BEFORE_ANALYSIS: 'CLARIFY',
+    REASSURE_AND_SIMPLIFY: 'REASSURE',
+    CONTINUITY_CHECK: 'FOLLOW_UP',
+  };
   return {
     id: 'nutrition-decision-plan:analysis-id',
     primaryDecisionId: ids[0],
+    dialogueProfile,
+    centralIntent: centralIntents[dialogueProfile],
     selectedDecisions: ids.map(selected),
     suppressedDecisions: [],
     mandatoryDecisionIds,
@@ -100,14 +121,14 @@ describe('NutritionConversationComposer', () => {
     );
 
     expect(result.blocks.map((block) => block.type)).toEqual([
-      'FACTUAL_ACKNOWLEDGEMENT',
       'PRIMARY_OBSERVATION',
       'CLARIFYING_QUESTION',
     ]);
-    expect(result.blocks[1].decisionIds).toEqual([
+    expect(result.blocks[0].decisionIds).toEqual([
       'nutrition.respond-to-meal',
       'nutrition.show-protein',
       'nutrition.show-carbohydrates',
+      'nutrition.acknowledge-meal',
     ]);
     expect(result.blocks.every((block) => block.decisionIds.length > 0)).toBe(
       true,
@@ -182,7 +203,7 @@ describe('NutritionConversationComposer', () => {
       ]),
     );
     const recognition = result.blocks.find(
-      (block) => block.type === 'FACTUAL_ACKNOWLEDGEMENT',
+      (block) => block.type === 'PRIMARY_OBSERVATION',
     );
 
     expect(recognition?.decisionIds).toContain(
@@ -198,54 +219,40 @@ describe('NutritionConversationComposer', () => {
   });
 
   it.each([
-    ['minimal', 80, 600, 2, 'FAST', 'MINIMAL'],
-    ['standard', 20, 600, 3, 'PROGRESSIVE', 'MODERATE'],
-    ['deep', 20, 900, 5, 'PROGRESSIVE', 'DEEP'],
+    ['minimal', 'REASSURE_AND_SIMPLIFY', 'WARM', 'MINIMAL'],
+    ['standard', 'ACKNOWLEDGE_AND_ADJUST', 'PROGRESSIVE', 'MODERATE'],
+    ['deep', 'DETAILED_ANALYSIS', 'EXPLANATORY', 'DEEP'],
   ])(
-    'models %s rhythm and depth deterministically',
-    (_label, fatigue, length, budget, rhythm, depth) => {
-      const base = context();
-      const source: NutritionConversationContext = {
-        ...base,
-        communication: {
-          ...base.communication,
-          fatigue: { ...base.communication.fatigue, score: fatigue },
-          preferredMessageLength: length,
-        },
-      };
-      const input = {
-        ...plan(['nutrition.respond-to-meal']),
-        maximumCommunicativeDecisions: budget,
-      };
-
-      expect(composer.compose(source, input)).toEqual(
-        expect.objectContaining({ rhythm, depth }),
-      );
+    'models %s rhythm and depth from the selected profile',
+    (_label, profile, rhythm, depth) => {
+      expect(
+        composer.compose(
+          context(),
+          plan(
+            ['nutrition.respond-to-meal'],
+            [],
+            profile as ConversationDialogueProfile,
+          ),
+        ),
+      ).toEqual(expect.objectContaining({ rhythm, depth }));
     },
   );
 
   it.each([
-    [['nutrition.respond-to-meal'], 'LOW'],
-    [
-      [
-        'nutrition.respond-to-meal',
-        'nutrition.acknowledge-meal',
-        'nutrition.mention-insight',
-      ],
-      'MEDIUM',
-    ],
-    [
-      [
-        'nutrition.respond-to-meal',
-        'nutrition.acknowledge-meal',
-        'nutrition.mention-insight',
-        'nutrition.use-memory',
-        'nutrition.mention-trend',
-      ],
-      'HIGH',
-    ],
-  ])('models density from decisions and facts', (ids, expected) => {
-    expect(composer.compose(context(), plan(ids)).density).toBe(expected);
+    ['ACKNOWLEDGE_ONLY', 'LOW'],
+    ['ACKNOWLEDGE_AND_ADJUST', 'MEDIUM'],
+    ['DETAILED_ANALYSIS', 'HIGH'],
+  ])('models density from the selected profile', (profile, expected) => {
+    expect(
+      composer.compose(
+        context(),
+        plan(
+          ['nutrition.respond-to-meal'],
+          [],
+          profile as ConversationDialogueProfile,
+        ),
+      ).density,
+    ).toBe(expected);
   });
 
   it('is deterministic, deeply immutable and contains no realized text', () => {

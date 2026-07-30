@@ -22,7 +22,7 @@ export const landingData: LandingData = {
         label: "pessoas já evoluíram",
       },
       {
-        value: "88%",
+        value: "95%",
         label: "aderência média",
       },
       {
@@ -84,7 +84,7 @@ export const landingData: LandingData = {
         quote:
           "Nunca consegui manter uma rotina tão simples. Uso todos os dias.",
         name: "Carlos Eduardo",
-        role: "Usuário há 6 meses",
+        role: "Esportista",
       },
       {
         quote:
@@ -96,7 +96,7 @@ export const landingData: LandingData = {
         quote:
           "Antes era tudo bagunçado. Agora consigo manter consistência de verdade.",
         name: "Júlia Oliveira",
-        role: "Usuária há 1 ano",
+        role: "Servidora pública",
       },
       {
         quote:

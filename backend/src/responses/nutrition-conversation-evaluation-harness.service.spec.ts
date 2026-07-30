@@ -4,6 +4,7 @@ import type { ConversationEvaluationScenario } from './conversation-evaluation-h
 import type { LanguageRealizationResult } from './conversation-language-realization.contract';
 import { NutritionConversationEvaluationHarnessService } from './nutrition-conversation-evaluation-harness.service';
 import type { SanitizedConversationPayload } from './sanitized-conversation-payload.contract';
+import { DEFAULT_NUTRITION_CONVERSATION_COACH_STYLE } from './nutrition-conversation-coach-style.engine';
 
 const payload = {
   facts: {
@@ -20,6 +21,8 @@ const payload = {
   },
   selectedDecisions: ['RESPOND_TO_MEAL', 'PROVIDE_RECOMMENDATION'],
   structure: {
+    dialogueProfile: 'ACKNOWLEDGE_AND_ADJUST',
+    centralIntent: 'ADJUST',
     blocks: [
       {
         key: 'response',
@@ -40,6 +43,7 @@ const payload = {
     paragraphCount: 1,
   },
   style: {
+    coach: DEFAULT_NUTRITION_CONVERSATION_COACH_STYLE,
     communication: 'BALANCED',
     coaching: 'SUPPORTIVE',
     tone: 'MODERATE',
@@ -51,8 +55,15 @@ const payload = {
     maximumEmojiCount: 0,
     maximumQuestions: 0,
     maximumActions: 1,
+    maximumFacts: 7,
+    maximumBlocks: 4,
+    maximumParagraphs: 3,
   },
-  policies: { estimateQualificationRequired: true, emojiAllowed: false },
+  policies: {
+    estimateQualificationRequired: true,
+    emojiAllowed: false,
+    closingRequirement: 'OPTIONAL',
+  },
 } as SanitizedConversationPayload;
 
 function candidate(
@@ -133,6 +144,26 @@ describe('NutritionConversationEvaluationHarnessService', () => {
     expect(first.metrics.totalTokens).toBe(120);
     expect(first.metrics.density).toBe('LOW');
     expect(first.metrics.depth).toBe('BRIEF');
+    expect(first.metrics.emotionalEvidencePreserved).toBe(true);
+    expect(first.metrics.unsafeEmotionalLanguageAbsent).toBe(true);
+    expect(first.metrics.profileRespected).toBe(true);
+    expect(first.metrics.centralIntentPreserved).toBe(true);
+    expect(first.metrics.paragraphBudgetRespected).toBe(true);
+    expect(first.metrics.questionBudgetRespected).toBe(true);
+    expect(first.metrics.actionBudgetRespected).toBe(true);
+    expect(first.metrics.structuralDiversity).toBe(true);
+    expect(first.metrics.naturalness).toBeGreaterThanOrEqual(80);
+    expect(first.metrics.coachIdentity).toBe(100);
+    expect(first.metrics.toneConsistency).toBe(100);
+    expect(first.metrics.empathyQuality).toBeGreaterThanOrEqual(80);
+    expect(first.metrics.lexicalDiversity).toBeGreaterThan(0);
+    expect(first.metrics.openingDiversity).toBe(100);
+    expect(first.metrics.closingDiversity).toBe(100);
+    expect(first.metrics.transitionQuality).toBe(100);
+    expect(first.metrics.humanPerception).toBeGreaterThanOrEqual(80);
+    expect(first.metrics.motivationQuality).toBeGreaterThanOrEqual(80);
+    expect(first.metrics.warmth).toBeGreaterThanOrEqual(80);
+    expect(first.metrics.professionalism).toBeGreaterThanOrEqual(90);
     expect(JSON.stringify(input)).toBe(before);
     expect(Object.isFrozen(first)).toBe(true);
     expect(Object.isFrozen(first.summary)).toBe(true);
@@ -210,6 +241,168 @@ describe('NutritionConversationEvaluationHarnessService', () => {
         'FAILED:RECOMMENDATIONS_PRESERVED',
       ]),
     );
+  });
+
+  it('detects emotional adaptation without evidence and unsafe inferred emotion', () => {
+    const unsafe = candidate({
+      candidateText: 'Você está triste.',
+      realizedUnits: [
+        {
+          ...candidate().realizedUnits[0],
+          decisionCodes: ['VALIDATE_FRUSTRATION'],
+          factKeys: [],
+          text: 'Você está triste.',
+          claims: {
+            numbers: [],
+            foods: [],
+            usesMemory: false,
+            usesRecommendation: false,
+          },
+        },
+      ],
+    });
+    const report = harness.evaluate(scenario({ candidate: unsafe }));
+
+    expect(report.metrics.emotionalEvidencePreserved).toBe(false);
+    expect(report.metrics.unsafeEmotionalLanguageAbsent).toBe(false);
+    expect(report.objectiveReasons).toEqual(
+      expect.arrayContaining([
+        'FAILED:EMOTIONAL_EVIDENCE_PRESERVED',
+        'FAILED:UNSAFE_EMOTIONAL_LANGUAGE_PRESENT',
+      ]),
+    );
+  });
+
+  it('detects deterministic profile violations without an LLM judge', () => {
+    const celebrate = harness.evaluate(
+      scenario({
+        payload: {
+          ...payload,
+          structure: {
+            ...payload.structure,
+            dialogueProfile: 'CELEBRATE',
+            centralIntent: 'CELEBRATE',
+          },
+        },
+      }),
+    );
+    const clarify = harness.evaluate(
+      scenario({
+        payload: {
+          ...payload,
+          structure: {
+            ...payload.structure,
+            dialogueProfile: 'CLARIFY_BEFORE_ANALYSIS',
+            centralIntent: 'CLARIFY',
+          },
+        },
+      }),
+    );
+    const detailedOutsideProfile = harness.evaluate(
+      scenario({
+        candidate: candidate({
+          realizedDecisions: [
+            'RESPOND_TO_MEAL',
+            'PROVIDE_RECOMMENDATION',
+            'DETAIL_ANALYSIS',
+          ],
+        }),
+      }),
+    );
+
+    expect(celebrate.metrics.celebrationStayedFocused).toBe(false);
+    expect(clarify.metrics.clarificationAvoidedSpeculation).toBe(false);
+    expect(
+      detailedOutsideProfile.metrics.detailedAnalysisUsedOnlyWhenEligible,
+    ).toBe(false);
+    expect(celebrate.objectiveReasons).toContain(
+      'FAILED:CELEBRATION_STAYED_FOCUSED',
+    );
+    expect(clarify.objectiveReasons).toContain(
+      'FAILED:CLARIFICATION_AVOIDED_SPECULATION',
+    );
+  });
+
+  it('audits episodic recall, relevance, invention and lifecycle sanitization deterministically', () => {
+    const episodicPayload: SanitizedConversationPayload = {
+      ...payload,
+      facts: {
+        ...payload.facts,
+        allowed: [
+          ...payload.facts.allowed,
+          {
+            key: 'episodicMemory.COMMITMENT',
+            source: 'MEMORY',
+            value: {
+              category: 'COMMITMENT',
+              fact: { action: 'incluir vegetais' },
+              relationToContext: 'follow-up atual',
+              recallReason: 'FOLLOW_UP_DUE',
+            },
+            estimated: false,
+          },
+        ],
+      },
+      selectedDecisions: [...payload.selectedDecisions, 'CHECK_COMMITMENT'],
+      structure: {
+        ...payload.structure,
+        blocks: payload.structure.blocks.map((block) => ({
+          ...block,
+          decisions: [...block.decisions, 'CHECK_COMMITMENT'],
+          facts: [...block.facts, 'episodicMemory.COMMITMENT'],
+        })),
+      },
+    };
+    const authorized = candidate({
+      realizedUnits: [
+        {
+          ...candidate().realizedUnits[0],
+          decisionCodes: [
+            ...candidate().realizedUnits[0].decisionCodes,
+            'CHECK_COMMITMENT',
+          ],
+          factKeys: [
+            ...candidate().realizedUnits[0].factKeys,
+            'episodicMemory.COMMITMENT',
+          ],
+          claims: {
+            ...candidate().realizedUnits[0].claims,
+            usesMemory: true,
+          },
+        },
+      ],
+      realizedFacts: ['MEAL_TOTAL_CALORIES', 'episodicMemory.COMMITMENT'],
+      realizedDecisions: [
+        'RESPOND_TO_MEAL',
+        'PROVIDE_RECOMMENDATION',
+        'CHECK_COMMITMENT',
+      ],
+    });
+    const valid = harness.evaluate(
+      scenario({ payload: episodicPayload, candidate: authorized }),
+    );
+    const invented = harness.evaluate(
+      scenario({
+        payload: episodicPayload,
+        candidate: {
+          ...authorized,
+          realizedUnits: authorized.realizedUnits.map((unit) => ({
+            ...unit,
+            factKeys: ['episodicMemory.UNKNOWN'],
+          })),
+        },
+      }),
+    );
+
+    expect(valid.metrics.memoryRecallCorrect).toBe(true);
+    expect(valid.metrics.memoryRecallNecessary).toBe(true);
+    expect(valid.metrics.memoryNotInvented).toBe(true);
+    expect(valid.metrics.continuityNatural).toBe(true);
+    expect(valid.metrics.episodeRelevance).toBe(true);
+    expect(valid.metrics.episodeReuse).toBe(true);
+    expect(valid.metrics.episodeExpiration).toBe(true);
+    expect(invented.metrics.memoryRecallCorrect).toBe(false);
+    expect(invented.metrics.memoryNotInvented).toBe(false);
   });
 
   it('has no production, provider or infrastructure dependency', () => {

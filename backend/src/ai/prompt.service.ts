@@ -11,6 +11,9 @@ export interface CreatePromptVersionInput {
   name: string;
   version: number;
   prompt: string;
+  capability?: string;
+  model?: string;
+  jsonSchema?: Prisma.InputJsonValue;
   isActive?: boolean;
 }
 
@@ -134,6 +137,17 @@ export class PromptService {
       name: this.requireText(input.name, 'Nome do prompt'),
       version: input.version,
       prompt: this.requireText(input.prompt, 'Conteúdo do prompt'),
+      ...(input.capability
+        ? {
+            capability: this.requireText(input.capability, 'Capacidade'),
+          }
+        : {}),
+      ...(input.model
+        ? {
+            model: this.requireText(input.model, 'Modelo'),
+          }
+        : {}),
+      ...(input.jsonSchema ? { jsonSchema: input.jsonSchema } : {}),
       isActive: input.isActive ?? false,
     };
   }

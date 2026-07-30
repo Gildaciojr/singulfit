@@ -35,6 +35,31 @@ export interface LanguageRealizationDecisionOmission {
   readonly reason: LanguageRealizationOmissionReason;
 }
 
+export interface LanguageRealizationUsageMetadata {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly totalTokens: number;
+  readonly estimatedCostUsd: string | null;
+}
+
+export type LanguageRealizationExecutionStatus =
+  | 'PROCESSING'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'REUSED_COMPLETED'
+  | 'IN_PROGRESS'
+  | 'TERMINAL_FAILURE'
+  | 'PAYLOAD_CONFLICT';
+
+export interface LanguageRealizationOperationalMetadata {
+  readonly aiJobId: string;
+  readonly promptVersionId: string;
+  readonly providerResponseId: string | null;
+  readonly model: string | null;
+  readonly usage: LanguageRealizationUsageMetadata | null;
+  readonly executionStatus: LanguageRealizationExecutionStatus;
+}
+
 interface LanguageRealizationAudit {
   readonly candidateText: string | null;
   readonly candidateTextSource: 'VALIDATED_UNITS';
@@ -50,6 +75,7 @@ interface LanguageRealizationAudit {
   readonly producedLength: number;
   readonly producedQuestionCount: number;
   readonly warningCodes: readonly string[];
+  readonly operationalMetadata?: LanguageRealizationOperationalMetadata;
 }
 
 interface LanguageRealizationReference {

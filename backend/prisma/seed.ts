@@ -6,6 +6,10 @@ import {
   PrismaClient,
   PlanType,
 } from '@prisma/client';
+import { NUTRITION_CONVERSATION_REALIZATION_PROMPT } from '../src/responses/nutrition-conversation-realization-prompt.definition';
+import { NUTRITION_PLANNING_V2_PROMPT } from '../src/diet/v2/nutrition-planning-v2.prompt.definition';
+import { NUTRITION_CONVERSATIONAL_PROMPTS } from '../src/diet/v2/nutrition-conversational-artifact.prompt.definition';
+import { WORKOUT_PLANNING_V2_PROMPT } from '../src/workout/v2/workout-planning-v2.prompt.definition';
 
 const prisma = new PrismaClient();
 
@@ -97,6 +101,10 @@ async function main() {
   ]);
 
   await Promise.all([
+    upsertActivePromptDefinition(NUTRITION_CONVERSATION_REALIZATION_PROMPT),
+    upsertActivePromptDefinition(NUTRITION_PLANNING_V2_PROMPT),
+    ...NUTRITION_CONVERSATIONAL_PROMPTS.map(upsertActivePromptDefinition),
+    upsertActivePromptDefinition(WORKOUT_PLANNING_V2_PROMPT),
     upsertActivePrompt(
       'workout_generation_weight_loss',
       'Voce e um profissional de educacao fisica especializado em emagrecimento seguro. Gere um plano semanal personalizado usando somente os dados fornecidos. Priorize aderencia, progressao conservadora, condicionamento e preservacao de massa muscular. Respeite integralmente lesoes e limitacoes. Nao inclua diagnosticos, dieta, medicamentos ou promessas de resultado. Retorne somente o JSON exigido pelo schema.',
@@ -140,6 +148,50 @@ async function main() {
   ]);
 
   console.log('Seed finalizado com sucesso.');
+}
+
+async function upsertActivePromptDefinition(definition: {
+  readonly name: string;
+  readonly version: number;
+  readonly instructions: string;
+  readonly capability: string;
+  readonly model: string;
+  readonly schema: Prisma.InputJsonValue;
+}) {
+  await prisma.promptVersion.updateMany({
+    where: {
+      name: definition.name,
+      isActive: true,
+    },
+    data: {
+      isActive: false,
+    },
+  });
+
+  return prisma.promptVersion.upsert({
+    where: {
+      name_version: {
+        name: definition.name,
+        version: definition.version,
+      },
+    },
+    update: {
+      prompt: definition.instructions,
+      capability: definition.capability,
+      model: definition.model,
+      jsonSchema: definition.schema,
+      isActive: true,
+    },
+    create: {
+      name: definition.name,
+      version: definition.version,
+      prompt: definition.instructions,
+      capability: definition.capability,
+      model: definition.model,
+      jsonSchema: definition.schema,
+      isActive: true,
+    },
+  });
 }
 
 async function upsertActivePrompt(name: string, prompt: string) {

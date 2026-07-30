@@ -1,38 +1,33 @@
 import { Injectable } from '@nestjs/common';
+import { CoachPlanningExecutionService } from './coach-planning-execution.service';
 import { CoachMessageType, ScheduledMessageStatus } from '@prisma/client';
-import { DietGeneratorService } from '../diet/diet-generator.service';
 import { EventBusService } from '../event-bus/event-bus.service';
 import { INTERNAL_EVENT } from '../event-bus/event-bus.constants';
 import { PrismaService } from '../prisma/prisma.service';
-import { WorkoutGeneratorService } from '../workout/workout-generator.service';
 import { AUTOMATION_RULE_CODES } from './automation.constants';
+import { ConversationGoalShadowPipelineService } from './conversation-goal-shadow-pipeline.service';
 
-type CoachCommandIntent = 'DIET' | 'WORKOUT' | 'BOTH' | 'UNKNOWN';
+export type CoachCommandIntent = 'DIET' | 'WORKOUT' | 'BOTH' | 'UNKNOWN';
 
-interface ProcessCoachCommandInput {
+export interface ProcessCoachCommandInput {
   userId: string;
   messageId: string;
 }
 
-interface ProcessCoachCommandResult {
+export interface ProcessCoachCommandResult {
   handled: boolean;
   duplicated: boolean;
   intent: CoachCommandIntent;
   reason?: string;
 }
 
-type GeneratedDietPlan = Awaited<ReturnType<DietGeneratorService['generate']>>;
-type GeneratedWorkoutPlan = Awaited<
-  ReturnType<WorkoutGeneratorService['generate']>
->;
-
 @Injectable()
 export class CoachCommandService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly dietGenerator: DietGeneratorService,
-    private readonly workoutGenerator: WorkoutGeneratorService,
+    private readonly planningExecution: CoachPlanningExecutionService,
     private readonly eventBus: EventBusService,
+    private readonly conversationGoalShadow: ConversationGoalShadowPipelineService,
   ) {}
 
   async processTextMessage(
@@ -51,9 +46,15 @@ export class CoachCommandService {
         timestamp: true,
         conversation: {
           select: {
+            id: true,
             user: {
               select: {
                 onboardingCompleted: true,
+                fitnessProfile: {
+                  select: {
+                    id: true,
+                  },
+                },
               },
             },
           },
@@ -93,6 +94,7 @@ export class CoachCommandService {
         messageId: message.id,
         content: existing.content,
         scheduledFor: this.scheduledFor(message.timestamp, message.id),
+        intent,
       });
 
       return {
@@ -102,7 +104,13 @@ export class CoachCommandService {
       };
     }
 
-    const content = await this.contentForIntent(input.userId, intent);
+    const content = await this.planningExecution.execute(input.userId, intent, {
+      conversationId: message.conversation.id,
+      messageId: message.id,
+      correlationId: message.id,
+      referenceDate: message.timestamp,
+      profileId: message.conversation.user.fitnessProfile?.id,
+    });
     await this.prisma.coachMessage.create({
       data: {
         userId: input.userId,
@@ -123,6 +131,15 @@ export class CoachCommandService {
       messageId: message.id,
       content,
       scheduledFor: this.scheduledFor(message.timestamp, message.id),
+      intent,
+    });
+    this.conversationGoalShadow.execute({
+      userId: input.userId,
+      messageId: message.id,
+      legacyIntent: intent,
+      referenceTimestamp: message.timestamp.toISOString(),
+      onboardingActive: false,
+      equivalentGenerationInProgress: false,
     });
 
     return {
@@ -177,90 +194,12 @@ export class CoachCommandService {
     return 'UNKNOWN';
   }
 
-  formatDiet(plan: GeneratedDietPlan): string {
-    const meals = plan.meals
-      .slice(0, 5)
-      .map((meal) => {
-        const items = meal.items
-          .slice(0, 3)
-          .map((item) => `${item.foodName} (${item.quantity})`)
-          .join(', ');
-        const notes = meal.notes ? ` Observação: ${meal.notes}` : '';
-
-        return `• ${meal.name}: ${items}.${notes}`;
-      })
-      .join('\n');
-
-    return [
-      `🥗 Plano alimentar: ${plan.title}`,
-      '',
-      `Objetivo: ${this.goalLabel(plan.objective)}`,
-      `Calorias diárias: ${this.formatNumber(plan.dailyCaloriesTarget.toNumber())} kcal`,
-      `Macros: ${this.formatNumber(plan.proteinTarget.toNumber())}g proteína, ${this.formatNumber(plan.carbsTarget.toNumber())}g carboidratos, ${this.formatNumber(plan.fatTarget.toNumber())}g gorduras.`,
-      '',
-      'Refeições principais:',
-      meals,
-      '',
-      'Use este plano como guia inicial. Se quiser, depois posso ajudar a ajustar substituições conforme sua rotina.',
-    ].join('\n');
-  }
-
-  formatWorkout(plan: GeneratedWorkoutPlan): string {
-    const days = plan.days
-      .slice(0, 7)
-      .map((day) => {
-        const exercises = day.exercises
-          .slice(0, 4)
-          .map((exercise) => exercise.exerciseName)
-          .join(', ');
-
-        return `• Dia ${day.dayNumber} - ${day.title}: ${exercises}.`;
-      })
-      .join('\n');
-
-    return [
-      `🏋️ Plano de treino: ${plan.title}`,
-      '',
-      `Objetivo: ${this.goalLabel(plan.objective)}`,
-      '',
-      'Divisão semanal:',
-      days,
-      '',
-      'Respeite sua técnica, carga atual e recuperação. Se sentir dor fora do normal, pare e procure orientação profissional.',
-    ].join('\n');
-  }
-
-  private async contentForIntent(
-    userId: string,
-    intent: CoachCommandIntent,
-  ): Promise<string> {
-    try {
-      if (intent === 'DIET') {
-        return this.formatDiet(await this.dietGenerator.generate(userId));
-      }
-
-      if (intent === 'WORKOUT') {
-        return this.formatWorkout(await this.workoutGenerator.generate(userId));
-      }
-
-      if (intent === 'BOTH') {
-        const diet = await this.dietGenerator.generate(userId);
-        const workout = await this.workoutGenerator.generate(userId);
-
-        return `${this.formatDiet(diet)}\n\n${this.formatWorkout(workout)}`;
-      }
-
-      return this.unknownIntentMessage();
-    } catch (error: unknown) {
-      return this.failureMessage(error);
-    }
-  }
-
   private async scheduleResponse(input: {
     userId: string;
     messageId: string;
     content: string;
     scheduledFor: Date;
+    intent: CoachCommandIntent;
   }): Promise<void> {
     const rule = await this.prisma.automationRule.findUnique({
       where: {
@@ -316,40 +255,13 @@ export class CoachCommandService {
             ruleCode: AUTOMATION_RULE_CODES.DAILY_COACH,
             source: 'WHATSAPP_COACH_COMMAND',
             sourceMessageId: input.messageId,
+            intent: input.intent,
           },
           availableAt: input.scheduledFor,
         },
         transaction,
       );
     });
-  }
-
-  private unknownIntentMessage(): string {
-    return [
-      'Posso te ajudar com isso 😊',
-      '',
-      'Escolha uma opção:',
-      '',
-      '1. Plano alimentar',
-      '2. Plano de treino',
-      '3. Os dois',
-      '',
-      'Você também pode responder com “quero uma dieta”, “monte meu treino” ou “quero os dois”.',
-    ].join('\n');
-  }
-
-  private failureMessage(error: unknown): string {
-    const message = error instanceof Error ? error.message : '';
-
-    if (/assinatura|acesso|subscription|forbidden/i.test(message)) {
-      return 'Para gerar seu plano personalizado, sua assinatura precisa estar ativa. Assim que o acesso estiver liberado, eu continuo daqui.';
-    }
-
-    if (/perfil fitness|perfil/i.test(message)) {
-      return 'Ainda preciso do seu perfil completo para gerar um plano seguro e personalizado. Conclua o onboarding e me peça novamente.';
-    }
-
-    return 'Tive uma falha ao gerar seu plano agora. Tente novamente em alguns instantes que eu continuo te ajudando.';
   }
 
   private idempotencyKey(userId: string, messageId: string): string {
@@ -382,19 +294,5 @@ export class CoachCommandService {
       .replace(/[^\p{L}\p{N}\s]/gu, ' ')
       .replace(/\s+/g, ' ')
       .trim();
-  }
-
-  private goalLabel(goal: string): string {
-    const labels: Record<string, string> = {
-      WEIGHT_LOSS: 'emagrecimento',
-      MUSCLE_GAIN: 'ganho de massa muscular',
-      MAINTENANCE: 'manutenção e evolução física',
-    };
-
-    return labels[goal] ?? 'evolução física';
-  }
-
-  private formatNumber(value: number): string {
-    return Number(value.toFixed(2)).toString().replace('.', ',');
   }
 }

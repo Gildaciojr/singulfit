@@ -18,6 +18,7 @@ import { AIResponseEvaluationType, AIResponseRiskLevel } from '@prisma/client';
 import { RecommendationService } from '../recommendations/recommendation.service';
 import { LongitudinalService } from '../longitudinal/longitudinal.service';
 import { NutritionConversationShadowPipelineService } from './nutrition-conversation-shadow-pipeline.service';
+import { NutritionConversationEpisodicMemoryIntegrationService } from './nutrition-conversation-episodic-memory-integration.service';
 
 describe('ResponseBuilderService', () => {
   function createSubject() {
@@ -277,6 +278,10 @@ describe('ResponseBuilderService', () => {
     const nutritionConversationShadowPipeline = {
       execute: jest.fn().mockResolvedValue(undefined),
     };
+    const episodicMemoryIntegration = {
+      loadForContext: jest.fn().mockResolvedValue(Object.freeze([])),
+      captureAfterCommit: jest.fn(),
+    };
     const service = new ResponseBuilderService(
       prisma as unknown as PrismaService,
       formatter as unknown as NutritionResponseFormatter,
@@ -288,6 +293,7 @@ describe('ResponseBuilderService', () => {
       recommendationService as unknown as RecommendationService,
       longitudinal as unknown as LongitudinalService,
       nutritionConversationShadowPipeline as unknown as NutritionConversationShadowPipelineService,
+      episodicMemoryIntegration as unknown as NutritionConversationEpisodicMemoryIntegrationService,
     );
 
     return {
@@ -303,6 +309,7 @@ describe('ResponseBuilderService', () => {
       recommendationService,
       longitudinal,
       nutritionConversationShadowPipeline,
+      episodicMemoryIntegration,
       outbound,
       analysis,
     };
@@ -314,6 +321,7 @@ describe('ResponseBuilderService', () => {
     await expect(
       subject.service.buildNutritionResponse('analysis-id'),
     ).resolves.toBe(subject.outbound);
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(subject.transaction.outboundMessage.upsert).toHaveBeenCalledWith({
       where: {
         mealAnalysisId: 'analysis-id',
@@ -375,7 +383,12 @@ describe('ResponseBuilderService', () => {
     expect(
       subject.nutritionConversationShadowPipeline.execute,
     ).toHaveBeenCalledWith({
-      conversation: {
+      operation: {
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+      },
+      conversation: expect.objectContaining({
         analysis: subject.analysis,
         context: expect.objectContaining({ userId: 'user-id' }),
         recommendations: expect.any(Array),
@@ -384,11 +397,18 @@ describe('ResponseBuilderService', () => {
         longitudinal: expect.objectContaining({
           profile: expect.objectContaining({ historySize: 8 }),
         }),
-      },
+        episodicMemory: [],
+      }),
       legacyText: 'Resposta nutricional',
     });
     expect(subject.formatter.format).toHaveReturnedWith('Resposta nutricional');
     expect(subject.formatter.format).toHaveBeenCalledTimes(1);
+    expect(
+      subject.episodicMemoryIntegration.loadForContext,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      subject.episodicMemoryIntegration.captureAfterCommit,
+    ).toHaveBeenCalledTimes(1);
     expect(
       subject.nutritionConversationShadowPipeline.execute,
     ).toHaveBeenCalledTimes(1);

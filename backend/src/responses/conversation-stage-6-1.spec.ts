@@ -219,6 +219,9 @@ describe('Conversation Layer stage 6.1', () => {
     expect(second).toEqual(first);
     expect(first.selectedDecisions).toContain('RESPOND_TO_MEAL');
     expect(first.structure.blocks.length).toBeGreaterThan(0);
+    expect(first.style.coach.identity).toBe('SINGULFIT_COACH_V1');
+    expect(first.style.coach.role).toBe('SPORTS_NUTRITION_COACH');
+    expect(first.style.coach.lexicalVariant).toMatch(/^[A-D]$/u);
     expect(serialized).not.toMatch(
       /internal-analysis-123|internal-recommendation-456|mealAnalysisId|recommendationId|conversationId|providerId|userId|blockId|decisionId|nutrition\./,
     );

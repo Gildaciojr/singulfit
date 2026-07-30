@@ -291,6 +291,32 @@ describe('NutritionConversationContextBuilder', () => {
     expect(result.facts).not.toHaveProperty('estimatedDataDisclaimer');
   });
 
+  it('accepts only preselected episodic recalls, caps them and deep-freezes their facts', () => {
+    const base = input();
+    const episodicMemory = Array.from({ length: 4 }, (_, index) => ({
+      continuityKey: `commitment-${index}`,
+      category: 'COMMITMENT' as const,
+      fact: { action: `ação-${index}` },
+      relationToContext: 'follow-up atual',
+      recallReason: 'FOLLOW_UP_DUE' as const,
+      source: 'COACH' as const,
+      sensitivity: 'STANDARD' as const,
+    }));
+    const result = new NutritionConversationContextBuilder().build({
+      ...base,
+      episodicMemory,
+    });
+
+    expect(result.episodicMemory?.episodes).toHaveLength(3);
+    expect(result.episodicMemory?.episodes[0].fact).toEqual({
+      action: 'ação-0',
+    });
+    expect(Object.isFrozen(result.episodicMemory)).toBe(true);
+    expect(Object.isFrozen(result.episodicMemory?.episodes)).toBe(true);
+    expect(Object.isFrozen(result.episodicMemory?.episodes[0].fact)).toBe(true);
+    expect(episodicMemory).toHaveLength(4);
+  });
+
   it('keeps the first ranked recommendation separate from supporting evidence', () => {
     const result = new NutritionConversationContextBuilder().build(input());
 
@@ -661,6 +687,42 @@ describe('NutritionConversationContextBuilder', () => {
     expect(preparation.communication.shouldAskQuestion).toBe(true);
     expect(action.communication.shouldAskQuestion).toBe(false);
     expect(fatigued.communication.shouldAskQuestion).toBe(false);
+  });
+
+  it('materializes emotional signals only from existing typed evidence', () => {
+    const base = input();
+    const result = new NutritionConversationContextBuilder().build({
+      ...base,
+      analysis: { ...base.analysis, confidence: decimal(0.5), items: [] },
+      recommendations: [
+        ...base.recommendations,
+        { title: 'Terceiro foco', action: 'Escolha uma única ação.' },
+      ],
+      coach: {
+        ...base.coach,
+        experience: {
+          ...base.coach.experience,
+          fatigue: { ...base.coach.experience.fatigue, score: 80 },
+        },
+      },
+      behavior: {
+        ...base.behavior,
+        adherenceScore: 30,
+        insights: ['DATA_RESPONSIVE'],
+      },
+    });
+
+    expect(result.emotional?.signals.map((signal) => signal.kind)).toEqual(
+      expect.arrayContaining([
+        'OVERWHELM',
+        'UNCERTAINTY',
+        'FATIGUE',
+        'CURIOSITY',
+      ]),
+    );
+    expect(JSON.stringify(result.emotional)).not.toMatch(
+      /user-id|analysis-id|score|heuristic|metadata/i,
+    );
   });
 
   it('has no service, network, database, clock or random dependency', () => {

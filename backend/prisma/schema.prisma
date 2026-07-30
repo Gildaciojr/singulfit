@@ -102,6 +102,7 @@ enum AIJobType {
   DIET
   WORKOUT
   PROGRESS
+  CONVERSATION_REALIZATION
 }
 
 enum AIJobStatus {
@@ -213,6 +214,7 @@ enum OutboundMessageStatus {
 enum ResponseType {
   NUTRITION_ANALYSIS
   USAGE_LIMIT
+  PROFILE_ACQUISITION
 }
 
 enum UsageEventStatus {
@@ -261,6 +263,95 @@ enum DietPlanStatus {
   ARCHIVED
 }
 
+enum NutritionArtifactType {
+  POINT_GUIDANCE
+  MEAL_SUGGESTION
+  DAILY_STRUCTURE
+  WEEKLY_PLAN
+  PLAN_REVIEW
+  PLAN_ADAPTATION
+  FOOD_SUBSTITUTION
+  CURRENT_PLAN_PRESENTATION
+}
+
+enum NutritionPlanLifecycleReason {
+  CREATION
+  REPLACEMENT
+  ADAPTATION
+  REVIEW
+  REACTIVATION
+}
+
+enum NutritionPlanStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum NutritionShadowRunStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum NutritionShadowOutputKind {
+  PLAN
+  CONVERSATIONAL_ARTIFACT
+  CURRENT_PLAN_PRESENTATION
+}
+
+enum NutritionShadowErrorCategory {
+  BUILDER_ERROR
+  STRATEGY_ERROR
+  PROVIDER_ERROR
+  PARSER_ERROR
+  VALIDATION_ERROR
+  ACTIVE_PLAN_RESOLUTION_ERROR
+  SHADOW_PERSISTENCE_ERROR
+  UNKNOWN_ERROR
+}
+
+enum NutritionShadowComparisonDivergence {
+  WRONG_ARTIFACT_TYPE
+  WRONG_KIND
+  MISSING_PLAN
+  EXTRA_PLAN
+  MISSING_GUIDANCE
+  MISSING_MEAL_SUGGESTION
+  MISSING_REVIEW
+  MISSING_PRESENTATION
+  GOAL_MISMATCH
+  OBJECTIVE_MISMATCH
+  FOCUS_MISMATCH
+  CONTEXT_MISMATCH
+  RESTRICTION_MISMATCH
+  CONTENT_DIVERGENCE
+  PERFORMANCE_REGRESSION
+  TOKEN_REGRESSION
+  COST_REGRESSION
+  PROVIDER_DIFFERENCE
+  MODEL_DIFFERENCE
+  RETRY_REGRESSION
+  PARSER_DIFFERENCE
+  VALIDATION_DIFFERENCE
+}
+
+enum NutritionShadowRuntimeDecisionType {
+  PENDING
+  STARTED
+  SKIPPED
+}
+
+enum NutritionShadowRuntimeSkipReason {
+  DISABLED_BY_POLICY
+  NON_NUTRITION_GOAL
+  CONCURRENCY_LIMIT
+  SHUTTING_DOWN
+  MISSING_REQUIRED_CONTEXT
+  POLICY_EVALUATION_ERROR
+  STORAGE_UNAVAILABLE
+}
+
 enum ScheduledMessageStatus {
   PENDING
   SENDING
@@ -298,6 +389,83 @@ enum WorkerStatus {
 enum MemoryType {
   SHORT_TERM
   LONG_TERM
+}
+
+enum CoachProfileAcquisitionField {
+  TRAINING_MODALITY
+  TRAINING_EXPERIENCE
+  WEEKLY_FREQUENCY
+  SESSION_DURATION_MINUTES
+  TRAINING_ENVIRONMENT
+  AVAILABLE_EQUIPMENT
+  PERCEIVED_CONDITIONING
+  PREFERRED_INTENSITY
+  CARDIO_AVAILABILITY
+  TRAINING_FORMAT_PREFERENCE
+  RETURNING_AFTER_BREAK
+  DESIRED_MEAL_COUNT
+  EATING_PATTERN
+  FOOD_INTOLERANCES
+  DECLARED_FOOD_PREFERENCES
+  DECLARED_FOOD_REJECTIONS
+  FOOD_BUDGET_LEVEL
+  COOKING_AVAILABILITY
+  EATING_OUT_FREQUENCY
+  REPORTED_HYDRATION
+  REPORTED_SUPPLEMENTATION
+  MEAL_TIMES
+  TRAINING_TIME
+  AVAILABLE_TRAINING_DAYS
+  DAILY_TRAINING_WINDOWS
+}
+
+enum CoachProfileValueType {
+  TEXT
+  INTEGER
+  BOOLEAN
+  TEXT_LIST
+}
+
+enum CoachProfileValueStatus {
+  UNKNOWN
+  ASKED
+  ANSWERED_UNCONFIRMED
+  CONFIRMED
+  DECLINED
+  DEFERRED
+  INFERRED
+  CONFLICTED
+  INVALIDATED
+  NOT_APPLICABLE
+}
+
+enum CoachProfileValueSource {
+  USER_CONFIRMED
+  USER_REPORTED
+  ONBOARDING
+  PROFILE_UPDATE
+  INFERRED_FROM_ROUTINE
+  INFERRED_FROM_HISTORY
+  PROFESSIONAL_DEFINED
+  SYSTEM_DEFAULT
+}
+
+enum CoachProfileConfirmationState {
+  NOT_REQUIRED
+  PENDING
+  CONFIRMED
+}
+
+enum CoachProfileAcquisitionCycleStatus {
+  PENDING
+  ASKED
+  ANSWERED
+  DECLINED
+  DEFERRED
+  EXPIRED
+  CANCELLED
+  CONFIRMATION_PENDING
+  COMPLETED
 }
 
 enum CoachCommunicationStyle {
@@ -624,86 +792,90 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  subscriptions               Subscription[]
-  meals                       Meal[]
-  usageDaily                  UsageDaily[]
-  authSessions                AuthSession[]
-  conversations               Conversation[]
-  aiJobs                      AIJob[]
-  aiUsage                     AIUsage[]
-  mediaFiles                  MediaFile[]
-  outboundMessages            OutboundMessage[]
-  usageBuckets                UsageBucket[]
-  usageEvents                 UsageEvent[]
-  fitnessProfile              FitnessProfile?
-  workoutPlans                WorkoutPlan[]
-  dietPlans                   DietPlan[]
-  fitnessCheckIns             FitnessCheckIn[]
-  progressSnapshots           ProgressSnapshot[]
-  progressInsights            ProgressInsight[]
-  automationPreference        UserAutomationPreference?
-  scheduledMessages           ScheduledMessage[]
-  auditLogs                   AuditLog[]
-  aiUsageSummaries            AIUsageSummary[]
-  nutritionProfile            NutritionProfile?
-  preferences                 UserPreferences?
-  conversationMemories        ConversationMemory[]
-  contextSnapshots            UserContextSnapshot[]
-  nutritionScores             NutritionQualityScore[]
-  nutritionInsights           NutritionInsight[]
-  mealPatterns                MealPattern[]
-  nutritionTrends             NutritionTrend[]
-  nutritionRecommendations    NutritionRecommendation[]
-  coachProfile                CoachProfile?
-  goalClassification          UserGoalClassification?
-  habitSnapshots              HabitSnapshot[]
-  consistencyScores           ConsistencyScore[]
-  engagementScores            EngagementScore[]
-  churnAssessments            ChurnRiskAssessment[]
-  coachMessages               CoachMessage[]
-  coachReviews                CoachReview[]
-  coachCommunicationProfiles  CoachCommunicationProfileSnapshot[]
-  coachMotivationProfiles     CoachMotivationProfileSnapshot[]
-  messageFatigueSnapshots     MessageFatigueSnapshot[]
-  reengagementClassifications CoachReengagementClassification[]
-  goalMomentumSnapshots       GoalMomentumSnapshot[]
-  whatsappExperienceSnapshots WhatsAppExperienceSnapshot[]
-  retentionStrengthSnapshots  RetentionStrengthSnapshot[]
-  nutritionEvidenceSnapshots  NutritionEvidenceSnapshot[]
-  foodQualityIndexes          FoodQualityIndex[]
-  dietaryPatternSnapshots     DietaryPatternSnapshot[]
-  learningProfile             UserLearningProfile?
-  communicationAdaptations    CommunicationAdaptationSnapshot[]
-  earlyChurnSnapshots         EarlyChurnSnapshot[]
-  adaptiveRecommendationRanks AdaptiveRecommendationRank[]
-  nutritionWindowSnapshots    LongitudinalNutritionWindowSnapshot[]
-  whatsappCostSnapshots       WhatsAppCostSnapshot[]
-  storageCostSnapshots        StorageCostSnapshot[]
-  profitabilitySnapshots      UserProfitabilitySnapshot[]
-  behavioralProfile           BehavioralProfile?
-  behavioralMotivations       BehavioralMotivation[]
-  stageHistory                StageOfChangeHistory[]
-  adherencePredictions        AdherencePrediction[]
-  motivationTriggers          MotivationTrigger[]
-  behavioralInsights          BehavioralInsight[]
-  behavioralSnapshots         BehavioralSnapshot[]
-  aiResponseEvaluations       AIResponseEvaluation[]
-  aiReviewQueue               AIReviewQueue[]
-  recommendations             Recommendation[]
-  activation                  UserActivation?
-  activationEvents            ActivationEvent[]
-  activationSnapshots         ActivationSnapshot[]
-  longitudinalProfiles        LongitudinalNutritionProfile[]
-  foodPreferenceSnapshots     FoodPreferenceSnapshot[]
-  nutritionEvolution          NutritionEvolutionSnapshot[]
-  nutritionRelapses           NutritionRelapse[]
-  goalProgression             GoalProgressionSnapshot[]
-  longitudinalMemories        LongitudinalMemory[]
-  coachAdaptations            CoachAdaptationSnapshot[]
-  recommendationFeedback      RecommendationFeedbackSnapshot[]
-  monthlyEvolutionReviews     MonthlyEvolutionReview[]
-  pilotParticipations         PilotParticipant[]
-  pilotChecksPerformed        PilotManualCheck[]                    @relation("PilotCheckOperator")
+  subscriptions                    Subscription[]
+  meals                            Meal[]
+  usageDaily                       UsageDaily[]
+  authSessions                     AuthSession[]
+  conversations                    Conversation[]
+  aiJobs                           AIJob[]
+  aiUsage                          AIUsage[]
+  mediaFiles                       MediaFile[]
+  outboundMessages                 OutboundMessage[]
+  usageBuckets                     UsageBucket[]
+  usageEvents                      UsageEvent[]
+  fitnessProfile                   FitnessProfile?
+  workoutPlans                     WorkoutPlan[]
+  dietPlans                        DietPlan[]
+  nutritionPlansV2                 NutritionPlanV2[]
+  nutritionConversationalArtifacts NutritionConversationalArtifact[]
+  fitnessCheckIns                  FitnessCheckIn[]
+  progressSnapshots                ProgressSnapshot[]
+  progressInsights                 ProgressInsight[]
+  automationPreference             UserAutomationPreference?
+  scheduledMessages                ScheduledMessage[]
+  auditLogs                        AuditLog[]
+  aiUsageSummaries                 AIUsageSummary[]
+  nutritionProfile                 NutritionProfile?
+  preferences                      UserPreferences?
+  conversationMemories             ConversationMemory[]
+  contextSnapshots                 UserContextSnapshot[]
+  nutritionScores                  NutritionQualityScore[]
+  nutritionInsights                NutritionInsight[]
+  mealPatterns                     MealPattern[]
+  nutritionTrends                  NutritionTrend[]
+  nutritionRecommendations         NutritionRecommendation[]
+  coachProfile                     CoachProfile?
+  goalClassification               UserGoalClassification?
+  habitSnapshots                   HabitSnapshot[]
+  consistencyScores                ConsistencyScore[]
+  engagementScores                 EngagementScore[]
+  churnAssessments                 ChurnRiskAssessment[]
+  coachMessages                    CoachMessage[]
+  coachReviews                     CoachReview[]
+  coachCommunicationProfiles       CoachCommunicationProfileSnapshot[]
+  coachMotivationProfiles          CoachMotivationProfileSnapshot[]
+  messageFatigueSnapshots          MessageFatigueSnapshot[]
+  reengagementClassifications      CoachReengagementClassification[]
+  goalMomentumSnapshots            GoalMomentumSnapshot[]
+  whatsappExperienceSnapshots      WhatsAppExperienceSnapshot[]
+  retentionStrengthSnapshots       RetentionStrengthSnapshot[]
+  nutritionEvidenceSnapshots       NutritionEvidenceSnapshot[]
+  foodQualityIndexes               FoodQualityIndex[]
+  dietaryPatternSnapshots          DietaryPatternSnapshot[]
+  learningProfile                  UserLearningProfile?
+  communicationAdaptations         CommunicationAdaptationSnapshot[]
+  earlyChurnSnapshots              EarlyChurnSnapshot[]
+  adaptiveRecommendationRanks      AdaptiveRecommendationRank[]
+  nutritionWindowSnapshots         LongitudinalNutritionWindowSnapshot[]
+  whatsappCostSnapshots            WhatsAppCostSnapshot[]
+  storageCostSnapshots             StorageCostSnapshot[]
+  profitabilitySnapshots           UserProfitabilitySnapshot[]
+  behavioralProfile                BehavioralProfile?
+  behavioralMotivations            BehavioralMotivation[]
+  stageHistory                     StageOfChangeHistory[]
+  adherencePredictions             AdherencePrediction[]
+  motivationTriggers               MotivationTrigger[]
+  behavioralInsights               BehavioralInsight[]
+  behavioralSnapshots              BehavioralSnapshot[]
+  aiResponseEvaluations            AIResponseEvaluation[]
+  aiReviewQueue                    AIReviewQueue[]
+  recommendations                  Recommendation[]
+  activation                       UserActivation?
+  activationEvents                 ActivationEvent[]
+  activationSnapshots              ActivationSnapshot[]
+  longitudinalProfiles             LongitudinalNutritionProfile[]
+  foodPreferenceSnapshots          FoodPreferenceSnapshot[]
+  nutritionEvolution               NutritionEvolutionSnapshot[]
+  nutritionRelapses                NutritionRelapse[]
+  goalProgression                  GoalProgressionSnapshot[]
+  longitudinalMemories             LongitudinalMemory[]
+  coachAdaptations                 CoachAdaptationSnapshot[]
+  recommendationFeedback           RecommendationFeedbackSnapshot[]
+  monthlyEvolutionReviews          MonthlyEvolutionReview[]
+  pilotParticipations              PilotParticipant[]
+  pilotChecksPerformed             PilotManualCheck[]                    @relation("PilotCheckOperator")
+  coachProfileFieldValues          CoachProfileFieldValue[]
+  profileAcquisitionCycles         CoachProfileAcquisitionCycle[]
 
   @@index([isActive])
   @@map("users")
@@ -728,6 +900,7 @@ model FitnessProfile {
   bodyMeasurements   BodyMeasurement[]
   workoutPlans       WorkoutPlan[]
   dietPlans          DietPlan[]
+  nutritionPlansV2   NutritionPlanV2[]
   fitnessCheckIns    FitnessCheckIn[]
   progressSnapshots  ProgressSnapshot[]
 
@@ -772,6 +945,70 @@ model UserPreferences {
 
   @@index([timezone])
   @@map("user_preferences")
+}
+
+model CoachProfileFieldValue {
+  id                String                        @id @default(uuid())
+  userId            String
+  field             CoachProfileAcquisitionField
+  valueType         CoachProfileValueType
+  textValue         String?
+  integerValue      Int?
+  booleanValue      Boolean?
+  textListValue     Json?
+  valueFingerprint  String?
+  status            CoachProfileValueStatus
+  source            CoachProfileValueSource
+  confirmationState CoachProfileConfirmationState
+  definitionVersion Int
+  referenceDate     DateTime
+  operationKey      String                        @unique
+  previousValueId   String?
+  isActive          Boolean                       @default(true)
+  confirmedAt       DateTime?
+  invalidatedAt     DateTime?
+  createdAt         DateTime                      @default(now())
+  updatedAt         DateTime                      @updatedAt
+
+  user          User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  previousValue CoachProfileFieldValue?  @relation("CoachProfileFieldHistory", fields: [previousValueId], references: [id], onDelete: SetNull)
+  newerValues   CoachProfileFieldValue[] @relation("CoachProfileFieldHistory")
+
+  @@index([userId, field, isActive])
+  @@index([userId, status, referenceDate])
+  @@index([previousValueId])
+  @@map("coach_profile_field_values")
+}
+
+model CoachProfileAcquisitionCycle {
+  id                String                             @id @default(uuid())
+  userId            String
+  field             CoachProfileAcquisitionField
+  status            CoachProfileAcquisitionCycleStatus
+  questionKind      String
+  questionVersion   Int
+  logicalTurn       Int
+  origin            String
+  operationKey      String                             @unique
+  active            Boolean                            @default(true)
+  resultCode        String?
+  confirmationState CoachProfileConfirmationState
+  referenceDate     DateTime
+  askedAt           DateTime?
+  answeredAt        DateTime?
+  expiresAt         DateTime
+  cooldownUntil     DateTime?
+  completedAt       DateTime?
+  sourceMessageId   String?
+  createdAt         DateTime                           @default(now())
+  updatedAt         DateTime                           @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, active, expiresAt])
+  @@index([userId, field, referenceDate])
+  @@index([status, expiresAt])
+  @@map("coach_profile_acquisition_cycles")
 }
 
 model ConversationMemory {
@@ -982,6 +1219,182 @@ model DietPlan {
   @@index([userId, status, generatedAt])
   @@index([profileId, generatedAt])
   @@map("diet_plans")
+}
+
+model NutritionPlanV2 {
+  id                    String                       @id @default(uuid())
+  userId                String
+  profileId             String
+  aiJobId               String                       @unique
+  schemaVersion         Int
+  engineVersion         Int
+  artifactType          NutritionArtifactType
+  lifecycleReason       NutritionPlanLifecycleReason
+  replacesPlanReference String?
+  status                NutritionPlanStatus          @default(ACTIVE)
+  document              Json
+  generatedAt           DateTime
+  createdAt             DateTime                     @default(now())
+  updatedAt             DateTime                     @updatedAt
+
+  user    User                              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile FitnessProfile                    @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  aiJob   AIJob                             @relation(fields: [aiJobId], references: [id], onDelete: Restrict)
+  reviews NutritionConversationalArtifact[] @relation("ReviewedNutritionPlan")
+
+  @@index([userId, status, generatedAt])
+  @@index([profileId, generatedAt])
+  @@index([userId, artifactType, generatedAt])
+  @@index([replacesPlanReference])
+  @@map("nutrition_plans_v2")
+}
+
+model NutritionConversationalArtifact {
+  id             String                @id @default(uuid())
+  userId         String
+  artifactType   NutritionArtifactType
+  schemaVersion  String
+  document       Json
+  aiJobId        String                @unique
+  operationKey   String                @unique
+  reviewedPlanId String?
+  createdAt      DateTime              @default(now())
+
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aiJob        AIJob            @relation(fields: [aiJobId], references: [id], onDelete: Restrict)
+  reviewedPlan NutritionPlanV2? @relation("ReviewedNutritionPlan", fields: [reviewedPlanId], references: [id], onDelete: Restrict)
+
+  @@index([userId, artifactType, createdAt])
+  @@index([reviewedPlanId])
+  @@map("nutrition_conversational_artifacts")
+}
+
+model NutritionShadowRun {
+  id                    String                        @id @default(uuid())
+  operationKey          String                        @unique
+  inputFingerprint      String
+  correlationId         String
+  traceId               String?
+  userId                String
+  conversationId        String?
+  messageId             String?
+  conversationGoal      String?
+  status                NutritionShadowRunStatus      @default(PENDING)
+  artifactType          NutritionArtifactType?
+  kind                  NutritionShadowOutputKind?
+  provider              String?
+  model                 String?
+  promptVersionId       String?
+  attempts              Int                           @default(0)
+  promptTokens          Int?
+  completionTokens      Int?
+  totalTokens           Int?
+  estimatedCostUsd      Decimal?                      @db.Decimal(14, 8)
+  costCurrency          String?
+  builderDurationMs     Int?
+  strategyDurationMs    Int?
+  providerDurationMs    Int?
+  parsingDurationMs     Int?
+  validationDurationMs  Int?
+  persistenceDurationMs Int?
+  totalDurationMs       Int?
+  document              Json?
+  documentHash          String?
+  resultSummary         String?
+  activePlanReference   String?
+  errorCategory         NutritionShadowErrorCategory?
+  errorCode             String?
+  errorMessage          String?
+  startedAt             DateTime?
+  completedAt           DateTime?
+  createdAt             DateTime                      @default(now())
+  updatedAt             DateTime                      @updatedAt
+
+  runtimeDecisions NutritionShadowRuntimeDecision[]
+
+  @@index([userId, createdAt])
+  @@index([conversationId, createdAt])
+  @@index([messageId, createdAt])
+  @@index([status, createdAt])
+  @@index([artifactType, createdAt])
+  @@index([conversationGoal, createdAt], map: "nutrition_shadow_runs_goal_created_idx")
+  @@map("nutrition_shadow_runs")
+}
+
+model NutritionShadowComparison {
+  id                   String                                @id @default(uuid())
+  operationKey         String                                @unique
+  inputFingerprint     String
+  conversationId       String
+  messageId            String
+  shadowRunId          String
+  conversationGoal     String?
+  expectedArtifactType NutritionArtifactType
+  actualArtifactType   NutritionArtifactType
+  expectedKind         NutritionShadowOutputKind
+  actualKind           NutritionShadowOutputKind
+  equivalent           Boolean
+  structuralScore      Int
+  semanticScore        Int
+  operationalScore     Int
+  overallScore         Int
+  divergences          NutritionShadowComparisonDivergence[]
+  legacyDurationMs     Int?
+  shadowDurationMs     Int
+  legacyTokens         Int?
+  shadowTokens         Int
+  legacyCostUsd        Decimal?                              @db.Decimal(14, 8)
+  shadowCostUsd        Decimal?                              @db.Decimal(14, 8)
+  timeRatio            Decimal?                              @db.Decimal(14, 8)
+  tokenRatio           Decimal?                              @db.Decimal(14, 8)
+  costRatio            Decimal?                              @db.Decimal(14, 8)
+  legacyProvider       String?
+  shadowProvider       String?
+  legacyModel          String?
+  shadowModel          String?
+  legacyHash           String
+  shadowHash           String
+  createdAt            DateTime                              @default(now())
+
+  @@index([conversationId, createdAt])
+  @@index([messageId, createdAt])
+  @@index([shadowRunId])
+  @@index([equivalent, createdAt])
+  @@index([overallScore, createdAt])
+  @@index([conversationGoal, createdAt], map: "nutrition_shadow_comparisons_goal_created_idx")
+  @@map("nutrition_shadow_comparisons")
+}
+
+model NutritionShadowRuntimeDecision {
+  id                 String                             @id
+  operationKey       String                             @unique
+  inputFingerprint   String
+  userId             String
+  conversationId     String?
+  messageId          String?
+  correlationId      String
+  traceId            String?
+  conversationGoal   String
+  decision           NutritionShadowRuntimeDecisionType @default(PENDING)
+  skipReason         NutritionShadowRuntimeSkipReason?
+  shadowRunId        String?                            @unique
+  ownershipToken     String?                            @unique
+  ownershipClaimedAt DateTime?
+  ownershipExpiresAt DateTime?
+  decisionAt         DateTime                           @default(now())
+  createdAt          DateTime                           @default(now())
+
+  shadowRun NutritionShadowRun? @relation(fields: [shadowRunId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt])
+  @@index([conversationGoal, createdAt], map: "nutrition_shadow_runtime_decisions_goal_created_idx")
+  @@index([decision, createdAt])
+  @@index([decision, ownershipExpiresAt], map: "nutrition_shadow_runtime_decisions_ownership_expiry_idx")
+  @@index([skipReason, createdAt])
+  @@index([userId, createdAt])
+  @@index([conversationId, createdAt])
+  @@index([messageId, createdAt])
+  @@map("nutrition_shadow_runtime_decisions")
 }
 
 model DietMeal {
@@ -1387,12 +1800,15 @@ model MediaFile {
 }
 
 model PromptVersion {
-  id        String   @id @default(uuid())
-  name      String
-  version   Int
-  prompt    String
-  isActive  Boolean  @default(false)
-  createdAt DateTime @default(now())
+  id         String   @id @default(uuid())
+  name       String
+  version    Int
+  prompt     String
+  capability String?
+  model      String?
+  jsonSchema Json?
+  isActive   Boolean  @default(false)
+  createdAt  DateTime @default(now())
 
   aiJobs              AIJob[]
   responseEvaluations AIResponseEvaluation[]
@@ -1416,23 +1832,26 @@ model AIJob {
   attempts           Int         @default(0)
   startedAt          DateTime?
   leaseExpiresAt     DateTime?
+  result             Json?
   completedAt        DateTime?
   failedAt           DateTime?
   error              String?
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
 
-  user                User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  conversation        Conversation?          @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  message             Message?               @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  promptVersion       PromptVersion          @relation(fields: [promptVersionId], references: [id], onDelete: Restrict)
-  usage               AIUsage[]
-  usageEvents         UsageEvent[]
-  mealAnalysis        MealAnalysis?
-  dietPlan            DietPlan?
-  workoutPlan         WorkoutPlan?
-  progressInsight     ProgressInsight?
-  responseEvaluations AIResponseEvaluation[]
+  user                            User                             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation                    Conversation?                    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message                         Message?                         @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  promptVersion                   PromptVersion                    @relation(fields: [promptVersionId], references: [id], onDelete: Restrict)
+  usage                           AIUsage[]
+  usageEvents                     UsageEvent[]
+  mealAnalysis                    MealAnalysis?
+  dietPlan                        DietPlan?
+  nutritionPlanV2                 NutritionPlanV2?
+  nutritionConversationalArtifact NutritionConversationalArtifact?
+  workoutPlan                     WorkoutPlan?
+  progressInsight                 ProgressInsight?
+  responseEvaluations             AIResponseEvaluation[]
 
   @@unique([messageId, type, promptVersionId])
   @@index([userId, status, createdAt])
@@ -3193,4 +3612,3 @@ model PilotManualCheck {
   @@index([checkedByUserId, checkedAt])
   @@map("pilot_manual_checks")
 }
-

@@ -1,5 +1,9 @@
 import type { LanguageRealizationResult } from './conversation-language-realization.contract';
 import type {
+  ConversationCentralIntent,
+  ConversationDialogueProfile,
+} from './conversation-composition.contract';
+import type {
   ConversationEvaluationReport,
   ConversationEvaluationScenario,
   ConversationEvaluationScores,
@@ -17,6 +21,8 @@ export type ConversationCorpusClassification =
 export interface ConversationCorpusScenario extends ConversationEvaluationScenario {
   readonly tags: readonly string[];
   readonly golden: boolean;
+  readonly expectedDialogueProfile: ConversationDialogueProfile;
+  readonly expectedCentralIntent: ConversationCentralIntent;
 }
 
 export interface ConversationCandidateFactory {

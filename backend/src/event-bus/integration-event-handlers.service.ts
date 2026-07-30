@@ -1,5 +1,11 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
-import { MediaType, OutboxEvent, Prisma } from '@prisma/client';
+import {
+  MediaType,
+  OutboxEvent,
+  Prisma,
+  ResponseType,
+  ScheduledMessageStatus,
+} from '@prisma/client';
 import { UsageLimitExceededException } from '../entitlements/usage-limit.exception';
 import { EvolutionSendService } from '../evolution/evolution-send.service';
 import { EvolutionWebhookService } from '../evolution/evolution-webhook.service';
@@ -14,6 +20,7 @@ import { ACTIVATION_ONBOARDING_PROFILE_SOURCE_KEY } from '../activation/activati
 import { PagBankWebhookService } from '../webhooks/pagbank-webhook.service';
 import { INTERNAL_EVENT } from './event-bus.constants';
 import { EventHandlerRegistry } from './event-handler.registry';
+import { ProfileAcquisitionInternalRolloutService } from '../context/profile-acquisition/profile-acquisition-internal-rollout.service';
 
 @Injectable()
 export class IntegrationEventHandlersService implements OnModuleInit {
@@ -29,6 +36,7 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     private readonly automationService: AutomationService,
     private readonly activationJourneyService: ActivationJourneyService,
     private readonly activationOnboardingService: ActivationOnboardingService,
+    private readonly profileAcquisitionRollout: ProfileAcquisitionInternalRolloutService,
   ) {}
 
   onModuleInit(): void {
@@ -81,6 +89,13 @@ export class IntegrationEventHandlersService implements OnModuleInit {
       userId: this.requiredString(event.payload, 'userId'),
       messageId: this.requiredString(event.payload, 'messageId'),
     };
+    const acquisition =
+      await this.profileAcquisitionRollout.captureActiveResponse(input);
+
+    if (acquisition.handled) {
+      return;
+    }
+
     const result =
       await this.activationOnboardingService.processTextMessage(input);
 
@@ -119,15 +134,46 @@ export class IntegrationEventHandlersService implements OnModuleInit {
   }
 
   private async processOutboundMessage(event: OutboxEvent): Promise<void> {
-    await this.evolutionSendService.sendText(
-      this.requiredString(event.payload, 'outboundMessageId'),
+    const outboundMessageId = this.requiredString(
+      event.payload,
+      'outboundMessageId',
     );
+    const responseType = this.requiredString(event.payload, 'responseType');
+
+    if (
+      responseType === ResponseType.PROFILE_ACQUISITION &&
+      !(await this.profileAcquisitionRollout.authorizeQuestionSend(
+        outboundMessageId,
+      ))
+    ) {
+      return;
+    }
+
+    await this.evolutionSendService.sendText(outboundMessageId);
+    await this.profileAcquisitionRollout.afterOutboundSent(outboundMessageId);
   }
 
   private async processAutomation(event: OutboxEvent): Promise<void> {
-    await this.automationService.sendScheduledMessage(
+    const sent = await this.automationService.sendScheduledMessage(
       this.requiredString(event.payload, 'scheduledMessageId'),
     );
+    const source = this.optionalString(event.payload, 'source');
+    const intent = this.coachIntent(
+      this.optionalString(event.payload, 'intent'),
+    );
+
+    if (
+      sent.status === ScheduledMessageStatus.SENT &&
+      source === 'WHATSAPP_COACH_COMMAND' &&
+      intent
+    ) {
+      await this.profileAcquisitionRollout.afterCoachResponseSent({
+        userId: this.requiredString(event.payload, 'userId'),
+        sourceMessageId: this.requiredString(event.payload, 'sourceMessageId'),
+        intent,
+        sentAt: sent.scheduledFor,
+      });
+    }
   }
 
   private async processContextRefreshCompleted(
@@ -167,5 +213,36 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     }
 
     return payload[key].trim();
+  }
+
+  private optionalString(
+    payload: Prisma.JsonValue,
+    key: string,
+  ): string | undefined {
+    if (
+      typeof payload !== 'object' ||
+      payload === null ||
+      Array.isArray(payload) ||
+      typeof payload[key] !== 'string' ||
+      !payload[key].trim()
+    ) {
+      return undefined;
+    }
+
+    return payload[key].trim();
+  }
+
+  private coachIntent(
+    value: string | undefined,
+  ): 'DIET' | 'WORKOUT' | 'BOTH' | 'UNKNOWN' | null {
+    switch (value) {
+      case 'DIET':
+      case 'WORKOUT':
+      case 'BOTH':
+      case 'UNKNOWN':
+        return value;
+      default:
+        return null;
+    }
   }
 }

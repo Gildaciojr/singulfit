@@ -5,6 +5,7 @@ import { NutritionModule } from '../nutrition/nutrition.module';
 import { ResponseModule } from '../responses/response.module';
 import { WebhooksModule } from '../webhooks/webhooks.module';
 import { ActivationModule } from '../activation/activation.module';
+import { ContextModule } from '../context/context.module';
 import { IntegrationEventHandlersService } from './integration-event-handlers.service';
 
 @Module({
@@ -15,6 +16,7 @@ import { IntegrationEventHandlersService } from './integration-event-handlers.se
     ResponseModule,
     AutomationModule,
     ActivationModule,
+    ContextModule,
   ],
   providers: [IntegrationEventHandlersService],
 })

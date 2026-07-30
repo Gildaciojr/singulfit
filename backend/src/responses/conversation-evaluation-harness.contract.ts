@@ -5,6 +5,7 @@ import type {
 } from './conversation-comparison.contract';
 import type { LanguageRealizationResult } from './conversation-language-realization.contract';
 import type { SanitizedConversationPayload } from './sanitized-conversation-payload.contract';
+import type { NutritionConversationHumanizationMetrics } from './nutrition-conversation-coach-style.contract';
 
 export type ConversationEvaluationValue =
   | string
@@ -58,11 +59,36 @@ export interface ConversationEvaluationReport {
   readonly warnings: readonly ConversationComparisonCheckCode[];
   readonly objectiveReasons: readonly string[];
   readonly comparison: ConversationComparisonResult;
-  readonly metrics: ConversationComparisonMetrics & {
-    readonly foodsPreserved: boolean;
-    readonly recommendationsPreserved: boolean;
-    readonly density: SanitizedConversationPayload['structure']['density'];
-    readonly depth: SanitizedConversationPayload['structure']['depth'];
-  };
+  readonly metrics: ConversationComparisonMetrics &
+    NutritionConversationHumanizationMetrics & {
+      readonly foodsPreserved: boolean;
+      readonly recommendationsPreserved: boolean;
+      readonly recognitionEvidencePreserved: boolean;
+      readonly genericPraiseAbsent: boolean;
+      readonly emotionalEvidencePreserved: boolean;
+      readonly unsafeEmotionalLanguageAbsent: boolean;
+      readonly profileRespected: boolean;
+      readonly centralIntentPreserved: boolean;
+      readonly paragraphBudgetRespected: boolean;
+      readonly questionBudgetRespected: boolean;
+      readonly actionBudgetRespected: boolean;
+      readonly unnecessaryQuestionAbsent: boolean;
+      readonly unnecessaryRecommendationAbsent: boolean;
+      readonly detailedAnalysisUsedOnlyWhenEligible: boolean;
+      readonly recoveryStayedBrief: boolean;
+      readonly celebrationStayedFocused: boolean;
+      readonly clarificationAvoidedSpeculation: boolean;
+      readonly technicalHeadingsAbsentWhenProhibited: boolean;
+      readonly structuralDiversity: boolean;
+      readonly memoryRecallCorrect: boolean;
+      readonly memoryRecallNecessary: boolean;
+      readonly memoryNotInvented: boolean;
+      readonly continuityNatural: boolean;
+      readonly episodeRelevance: boolean;
+      readonly episodeReuse: boolean;
+      readonly episodeExpiration: boolean;
+      readonly density: SanitizedConversationPayload['structure']['density'];
+      readonly depth: SanitizedConversationPayload['structure']['depth'];
+    };
   readonly scores: ConversationEvaluationScores;
 }

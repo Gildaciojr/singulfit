@@ -1,4 +1,5 @@
 import { PrismaService } from '../prisma/prisma.service';
+import { NUTRITION_CONVERSATION_REALIZATION_PROMPT } from '../responses/nutrition-conversation-realization-prompt.definition';
 import { PromptService } from './prompt.service';
 
 describe('PromptService', () => {
@@ -68,5 +69,42 @@ describe('PromptService', () => {
     await expect(service.getActive('assistant-base')).resolves.toBe(
       promptVersion,
     );
+  });
+
+  it('preserves official capability, model and JSON Schema metadata', async () => {
+    const promptVersion = {
+      id: 'conversation-prompt-version-id',
+      ...NUTRITION_CONVERSATION_REALIZATION_PROMPT,
+      prompt: NUTRITION_CONVERSATION_REALIZATION_PROMPT.instructions,
+      jsonSchema: NUTRITION_CONVERSATION_REALIZATION_PROMPT.schema,
+      isActive: true,
+      createdAt: new Date(),
+    };
+    const prisma = {
+      promptVersion: {
+        create: jest.fn().mockResolvedValue(promptVersion),
+      },
+    };
+    const service = new PromptService(prisma as unknown as PrismaService);
+
+    await service.createVersion({
+      name: NUTRITION_CONVERSATION_REALIZATION_PROMPT.name,
+      version: NUTRITION_CONVERSATION_REALIZATION_PROMPT.version,
+      prompt: NUTRITION_CONVERSATION_REALIZATION_PROMPT.instructions,
+      capability: NUTRITION_CONVERSATION_REALIZATION_PROMPT.capability,
+      model: NUTRITION_CONVERSATION_REALIZATION_PROMPT.model,
+      jsonSchema: NUTRITION_CONVERSATION_REALIZATION_PROMPT.schema as never,
+    });
+
+    expect(prisma.promptVersion.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        name: NUTRITION_CONVERSATION_REALIZATION_PROMPT.name,
+        version: 1,
+        capability: 'CONVERSATION_REALIZATION',
+        model: 'TEXT',
+        jsonSchema: NUTRITION_CONVERSATION_REALIZATION_PROMPT.schema,
+        isActive: false,
+      }),
+    });
   });
 });

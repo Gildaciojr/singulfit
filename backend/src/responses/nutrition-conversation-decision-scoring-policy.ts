@@ -9,6 +9,7 @@ import type {
   SuppressedDecision,
 } from './conversation-decision.contract';
 import type { NutritionConversationContext } from './nutrition-conversation-context.interface';
+import { NutritionConversationDialogueProfilePolicy } from './nutrition-conversation-dialogue-profile.policy';
 
 const PRIORITY_ORDER: Readonly<
   Record<ConversationDecisionIntrinsicPriority, number>
@@ -37,6 +38,9 @@ interface SuppressionRecord {
 }
 
 export class NutritionConversationDecisionScoringPolicy {
+  private readonly dialogueProfilePolicy =
+    new NutritionConversationDialogueProfilePolicy();
+
   select(
     context: NutritionConversationContext,
     candidates: readonly DecisionCandidate[],
@@ -202,6 +206,25 @@ export class NutritionConversationDecisionScoringPolicy {
       this.addSelected(candidate, selectedIds, selectedCandidates);
     }
 
+    const preliminaryDecisions = selectedCandidates.map((candidate, order) =>
+      this.selectedDecision(
+        candidate,
+        order,
+        candidate.complementaryIds.some((id) => selectedIds.has(id)),
+      ),
+    );
+    const profileSelection = this.dialogueProfilePolicy.select(
+      context,
+      preliminaryDecisions,
+    );
+    this.applyProfileConstraints(
+      profileSelection.profile,
+      candidates,
+      selectedIds,
+      selectedCandidates,
+      suppressions,
+    );
+
     for (const candidate of candidates) {
       if (!selectedIds.has(candidate.id) && !suppressions.has(candidate.id)) {
         this.suppress(suppressions, candidate, 'LOW_RELEVANCE', [
@@ -236,6 +259,8 @@ export class NutritionConversationDecisionScoringPolicy {
     return Object.freeze({
       id: `nutrition-decision-plan:${context.metadata.mealAnalysisId}`,
       primaryDecisionId,
+      dialogueProfile: profileSelection.profile,
+      centralIntent: profileSelection.centralIntent,
       selectedDecisions,
       suppressedDecisions,
       mandatoryDecisionIds: Object.freeze(
@@ -252,10 +277,129 @@ export class NutritionConversationDecisionScoringPolicy {
           ),
         ].sort(),
       ),
-      maximumCommunicativeDecisions: budget,
-      maximumQuestions: 1,
-      maximumActions: 1,
+      maximumCommunicativeDecisions: Math.min(
+        budget,
+        profileSelection.definition.budgets.maximumPerceptibleDecisions,
+      ),
+      maximumQuestions: profileSelection.definition.budgets.maximumQuestions,
+      maximumActions: profileSelection.definition.budgets.maximumActions,
     });
+  }
+
+  private applyProfileConstraints(
+    profile: Parameters<
+      NutritionConversationDialogueProfilePolicy['definition']
+    >[0],
+    candidates: readonly DecisionCandidate[],
+    selectedIds: Set<ConversationDecisionId>,
+    selectedCandidates: DecisionCandidate[],
+    suppressions: Map<ConversationDecisionId, SuppressionRecord>,
+  ): void {
+    const profileDefinition = this.dialogueProfilePolicy.definition(profile);
+
+    for (const candidate of [...selectedCandidates]) {
+      if (
+        candidate.required ||
+        this.dialogueProfilePolicy.allowsDecision(
+          profile,
+          candidate.id,
+          candidate.category,
+        )
+      ) {
+        continue;
+      }
+      this.removeSelected(candidate, selectedIds, selectedCandidates);
+      suppressions.delete(candidate.id);
+      this.suppress(suppressions, candidate, 'PROFILE_MISMATCH', [
+        `DIALOGUE_PROFILE_${profile}`,
+      ]);
+    }
+
+    const requiresQuestion = [
+      'CLARIFY_BEFORE_ANALYSIS',
+      'REFLECT_AND_ASK',
+      'CONTINUITY_CHECK',
+    ].includes(profile);
+    if (requiresQuestion) {
+      this.replaceConversationalEnding(
+        'nutrition.ask-question',
+        'nutrition.close-without-question',
+        candidates,
+        selectedIds,
+        selectedCandidates,
+        suppressions,
+      );
+    } else if (profileDefinition.closingRequirement === 'REQUIRED') {
+      this.replaceConversationalEnding(
+        'nutrition.close-without-question',
+        'nutrition.ask-question',
+        candidates,
+        selectedIds,
+        selectedCandidates,
+        suppressions,
+      );
+    }
+
+    const optionalPerceptible = selectedCandidates.filter(
+      (candidate) =>
+        !candidate.required && this.isProfilePerceptible(candidate),
+    );
+    for (const candidate of optionalPerceptible.slice(
+      profileDefinition.budgets.maximumPerceptibleDecisions,
+    )) {
+      this.removeSelected(candidate, selectedIds, selectedCandidates);
+      suppressions.delete(candidate.id);
+      this.suppress(suppressions, candidate, 'PROFILE_BUDGET', [
+        `DIALOGUE_PROFILE_BUDGET_${profile}`,
+      ]);
+    }
+  }
+
+  private replaceConversationalEnding(
+    selectedId: ConversationDecisionId,
+    removedId: ConversationDecisionId,
+    candidates: readonly DecisionCandidate[],
+    selectedIds: Set<ConversationDecisionId>,
+    selectedCandidates: DecisionCandidate[],
+    suppressions: Map<ConversationDecisionId, SuppressionRecord>,
+  ): void {
+    const removed = selectedCandidates.find(
+      (candidate) => candidate.id === removedId,
+    );
+    if (removed) {
+      this.removeSelected(removed, selectedIds, selectedCandidates);
+      suppressions.delete(removed.id);
+      this.suppress(suppressions, removed, 'PROFILE_MISMATCH', [
+        'CONVERSATIONAL_ENDING_REPLACED_BY_PROFILE',
+      ]);
+    }
+    const selected = candidates.find(
+      (candidate) => candidate.id === selectedId,
+    );
+    if (selected && !selectedIds.has(selected.id)) {
+      suppressions.delete(selected.id);
+      this.addSelected(selected, selectedIds, selectedCandidates);
+    }
+  }
+
+  private removeSelected(
+    candidate: DecisionCandidate,
+    selectedIds: Set<ConversationDecisionId>,
+    selectedCandidates: DecisionCandidate[],
+  ): void {
+    selectedIds.delete(candidate.id);
+    selectedCandidates.splice(selectedCandidates.indexOf(candidate), 1);
+  }
+
+  private isProfilePerceptible(candidate: DecisionCandidate): boolean {
+    return ![
+      'nutrition.respond-to-meal',
+      'nutrition.qualify-estimates',
+      'nutrition.respond-briefly',
+      'nutrition.reduce-conversational-load',
+      'nutrition.use-emoji',
+      'nutrition.close-without-question',
+    ].includes(candidate.id);
   }
 
   private validateCandidates(
@@ -422,6 +566,36 @@ export class NutritionConversationDecisionScoringPolicy {
     if (candidate.id === 'nutrition.use-memory') {
       return 65;
     }
+    const recognitionRelevance: Readonly<Record<string, number>> = {
+      'nutrition.acknowledge-recovery': 98,
+      'nutrition.acknowledge-small-win': 92,
+      'nutrition.acknowledge-effort': 88,
+      'nutrition.acknowledge-consistency': 82,
+      'nutrition.acknowledge-progress': 78,
+      'nutrition.acknowledge-discipline': 74,
+      'nutrition.acknowledge-strategy': 70,
+      'nutrition.acknowledge-improvement': 68,
+      'nutrition.validate-frustration': 96,
+      'nutrition.reduce-cognitive-load': 94,
+      'nutrition.simplify-guidance': 90,
+      'nutrition.normalize-setback': 86,
+      'nutrition.reinforce-confidence': 80,
+      'nutrition.encourage-continuity': 78,
+      'nutrition.answer-curiosity': 76,
+      'nutrition.clarify-before-analysis': 99,
+      'nutrition.detail-analysis': 93,
+      'nutrition.teach-briefly': 88,
+      'nutrition.follow-up-commitment': 86,
+      'nutrition.follow-up-episode': 90,
+      'nutrition.check-commitment': 92,
+      'nutrition.continue-strategy': 88,
+      'nutrition.recall-success': 86,
+      'nutrition.recall-setback': 84,
+      'nutrition.recall-difficulty': 82,
+      'nutrition.recall-goal': 80,
+    };
+    if (recognitionRelevance[candidate.id] !== undefined)
+      return recognitionRelevance[candidate.id];
     return 50 + Math.min(candidate.factIds.length, 5);
   }
 
@@ -450,6 +624,32 @@ export class NutritionConversationDecisionScoringPolicy {
       'nutrition.show-calories': 44,
       'nutrition.show-quality': 42,
       'nutrition.use-emoji': 10,
+      'nutrition.acknowledge-recovery': 92,
+      'nutrition.acknowledge-small-win': 87,
+      'nutrition.acknowledge-effort': 82,
+      'nutrition.acknowledge-consistency': 76,
+      'nutrition.acknowledge-progress': 72,
+      'nutrition.acknowledge-discipline': 68,
+      'nutrition.acknowledge-strategy': 64,
+      'nutrition.acknowledge-improvement': 62,
+      'nutrition.validate-frustration': 91,
+      'nutrition.reduce-cognitive-load': 89,
+      'nutrition.simplify-guidance': 87,
+      'nutrition.normalize-setback': 81,
+      'nutrition.reinforce-confidence': 75,
+      'nutrition.encourage-continuity': 71,
+      'nutrition.answer-curiosity': 69,
+      'nutrition.clarify-before-analysis': 98,
+      'nutrition.detail-analysis': 92,
+      'nutrition.teach-briefly': 84,
+      'nutrition.follow-up-commitment': 82,
+      'nutrition.follow-up-episode': 84,
+      'nutrition.check-commitment': 88,
+      'nutrition.continue-strategy': 85,
+      'nutrition.recall-success': 80,
+      'nutrition.recall-setback': 78,
+      'nutrition.recall-difficulty': 76,
+      'nutrition.recall-goal': 74,
     };
 
     if (candidate.id === 'nutrition.ask-question') {
@@ -470,12 +670,22 @@ export class NutritionConversationDecisionScoringPolicy {
       fatigue.repeatedThemeScore,
       fatigue.repeatedPhraseScore,
     );
+    if (
+      [
+        'nutrition.reduce-cognitive-load',
+        'nutrition.simplify-guidance',
+      ].includes(candidate.id)
+    ) {
+      return 0;
+    }
     const affected = new Set<ConversationDecisionCategory>([
       'CURIOSITY',
       'MOTIVATION',
       'CELEBRATION',
       'MEMORY',
       'EDUCATION',
+      'RECOGNITION',
+      'EMPATHY',
     ]);
 
     if (!affected.has(candidate.category)) {
@@ -490,6 +700,8 @@ export class NutritionConversationDecisionScoringPolicy {
     if (candidate.category === 'CONTINUITY') return 30;
     if (candidate.category === 'MEMORY') return 25;
     if (candidate.category === 'MOTIVATION') return 20;
+    if (candidate.category === 'RECOGNITION') return 10;
+    if (candidate.category === 'EMPATHY') return 5;
     if (candidate.category === 'PRESENTATION') return 5;
     return 10;
   }
@@ -517,6 +729,8 @@ export class NutritionConversationDecisionScoringPolicy {
       context.userContext.memory,
       context.userContext.trend,
       context.userContext.longitudinalSignal,
+      (context.episodicMemory?.episodes.length ?? 0) > 0,
+      (context.emotional?.signals.length ?? 0) > 0,
     ].filter(Boolean).length;
 
     if (context.communication.preferredMessageLength >= 800) {
@@ -526,7 +740,10 @@ export class NutritionConversationDecisionScoringPolicy {
       return 4;
     }
     if (complexity <= 1) {
-      return 2;
+      return (context.recognition?.signals.length ?? 0) > 0 ||
+        (context.emotional?.signals.length ?? 0) > 0
+        ? 3
+        : 2;
     }
     return 3;
   }
@@ -576,15 +793,46 @@ export class NutritionConversationDecisionScoringPolicy {
       [
         'nutrition.celebrate-improvement',
         'nutrition.motivate-with-evidence',
+        'nutrition.encourage-continuity',
       ].includes(candidate.id)
     )
       return 'ENCOURAGEMENT';
     if (
-      ['nutrition.acknowledge-meal', 'nutrition.acknowledge-positive'].includes(
+      [
+        'nutrition.acknowledge-meal',
+        'nutrition.acknowledge-positive',
+        'nutrition.acknowledge-recovery',
+        'nutrition.acknowledge-small-win',
+        'nutrition.acknowledge-effort',
+        'nutrition.acknowledge-consistency',
+        'nutrition.acknowledge-progress',
+        'nutrition.acknowledge-discipline',
+        'nutrition.acknowledge-strategy',
+        'nutrition.acknowledge-improvement',
+        'nutrition.reinforce-confidence',
+      ].includes(candidate.id)
+    )
+      return 'RECOGNITION';
+    if (
+      [
+        'nutrition.validate-frustration',
+        'nutrition.normalize-setback',
+      ].includes(candidate.id)
+    )
+      return 'EMOTIONAL_VALIDATION';
+    if (
+      [
+        'nutrition.reduce-cognitive-load',
+        'nutrition.simplify-guidance',
+      ].includes(candidate.id)
+    )
+      return 'COGNITIVE_LOAD';
+    if (
+      ['nutrition.mention-insight', 'nutrition.answer-curiosity'].includes(
         candidate.id,
       )
     )
-      return 'RECOGNITION';
+      return 'EDUCATION';
     if (
       [
         'nutrition.provide-recommendation',
@@ -592,6 +840,18 @@ export class NutritionConversationDecisionScoringPolicy {
       ].includes(candidate.id)
     )
       return 'GUIDANCE';
+    if (
+      [
+        'nutrition.follow-up-episode',
+        'nutrition.continue-strategy',
+        'nutrition.check-commitment',
+        'nutrition.recall-success',
+        'nutrition.recall-setback',
+        'nutrition.recall-difficulty',
+        'nutrition.recall-goal',
+      ].includes(candidate.id)
+    )
+      return 'EPISODIC_RECALL';
     return null;
   }
 
@@ -607,6 +867,8 @@ export class NutritionConversationDecisionScoringPolicy {
         'CELEBRATION',
         'MEMORY',
         'EDUCATION',
+        'RECOGNITION',
+        'EMPATHY',
       ].includes(candidate.category)
     ) {
       return 'FATIGUE';
@@ -632,6 +894,7 @@ export class NutritionConversationDecisionScoringPolicy {
     if (context.facts.totalCarbs !== null) facts.add('facts.totalCarbs');
     if (context.facts.totalFat !== null) facts.add('facts.totalFat');
     if (context.facts.qualityScore !== null) facts.add('facts.qualityScore');
+    if (context.facts.confidence !== undefined) facts.add('facts.confidence');
     if (context.userContext.goal !== null) facts.add('userContext.goal');
     if (context.userContext.memory) facts.add('userContext.memory');
     if (context.userContext.recentMeals.length > 0)
@@ -646,6 +909,18 @@ export class NutritionConversationDecisionScoringPolicy {
       facts.add('direction.supportingEvidence.positiveFactors');
     if (context.direction.supportingEvidence.limitingFactors.length > 0)
       facts.add('direction.supportingEvidence.limitingFactors');
+    for (const signal of context.recognition?.signals ?? [])
+      facts.add(`recognition.${signal.kind}`);
+    for (const signal of context.emotional?.signals ?? [])
+      facts.add(`emotional.${signal.kind}`);
+    if (context.dialogue?.specificQuestion)
+      facts.add('dialogue.specificQuestion');
+    if (context.dialogue?.explicitDetailRequest)
+      facts.add('dialogue.explicitDetailRequest');
+    if (context.dialogue?.previousCommitmentAvailable)
+      facts.add('dialogue.previousCommitmentAvailable');
+    for (const episode of context.episodicMemory?.episodes ?? [])
+      facts.add(`episodicMemory.${episode.category}`);
     return facts;
   }
 

@@ -5,6 +5,9 @@ import type {
 } from './conversation-authorized-facts.contract';
 import type {
   ConversationBlockType,
+  ConversationCentralIntent,
+  ConversationClosingRequirement,
+  ConversationDialogueProfile,
   ConversationDensity,
   ConversationDepth,
   ConversationPresentation,
@@ -15,6 +18,7 @@ import type {
   NutritionConversationContext,
   NutritionConversationMotivationFocus,
 } from './nutrition-conversation-context.interface';
+import type { NutritionConversationCoachStyle } from './nutrition-conversation-coach-style.contract';
 
 export type SanitizedConversationDecision =
   | 'RESPOND_TO_MEAL'
@@ -40,7 +44,33 @@ export type SanitizedConversationDecision =
   | 'CLOSE_WITHOUT_QUESTION'
   | 'RESPOND_BRIEFLY'
   | 'REDUCE_CONVERSATIONAL_LOAD'
-  | 'USE_EMOJI';
+  | 'USE_EMOJI'
+  | 'ACKNOWLEDGE_EFFORT'
+  | 'ACKNOWLEDGE_PROGRESS'
+  | 'ACKNOWLEDGE_RECOVERY'
+  | 'ACKNOWLEDGE_SMALL_WIN'
+  | 'ACKNOWLEDGE_CONSISTENCY'
+  | 'ACKNOWLEDGE_STRATEGY'
+  | 'ACKNOWLEDGE_DISCIPLINE'
+  | 'ACKNOWLEDGE_IMPROVEMENT'
+  | 'VALIDATE_FRUSTRATION'
+  | 'REINFORCE_CONFIDENCE'
+  | 'REDUCE_COGNITIVE_LOAD'
+  | 'NORMALIZE_SETBACK'
+  | 'SIMPLIFY_GUIDANCE'
+  | 'ENCOURAGE_CONTINUITY'
+  | 'ANSWER_CURIOSITY'
+  | 'CLARIFY_BEFORE_ANALYSIS'
+  | 'TEACH_BRIEFLY'
+  | 'DETAIL_ANALYSIS'
+  | 'FOLLOW_UP_COMMITMENT'
+  | 'FOLLOW_UP_EPISODE'
+  | 'CONTINUE_STRATEGY'
+  | 'CHECK_COMMITMENT'
+  | 'RECALL_SUCCESS'
+  | 'RECALL_SETBACK'
+  | 'RECALL_DIFFICULTY'
+  | 'RECALL_GOAL';
 
 export interface SanitizedConversationFact {
   readonly key: AuthorizedFactId;
@@ -69,6 +99,8 @@ export interface SanitizedConversationPayload {
   };
   readonly selectedDecisions: readonly SanitizedConversationDecision[];
   readonly structure: {
+    readonly dialogueProfile: ConversationDialogueProfile;
+    readonly centralIntent: ConversationCentralIntent;
     readonly blocks: readonly SanitizedConversationBlock[];
     readonly depth: ConversationDepth;
     readonly density: ConversationDensity;
@@ -77,6 +109,7 @@ export interface SanitizedConversationPayload {
     readonly paragraphCount: number;
   };
   readonly style: {
+    readonly coach: NutritionConversationCoachStyle;
     readonly communication: NutritionConversationCommunicationStyle;
     readonly coaching: NutritionConversationContext['communication']['coachingStyle'];
     readonly tone: NutritionConversationContext['communication']['tone'];
@@ -88,9 +121,13 @@ export interface SanitizedConversationPayload {
     readonly maximumEmojiCount: number;
     readonly maximumQuestions: number;
     readonly maximumActions: number;
+    readonly maximumFacts: number;
+    readonly maximumBlocks: number;
+    readonly maximumParagraphs: number;
   };
   readonly policies: {
     readonly estimateQualificationRequired: boolean;
     readonly emojiAllowed: boolean;
+    readonly closingRequirement: ConversationClosingRequirement;
   };
 }

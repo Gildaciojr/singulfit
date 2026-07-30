@@ -9,6 +9,7 @@ import type { NutritionConversationContext } from './nutrition-conversation-cont
 
 export class NutritionConversationAuthorizedFactsBuilder {
   build(context: NutritionConversationContext): AuthorizedFacts {
+    const sensitiveEpisodes: AuthorizedFact[] = [];
     const allowed: AuthorizedFact[] = [
       this.fact(
         'facts.mealCategory',
@@ -166,8 +167,63 @@ export class NutritionConversationAuthorizedFactsBuilder {
         ),
       );
     }
+    for (const signal of context.recognition?.signals ?? []) {
+      allowed.push(
+        this.fact(`recognition.${signal.kind}`, signal.origin, {
+          kind: signal.kind,
+          evidence: signal.evidence,
+          ...(signal.goalRelation ? { goalRelation: signal.goalRelation } : {}),
+        }),
+      );
+    }
+    for (const signal of context.emotional?.signals ?? []) {
+      allowed.push(
+        this.fact(`emotional.${signal.kind}`, signal.origin, {
+          kind: signal.kind,
+          evidence: signal.evidence,
+        }),
+      );
+    }
+    if (context.dialogue?.specificQuestion) {
+      allowed.push(
+        this.fact('dialogue.specificQuestion', 'USER_CONTEXT', true),
+      );
+    }
+    if (context.dialogue?.explicitDetailRequest) {
+      allowed.push(
+        this.fact('dialogue.explicitDetailRequest', 'USER_CONTEXT', true),
+      );
+    }
+    if (context.dialogue?.previousCommitmentAvailable) {
+      allowed.push(
+        this.fact('dialogue.previousCommitmentAvailable', 'MEMORY', true),
+      );
+    }
+    const episodicCategories = new Set<string>();
+    for (const episode of context.episodicMemory?.episodes ?? []) {
+      if (episodicCategories.has(episode.category)) continue;
+      episodicCategories.add(episode.category);
+      const authorizedEpisode = this.fact(
+        `episodicMemory.${episode.category}`,
+        'MEMORY',
+        {
+          category: episode.category,
+          fact: episode.fact,
+          relationToContext: episode.relationToContext,
+          recallReason: episode.recallReason,
+        },
+        false,
+        undefined,
+        episode.sensitivity === 'SENSITIVE',
+      );
+      if (episode.sensitivity === 'SENSITIVE') {
+        sensitiveEpisodes.push(authorizedEpisode);
+      } else {
+        allowed.push(authorizedEpisode);
+      }
+    }
 
-    const sensitive = this.sensitiveFacts(context);
+    const sensitive = [...this.sensitiveFacts(context), ...sensitiveEpisodes];
     const disclaimerRequired = context.policies.requiresEstimateQualification
       ? allowed
           .filter(

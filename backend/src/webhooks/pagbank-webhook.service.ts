@@ -188,9 +188,7 @@ export class PagBankWebhookService {
     authenticityToken: string | undefined,
     receivedHeaders: PagBankWebhookHeaders['receivedHeaders'],
   ): void {
-    const secret = this.configService
-      .get<string>('PAGBANK_TOKEN')
-      ?.trim();
+    const secret = this.configService.get<string>('PAGBANK_TOKEN')?.trim();
 
     if (!secret) {
       this.logAuthenticationDiagnostic({
@@ -200,9 +198,7 @@ export class PagBankWebhookService {
         secretLoaded: false,
         xAuthenticityToken: authenticityToken,
       });
-      throw new ServiceUnavailableException(
-        'PAGBANK_TOKEN não configurado',
-      );
+      throw new ServiceUnavailableException('PAGBANK_TOKEN não configurado');
     }
 
     const suppliedToken = authenticityToken?.trim().toLowerCase();

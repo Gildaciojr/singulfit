@@ -12,6 +12,7 @@ import type {
   SelectedDecision,
 } from './conversation-decision.contract';
 import type { NutritionConversationContext } from './nutrition-conversation-context.interface';
+import { NutritionConversationDialogueProfilePolicy } from './nutrition-conversation-dialogue-profile.policy';
 
 interface BlockDefinition {
   readonly key: string;
@@ -128,6 +129,61 @@ const DECISION_BLOCK: Readonly<
     type: 'MINIMAL_CLOSURE',
     rank: 100,
   },
+  'nutrition.clarify-before-analysis': {
+    key: 'disclaimer',
+    type: 'UNCERTAINTY_QUALIFICATION',
+    rank: 0,
+  },
+  'nutrition.teach-briefly': {
+    key: 'education',
+    type: 'NUTRITION_EDUCATION',
+    rank: 30,
+  },
+  'nutrition.detail-analysis': {
+    key: 'analysis',
+    type: 'PRIMARY_OBSERVATION',
+    rank: 20,
+  },
+  'nutrition.follow-up-commitment': {
+    key: 'continuity',
+    type: 'HISTORICAL_COMPARISON',
+    rank: 50,
+  },
+  'nutrition.follow-up-episode': {
+    key: 'continuity',
+    type: 'HISTORICAL_COMPARISON',
+    rank: 50,
+  },
+  'nutrition.continue-strategy': {
+    key: 'continuity',
+    type: 'HISTORICAL_COMPARISON',
+    rank: 50,
+  },
+  'nutrition.check-commitment': {
+    key: 'continuity',
+    type: 'HISTORICAL_COMPARISON',
+    rank: 50,
+  },
+  'nutrition.recall-success': {
+    key: 'continuity',
+    type: 'HISTORICAL_COMPARISON',
+    rank: 50,
+  },
+  'nutrition.recall-setback': {
+    key: 'continuity',
+    type: 'HISTORICAL_COMPARISON',
+    rank: 50,
+  },
+  'nutrition.recall-difficulty': {
+    key: 'continuity',
+    type: 'HISTORICAL_COMPARISON',
+    rank: 50,
+  },
+  'nutrition.recall-goal': {
+    key: 'continuity',
+    type: 'HISTORICAL_COMPARISON',
+    rank: 50,
+  },
 });
 
 const PRESENTATION_DECISIONS = new Set([
@@ -136,49 +192,99 @@ const PRESENTATION_DECISIONS = new Set([
   'nutrition.use-emoji',
 ]);
 
+const RECOGNITION_DECISIONS = new Set([
+  'nutrition.acknowledge-effort',
+  'nutrition.acknowledge-progress',
+  'nutrition.acknowledge-recovery',
+  'nutrition.acknowledge-small-win',
+  'nutrition.acknowledge-consistency',
+  'nutrition.acknowledge-strategy',
+  'nutrition.acknowledge-discipline',
+  'nutrition.acknowledge-improvement',
+]);
+
+const EMOTIONAL_DECISIONS = new Set([
+  'nutrition.validate-frustration',
+  'nutrition.reinforce-confidence',
+  'nutrition.reduce-cognitive-load',
+  'nutrition.normalize-setback',
+  'nutrition.simplify-guidance',
+  'nutrition.encourage-continuity',
+  'nutrition.answer-curiosity',
+]);
+
 export class NutritionConversationComposer {
+  private readonly dialogueProfilePolicy =
+    new NutritionConversationDialogueProfilePolicy();
+
   compose(
     context: NutritionConversationContext,
     decisionPlan: DecisionPlan,
   ): CompositionPlan {
     this.validatePlan(context, decisionPlan);
 
+    const profile = this.dialogueProfilePolicy.definition(
+      decisionPlan.dialogueProfile,
+    );
     const maximumLength = this.maximumLength(context, decisionPlan);
-    const grouped = this.group(decisionPlan.selectedDecisions);
+    const grouped = this.group(
+      decisionPlan.selectedDecisions,
+      decisionPlan.dialogueProfile,
+    );
     const ordered = [...grouped].sort(
       (left, right) =>
-        left.rank - right.rank || this.compare(left.key, right.key),
+        this.profileBlockRank(profile.allowedBlocks, left.type) -
+          this.profileBlockRank(profile.allowedBlocks, right.type) ||
+        left.rank - right.rank ||
+        this.compare(left.key, right.key),
     );
-    const blocks = Object.freeze(
+    const blocks = this.limitFacts(
       ordered.map((definition, order) =>
         this.block(definition, order, decisionPlan, maximumLength),
       ),
+      profile.budgets.maximumFactCount,
     );
+    const paragraphCount =
+      blocks.length === 0
+        ? 0
+        : Math.max(...blocks.map((block) => block.paragraph)) + 1;
     const question = blocks.find((block) =>
       block.decisionIds.includes('nutrition.ask-question'),
     );
     const closing = blocks.find((block) =>
       block.decisionIds.includes('nutrition.close-without-question'),
     );
+    this.validateProfileCoherence(decisionPlan, blocks);
 
     return Object.freeze({
       id: `nutrition-composition:${decisionPlan.id}`,
       decisionPlanId: decisionPlan.id,
       blocks,
-      depth: this.depth(context, decisionPlan),
-      density: this.density(decisionPlan),
-      rhythm: this.rhythm(context, decisionPlan),
+      dialogueProfile: decisionPlan.dialogueProfile,
+      centralIntent: decisionPlan.centralIntent,
+      profileBudgets: profile.budgets,
+      closingRequirement: profile.closingRequirement,
+      depth: profile.depth,
+      density: profile.density,
+      rhythm: profile.rhythm,
       presentation: this.presentation(context, blocks),
-      paragraphCount: blocks.length,
+      paragraphCount,
       maximumLength,
-      emojiAllowed: decisionPlan.selectedDecisions.some(
-        (decision) => decision.candidateId === 'nutrition.use-emoji',
-      ),
-      maximumEmojiCount: decisionPlan.selectedDecisions.some(
-        (decision) => decision.candidateId === 'nutrition.use-emoji',
-      )
-        ? context.communication.idealEmojiCount
-        : 0,
+      emojiAllowed:
+        profile.emojiAllowed &&
+        decisionPlan.selectedDecisions.some(
+          (decision) => decision.candidateId === 'nutrition.use-emoji',
+        ),
+      maximumEmojiCount:
+        profile.emojiAllowed &&
+        decisionPlan.selectedDecisions.some(
+          (decision) => decision.candidateId === 'nutrition.use-emoji',
+        )
+          ? Math.min(
+              context.communication.idealEmojiCount,
+              profile.budgets.maximumEmojiCount,
+            )
+          : 0,
       ...(question ? { questionBlockId: question.id } : {}),
       ...(closing ? { closingBlockId: closing.id } : {}),
     });
@@ -219,6 +325,7 @@ export class NutritionConversationComposer {
 
   private group(
     decisions: readonly SelectedDecision[],
+    profile: DecisionPlan['dialogueProfile'],
   ): readonly BlockDefinition[] {
     const groups = new Map<string, BlockDefinition>();
     const selectedIds = new Set(
@@ -228,10 +335,17 @@ export class NutritionConversationComposer {
     for (const decision of decisions) {
       if (PRESENTATION_DECISIONS.has(decision.candidateId)) continue;
       const defaultMapping = DECISION_BLOCK[decision.candidateId];
+      const resolvedMapping = EMOTIONAL_DECISIONS.has(decision.candidateId)
+        ? this.emotionalSupportMapping(decision.candidateId, selectedIds)
+        : RECOGNITION_DECISIONS.has(decision.candidateId)
+          ? this.recognitionSupportMapping(decision.candidateId, selectedIds)
+          : defaultMapping?.key === 'motivation'
+            ? this.motivationSupportMapping(selectedIds)
+            : defaultMapping;
       const mapping =
-        defaultMapping?.key === 'motivation'
-          ? this.motivationSupportMapping(selectedIds)
-          : defaultMapping;
+        resolvedMapping?.key === 'recognition'
+          ? { key: 'analysis', type: 'PRIMARY_OBSERVATION' as const, rank: 20 }
+          : this.profileContinuityMapping(profile, resolvedMapping);
       if (!mapping) {
         throw new Error(
           `Decisão sem mapeamento estrutural: ${decision.candidateId}`,
@@ -251,6 +365,107 @@ export class NutritionConversationComposer {
     }
 
     return Object.freeze([...groups.values()]);
+  }
+
+  private profileContinuityMapping(
+    profile: DecisionPlan['dialogueProfile'],
+    mapping: Omit<BlockDefinition, 'decisionIds'> | undefined,
+  ): Omit<BlockDefinition, 'decisionIds'> | undefined {
+    if (!mapping) return undefined;
+    if (
+      ['RECOVERY', 'CONTINUITY_CHECK'].includes(profile) &&
+      ['continuity', 'memory', 'longitudinal'].includes(mapping.key)
+    ) {
+      return {
+        key: 'continuity',
+        type: 'HISTORICAL_COMPARISON',
+        rank: 50,
+      };
+    }
+    if (profile === 'CELEBRATE' && mapping.key === 'longitudinal') {
+      return { key: 'analysis', type: 'PRIMARY_OBSERVATION', rank: 20 };
+    }
+    return mapping;
+  }
+
+  private recognitionSupportMapping(
+    decisionId: string,
+    selectedIds: ReadonlySet<string>,
+  ): Omit<BlockDefinition, 'decisionIds'> {
+    if (
+      decisionId === 'nutrition.acknowledge-recovery' &&
+      (selectedIds.has('nutrition.correct-limiting-factor') ||
+        selectedIds.has('nutrition.provide-recommendation'))
+    ) {
+      return { key: 'correction', type: 'CORRECTION', rank: 40 };
+    }
+    if (
+      [
+        'nutrition.acknowledge-progress',
+        'nutrition.acknowledge-improvement',
+      ].includes(decisionId) &&
+      (selectedIds.has('nutrition.mention-trend') ||
+        selectedIds.has('nutrition.mention-longitudinal'))
+    ) {
+      return { key: 'longitudinal', type: 'TREND', rank: 70 };
+    }
+    if (
+      decisionId === 'nutrition.acknowledge-strategy' &&
+      selectedIds.has('nutrition.compare-history')
+    ) {
+      return { key: 'continuity', type: 'HISTORICAL_COMPARISON', rank: 50 };
+    }
+    return { key: 'analysis', type: 'PRIMARY_OBSERVATION', rank: 20 };
+  }
+
+  private emotionalSupportMapping(
+    decisionId: string,
+    selectedIds: ReadonlySet<string>,
+  ): Omit<BlockDefinition, 'decisionIds'> {
+    const correctionAvailable =
+      selectedIds.has('nutrition.correct-limiting-factor') ||
+      selectedIds.has('nutrition.provide-recommendation');
+    const trendAvailable =
+      selectedIds.has('nutrition.mention-trend') ||
+      selectedIds.has('nutrition.mention-longitudinal');
+    const historyAvailable =
+      selectedIds.has('nutrition.compare-history') ||
+      selectedIds.has('nutrition.use-memory');
+
+    if (
+      correctionAvailable &&
+      [
+        'nutrition.validate-frustration',
+        'nutrition.reduce-cognitive-load',
+        'nutrition.normalize-setback',
+        'nutrition.simplify-guidance',
+        'nutrition.answer-curiosity',
+      ].includes(decisionId)
+    ) {
+      return { key: 'correction', type: 'CORRECTION', rank: 40 };
+    }
+    if (
+      trendAvailable &&
+      [
+        'nutrition.validate-frustration',
+        'nutrition.reinforce-confidence',
+        'nutrition.normalize-setback',
+        'nutrition.encourage-continuity',
+      ].includes(decisionId)
+    ) {
+      return { key: 'longitudinal', type: 'TREND', rank: 70 };
+    }
+    if (
+      historyAvailable &&
+      [
+        'nutrition.validate-frustration',
+        'nutrition.normalize-setback',
+        'nutrition.encourage-continuity',
+      ].includes(decisionId)
+    ) {
+      return { key: 'continuity', type: 'HISTORICAL_COMPARISON', rank: 50 };
+    }
+    return { key: 'analysis', type: 'PRIMARY_OBSERVATION', rank: 20 };
   }
 
   private motivationSupportMapping(
@@ -303,7 +518,7 @@ export class NutritionConversationComposer {
       decisionIds: Object.freeze([...definition.decisionIds]),
       factIds,
       order,
-      paragraph: order,
+      paragraph: this.paragraphFor(plan.dialogueProfile, definition, order),
       presentation:
         definition.key === 'analysis' && definition.decisionIds.length >= 3
           ? 'BULLETS'
@@ -313,10 +528,64 @@ export class NutritionConversationComposer {
         40,
         Math.floor(
           maximumLength /
-            Math.max(1, this.group(plan.selectedDecisions).length),
+            Math.max(
+              1,
+              this.group(plan.selectedDecisions, plan.dialogueProfile).length,
+            ),
         ),
       ),
     });
+  }
+
+  private paragraphFor(
+    profile: DecisionPlan['dialogueProfile'],
+    definition: BlockDefinition,
+    order: number,
+  ): number {
+    if (profile === 'DETAILED_ANALYSIS') return order;
+    if (['disclaimer', 'recognition', 'analysis'].includes(definition.key)) {
+      return 0;
+    }
+    if (
+      [
+        'correction',
+        'education',
+        'continuity',
+        'memory',
+        'longitudinal',
+      ].includes(definition.key)
+    ) {
+      return 1;
+    }
+    if (
+      ['ACKNOWLEDGE_ONLY', 'CELEBRATE', 'CLARIFY_BEFORE_ANALYSIS'].includes(
+        profile,
+      )
+    ) {
+      return 1;
+    }
+    return 2;
+  }
+
+  private limitFacts(
+    blocks: readonly ConversationBlock[],
+    maximumFactCount: number,
+  ): readonly ConversationBlock[] {
+    const admitted = new Set<string>();
+    return Object.freeze(
+      blocks.map((block) => {
+        const factIds = block.factIds.filter((factId) => {
+          if (admitted.has(factId)) return true;
+          if (admitted.size >= maximumFactCount) return false;
+          admitted.add(factId);
+          return true;
+        });
+        return Object.freeze({
+          ...block,
+          factIds: Object.freeze(factIds),
+        });
+      }),
+    );
   }
 
   private maximumLength(
@@ -327,66 +596,16 @@ export class NutritionConversationComposer {
       160,
       context.communication.preferredMessageLength,
     );
-    const cap = plan.maximumCommunicativeDecisions <= 2 ? 400 : 1_200;
-    return Math.min(preferred, cap);
-  }
-
-  private depth(
-    context: NutritionConversationContext,
-    plan: DecisionPlan,
-  ): ConversationDepth {
-    if (
-      context.communication.prefersShortMessages ||
-      context.communication.fatigue.score >= 70 ||
-      plan.maximumCommunicativeDecisions <= 2
-    )
-      return 'MINIMAL';
-    if (
-      plan.maximumCommunicativeDecisions >= 5 &&
-      context.communication.preferredMessageLength >= 800
-    )
-      return 'DEEP';
-    return 'MODERATE';
-  }
-
-  private density(plan: DecisionPlan): ConversationDensity {
-    const selected = plan.selectedDecisions.filter(
-      (decision) => !PRESENTATION_DECISIONS.has(decision.candidateId),
-    );
-    const facts = new Set(selected.flatMap((decision) => decision.factIds));
-    if (selected.length <= 2 && facts.size <= 3) return 'LOW';
-    if (selected.length >= 5 || facts.size >= 8) return 'HIGH';
-    return 'MEDIUM';
-  }
-
-  private rhythm(
-    context: NutritionConversationContext,
-    plan: DecisionPlan,
-  ): ConversationRhythm {
-    if (
-      context.communication.prefersShortMessages ||
-      context.communication.fatigue.score >= 70 ||
-      plan.maximumCommunicativeDecisions <= 2
-    )
-      return 'FAST';
-    if (
-      plan.selectedDecisions.some((decision) =>
-        [
-          'nutrition.mention-insight',
-          'nutrition.correct-limiting-factor',
-          'nutrition.provide-recommendation',
-        ].includes(decision.candidateId),
-      )
-    )
-      return 'EXPLANATORY';
-    return 'PROGRESSIVE';
+    const profile = this.dialogueProfilePolicy.definition(plan.dialogueProfile);
+    return Math.min(preferred, profile.budgets.maximumLength);
   }
 
   private presentation(
     context: NutritionConversationContext,
     blocks: readonly ConversationBlock[],
   ): ConversationPresentation {
-    if (context.communication.prefersShortMessages) return 'PROSE';
+    if (context.communication.prefersShortMessages || blocks.length <= 3)
+      return 'PROSE';
     return blocks.some((block) => block.presentation === 'BULLETS')
       ? 'BULLETS'
       : 'PROSE';
@@ -394,5 +613,68 @@ export class NutritionConversationComposer {
 
   private compare(left: string, right: string): number {
     return left < right ? -1 : left > right ? 1 : 0;
+  }
+
+  private profileBlockRank(
+    allowedBlocks: readonly ConversationBlockType[],
+    block: ConversationBlockType,
+  ): number {
+    const rank = allowedBlocks.indexOf(block);
+    return rank === -1 ? Number.MAX_SAFE_INTEGER : rank;
+  }
+
+  private validateProfileCoherence(
+    plan: DecisionPlan,
+    blocks: readonly ConversationBlock[],
+  ): void {
+    const profile = this.dialogueProfilePolicy.definition(plan.dialogueProfile);
+    const selected = new Set(
+      plan.selectedDecisions.map((decision) => decision.candidateId),
+    );
+    if (plan.centralIntent !== profile.centralIntent) {
+      throw new Error('Intenção central incompatível com o perfil');
+    }
+    if (
+      blocks.some(
+        (block) =>
+          !profile.allowedBlocks.includes(block.type) ||
+          profile.prohibitedBlocks.includes(block.type),
+      )
+    ) {
+      throw new Error('Perfil contém bloco proibido');
+    }
+    const paragraphCount =
+      blocks.length === 0
+        ? 0
+        : Math.max(...blocks.map((block) => block.paragraph)) + 1;
+    if (
+      blocks.length > profile.budgets.maximumBlockCount ||
+      paragraphCount > profile.budgets.maximumParagraphCount
+    ) {
+      throw new Error('Perfil excede orçamento estrutural');
+    }
+    const factCount = new Set(blocks.flatMap((block) => block.factIds)).size;
+    if (factCount > profile.budgets.maximumFactCount) {
+      throw new Error('Perfil excede orçamento de fatos');
+    }
+    if (
+      plan.dialogueProfile === 'CELEBRATE' &&
+      (selected.has('nutrition.provide-recommendation') ||
+        selected.has('nutrition.correct-limiting-factor'))
+    ) {
+      throw new Error('Celebração não pode competir com correção');
+    }
+    if (
+      plan.dialogueProfile === 'RECOVERY' &&
+      selected.has('nutrition.detail-analysis')
+    ) {
+      throw new Error('Recuperação não pode conter análise detalhada');
+    }
+    if (
+      profile.budgets.maximumQuestions === 0 &&
+      selected.has('nutrition.ask-question')
+    ) {
+      throw new Error('Perfil não autoriza pergunta');
+    }
   }
 }

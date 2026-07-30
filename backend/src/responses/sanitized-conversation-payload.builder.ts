@@ -2,6 +2,7 @@ import type { AuthorizedFacts } from './conversation-authorized-facts.contract';
 import type { CompositionPlan } from './conversation-composition.contract';
 import type { DecisionPlan } from './conversation-decision.contract';
 import type { NutritionConversationContext } from './nutrition-conversation-context.interface';
+import { NutritionConversationCoachStyleEngine } from './nutrition-conversation-coach-style.engine';
 import type {
   SanitizedConversationBlock,
   SanitizedConversationDecision,
@@ -36,6 +37,32 @@ const SEMANTIC_DECISION: Readonly<
   'nutrition.respond-briefly': 'RESPOND_BRIEFLY',
   'nutrition.reduce-conversational-load': 'REDUCE_CONVERSATIONAL_LOAD',
   'nutrition.use-emoji': 'USE_EMOJI',
+  'nutrition.acknowledge-effort': 'ACKNOWLEDGE_EFFORT',
+  'nutrition.acknowledge-progress': 'ACKNOWLEDGE_PROGRESS',
+  'nutrition.acknowledge-recovery': 'ACKNOWLEDGE_RECOVERY',
+  'nutrition.acknowledge-small-win': 'ACKNOWLEDGE_SMALL_WIN',
+  'nutrition.acknowledge-consistency': 'ACKNOWLEDGE_CONSISTENCY',
+  'nutrition.acknowledge-strategy': 'ACKNOWLEDGE_STRATEGY',
+  'nutrition.acknowledge-discipline': 'ACKNOWLEDGE_DISCIPLINE',
+  'nutrition.acknowledge-improvement': 'ACKNOWLEDGE_IMPROVEMENT',
+  'nutrition.validate-frustration': 'VALIDATE_FRUSTRATION',
+  'nutrition.reinforce-confidence': 'REINFORCE_CONFIDENCE',
+  'nutrition.reduce-cognitive-load': 'REDUCE_COGNITIVE_LOAD',
+  'nutrition.normalize-setback': 'NORMALIZE_SETBACK',
+  'nutrition.simplify-guidance': 'SIMPLIFY_GUIDANCE',
+  'nutrition.encourage-continuity': 'ENCOURAGE_CONTINUITY',
+  'nutrition.answer-curiosity': 'ANSWER_CURIOSITY',
+  'nutrition.clarify-before-analysis': 'CLARIFY_BEFORE_ANALYSIS',
+  'nutrition.teach-briefly': 'TEACH_BRIEFLY',
+  'nutrition.detail-analysis': 'DETAIL_ANALYSIS',
+  'nutrition.follow-up-commitment': 'FOLLOW_UP_COMMITMENT',
+  'nutrition.follow-up-episode': 'FOLLOW_UP_EPISODE',
+  'nutrition.continue-strategy': 'CONTINUE_STRATEGY',
+  'nutrition.check-commitment': 'CHECK_COMMITMENT',
+  'nutrition.recall-success': 'RECALL_SUCCESS',
+  'nutrition.recall-setback': 'RECALL_SETBACK',
+  'nutrition.recall-difficulty': 'RECALL_DIFFICULTY',
+  'nutrition.recall-goal': 'RECALL_GOAL',
 });
 
 export interface BuildSanitizedConversationPayloadInput {
@@ -46,6 +73,9 @@ export interface BuildSanitizedConversationPayloadInput {
 }
 
 export class SanitizedConversationPayloadBuilder {
+  private readonly coachStyleEngine =
+    new NutritionConversationCoachStyleEngine();
+
   build(
     input: BuildSanitizedConversationPayloadInput,
   ): SanitizedConversationPayload {
@@ -97,6 +127,8 @@ export class SanitizedConversationPayloadBuilder {
       }),
       selectedDecisions,
       structure: Object.freeze({
+        dialogueProfile: input.compositionPlan.dialogueProfile,
+        centralIntent: input.compositionPlan.centralIntent,
         blocks,
         depth: input.compositionPlan.depth,
         density: input.compositionPlan.density,
@@ -105,6 +137,11 @@ export class SanitizedConversationPayloadBuilder {
         paragraphCount: input.compositionPlan.paragraphCount,
       }),
       style: Object.freeze({
+        coach: this.coachStyleEngine.resolve(
+          input.context,
+          input.compositionPlan,
+          selectedDecisions,
+        ),
         communication: input.context.communication.communicationStyle,
         coaching: input.context.communication.coachingStyle,
         tone: input.context.communication.tone,
@@ -116,11 +153,16 @@ export class SanitizedConversationPayloadBuilder {
         maximumEmojiCount: input.compositionPlan.maximumEmojiCount,
         maximumQuestions: input.decisionPlan.maximumQuestions,
         maximumActions: input.decisionPlan.maximumActions,
+        maximumFacts: input.compositionPlan.profileBudgets.maximumFactCount,
+        maximumBlocks: input.compositionPlan.profileBudgets.maximumBlockCount,
+        maximumParagraphs:
+          input.compositionPlan.profileBudgets.maximumParagraphCount,
       }),
       policies: Object.freeze({
         estimateQualificationRequired:
           input.context.policies.requiresEstimateQualification,
         emojiAllowed: input.compositionPlan.emojiAllowed,
+        closingRequirement: input.compositionPlan.closingRequirement,
       }),
     });
   }

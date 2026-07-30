@@ -37,6 +37,18 @@ describe('AIUsageService', () => {
     expect(estimatedCost.toString()).toBe('0.000255');
   });
 
+  it('charges conversation realization with the official text rates', () => {
+    const service = createService();
+
+    const estimatedCost = service.estimateCost(
+      AIJobType.CONVERSATION_REALIZATION,
+      500,
+      300,
+    );
+
+    expect(estimatedCost.toString()).toBe('0.000255');
+  });
+
   it('persists token usage and the calculated cost', async () => {
     const createdUsage = {
       id: 'usage-id',

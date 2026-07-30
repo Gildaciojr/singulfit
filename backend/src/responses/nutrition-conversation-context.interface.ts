@@ -5,6 +5,9 @@ import {
   MealCategory,
   StageOfChange,
 } from '@prisma/client';
+import type { NutritionRecognitionContext } from './nutrition-conversation-recognition.contract';
+import type { NutritionEmotionalContext } from './nutrition-conversation-emotional.contract';
+import type { NutritionConversationEpisodicRecall } from './nutrition-conversation-episodic-memory.contract';
 
 export type NutritionConversationCommunicationStyle =
   | 'DIRECT'
@@ -27,6 +30,20 @@ export type NutritionConversationTrendDirection =
   | 'IMPROVING'
   | 'STABLE'
   | 'DECLINING';
+
+export type NutritionConversationInteractionIntent =
+  | 'MEAL_ANALYSIS'
+  | 'SPECIFIC_QUESTION'
+  | 'DETAIL_REQUEST'
+  | 'FOLLOW_UP';
+
+export interface NutritionConversationDialogueSignals {
+  readonly interactionIntent: NutritionConversationInteractionIntent;
+  readonly explicitDetailRequest: boolean;
+  readonly specificQuestion: boolean;
+  readonly clarificationRequired: boolean;
+  readonly previousCommitmentAvailable: boolean;
+}
 
 export interface NutritionConversationConstraint {
   readonly type?: string;
@@ -109,6 +126,12 @@ export interface NutritionConversationContext {
       readonly limitingFactors: readonly string[];
     };
   };
+  readonly recognition?: NutritionRecognitionContext;
+  readonly emotional?: NutritionEmotionalContext;
+  readonly episodicMemory?: {
+    readonly episodes: readonly NutritionConversationEpisodicRecall[];
+  };
+  readonly dialogue?: NutritionConversationDialogueSignals;
   readonly communication: {
     readonly communicationStyle: NutritionConversationCommunicationStyle;
     readonly coachingStyle: CoachCoachingStyle;

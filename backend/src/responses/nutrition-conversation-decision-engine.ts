@@ -32,6 +32,32 @@ const DECISION_ID = {
   RESPOND_BRIEFLY: 'nutrition.respond-briefly',
   REDUCE_CONVERSATIONAL_LOAD: 'nutrition.reduce-conversational-load',
   USE_EMOJI: 'nutrition.use-emoji',
+  ACKNOWLEDGE_EFFORT: 'nutrition.acknowledge-effort',
+  ACKNOWLEDGE_PROGRESS: 'nutrition.acknowledge-progress',
+  ACKNOWLEDGE_RECOVERY: 'nutrition.acknowledge-recovery',
+  ACKNOWLEDGE_SMALL_WIN: 'nutrition.acknowledge-small-win',
+  ACKNOWLEDGE_CONSISTENCY: 'nutrition.acknowledge-consistency',
+  ACKNOWLEDGE_STRATEGY: 'nutrition.acknowledge-strategy',
+  ACKNOWLEDGE_DISCIPLINE: 'nutrition.acknowledge-discipline',
+  ACKNOWLEDGE_IMPROVEMENT: 'nutrition.acknowledge-improvement',
+  VALIDATE_FRUSTRATION: 'nutrition.validate-frustration',
+  REINFORCE_CONFIDENCE: 'nutrition.reinforce-confidence',
+  REDUCE_COGNITIVE_LOAD: 'nutrition.reduce-cognitive-load',
+  NORMALIZE_SETBACK: 'nutrition.normalize-setback',
+  SIMPLIFY_GUIDANCE: 'nutrition.simplify-guidance',
+  ENCOURAGE_CONTINUITY: 'nutrition.encourage-continuity',
+  ANSWER_CURIOSITY: 'nutrition.answer-curiosity',
+  CLARIFY_BEFORE_ANALYSIS: 'nutrition.clarify-before-analysis',
+  TEACH_BRIEFLY: 'nutrition.teach-briefly',
+  DETAIL_ANALYSIS: 'nutrition.detail-analysis',
+  FOLLOW_UP_COMMITMENT: 'nutrition.follow-up-commitment',
+  FOLLOW_UP_EPISODE: 'nutrition.follow-up-episode',
+  CONTINUE_STRATEGY: 'nutrition.continue-strategy',
+  CHECK_COMMITMENT: 'nutrition.check-commitment',
+  RECALL_SUCCESS: 'nutrition.recall-success',
+  RECALL_SETBACK: 'nutrition.recall-setback',
+  RECALL_DIFFICULTY: 'nutrition.recall-difficulty',
+  RECALL_GOAL: 'nutrition.recall-goal',
 } as const;
 
 const ORIGIN = {
@@ -324,6 +350,11 @@ export class NutritionConversationDecisionEngine {
       );
     }
 
+    this.addRecognitionCandidates(candidates, context);
+    this.addEmotionalCandidates(candidates, context);
+    this.addEpisodicMemoryCandidates(candidates, context);
+    this.addDialogueCandidates(candidates, context);
+
     candidates.push(
       this.candidate({
         id: DECISION_ID.ASK_QUESTION,
@@ -393,6 +424,328 @@ export class NutritionConversationDecisionEngine {
     }
 
     return Object.freeze(candidates);
+  }
+
+  private addRecognitionCandidates(
+    candidates: DecisionCandidate[],
+    context: NutritionConversationContext,
+  ): void {
+    const definitions: readonly {
+      readonly id: ConversationDecisionId;
+      readonly kinds: readonly string[];
+      readonly priority: ConversationDecisionIntrinsicPriority;
+      readonly rationale: string;
+    }[] = [
+      {
+        id: DECISION_ID.ACKNOWLEDGE_RECOVERY,
+        kinds: ['RECOVERY'],
+        priority: 'P1',
+        rationale: 'RECOVERY_EVIDENCE_AVAILABLE',
+      },
+      {
+        id: DECISION_ID.ACKNOWLEDGE_SMALL_WIN,
+        kinds: ['SMALL_WIN', 'GOOD_DECISION'],
+        priority: 'P2',
+        rationale: 'SMALL_WIN_EVIDENCE_AVAILABLE',
+      },
+      {
+        id: DECISION_ID.ACKNOWLEDGE_EFFORT,
+        kinds: ['EFFORT'],
+        priority: 'P2',
+        rationale: 'EFFORT_EVIDENCE_AVAILABLE',
+      },
+      {
+        id: DECISION_ID.ACKNOWLEDGE_CONSISTENCY,
+        kinds: ['CONSISTENCY'],
+        priority: 'P3',
+        rationale: 'CONSISTENCY_EVIDENCE_AVAILABLE',
+      },
+      {
+        id: DECISION_ID.ACKNOWLEDGE_PROGRESS,
+        kinds: ['BIG_WIN', 'ADHERENCE', 'MOMENTUM'],
+        priority: 'P3',
+        rationale: 'PROGRESS_EVIDENCE_AVAILABLE',
+      },
+      {
+        id: DECISION_ID.ACKNOWLEDGE_DISCIPLINE,
+        kinds: ['DISCIPLINE'],
+        priority: 'P3',
+        rationale: 'DISCIPLINE_EVIDENCE_AVAILABLE',
+      },
+      {
+        id: DECISION_ID.ACKNOWLEDGE_STRATEGY,
+        kinds: ['GOOD_STRATEGY', 'BAD_STRATEGY'],
+        priority: 'P4',
+        rationale: 'STRATEGY_EVIDENCE_AVAILABLE',
+      },
+      {
+        id: DECISION_ID.ACKNOWLEDGE_IMPROVEMENT,
+        kinds: ['IMPROVEMENT'],
+        priority: 'P4',
+        rationale: 'IMPROVEMENT_EVIDENCE_AVAILABLE',
+      },
+    ];
+    for (const definition of definitions) {
+      const signals = (context.recognition?.signals ?? []).filter((signal) =>
+        definition.kinds.includes(signal.kind),
+      );
+      if (signals.length === 0) continue;
+      candidates.push(
+        this.candidate({
+          id: definition.id,
+          origin: ORIGIN.USER_CONTEXT,
+          category: 'RECOGNITION',
+          intrinsicPriority: definition.priority,
+          factIds: signals.map((signal) => `recognition.${signal.kind}`),
+          dependencyIds: [DECISION_ID.RESPOND_TO_MEAL],
+          rationale: definition.rationale,
+        }),
+      );
+    }
+  }
+
+  private addEmotionalCandidates(
+    candidates: DecisionCandidate[],
+    context: NutritionConversationContext,
+  ): void {
+    const definitions: readonly {
+      readonly id: ConversationDecisionId;
+      readonly kinds: readonly string[];
+      readonly category: ConversationDecisionCategory;
+      readonly priority: ConversationDecisionIntrinsicPriority;
+      readonly rationale: string;
+    }[] = [
+      {
+        id: DECISION_ID.VALIDATE_FRUSTRATION,
+        kinds: ['FRUSTRATION'],
+        category: 'EMPATHY',
+        priority: 'P1',
+        rationale: 'OBJECTIVE_FRUSTRATION_EVIDENCE_AVAILABLE',
+      },
+      {
+        id: DECISION_ID.REINFORCE_CONFIDENCE,
+        kinds: ['CONFIDENCE', 'SATISFACTION'],
+        category: 'MOTIVATION',
+        priority: 'P2',
+        rationale: 'OBJECTIVE_CONFIDENCE_EVIDENCE_AVAILABLE',
+      },
+      {
+        id: DECISION_ID.REDUCE_COGNITIVE_LOAD,
+        kinds: ['OVERWHELM'],
+        category: 'EMPATHY',
+        priority: 'P1',
+        rationale: 'OBJECTIVE_OVERWHELM_EVIDENCE_AVAILABLE',
+      },
+      {
+        id: DECISION_ID.NORMALIZE_SETBACK,
+        kinds: ['FRUSTRATION', 'RESISTANCE'],
+        category: 'EMPATHY',
+        priority: 'P2',
+        rationale: 'OBJECTIVE_SETBACK_EVIDENCE_AVAILABLE',
+      },
+      {
+        id: DECISION_ID.SIMPLIFY_GUIDANCE,
+        kinds: ['OVERWHELM', 'UNCERTAINTY', 'FATIGUE'],
+        category: 'EMPATHY',
+        priority: 'P1',
+        rationale: 'OBJECTIVE_SIMPLIFICATION_EVIDENCE_AVAILABLE',
+      },
+      {
+        id: DECISION_ID.ENCOURAGE_CONTINUITY,
+        kinds: ['MOTIVATION', 'REENGAGEMENT'],
+        category: 'CONTINUITY',
+        priority: 'P2',
+        rationale: 'OBJECTIVE_CONTINUITY_EVIDENCE_AVAILABLE',
+      },
+      {
+        id: DECISION_ID.ANSWER_CURIOSITY,
+        kinds: ['CURIOSITY'],
+        category: 'EDUCATION',
+        priority: 'P2',
+        rationale: 'OBJECTIVE_CURIOSITY_EVIDENCE_AVAILABLE',
+      },
+    ];
+
+    for (const definition of definitions) {
+      const signals = (context.emotional?.signals ?? []).filter((signal) =>
+        definition.kinds.includes(signal.kind),
+      );
+      if (signals.length === 0) continue;
+      candidates.push(
+        this.candidate({
+          id: definition.id,
+          origin: ORIGIN.USER_CONTEXT,
+          category: definition.category,
+          intrinsicPriority: definition.priority,
+          factIds: signals.map((signal) => `emotional.${signal.kind}`),
+          dependencyIds: [DECISION_ID.RESPOND_TO_MEAL],
+          rationale: definition.rationale,
+        }),
+      );
+    }
+  }
+
+  private addDialogueCandidates(
+    candidates: DecisionCandidate[],
+    context: NutritionConversationContext,
+  ): void {
+    const lowConfidence =
+      context.dialogue?.clarificationRequired === true ||
+      context.facts.foods.length === 0 ||
+      (context.facts.confidence !== undefined &&
+        context.facts.confidence < 0.7);
+
+    if (lowConfidence) {
+      candidates.push(
+        this.candidate({
+          id: DECISION_ID.CLARIFY_BEFORE_ANALYSIS,
+          origin: ORIGIN.FACTS,
+          category: 'SAFETY',
+          intrinsicPriority: 'P1',
+          factIds: [
+            'facts.foods',
+            ...(context.facts.confidence !== undefined
+              ? ['facts.confidence']
+              : []),
+          ],
+          dependencyIds: [DECISION_ID.RESPOND_TO_MEAL],
+          rationale: 'ESSENTIAL_NUTRITION_FACT_REQUIRES_CLARIFICATION',
+        }),
+      );
+    }
+
+    if (context.dialogue?.specificQuestion) {
+      candidates.push(
+        this.candidate({
+          id: DECISION_ID.TEACH_BRIEFLY,
+          origin: ORIGIN.USER_CONTEXT,
+          category: 'EDUCATION',
+          intrinsicPriority: 'P2',
+          factIds: ['dialogue.specificQuestion'],
+          dependencyIds: [DECISION_ID.RESPOND_TO_MEAL],
+          rationale: 'SPECIFIC_QUESTION_CAN_BE_ANSWERED_BRIEFLY',
+        }),
+      );
+    }
+
+    if (context.dialogue?.explicitDetailRequest) {
+      candidates.push(
+        this.candidate({
+          id: DECISION_ID.DETAIL_ANALYSIS,
+          origin: ORIGIN.USER_CONTEXT,
+          category: 'EDUCATION',
+          intrinsicPriority: 'P2',
+          factIds: [
+            'dialogue.explicitDetailRequest',
+            'facts.foods',
+            ...(context.facts.totalCalories !== null
+              ? ['facts.totalCalories']
+              : []),
+            ...(context.facts.totalProtein !== null
+              ? ['facts.totalProtein']
+              : []),
+            ...(context.facts.totalCarbs !== null ? ['facts.totalCarbs'] : []),
+            ...(context.facts.totalFat !== null ? ['facts.totalFat'] : []),
+          ],
+          dependencyIds: [DECISION_ID.RESPOND_TO_MEAL],
+          rationale: 'EXPLICIT_DETAIL_REQUEST_WITH_AVAILABLE_FACTS',
+        }),
+      );
+    }
+
+    if (
+      context.dialogue?.previousCommitmentAvailable &&
+      context.userContext.memory
+    ) {
+      candidates.push(
+        this.candidate({
+          id: DECISION_ID.FOLLOW_UP_COMMITMENT,
+          origin: ORIGIN.USER_CONTEXT,
+          category: 'CONTINUITY',
+          intrinsicPriority: 'P2',
+          factIds: [
+            'dialogue.previousCommitmentAvailable',
+            'userContext.memory',
+          ],
+          dependencyIds: [DECISION_ID.RESPOND_TO_MEAL],
+          rationale: 'AUTHORIZED_PRIOR_COMMITMENT_AVAILABLE',
+        }),
+      );
+    }
+  }
+
+  private addEpisodicMemoryCandidates(
+    candidates: DecisionCandidate[],
+    context: NutritionConversationContext,
+  ): void {
+    const definitions: readonly {
+      readonly id: ConversationDecisionId;
+      readonly categories: readonly string[];
+      readonly rationale: string;
+    }[] = [
+      {
+        id: DECISION_ID.FOLLOW_UP_EPISODE,
+        categories: [
+          'FOLLOW_UP',
+          'QUESTION',
+          'TRAVEL',
+          'PREFERENCE',
+          'ALLERGY',
+          'RESTRICTION',
+        ],
+        rationale: 'RELEVANT_EPISODE_AUTHORIZES_FOLLOW_UP',
+      },
+      {
+        id: DECISION_ID.CONTINUE_STRATEGY,
+        categories: ['PLAN', 'HABIT', 'ROUTINE', 'WORKOUT'],
+        rationale: 'RELEVANT_STRATEGY_EPISODE_AVAILABLE',
+      },
+      {
+        id: DECISION_ID.CHECK_COMMITMENT,
+        categories: ['COMMITMENT'],
+        rationale: 'RELEVANT_COMMITMENT_EPISODE_AVAILABLE',
+      },
+      {
+        id: DECISION_ID.RECALL_SUCCESS,
+        categories: ['SUCCESS', 'MILESTONE'],
+        rationale: 'RELEVANT_SUCCESS_EPISODE_AVAILABLE',
+      },
+      {
+        id: DECISION_ID.RECALL_SETBACK,
+        categories: ['SETBACK'],
+        rationale: 'RELEVANT_SETBACK_EPISODE_AVAILABLE',
+      },
+      {
+        id: DECISION_ID.RECALL_DIFFICULTY,
+        categories: ['DIFFICULTY'],
+        rationale: 'RELEVANT_DIFFICULTY_EPISODE_AVAILABLE',
+      },
+      {
+        id: DECISION_ID.RECALL_GOAL,
+        categories: ['GOAL'],
+        rationale: 'RELEVANT_GOAL_EPISODE_AVAILABLE',
+      },
+    ];
+
+    for (const definition of definitions) {
+      const episodes = (context.episodicMemory?.episodes ?? []).filter(
+        (episode) => definition.categories.includes(episode.category),
+      );
+      if (episodes.length === 0) continue;
+      candidates.push(
+        this.candidate({
+          id: definition.id,
+          origin: ORIGIN.USER_CONTEXT,
+          category: 'MEMORY',
+          intrinsicPriority: 'P2',
+          factIds: episodes.map(
+            (episode) => `episodicMemory.${episode.category}`,
+          ),
+          dependencyIds: [DECISION_ID.RESPOND_TO_MEAL],
+          rationale: definition.rationale,
+        }),
+      );
+    }
   }
 
   private addNumericFactCandidate(

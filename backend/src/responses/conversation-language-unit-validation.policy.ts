@@ -73,10 +73,7 @@ export class ConversationLanguageUnitValidationPolicy {
       if (unit.claims.foods.some((food) => !foods.has(this.normalize(food)))) {
         violations.push('FOOD_NOT_AUTHORIZED');
       }
-      if (
-        unit.claims.usesMemory &&
-        !this.hasLinkedFact(linkedFacts, 'userContext.memory')
-      ) {
+      if (unit.claims.usesMemory && !this.hasLinkedMemoryFact(linkedFacts)) {
         violations.push('MEMORY_NOT_AUTHORIZED');
       }
       if (
@@ -117,9 +114,7 @@ export class ConversationLanguageUnitValidationPolicy {
       return value.flatMap((item) => this.numbers(item));
     }
     if (this.isRecord(value)) {
-      return Object.values(value).flatMap((item) =>
-        this.numbers(item as AuthorizedFactValue),
-      );
+      return Object.values(value).flatMap((item) => this.numbers(item));
     }
     return [];
   }
@@ -137,6 +132,16 @@ export class ConversationLanguageUnitValidationPolicy {
     key: string,
   ): boolean {
     return facts.some((fact) => fact.key === key);
+  }
+
+  private hasLinkedMemoryFact(
+    facts: readonly SanitizedConversationFact[],
+  ): boolean {
+    return facts.some(
+      (fact) =>
+        fact.key === 'userContext.memory' ||
+        fact.key.startsWith('episodicMemory.'),
+    );
   }
 
   private normalize(value: string): string {

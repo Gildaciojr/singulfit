@@ -343,10 +343,14 @@ describe('NutritionConversationDecisionScoringPolicy', () => {
 
   it.each([
     ['minimal', { fatigue: 20, short: false, length: 300 }, 2],
-    ['standard', { fatigue: 20, short: false, length: 600 }, 4],
+    ['standard', { fatigue: 20, short: false, length: 600 }, 3],
     ['fatigued', { fatigue: 70, short: false, length: 600 }, 2],
     ['short preference', { fatigue: 20, short: true, length: 600 }, 2],
-    ['deep allowed', { fatigue: 20, short: false, length: 900 }, 5],
+    [
+      'deep preference without explicit request',
+      { fatigue: 20, short: false, length: 900 },
+      3,
+    ],
   ])('calculates %s budget deterministically', (_label, values, expected) => {
     const source = context();
     const adjusted: NutritionConversationContext = {
@@ -447,7 +451,7 @@ describe('NutritionConversationDecisionScoringPolicy', () => {
           'nutrition.motivate-with-evidence',
         ].includes(id),
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
     expect(
       ids.filter((id) =>
         [

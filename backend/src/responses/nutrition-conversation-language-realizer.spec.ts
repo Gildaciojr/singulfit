@@ -7,6 +7,8 @@ import type {
 import type { ConversationAIService } from '../ai/conversation-ai.service';
 import { NutritionConversationLanguageRealizer } from './nutrition-conversation-language-realizer';
 import type { SanitizedConversationPayload } from './sanitized-conversation-payload.contract';
+import { DEFAULT_NUTRITION_CONVERSATION_COACH_STYLE } from './nutrition-conversation-coach-style.engine';
+import { NUTRITION_CONVERSATION_REALIZATION_PROMPT } from './nutrition-conversation-realization-prompt.definition';
 
 function payload(): SanitizedConversationPayload {
   return {
@@ -35,6 +37,8 @@ function payload(): SanitizedConversationPayload {
       'ASK_QUESTION',
     ],
     structure: {
+      dialogueProfile: 'DETAILED_ANALYSIS',
+      centralIntent: 'ANALYZE',
       blocks: [
         {
           key: 'block-1-uncertainty-qualification',
@@ -77,6 +81,7 @@ function payload(): SanitizedConversationPayload {
       paragraphCount: 3,
     },
     style: {
+      coach: DEFAULT_NUTRITION_CONVERSATION_COACH_STYLE,
       communication: 'FRIENDLY',
       coaching: 'MOTIVATIONAL',
       tone: 'MODERATE',
@@ -88,10 +93,14 @@ function payload(): SanitizedConversationPayload {
       maximumEmojiCount: 0,
       maximumQuestions: 1,
       maximumActions: 1,
+      maximumFacts: 8,
+      maximumBlocks: 5,
+      maximumParagraphs: 5,
     },
     policies: {
       estimateQualificationRequired: true,
       emojiAllowed: false,
+      closingRequirement: 'OPTIONAL',
     },
   };
 }
@@ -208,10 +217,54 @@ describe('NutritionConversationLanguageRealizer', () => {
 
     expect(request.payload).toBe(source);
     expect(request.instructions).toContain('somente unidades estruturadas');
+    expect(request.instructions).toContain(
+      'descreva o fato observado, nunca atribua emoção ao usuário',
+    );
     expect(request.schema.name).toBe('nutrition_conversation_language_units');
     expect(JSON.stringify(request)).not.toMatch(
       /mealAnalysisId|conversationId|messageId|userId|compositionPlanId/,
     );
+  });
+
+  it('uses the official execution definition and returns provider metadata outside the payload', async () => {
+    const source = payload();
+    const target = realizer(success(completeOutput()));
+    const result = await target.service.realize(source, {
+      prompt: NUTRITION_CONVERSATION_REALIZATION_PROMPT,
+      operation: {
+        aiJobId: 'conversation-job-id',
+        promptVersionId: 'conversation-prompt-version-id',
+      },
+    });
+
+    expect(target.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'TEXT',
+        instructions: NUTRITION_CONVERSATION_REALIZATION_PROMPT.instructions,
+        schema: NUTRITION_CONVERSATION_REALIZATION_PROMPT.schema,
+        payload: source,
+      }),
+    );
+    expect(result.operationalMetadata).toEqual({
+      aiJobId: 'conversation-job-id',
+      promptVersionId: 'conversation-prompt-version-id',
+      providerResponseId: 'provider-ref',
+      model: 'model',
+      usage: {
+        inputTokens: 10,
+        outputTokens: 20,
+        totalTokens: 30,
+        estimatedCostUsd: null,
+      },
+      executionStatus: 'PROCESSING',
+    });
+    expect(JSON.stringify(source)).not.toMatch(
+      /conversation-job-id|conversation-prompt-version-id|provider-ref/,
+    );
+    expect(result.candidateText).not.toMatch(
+      /conversation-job-id|conversation-prompt-version-id|provider-ref/,
+    );
+    assertDeepFrozen(result.operationalMetadata);
   });
 
   it('returns partial only when optional blocks are explicitly omitted', async () => {
@@ -310,6 +363,255 @@ describe('NutritionConversationLanguageRealizer', () => {
     expect(result.status).toBe('INVALID_STRUCTURE');
   });
 
+  it('realizes an emotional adaptation only with authorized evidence', async () => {
+    const base = payload();
+    const emotionalPayload: SanitizedConversationPayload = {
+      ...base,
+      facts: {
+        ...base.facts,
+        allowed: [
+          ...base.facts.allowed,
+          {
+            key: 'emotional.FRUSTRATION',
+            source: 'LONGITUDINAL',
+            value: {
+              kind: 'FRUSTRATION',
+              evidence: ['essa estratégia ainda não mostrou resultado'],
+            },
+            estimated: false,
+          },
+        ],
+      },
+      selectedDecisions: [...base.selectedDecisions, 'VALIDATE_FRUSTRATION'],
+      structure: {
+        ...base.structure,
+        blocks: base.structure.blocks.map((block, index) =>
+          index === 1
+            ? {
+                ...block,
+                decisions: [...block.decisions, 'VALIDATE_FRUSTRATION'],
+                facts: [...block.facts, 'emotional.FRUSTRATION'],
+              }
+            : block,
+        ),
+      },
+    };
+    const output = completeOutput();
+    output.units[1] = {
+      ...output.units[1],
+      decisionCodes: [...output.units[1].decisionCodes, 'VALIDATE_FRUSTRATION'],
+      factKeys: [...output.units[1].factKeys, 'emotional.FRUSTRATION'],
+      text: 'Essa estratégia ainda não mostrou resultado; o frango oferece cerca de 30 g de proteína.',
+    };
+
+    const result = await realizer(success(output)).service.realize(
+      emotionalPayload,
+    );
+    expect(result.status).toBe('COMPLETED');
+    expect(result.realizedFacts).toContain('emotional.FRUSTRATION');
+  });
+
+  it('realizes only an authorized episodic memory and rejects an invented date', async () => {
+    const base = payload();
+    const episodicPayload: SanitizedConversationPayload = {
+      ...base,
+      facts: {
+        ...base.facts,
+        allowed: [
+          ...base.facts.allowed,
+          {
+            key: 'episodicMemory.COMMITMENT',
+            source: 'MEMORY',
+            value: {
+              category: 'COMMITMENT',
+              fact: { action: 'incluir vegetais no almoço' },
+              relationToContext: 'follow-up atual',
+              recallReason: 'FOLLOW_UP_DUE',
+            },
+            estimated: false,
+          },
+        ],
+      },
+      selectedDecisions: [...base.selectedDecisions, 'CHECK_COMMITMENT'],
+      structure: {
+        ...base.structure,
+        blocks: base.structure.blocks.map((block, index) =>
+          index === 1
+            ? {
+                ...block,
+                decisions: [...block.decisions, 'CHECK_COMMITMENT'],
+                facts: [...block.facts, 'episodicMemory.COMMITMENT'],
+              }
+            : block,
+        ),
+      },
+    };
+    const authorized = completeOutput();
+    authorized.units[1] = {
+      ...authorized.units[1],
+      decisionCodes: [...authorized.units[1].decisionCodes, 'CHECK_COMMITMENT'],
+      factKeys: [...authorized.units[1].factKeys, 'episodicMemory.COMMITMENT'],
+      text: 'O combinado era incluir vegetais; o frango oferece cerca de 30 g de proteína.',
+      claims: { ...authorized.units[1].claims, usesMemory: true },
+    };
+    const dated = completeOutput();
+    dated.units[1] = {
+      ...authorized.units[1],
+      text: 'Em janeiro, o combinado era incluir vegetais; o frango oferece cerca de 30 g de proteína.',
+    };
+
+    const valid = await realizer(success(authorized)).service.realize(
+      episodicPayload,
+    );
+    const invalid = await realizer(success(dated)).service.realize(
+      episodicPayload,
+    );
+
+    expect(valid.status).toBe('COMPLETED');
+    expect(valid.realizedFacts).toContain('episodicMemory.COMMITMENT');
+    expect(invalid.status).toBe('INVALID_STRUCTURE');
+    expect(invalid.failureCode).toBe('INVALID_EPISODIC_MEMORY');
+  });
+
+  it('rejects inferred emotion, guilt and emotional decisions without evidence', async () => {
+    const base = payload();
+    const emotionalPayload: SanitizedConversationPayload = {
+      ...base,
+      facts: {
+        ...base.facts,
+        allowed: [
+          ...base.facts.allowed,
+          {
+            key: 'emotional.FRUSTRATION',
+            source: 'LONGITUDINAL',
+            value: {
+              kind: 'FRUSTRATION',
+              evidence: ['estratégia sem resultado'],
+            },
+            estimated: false,
+          },
+        ],
+      },
+      selectedDecisions: [...base.selectedDecisions, 'VALIDATE_FRUSTRATION'],
+      structure: {
+        ...base.structure,
+        blocks: base.structure.blocks.map((block, index) =>
+          index === 1
+            ? {
+                ...block,
+                decisions: [...block.decisions, 'VALIDATE_FRUSTRATION'],
+                facts: [...block.facts, 'emotional.FRUSTRATION'],
+              }
+            : block,
+        ),
+      },
+    };
+    const inferred = completeOutput();
+    inferred.units[1] = {
+      ...inferred.units[1],
+      decisionCodes: [
+        ...inferred.units[1].decisionCodes,
+        'VALIDATE_FRUSTRATION',
+      ],
+      factKeys: [...inferred.units[1].factKeys, 'emotional.FRUSTRATION'],
+      text: 'Você está frustrado com o frango e seus 30 g de proteína.',
+    };
+    const missingEvidence = completeOutput();
+    missingEvidence.units[1] = {
+      ...missingEvidence.units[1],
+      decisionCodes: [
+        ...missingEvidence.units[1].decisionCodes,
+        'VALIDATE_FRUSTRATION',
+      ],
+    };
+
+    expect(
+      (await realizer(success(inferred)).service.realize(emotionalPayload))
+        .status,
+    ).toBe('INVALID_STRUCTURE');
+    expect(
+      (
+        await realizer(success(missingEvidence)).service.realize(
+          emotionalPayload,
+        )
+      ).status,
+    ).toBe('INVALID_STRUCTURE');
+  });
+
+  it('rejects generic praise, empty motivation and robotic language', async () => {
+    const base = payload();
+    const genericPraise = completeOutput();
+    genericPraise.units[1] = {
+      ...genericPraise.units[1],
+      text: 'Parabéns! Continue assim.',
+      claims: {
+        numbers: [],
+        foods: [],
+        usesMemory: false,
+        usesRecommendation: false,
+      },
+    };
+    const motivationalPayload: SanitizedConversationPayload = {
+      ...base,
+      selectedDecisions: [...base.selectedDecisions, 'MOTIVATE_WITH_EVIDENCE'],
+      structure: {
+        ...base.structure,
+        blocks: base.structure.blocks.map((block, index) =>
+          index === 1
+            ? {
+                ...block,
+                decisions: [...block.decisions, 'MOTIVATE_WITH_EVIDENCE'],
+              }
+            : block,
+        ),
+      },
+    };
+    const emptyMotivation = completeOutput();
+    emptyMotivation.units[1] = {
+      ...emptyMotivation.units[1],
+      decisionCodes: [
+        ...emptyMotivation.units[1].decisionCodes,
+        'MOTIVATE_WITH_EVIDENCE',
+      ],
+      text: 'Siga firme no processo.',
+      claims: {
+        numbers: [],
+        foods: [],
+        usesMemory: false,
+        usesRecommendation: false,
+      },
+    };
+    const robotic = completeOutput();
+    robotic.units[1] = {
+      ...robotic.units[1],
+      text: 'De acordo com os dados, a análise indica equilíbrio.',
+      claims: {
+        numbers: [],
+        foods: [],
+        usesMemory: false,
+        usesRecommendation: false,
+      },
+    };
+
+    const praiseResult = await realizer(success(genericPraise)).service.realize(
+      base,
+    );
+    const motivationResult = await realizer(
+      success(emptyMotivation),
+    ).service.realize(motivationalPayload);
+    const roboticResult = await realizer(success(robotic)).service.realize(
+      base,
+    );
+
+    expect(praiseResult.failureCode).toContain(
+      'COACH_STYLE:GENERIC_PRAISE_WITHOUT_EVIDENCE',
+    );
+    expect(motivationResult.failureCode).toContain(
+      'COACH_STYLE:MOTIVATION_WITHOUT_EVIDENCE',
+    );
+    expect(roboticResult.failureCode).toContain('COACH_STYLE:ROBOTIC_LANGUAGE');
+  });
+
   it('rejects unauthorized questions, emoji, lists and excess length', async () => {
     const base = payload();
     const withoutQuestion: SanitizedConversationPayload = {
@@ -332,6 +634,66 @@ describe('NutritionConversationLanguageRealizer', () => {
     );
 
     expect(result.status).toBe('INVALID_STRUCTURE');
+  });
+
+  it.each([
+    ['CELEBRATE', 'CELEBRATE'],
+    ['CLARIFY_BEFORE_ANALYSIS', 'CLARIFY'],
+  ] as const)(
+    'rejects units that violate the %s profile',
+    async (dialogueProfile, centralIntent) => {
+      const base = payload();
+      const incompatible: SanitizedConversationPayload = {
+        ...base,
+        structure: { ...base.structure, dialogueProfile, centralIntent },
+      };
+
+      const result = await realizer(success(completeOutput())).service.realize(
+        incompatible,
+      );
+
+      expect(result.status).toBe('INVALID_STRUCTURE');
+      expect(result.failureCode).toBe('DIALOGUE_PROFILE_VIOLATION');
+    },
+  );
+
+  it('rejects detailed analysis inside RECOVERY and permits it only in DETAILED_ANALYSIS', async () => {
+    const base = payload();
+    const detailedPayload: SanitizedConversationPayload = {
+      ...base,
+      selectedDecisions: [...base.selectedDecisions, 'DETAIL_ANALYSIS'],
+      structure: {
+        ...base.structure,
+        blocks: base.structure.blocks.map((block, index) =>
+          index === 1
+            ? {
+                ...block,
+                decisions: [...block.decisions, 'DETAIL_ANALYSIS'],
+              }
+            : block,
+        ),
+      },
+    };
+    const output = completeOutput();
+    output.units[1] = {
+      ...output.units[1],
+      decisionCodes: [...output.units[1].decisionCodes, 'DETAIL_ANALYSIS'],
+    };
+    const detailed = await realizer(success(output)).service.realize(
+      detailedPayload,
+    );
+    const recovery = await realizer(success(output)).service.realize({
+      ...detailedPayload,
+      structure: {
+        ...detailedPayload.structure,
+        dialogueProfile: 'RECOVERY',
+        centralIntent: 'RECOVER',
+      },
+    });
+
+    expect(detailed.status).toBe('COMPLETED');
+    expect(recovery.status).toBe('INVALID_STRUCTURE');
+    expect(recovery.failureCode).toBe('DIALOGUE_PROFILE_VIOLATION');
   });
 
   it('realizes an authorized closing as the final locally composed unit', async () => {

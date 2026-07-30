@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   BehavioralCommunicationStyle,
+  BehavioralInsightType,
   BehavioralMotivationStyle,
   CoachCommunicationStyle,
   CoachMotivationStyle,
@@ -17,14 +18,19 @@ import {
   NutritionConversationCommunicationStyle,
   NutritionConversationConstraint,
   NutritionConversationContext,
+  NutritionConversationDialogueSignals,
   NutritionConversationLongitudinalSignal,
   NutritionConversationMotivationFocus,
   NutritionConversationTrendDirection,
 } from './nutrition-conversation-context.interface';
+import { NutritionConversationRecognitionEngine } from './nutrition-conversation-recognition-engine';
+import { NutritionConversationEmotionalEngine } from './nutrition-conversation-emotional-engine';
+import type { NutritionConversationEpisodicRecall } from './nutrition-conversation-episodic-memory.contract';
 
 const MAX_SUPPORTING_FACTORS = 3;
 const MAX_ADAPTIVE_TOPICS = 3;
 const MAX_RECENT_MEALS = 2;
+const MAX_EPISODIC_MEMORIES = 3;
 
 interface NumericValue {
   toNumber(): number;
@@ -69,10 +75,16 @@ export interface BuildNutritionConversationContextInput {
     readonly motivationStyle?: BehavioralSignals['motivationStyle'];
   };
   readonly longitudinal?: LongitudinalResponseContext;
+  readonly dialogue?: NutritionConversationDialogueSignals;
+  readonly episodicMemory?: readonly NutritionConversationEpisodicRecall[];
 }
 
 @Injectable()
 export class NutritionConversationContextBuilder {
+  private readonly recognitionEngine =
+    new NutritionConversationRecognitionEngine();
+  private readonly emotionalEngine = new NutritionConversationEmotionalEngine();
+
   build(
     input: BuildNutritionConversationContextInput,
   ): NutritionConversationContext {
@@ -89,6 +101,50 @@ export class NutritionConversationContextBuilder {
       input.coach.experience.fatigue.score < 70 &&
       (input.behavior.stage === StageOfChange.CONTEMPLATION ||
         input.behavior.stage === StageOfChange.PREPARATION);
+    const positiveFactors = this.limitedStrings(
+      adaptive?.foodQuality?.positiveFactors,
+      MAX_SUPPORTING_FACTORS,
+    );
+    const limitingFactors = this.limitedStrings(
+      adaptive?.foodQuality?.limitingFactors,
+      MAX_SUPPORTING_FACTORS,
+    );
+    const recognition = this.recognitionEngine.recognize({
+      positiveFactors,
+      recentMealCount: input.context.recentMeals.length,
+      currentQualityScore: input.analysis.qualityScore?.score ?? null,
+      recentQualityScores: input.context.recentMeals.flatMap((meal) =>
+        meal.score === null ? [] : [meal.score],
+      ),
+      trendDirection: trend ? this.trendDirection(trend.direction) : undefined,
+      longitudinalDirection: longitudinalSignal?.direction,
+      relapsePresent: Boolean(input.longitudinal?.relapse),
+      returnAfterAbsence: Boolean(input.coach.experience.reengagement),
+      activeDays: input.coach.activeDays,
+      consecutiveDays: input.coach.consecutiveDays,
+      consistencyScore: input.coach.consistencyScore,
+      adherenceScore: input.behavior.adherenceScore,
+      momentumScore: input.coach.experience.momentum.score,
+      ...this.strategySignals(input.longitudinal),
+      goalRelation: input.context.goal ?? undefined,
+    });
+    const emotional = this.emotionalEngine.recognize({
+      recognitionSignals: recognition.signals,
+      ...(input.analysis.confidence
+        ? { nutritionConfidence: input.analysis.confidence.toNumber() }
+        : {}),
+      identifiedFoodCount: input.analysis.items.length,
+      requiresEstimateQualification: true,
+      recommendationCount: input.recommendations.length,
+      coachFatigueScore: input.coach.experience.fatigue.score,
+      adherenceScore: input.behavior.adherenceScore,
+      engagementScore: input.behavior.engagementScore,
+      behavioralInsights: input.behavior.insights.map((insight) =>
+        insight === BehavioralInsightType.DATA_RESPONSIVE
+          ? 'DATA_RESPONSIVE'
+          : insight,
+      ),
+    });
 
     return Object.freeze({
       metadata: Object.freeze({
@@ -164,16 +220,40 @@ export class NutritionConversationContextBuilder {
             }
           : {}),
         supportingEvidence: Object.freeze({
-          positiveFactors: this.limitedStrings(
-            adaptive?.foodQuality?.positiveFactors,
-            MAX_SUPPORTING_FACTORS,
-          ),
-          limitingFactors: this.limitedStrings(
-            adaptive?.foodQuality?.limitingFactors,
-            MAX_SUPPORTING_FACTORS,
-          ),
+          positiveFactors,
+          limitingFactors,
         }),
       }),
+      recognition,
+      emotional,
+      ...(input.episodicMemory && input.episodicMemory.length > 0
+        ? {
+            episodicMemory: Object.freeze({
+              episodes: Object.freeze(
+                input.episodicMemory
+                  .slice(0, MAX_EPISODIC_MEMORIES)
+                  .map((episode) =>
+                    Object.freeze({
+                      ...episode,
+                      fact: this.freezeValue(episode.fact),
+                    }),
+                  ),
+              ),
+            }),
+          }
+        : {}),
+      ...(input.dialogue
+        ? {
+            dialogue: Object.freeze({
+              interactionIntent: input.dialogue.interactionIntent,
+              explicitDetailRequest: input.dialogue.explicitDetailRequest,
+              specificQuestion: input.dialogue.specificQuestion,
+              clarificationRequired: input.dialogue.clarificationRequired,
+              previousCommitmentAvailable:
+                input.dialogue.previousCommitmentAvailable,
+            }),
+          }
+        : {}),
       communication: Object.freeze({
         communicationStyle: this.communicationStyle(
           input.behavior.communicationStyle,
@@ -207,6 +287,23 @@ export class NutritionConversationContextBuilder {
         shouldAskQuestion,
       }),
     });
+  }
+
+  private freezeValue(
+    value: NutritionConversationEpisodicRecall['fact'],
+  ): NutritionConversationEpisodicRecall['fact'] {
+    if (Array.isArray(value))
+      return Object.freeze(value.map((item) => this.freezeValue(item)));
+    if (typeof value === 'object' && value !== null)
+      return Object.freeze(
+        Object.fromEntries(
+          Object.entries(value).map(([key, item]) => [
+            key,
+            this.freezeValue(item),
+          ]),
+        ),
+      );
+    return value;
   }
 
   private communicationStyle(
@@ -308,6 +405,30 @@ export class NutritionConversationContextBuilder {
     };
 
     return mapping[direction];
+  }
+
+  private trendDirection(value: string): NutritionConversationTrendDirection {
+    return value === 'IMPROVING'
+      ? 'IMPROVING'
+      : value === 'DECLINING'
+        ? 'DECLINING'
+        : 'STABLE';
+  }
+
+  private strategySignals(context: LongitudinalResponseContext | undefined): {
+    readonly strategyWorked?: string;
+    readonly strategyFailed?: string;
+  } {
+    const worked = context?.memories.find((memory) =>
+      ['STRATEGY_WORKED', 'WORKING_STRATEGY'].includes(memory.kind),
+    );
+    const failed = context?.memories.find((memory) =>
+      ['STRATEGY_FAILED', 'FAILED_STRATEGY'].includes(memory.kind),
+    );
+    return {
+      ...(worked ? { strategyWorked: worked.summary } : {}),
+      ...(failed ? { strategyFailed: failed.summary } : {}),
+    };
   }
 
   private goalProgressionDirection(

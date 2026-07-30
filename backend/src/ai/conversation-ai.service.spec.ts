@@ -152,6 +152,23 @@ describe('ConversationAIService', () => {
     );
   });
 
+  it('preserves provider reference, model and usage when provider JSON is invalid', async () => {
+    const target = gateway('not-json');
+
+    await expect(target.service.execute(request())).resolves.toEqual({
+      status: 'FAILED',
+      structuredOutput: null,
+      rawText: null,
+      finishReason: 'UNKNOWN',
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      provider: {
+        responseReference: 'provider-response',
+        model: 'configured-model',
+      },
+      errorCode: 'INVALID_RESPONSE',
+    });
+  });
+
   it.each([
     ['invalid schema name', { schema: { name: '', schema: {} } }],
     [

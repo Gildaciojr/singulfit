@@ -10,11 +10,14 @@ import type {
 import type { NutritionConversationComposer } from './nutrition-conversation-composer';
 import type { NutritionConversationDecisionEngine } from './nutrition-conversation-decision-engine';
 import type { NutritionConversationDecisionScoringPolicy } from './nutrition-conversation-decision-scoring-policy';
-import type { NutritionConversationLanguageRealizer } from './nutrition-conversation-language-realizer';
+import type { NutritionConversationRealizationExecutorService } from './nutrition-conversation-realization-executor.service';
 import type { NutritionConversationLegacyCandidateAdapter } from './nutrition-conversation-legacy-candidate.adapter';
 import type { NutritionConversationComparator } from './nutrition-conversation-comparator';
 import { NutritionConversationShadowPipelineService } from './nutrition-conversation-shadow-pipeline.service';
 import type { SanitizedConversationPayloadBuilder } from './sanitized-conversation-payload.builder';
+import type { ConversationSelectionConfigService } from './conversation-selection-config.service';
+import type { NutritionConversationCandidateSelectorService } from './nutrition-conversation-candidate-selector.service';
+import type { NutritionConversationCandidateSelectionAuditService } from './nutrition-conversation-candidate-selection-audit.service';
 
 function subject(mode: 'OFF' | 'SHADOW' = 'SHADOW') {
   const context = Object.freeze({ context: true });
@@ -26,6 +29,11 @@ function subject(mode: 'OFF' | 'SHADOW' = 'SHADOW') {
   const languageResult = Object.freeze({
     status: 'COMPLETED',
     candidateText: 'candidate',
+    sanitizedPayloadReference: 'payload-reference',
+    operationalMetadata: Object.freeze({
+      aiJobId: 'candidate-job-id',
+      promptVersionId: 'prompt-version-id',
+    }),
   });
   const operationalConfig = {
     get: jest.fn().mockReturnValue({ effectiveMode: mode }),
@@ -40,8 +48,8 @@ function subject(mode: 'OFF' | 'SHADOW' = 'SHADOW') {
   const sanitizedPayloadBuilder = {
     build: jest.fn().mockReturnValue(sanitizedPayload),
   };
-  const languageRealizer = {
-    realize: jest.fn().mockResolvedValue(languageResult),
+  const realizationExecutor = {
+    execute: jest.fn().mockResolvedValue(languageResult),
   };
   const adapter = {
     adapt: jest.fn().mockReturnValue({ candidate: { eligible: true } }),
@@ -58,6 +66,30 @@ function subject(mode: 'OFF' | 'SHADOW' = 'SHADOW') {
       },
     }),
   };
+  const selectionConfig = {
+    get: jest.fn().mockReturnValue({
+      effectiveMode: 'OFF',
+      formatterVersion: 'nutrition-response-formatter:v1',
+    }),
+  };
+  const selectionDecision = Object.freeze({
+    selectedSource: 'FORMATTER',
+    reason: 'ROLLOUT_MODE_OFF',
+    comparisonScore: 100,
+    promptVersionId: 'prompt-version-id',
+    candidateJobId: 'candidate-job-id',
+    formatterVersion: 'nutrition-response-formatter:v1',
+    selectionStatus: 'FUTURE_ROLLOUT_DISABLED',
+    rolloutMode: 'OFF',
+    candidateAvailable: true,
+    candidateValid: true,
+    timestamp: '2026-07-15T12:00:00.000Z',
+    metrics: Object.freeze({}),
+  });
+  const candidateSelector = {
+    select: jest.fn().mockReturnValue(selectionDecision),
+  };
+  const selectionAudit = { record: jest.fn().mockResolvedValue(undefined) };
   const diagnostics = { record: jest.fn() };
   const service = new NutritionConversationShadowPipelineService(
     operationalConfig as unknown as ConversationLayerOperationalConfigService,
@@ -67,9 +99,12 @@ function subject(mode: 'OFF' | 'SHADOW' = 'SHADOW') {
     composer as unknown as NutritionConversationComposer,
     authorizedFactsBuilder as unknown as NutritionConversationAuthorizedFactsBuilder,
     sanitizedPayloadBuilder as unknown as SanitizedConversationPayloadBuilder,
-    languageRealizer as unknown as NutritionConversationLanguageRealizer,
+    realizationExecutor as unknown as NutritionConversationRealizationExecutorService,
     adapter as unknown as NutritionConversationLegacyCandidateAdapter,
     comparator as unknown as NutritionConversationComparator,
+    selectionConfig as unknown as ConversationSelectionConfigService,
+    candidateSelector as unknown as NutritionConversationCandidateSelectorService,
+    selectionAudit as unknown as NutritionConversationCandidateSelectionAuditService,
     diagnostics as unknown as ConversationShadowDiagnosticsService,
   );
 
@@ -82,9 +117,13 @@ function subject(mode: 'OFF' | 'SHADOW' = 'SHADOW') {
     composer,
     authorizedFactsBuilder,
     sanitizedPayloadBuilder,
-    languageRealizer,
+    realizationExecutor,
     adapter,
     comparator,
+    selectionConfig,
+    candidateSelector,
+    selectionAudit,
+    selectionDecision,
     diagnostics,
     context,
     candidates,
@@ -98,7 +137,15 @@ function subject(mode: 'OFF' | 'SHADOW' = 'SHADOW') {
 const conversation = Object.freeze({
   analysis: { id: 'analysis' },
 }) as unknown as BuildNutritionConversationContextInput;
-const input = Object.freeze({ conversation, legacyText: 'legacy' });
+const input = Object.freeze({
+  operation: Object.freeze({
+    userId: 'user-id',
+    conversationId: 'conversation-id',
+    messageId: 'message-id',
+  }),
+  conversation,
+  legacyText: 'legacy',
+});
 
 async function flush(): Promise<void> {
   await Promise.resolve();
@@ -131,15 +178,36 @@ describe('NutritionConversationShadowPipelineService', () => {
       decisionPlan: target.decisionPlan,
       compositionPlan: target.compositionPlan,
     });
-    expect(target.languageRealizer.realize).toHaveBeenCalledWith(
-      target.sanitizedPayload,
-    );
+    expect(target.realizationExecutor.execute).toHaveBeenCalledWith({
+      ...input.operation,
+      payload: target.sanitizedPayload,
+    });
     expect(target.adapter.adapt).toHaveBeenCalledWith(
       'legacy',
       expect.objectContaining({ status: 'COMPLETED' }),
     );
     expect(target.comparator.compare).toHaveBeenCalledWith(
       expect.objectContaining({ payload: target.sanitizedPayload }),
+    );
+    expect(target.candidateSelector.select).toHaveBeenCalledWith(
+      expect.objectContaining({
+        officialResponse: 'legacy',
+        candidate: expect.objectContaining({ status: 'COMPLETED' }),
+        comparison: expect.objectContaining({ candidateEligible: true }),
+        metadata: expect.objectContaining({
+          rolloutMode: 'OFF',
+          formatterVersion: 'nutrition-response-formatter:v1',
+          promptVersionId: 'prompt-version-id',
+          candidateJobId: 'candidate-job-id',
+        }),
+      }),
+    );
+    expect(target.selectionAudit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-id',
+        decisionReference: 'candidate-job-id',
+        decision: target.selectionDecision,
+      }),
     );
     const calls = [
       target.contextBuilder.build,
@@ -148,7 +216,7 @@ describe('NutritionConversationShadowPipelineService', () => {
       target.composer.compose,
       target.authorizedFactsBuilder.build,
       target.sanitizedPayloadBuilder.build,
-      target.languageRealizer.realize,
+      target.realizationExecutor.execute,
     ].map((mock) => mock.mock.invocationCallOrder[0]);
     expect(calls).toEqual([...calls].sort((left, right) => left - right));
   });
@@ -161,7 +229,7 @@ describe('NutritionConversationShadowPipelineService', () => {
       target.service.execute(input);
 
       expect(target.contextBuilder.build).not.toHaveBeenCalled();
-      expect(target.languageRealizer.realize).not.toHaveBeenCalled();
+      expect(target.realizationExecutor.execute).not.toHaveBeenCalled();
     },
   );
 
@@ -172,6 +240,8 @@ describe('NutritionConversationShadowPipelineService', () => {
     ['Composer', 'composer', 'compose'],
     ['AuthorizedFacts', 'authorizedFactsBuilder', 'build'],
     ['Payload', 'sanitizedPayloadBuilder', 'build'],
+    ['Selection config', 'selectionConfig', 'get'],
+    ['Candidate selector', 'candidateSelector', 'select'],
   ] as const)(
     'isolates a synchronous %s failure',
     async (_label, dependency, method) => {
@@ -187,7 +257,7 @@ describe('NutritionConversationShadowPipelineService', () => {
 
   it('isolates an asynchronous Realizer failure', async () => {
     const target = subject();
-    target.languageRealizer.realize.mockRejectedValue(
+    target.realizationExecutor.execute.mockRejectedValue(
       new Error('realizer failure'),
     );
 
@@ -202,14 +272,14 @@ describe('NutritionConversationShadowPipelineService', () => {
     first.service.execute(input);
     second.service.execute(input);
     await flush();
-    expect(first.languageRealizer.realize.mock.calls).toEqual(
-      second.languageRealizer.realize.mock.calls,
+    expect(first.realizationExecutor.execute.mock.calls).toEqual(
+      second.realizationExecutor.execute.mock.calls,
     );
   });
 
   it('skips deterministically when the process concurrency limit is reached', async () => {
     const target = subject();
-    target.languageRealizer.realize.mockReturnValue(
+    target.realizationExecutor.execute.mockReturnValue(
       new Promise(() => undefined),
     );
 
@@ -218,7 +288,7 @@ describe('NutritionConversationShadowPipelineService', () => {
     target.service.execute(input);
     await flush();
 
-    expect(target.languageRealizer.realize).toHaveBeenCalledTimes(2);
+    expect(target.realizationExecutor.execute).toHaveBeenCalledTimes(2);
     expect(target.diagnostics.record).toHaveBeenCalledWith({
       event: 'SKIPPED_CONCURRENCY',
     });
@@ -237,6 +307,28 @@ describe('NutritionConversationShadowPipelineService', () => {
     await flush();
   });
 
+  it('isolates selection audit persistence failure and still completes Shadow', async () => {
+    const target = subject();
+    target.selectionAudit.record.mockRejectedValue(
+      new Error('audit persistence failure'),
+    );
+
+    expect(target.service.execute(input)).toBeUndefined();
+    await flush();
+
+    expect(target.diagnostics.record).toHaveBeenCalledWith({
+      event: 'FAILED',
+      component: 'SELECTION_AUDIT',
+    });
+    expect(target.diagnostics.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'COMPLETED',
+        selectedSource: 'FORMATTER',
+        selectionAuditPersisted: false,
+      }),
+    );
+  });
+
   it('does not start new work after application shutdown', () => {
     const target = subject();
     target.service.onApplicationShutdown();
@@ -248,7 +340,7 @@ describe('NutritionConversationShadowPipelineService', () => {
   it('applies a total timeout without releasing the active slot early', async () => {
     jest.useFakeTimers();
     const target = subject();
-    target.languageRealizer.realize.mockReturnValue(
+    target.realizationExecutor.execute.mockReturnValue(
       new Promise(() => undefined),
     );
 
@@ -269,14 +361,14 @@ describe('NutritionConversationShadowPipelineService', () => {
     jest.useRealTimers();
   });
 
-  it('contains no persistence, outbound, event or production response dependency', () => {
+  it('contains no direct persistence, outbound, event or production response dependency', () => {
     const source = readFileSync(
       join(__dirname, 'nutrition-conversation-shadow-pipeline.service.ts'),
       'utf8',
     );
 
     expect(source).not.toMatch(
-      /Prisma|outbound|EventBus|Outbox|Evolution|MediaService|Worker|NutritionResponseFormatter|AIJob|PromptVersion|persist|publish/,
+      /Prisma|outbound|EventBus|Outbox|Evolution|MediaService|Worker|NutritionResponseFormatter|AIJob|PromptVersion|publish/,
     );
     expect(source).not.toMatch(/TODO|FIXME|console\.log/);
   });

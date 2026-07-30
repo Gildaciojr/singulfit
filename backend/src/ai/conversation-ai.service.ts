@@ -64,10 +64,10 @@ export class ConversationAIService {
       try {
         structuredOutput = JSON.parse(rawText) as ConversationAIValue;
       } catch {
-        return this.failure('INVALID_RESPONSE');
+        return this.failure('INVALID_RESPONSE', response);
       }
       if (!this.isRecord(structuredOutput)) {
-        return this.failure('INVALID_RESPONSE');
+        return this.failure('INVALID_RESPONSE', response);
       }
 
       return Object.freeze({
@@ -125,7 +125,7 @@ export class ConversationAIService {
         FORBIDDEN_OPERATIONAL_KEYS.has(key) ||
         key === 'metadata' ||
         /(?:Id|Ids)$/.test(key) ||
-        this.hasOperationalKey(item as ConversationAIValue),
+        this.hasOperationalKey(item),
     );
   }
 
@@ -170,9 +170,7 @@ export class ConversationAIService {
         .sort()
         .map(
           (key) =>
-            `${JSON.stringify(key)}:${this.canonicalStringify(
-              value[key] as ConversationAIValue,
-            )}`,
+            `${JSON.stringify(key)}:${this.canonicalStringify(value[key])}`,
         )
         .join(',')}}`;
     }
@@ -191,14 +189,34 @@ export class ConversationAIService {
     return 'UNKNOWN_FAILURE';
   }
 
-  private failure(errorCode: ConversationAIErrorCode): ConversationAIResponse {
+  private failure(
+    errorCode: ConversationAIErrorCode,
+    response?: {
+      readonly responseId: string;
+      readonly model: string;
+      readonly promptTokens: number;
+      readonly completionTokens: number;
+      readonly totalTokens: number;
+    },
+  ): ConversationAIResponse {
     return Object.freeze({
       status: 'FAILED',
       structuredOutput: null,
       rawText: null,
       finishReason: 'UNKNOWN',
-      usage: null,
-      provider: null,
+      usage: response
+        ? Object.freeze({
+            promptTokens: response.promptTokens,
+            completionTokens: response.completionTokens,
+            totalTokens: response.totalTokens,
+          })
+        : null,
+      provider: response
+        ? Object.freeze({
+            responseReference: response.responseId,
+            model: response.model,
+          })
+        : null,
       errorCode,
     });
   }
@@ -212,7 +230,7 @@ export class ConversationAIService {
         Object.fromEntries(
           Object.entries(value).map(([key, item]) => [
             key,
-            this.deepFreeze(item as ConversationAIValue),
+            this.deepFreeze(item),
           ]),
         ),
       );

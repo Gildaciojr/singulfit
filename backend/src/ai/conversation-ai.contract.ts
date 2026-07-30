@@ -53,7 +53,7 @@ export type ConversationAIResponse =
       readonly structuredOutput: null;
       readonly rawText: null;
       readonly finishReason: ConversationAIFinishReason;
-      readonly usage: null;
-      readonly provider: null;
+      readonly usage: ConversationAIUsage | null;
+      readonly provider: ConversationAIProviderMetadata | null;
       readonly errorCode: ConversationAIErrorCode;
     };

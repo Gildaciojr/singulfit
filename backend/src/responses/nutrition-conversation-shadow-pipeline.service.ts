@@ -11,15 +11,23 @@ import {
 import { NutritionConversationComposer } from './nutrition-conversation-composer';
 import { NutritionConversationDecisionEngine } from './nutrition-conversation-decision-engine';
 import { NutritionConversationDecisionScoringPolicy } from './nutrition-conversation-decision-scoring-policy';
-import { NutritionConversationLanguageRealizer } from './nutrition-conversation-language-realizer';
+import { NutritionConversationRealizationExecutorService } from './nutrition-conversation-realization-executor.service';
 import { NutritionConversationLegacyCandidateAdapter } from './nutrition-conversation-legacy-candidate.adapter';
 import { NutritionConversationComparator } from './nutrition-conversation-comparator';
 import { SanitizedConversationPayloadBuilder } from './sanitized-conversation-payload.builder';
+import { ConversationSelectionConfigService } from './conversation-selection-config.service';
+import { NutritionConversationCandidateSelectorService } from './nutrition-conversation-candidate-selector.service';
+import { NutritionConversationCandidateSelectionAuditService } from './nutrition-conversation-candidate-selection-audit.service';
 
 const SHADOW_TOTAL_TIMEOUT_MS = 25_000;
 const SHADOW_CONCURRENCY_LIMIT = 2;
 
 export interface ExecuteNutritionConversationShadowInput {
+  readonly operation: {
+    readonly userId: string;
+    readonly conversationId: string;
+    readonly messageId: string;
+  };
   readonly conversation: BuildNutritionConversationContextInput;
   readonly legacyText: string;
 }
@@ -37,9 +45,12 @@ export class NutritionConversationShadowPipelineService implements OnApplication
     private readonly composer: NutritionConversationComposer,
     private readonly authorizedFactsBuilder: NutritionConversationAuthorizedFactsBuilder,
     private readonly sanitizedPayloadBuilder: SanitizedConversationPayloadBuilder,
-    private readonly languageRealizer: NutritionConversationLanguageRealizer,
+    private readonly realizationExecutor: NutritionConversationRealizationExecutorService,
     private readonly adapter: NutritionConversationLegacyCandidateAdapter,
     private readonly comparator: NutritionConversationComparator,
+    private readonly selectionConfig: ConversationSelectionConfigService,
+    private readonly candidateSelector: NutritionConversationCandidateSelectorService,
+    private readonly selectionAudit: NutritionConversationCandidateSelectionAuditService,
     private readonly diagnostics: ConversationShadowDiagnosticsService,
   ) {}
 
@@ -120,7 +131,10 @@ export class NutritionConversationShadowPipelineService implements OnApplication
       });
 
       component = 'REALIZER';
-      const realization = await this.languageRealizer.realize(sanitizedPayload);
+      const realization = await this.realizationExecutor.execute({
+        ...input.operation,
+        payload: sanitizedPayload,
+      });
       component = 'ADAPTER';
       const envelope = this.adapter.adapt(input.legacyText, realization);
       component = 'COMPARATOR';
@@ -130,6 +144,43 @@ export class NutritionConversationShadowPipelineService implements OnApplication
         payload: sanitizedPayload,
         incrementalLatencyMs: performance.now() - startedAt,
       });
+      component = 'SELECTION_CONFIG';
+      const selectionConfig = this.selectionConfig.get();
+      component = 'CANDIDATE_SELECTOR';
+      const selectionStartedAt = performance.now();
+      const selectionDecision = this.candidateSelector.select({
+        officialResponse: input.legacyText,
+        candidate: realization,
+        comparison,
+        metadata: {
+          rolloutMode: selectionConfig.effectiveMode,
+          formatterVersion: selectionConfig.formatterVersion,
+          promptVersionId:
+            realization.operationalMetadata?.promptVersionId ?? null,
+          candidateJobId: realization.operationalMetadata?.aiJobId ?? null,
+          timestamp: new Date().toISOString(),
+        },
+      });
+      const selectionLatencyMs = performance.now() - selectionStartedAt;
+      let selectionAuditPersisted = true;
+
+      component = 'SELECTION_AUDIT';
+      try {
+        await this.selectionAudit.record({
+          userId: input.operation.userId,
+          decisionReference:
+            realization.operationalMetadata?.aiJobId ??
+            realization.sanitizedPayloadReference,
+          decision: selectionDecision,
+          selectionLatencyMs,
+        });
+      } catch {
+        selectionAuditPersisted = false;
+        this.safeDiagnostic({
+          event: 'FAILED',
+          component: 'SELECTION_AUDIT',
+        });
+      }
 
       this.safeDiagnostic({
         event: 'COMPLETED',
@@ -142,6 +193,17 @@ export class NutritionConversationShadowPipelineService implements OnApplication
         candidateQuestions: comparison.metrics.candidateQuestions,
         candidateEmojis: comparison.metrics.candidateEmojis,
         fallback: realization.status === 'FALLBACK',
+        selectionLatencyMs,
+        selectionStatus: selectionDecision.selectionStatus,
+        selectedSource: selectionDecision.selectedSource,
+        selectionReason: selectionDecision.reason,
+        candidateAvailable: selectionDecision.candidateAvailable,
+        candidateValid: selectionDecision.candidateValid,
+        comparisonScore: selectionDecision.comparisonScore,
+        formatterVersion: selectionDecision.formatterVersion,
+        promptVersionId: selectionDecision.promptVersionId,
+        candidateJobId: selectionDecision.candidateJobId,
+        selectionAuditPersisted,
       });
     } catch {
       this.safeDiagnostic({ event: 'FAILED', component });

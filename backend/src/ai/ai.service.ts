@@ -29,9 +29,10 @@ export interface CreateAIJobInput {
 }
 
 export interface CreateStandaloneAIJobInput {
-  userId: string;
-  type: AIJobType;
-  promptName: string;
+  readonly userId: string;
+  readonly type: AIJobType;
+  readonly promptName: string;
+  readonly operationKey?: string;
 }
 
 interface RunTextJobInput {
@@ -201,6 +202,31 @@ export class AIService {
         },
       });
 
+      if (input.operationKey) {
+        const existingJob = await transaction.aIJob.findUnique({
+          where: {
+            operationKey: input.operationKey,
+          },
+          include: {
+            promptVersion: true,
+          },
+        });
+
+        if (existingJob) {
+          if (
+            existingJob.userId !== input.userId ||
+            existingJob.type !== input.type ||
+            existingJob.promptVersionId !== promptVersion.id
+          ) {
+            throw new ConflictException(
+              'Chave de operação de IA pertence a outro contexto',
+            );
+          }
+
+          return existingJob;
+        }
+      }
+
       const activeJob = await transaction.aIJob.findFirst({
         where: {
           userId: input.userId,
@@ -223,6 +249,7 @@ export class AIService {
           userId: input.userId,
           type: input.type,
           promptVersionId: promptVersion.id,
+          operationKey: input.operationKey,
         },
         include: {
           promptVersion: true,
@@ -267,6 +294,7 @@ export class AIService {
       aiJobId: string;
       jobType: AIJobType;
       response: OpenAIResponseResult;
+      result?: Prisma.InputJsonValue;
     },
   ) {
     const usage = await this.aiUsageService.recordInTransaction(transaction, {
@@ -290,6 +318,7 @@ export class AIService {
         completedAt: new Date(),
         leaseExpiresAt: null,
         error: null,
+        ...(input.result ? { result: input.result } : {}),
       },
     });
 

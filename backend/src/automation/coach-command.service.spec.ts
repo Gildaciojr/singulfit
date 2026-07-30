@@ -10,9 +10,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WorkoutGeneratorService } from '../workout/workout-generator.service';
 import { AUTOMATION_RULE_CODES } from './automation.constants';
 import { CoachCommandService } from './coach-command.service';
+import { CoachPlanningExecutionDispatcherService } from './coach-planning-execution-dispatcher.service';
+import { CoachPlanningExecutionService } from './coach-planning-execution.service';
+import { ConversationGoalShadowPipelineService } from './conversation-goal-shadow-pipeline.service';
 
 describe('CoachCommandService', () => {
-  function dietPlan(): Parameters<CoachCommandService['formatDiet']>[0] {
+  function dietPlan(): Parameters<
+    CoachPlanningExecutionDispatcherService['formatDiet']
+  >[0] {
     return {
       id: 'diet-id',
       userId: 'user-id',
@@ -54,10 +59,14 @@ describe('CoachCommandService', () => {
       aiJob: {
         usage: [],
       },
-    } as unknown as Parameters<CoachCommandService['formatDiet']>[0];
+    } as unknown as Parameters<
+      CoachPlanningExecutionDispatcherService['formatDiet']
+    >[0];
   }
 
-  function workoutPlan(): Parameters<CoachCommandService['formatWorkout']>[0] {
+  function workoutPlan(): Parameters<
+    CoachPlanningExecutionDispatcherService['formatWorkout']
+  >[0] {
     return {
       id: 'workout-id',
       userId: 'user-id',
@@ -88,7 +97,9 @@ describe('CoachCommandService', () => {
           ],
         },
       ],
-    } as unknown as Parameters<CoachCommandService['formatWorkout']>[0];
+    } as unknown as Parameters<
+      CoachPlanningExecutionDispatcherService['formatWorkout']
+    >[0];
   }
 
   function createSubject(options?: {
@@ -129,6 +140,7 @@ describe('CoachCommandService', () => {
           content: options?.content ?? 'quero uma dieta',
           timestamp: at,
           conversation: {
+            id: 'conversation-id',
             user: {
               onboardingCompleted: options?.onboardingCompleted ?? true,
             },
@@ -176,20 +188,33 @@ describe('CoachCommandService', () => {
         id: 'outbox-id',
       }),
     };
-    const service = new CoachCommandService(
-      prisma as unknown as PrismaService,
+    const conversationGoalShadow = {
+      execute: jest.fn(),
+    };
+    const planningDispatcher = new CoachPlanningExecutionDispatcherService(
       dietGenerator as unknown as DietGeneratorService,
       workoutGenerator as unknown as WorkoutGeneratorService,
+    );
+    const planningExecution = new CoachPlanningExecutionService(
+      planningDispatcher,
+    );
+    const service = new CoachCommandService(
+      prisma as unknown as PrismaService,
+      planningExecution,
       eventBus as unknown as EventBusService,
+      conversationGoalShadow as unknown as ConversationGoalShadowPipelineService,
     );
 
     return {
       service,
       prisma,
       transaction,
+      planningDispatcher,
+      planningExecution,
       dietGenerator,
       workoutGenerator,
       eventBus,
+      conversationGoalShadow,
     };
   }
 
@@ -242,6 +267,14 @@ describe('CoachCommandService', () => {
       }),
       subject.transaction,
     );
+    expect(subject.conversationGoalShadow.execute).toHaveBeenCalledWith({
+      userId: 'user-id',
+      messageId: 'message-id',
+      legacyIntent: 'DIET',
+      referenceTimestamp: '2026-06-10T12:00:00.000Z',
+      onboardingActive: false,
+      equivalentGenerationInProgress: false,
+    });
   });
 
   it('generates and schedules a workout command response', async () => {
@@ -316,6 +349,7 @@ describe('CoachCommandService', () => {
       }),
     );
     expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.conversationGoalShadow.execute).not.toHaveBeenCalled();
   });
 
   it('keeps idempotency by messageId for repeated events', async () => {
@@ -334,6 +368,7 @@ describe('CoachCommandService', () => {
     );
     expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
     expect(subject.prisma.coachMessage.create).not.toHaveBeenCalled();
+    expect(subject.conversationGoalShadow.execute).not.toHaveBeenCalled();
     expect(subject.transaction.scheduledMessage.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({
@@ -405,10 +440,10 @@ describe('CoachCommandService', () => {
   it('formats diet and workout plans for WhatsApp', () => {
     const subject = createSubject();
 
-    expect(subject.service.formatDiet(dietPlan())).toContain(
+    expect(subject.planningDispatcher.formatDiet(dietPlan())).toContain(
       'Refeições principais',
     );
-    expect(subject.service.formatWorkout(workoutPlan())).toContain(
+    expect(subject.planningDispatcher.formatWorkout(workoutPlan())).toContain(
       'Divisão semanal',
     );
   });

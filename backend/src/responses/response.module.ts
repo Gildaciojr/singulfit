@@ -22,6 +22,13 @@ import { NutritionConversationShadowPipelineService } from './nutrition-conversa
 import { NutritionConversationLegacyCandidateAdapter } from './nutrition-conversation-legacy-candidate.adapter';
 import { NutritionConversationComparator } from './nutrition-conversation-comparator';
 import { ConversationShadowDiagnosticsService } from './conversation-shadow-diagnostics.service';
+import { NutritionConversationEpisodicMemoryCaptureEngine } from './nutrition-conversation-episodic-memory-capture.engine';
+import { NutritionConversationEpisodicMemoryIntegrationService } from './nutrition-conversation-episodic-memory-integration.service';
+import { NutritionConversationEpisodicMemoryPersistenceService } from './nutrition-conversation-episodic-memory-persistence.service';
+import { NutritionConversationRealizationExecutorService } from './nutrition-conversation-realization-executor.service';
+import { ConversationSelectionConfigService } from './conversation-selection-config.service';
+import { NutritionConversationCandidateSelectorService } from './nutrition-conversation-candidate-selector.service';
+import { NutritionConversationCandidateSelectionAuditService } from './nutrition-conversation-candidate-selection-audit.service';
 
 @Module({
   imports: [
@@ -46,10 +53,17 @@ import { ConversationShadowDiagnosticsService } from './conversation-shadow-diag
     NutritionConversationAuthorizedFactsBuilder,
     SanitizedConversationPayloadBuilder,
     NutritionConversationLanguageRealizer,
+    NutritionConversationRealizationExecutorService,
+    ConversationSelectionConfigService,
+    NutritionConversationCandidateSelectorService,
+    NutritionConversationCandidateSelectionAuditService,
     NutritionConversationLegacyCandidateAdapter,
     NutritionConversationComparator,
     ConversationShadowDiagnosticsService,
     NutritionConversationShadowPipelineService,
+    NutritionConversationEpisodicMemoryCaptureEngine,
+    NutritionConversationEpisodicMemoryPersistenceService,
+    NutritionConversationEpisodicMemoryIntegrationService,
   ],
   exports: [ResponseBuilderService, NutritionResponseFormatter],
 })

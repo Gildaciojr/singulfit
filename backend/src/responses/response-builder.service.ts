@@ -23,6 +23,7 @@ import { RecommendationService } from '../recommendations/recommendation.service
 import { LongitudinalService } from '../longitudinal/longitudinal.service';
 import { AdaptiveIntelligenceSignals } from '../adaptive-intelligence/interfaces/adaptive-intelligence.interface';
 import { NutritionConversationShadowPipelineService } from './nutrition-conversation-shadow-pipeline.service';
+import { NutritionConversationEpisodicMemoryIntegrationService } from './nutrition-conversation-episodic-memory-integration.service';
 
 @Injectable()
 export class ResponseBuilderService {
@@ -37,6 +38,7 @@ export class ResponseBuilderService {
     private readonly recommendationService: RecommendationService,
     private readonly longitudinal: LongitudinalService,
     private readonly nutritionConversationShadowPipeline: NutritionConversationShadowPipelineService,
+    private readonly episodicMemoryIntegration: NutritionConversationEpisodicMemoryIntegrationService,
   ) {}
 
   async buildNutritionResponse(mealAnalysisId: string) {
@@ -71,7 +73,7 @@ export class ResponseBuilderService {
     );
     const adaptive = coach.adaptive;
 
-    return this.prisma.$transaction(async (transaction) => {
+    const result = await this.prisma.$transaction(async (transaction) => {
       const analysis = await transaction.mealAnalysis.findUnique({
         where: {
           id: mealAnalysisId,
@@ -132,6 +134,14 @@ export class ResponseBuilderService {
         nutritionRecommendations,
         adaptive,
       );
+      const conversationInput = {
+        analysis,
+        context,
+        recommendations,
+        coach,
+        behavior,
+        longitudinal,
+      };
       const content = this.nutritionFormatter.format(analysis, {
         context,
         recommendations,
@@ -186,20 +196,36 @@ export class ResponseBuilderService {
 
       await this.publishOutbound(transaction, outbound);
 
-      this.nutritionConversationShadowPipeline.execute({
-        conversation: {
-          analysis,
-          context,
-          recommendations,
-          coach,
-          behavior,
-          longitudinal,
+      return {
+        outbound,
+        operation: {
+          userId: analysis.meal.userId,
+          conversationId: analysis.meal.conversationId,
+          messageId: analysis.meal.messageId,
         },
+        conversationInput,
         legacyText: decision.finalContent,
-      });
-
-      return outbound;
+      };
     });
+
+    void this.episodicMemoryIntegration
+      .loadForContext(result.conversationInput)
+      .then((episodicMemory) => {
+        this.nutritionConversationShadowPipeline.execute({
+          operation: {
+            ...result.operation,
+          },
+          conversation: {
+            ...result.conversationInput,
+            episodicMemory,
+          },
+          legacyText: result.legacyText,
+        });
+      })
+      .catch(() => undefined);
+    this.episodicMemoryIntegration.captureAfterCommit(result.conversationInput);
+
+    return result.outbound;
   }
 
   async buildUsageLimitResponse(mealId: string, content: string) {

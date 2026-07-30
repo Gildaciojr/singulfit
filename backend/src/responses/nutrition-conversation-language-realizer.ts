@@ -3,6 +3,7 @@ import type {
   ConversationAIResponse,
   ConversationAIValue,
 } from '../ai/conversation-ai.contract';
+import type { OpenAIJsonSchema } from '../ai/interfaces/openai.interface';
 import { ConversationAIService } from '../ai/conversation-ai.service';
 import type {
   ConversationLanguageUnit,
@@ -22,6 +23,20 @@ import type {
   SanitizedConversationPayload,
 } from './sanitized-conversation-payload.contract';
 import { SanitizedConversationPayloadReferenceBuilder } from './sanitized-conversation-payload-reference.builder';
+import { NutritionConversationCoachStyleEngine } from './nutrition-conversation-coach-style.engine';
+import { NUTRITION_CONVERSATION_REALIZATION_PROMPT } from './nutrition-conversation-realization-prompt.definition';
+
+export interface NutritionConversationLanguageRealizerExecution {
+  readonly prompt: {
+    readonly model: 'TEXT';
+    readonly instructions: string;
+    readonly schema: OpenAIJsonSchema;
+  };
+  readonly operation?: {
+    readonly aiJobId: string;
+    readonly promptVersionId: string;
+  };
+}
 
 type FailureStatus = Exclude<
   LanguageRealizationStatus,
@@ -44,82 +59,38 @@ const OMISSION_REASONS = new Set<ConversationLanguageUnitOmissionReason>([
   'SAFETY_RESTRICTION',
   'REALIZATION_FAILURE',
 ]);
-
-const INSTRUCTIONS = `Você realiza linguagem nutricional para WhatsApp em português brasileiro.
-Produza somente unidades estruturadas no schema solicitado, nunca um texto final separado.
-Respeite rigorosamente a ordem, decisões, fatos, estilo, limites e apresentação do payload.
-Use apenas fatos vinculados a cada bloco. Declare todos os números, alimentos, memória e recomendação usados nos claims da unidade.
-Não invente, altere ou amplie fatos, números, alimentos, memórias ou recomendações.
-Não crie perguntas, ações, diagnósticos ou promessas não autorizadas.
-Use tom próximo, sereno, observador e pragmático, sem linguagem culpabilizante, relatório técnico ou markdown pesado.
-Realize disclaimer, pergunta, encerramento, listas e emojis somente quando autorizados.`;
-
-const OUTPUT_SCHEMA = Object.freeze({
-  name: 'nutrition_conversation_language_units',
-  description: 'Unidades linguísticas rastreáveis para composição local.',
-  schema: {
-    type: 'object',
-    properties: {
-      units: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            blockKey: { type: 'string' },
-            unitType: {
-              type: 'string',
-              enum: [...UNIT_TYPES],
-            },
-            decisionCodes: { type: 'array', items: { type: 'string' } },
-            factKeys: { type: 'array', items: { type: 'string' } },
-            text: { type: 'string' },
-            claims: {
-              type: 'object',
-              properties: {
-                numbers: { type: 'array', items: { type: 'number' } },
-                foods: { type: 'array', items: { type: 'string' } },
-                usesMemory: { type: 'boolean' },
-                usesRecommendation: { type: 'boolean' },
-              },
-              required: [
-                'numbers',
-                'foods',
-                'usesMemory',
-                'usesRecommendation',
-              ],
-              additionalProperties: false,
-            },
-          },
-          required: [
-            'blockKey',
-            'unitType',
-            'decisionCodes',
-            'factKeys',
-            'text',
-            'claims',
-          ],
-          additionalProperties: false,
-        },
-      },
-      omittedUnits: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            blockKey: { type: 'string' },
-            decisionCodes: { type: 'array', items: { type: 'string' } },
-            factKeys: { type: 'array', items: { type: 'string' } },
-            reason: { type: 'string', enum: [...OMISSION_REASONS] },
-          },
-          required: ['blockKey', 'decisionCodes', 'factKeys', 'reason'],
-          additionalProperties: false,
-        },
-      },
-    },
-    required: ['units', 'omittedUnits'],
-    additionalProperties: false,
-  },
-});
+const RECOGNITION_DECISIONS = new Set<SanitizedConversationDecision>([
+  'ACKNOWLEDGE_EFFORT',
+  'ACKNOWLEDGE_PROGRESS',
+  'ACKNOWLEDGE_RECOVERY',
+  'ACKNOWLEDGE_SMALL_WIN',
+  'ACKNOWLEDGE_CONSISTENCY',
+  'ACKNOWLEDGE_STRATEGY',
+  'ACKNOWLEDGE_DISCIPLINE',
+  'ACKNOWLEDGE_IMPROVEMENT',
+]);
+const EMOTIONAL_DECISIONS = new Set<SanitizedConversationDecision>([
+  'VALIDATE_FRUSTRATION',
+  'REINFORCE_CONFIDENCE',
+  'REDUCE_COGNITIVE_LOAD',
+  'NORMALIZE_SETBACK',
+  'SIMPLIFY_GUIDANCE',
+  'ENCOURAGE_CONTINUITY',
+  'ANSWER_CURIOSITY',
+]);
+const EPISODIC_MEMORY_DECISIONS = new Set<SanitizedConversationDecision>([
+  'FOLLOW_UP_EPISODE',
+  'CONTINUE_STRATEGY',
+  'CHECK_COMMITMENT',
+  'RECALL_SUCCESS',
+  'RECALL_SETBACK',
+  'RECALL_DIFFICULTY',
+  'RECALL_GOAL',
+]);
+const UNSAFE_EMOTIONAL_LANGUAGE = [
+  /\bvoc[eê] (?:est[aá]|parece) (?:triste|ansios[oa]|desmotivad[oa]|frustrad[oa]|sobrecarregad[oa]|satisfeit[oa]|confiante|resistente|curios[oa]|cansad[oa])\b/iu,
+  /\b(?:a culpa [ée] sua|voc[eê] falhou|se voc[eê] realmente quisesse|tenho pena|coitad[oa]|garanto que|prometo que)\b/iu,
+] as const;
 
 @Injectable()
 export class NutritionConversationLanguageRealizer {
@@ -127,39 +98,53 @@ export class NutritionConversationLanguageRealizer {
     new ConversationLanguageUnitValidationPolicy();
   private readonly referenceBuilder =
     new SanitizedConversationPayloadReferenceBuilder();
+  private readonly coachStyleEngine =
+    new NutritionConversationCoachStyleEngine();
 
   constructor(private readonly conversationAI: ConversationAIService) {}
 
   async realize(
     payload: SanitizedConversationPayload,
+    execution: NutritionConversationLanguageRealizerExecution = {
+      prompt: NUTRITION_CONVERSATION_REALIZATION_PROMPT,
+    },
   ): Promise<LanguageRealizationResult> {
     const reference = this.referenceBuilder.build(payload);
     const response = await this.conversationAI.execute({
-      model: 'TEXT',
-      instructions: INSTRUCTIONS,
-      schema: OUTPUT_SCHEMA,
+      model: execution.prompt.model,
+      instructions: execution.prompt.instructions,
+      schema: execution.prompt.schema,
       payload: payload as unknown as ConversationAIValue,
       maxOutputCharacters: payload.limits.maximumLength,
       timeout: REALIZER_TIMEOUT_MS,
     });
 
     if (response.status === 'FAILED') {
-      return this.fromInfrastructureFailure(reference, response);
+      return this.withOperationalMetadata(
+        this.fromInfrastructureFailure(reference, response),
+        response,
+        execution.operation,
+      );
     }
+
+    const finalize = (result: LanguageRealizationResult) =>
+      this.withOperationalMetadata(result, response, execution.operation);
 
     const parsed = this.parseOutput(response.structuredOutput);
     if (!parsed) {
-      return this.invalid(reference, 'INVALID_LANGUAGE_UNIT_SCHEMA');
+      return finalize(this.invalid(reference, 'INVALID_LANGUAGE_UNIT_SCHEMA'));
     }
     const validated = this.validationPolicy.validate(payload, parsed.units);
     if (!validated.valid) {
-      return this.invalid(
-        reference,
-        `UNIT_VALIDATION:${validated.violations.join(',')}`,
+      return finalize(
+        this.invalid(
+          reference,
+          `UNIT_VALIDATION:${validated.violations.join(',')}`,
+        ),
       );
     }
     if (!this.validateOmissions(payload, parsed.omittedUnits)) {
-      return this.invalid(reference, 'INVALID_OMITTED_UNITS');
+      return finalize(this.invalid(reference, 'INVALID_OMITTED_UNITS'));
     }
     if (
       !this.hasCompleteBlockCoverage(
@@ -168,7 +153,7 @@ export class NutritionConversationLanguageRealizer {
         parsed.omittedUnits,
       )
     ) {
-      return this.invalid(reference, 'INCOMPLETE_BLOCK_COVERAGE');
+      return finalize(this.invalid(reference, 'INCOMPLETE_BLOCK_COVERAGE'));
     }
     if (
       parsed.omittedUnits.some((omitted) =>
@@ -177,49 +162,110 @@ export class NutritionConversationLanguageRealizer {
         ),
       )
     ) {
-      return this.invalid(reference, 'REQUIRED_BLOCK_OMITTED');
+      return finalize(this.invalid(reference, 'REQUIRED_BLOCK_OMITTED'));
     }
     if (
       !this.validateUnitRoles(payload, validated.units, parsed.omittedUnits)
     ) {
-      return this.invalid(reference, 'INVALID_UNIT_ROLE');
+      return finalize(this.invalid(reference, 'INVALID_UNIT_ROLE'));
     }
     if (!this.validateTextClaims(validated.units)) {
-      return this.invalid(reference, 'UNDECLARED_TEXT_CLAIM');
+      return finalize(this.invalid(reference, 'UNDECLARED_TEXT_CLAIM'));
+    }
+    if (!this.validateRecognition(validated.units)) {
+      return finalize(this.invalid(reference, 'INVALID_RECOGNITION'));
+    }
+    if (!this.validateEmotionalIntelligence(validated.units)) {
+      return finalize(
+        this.invalid(reference, 'INVALID_EMOTIONAL_INTELLIGENCE'),
+      );
+    }
+    if (!this.validateEpisodicMemory(validated.units)) {
+      return finalize(this.invalid(reference, 'INVALID_EPISODIC_MEMORY'));
+    }
+    if (!this.validateDialogueProfile(payload, validated.units)) {
+      return finalize(this.invalid(reference, 'DIALOGUE_PROFILE_VIOLATION'));
     }
     if (!this.validateUnitLimits(payload, validated.units)) {
-      return this.invalid(reference, 'UNIT_LIMIT_EXCEEDED');
+      return finalize(this.invalid(reference, 'UNIT_LIMIT_EXCEEDED'));
     }
 
     const orderedUnits = this.orderUnits(payload, validated.units);
     const candidateText = this.composeCandidateText(payload, orderedUnits);
     const producedLength = Array.from(candidateText).length;
     const producedQuestionCount = this.count(candidateText, '?');
-    if (!candidateText.trim()) return this.empty(reference);
+    if (!candidateText.trim()) return finalize(this.empty(reference));
     if (producedLength > payload.limits.maximumLength) {
-      return this.invalid(reference, 'MAXIMUM_LENGTH_EXCEEDED');
+      return finalize(this.invalid(reference, 'MAXIMUM_LENGTH_EXCEEDED'));
     }
     if (producedQuestionCount > payload.limits.maximumQuestions) {
-      return this.invalid(reference, 'QUESTION_LIMIT_EXCEEDED');
+      return finalize(this.invalid(reference, 'QUESTION_LIMIT_EXCEEDED'));
     }
     if (!this.validatePresentation(payload, candidateText)) {
-      return this.invalid(reference, 'PRESENTATION_NOT_AUTHORIZED');
+      return finalize(this.invalid(reference, 'PRESENTATION_NOT_AUTHORIZED'));
     }
     if (this.emojiCount(candidateText) > payload.limits.maximumEmojiCount) {
-      return this.invalid(reference, 'EMOJI_LIMIT_EXCEEDED');
+      return finalize(this.invalid(reference, 'EMOJI_LIMIT_EXCEEDED'));
+    }
+    const humanization = this.coachStyleEngine.evaluate(
+      payload,
+      candidateText,
+      orderedUnits,
+    );
+    if (!humanization.valid) {
+      return finalize(
+        this.invalid(
+          reference,
+          `COACH_STYLE:${humanization.violations.join(',')}`,
+        ),
+      );
     }
 
     const status: 'COMPLETED' | 'PARTIALLY_COMPLETED' =
       parsed.omittedUnits.length > 0 ? 'PARTIALLY_COMPLETED' : 'COMPLETED';
-    return this.success(
-      reference,
-      status,
-      candidateText,
-      orderedUnits,
-      parsed.omittedUnits,
-      producedLength,
-      producedQuestionCount,
+    return finalize(
+      this.success(
+        reference,
+        status,
+        candidateText,
+        orderedUnits,
+        parsed.omittedUnits,
+        producedLength,
+        producedQuestionCount,
+      ),
     );
+  }
+
+  private withOperationalMetadata(
+    result: LanguageRealizationResult,
+    response: ConversationAIResponse,
+    operation:
+      | {
+          readonly aiJobId: string;
+          readonly promptVersionId: string;
+        }
+      | undefined,
+  ): LanguageRealizationResult {
+    if (!operation) return result;
+
+    return Object.freeze({
+      ...result,
+      operationalMetadata: Object.freeze({
+        aiJobId: operation.aiJobId,
+        promptVersionId: operation.promptVersionId,
+        providerResponseId: response.provider?.responseReference ?? null,
+        model: response.provider?.model ?? null,
+        usage: response.usage
+          ? Object.freeze({
+              inputTokens: response.usage.promptTokens,
+              outputTokens: response.usage.completionTokens,
+              totalTokens: response.usage.totalTokens,
+              estimatedCostUsd: null,
+            })
+          : null,
+        executionStatus: 'PROCESSING' as const,
+      }),
+    });
   }
 
   private parseOutput(value: unknown): {
@@ -422,6 +468,141 @@ export class NutritionConversationLanguageRealizer {
       const questionCount = this.count(unit.text, '?');
       if (unit.unitType === 'QUESTION') return questionCount === 1;
       return questionCount === 0;
+    });
+  }
+
+  private validateRecognition(
+    units: readonly ConversationLanguageUnit[],
+  ): boolean {
+    const genericPraise =
+      /^(?:parab[eé]ns|excelente|muito bem|continue assim)[!.\s]*$/iu;
+    return units.every((unit) => {
+      const recognition = unit.decisionCodes.some((decision) =>
+        RECOGNITION_DECISIONS.has(decision),
+      );
+      return (
+        !recognition ||
+        (unit.factKeys.some((fact) => fact.startsWith('recognition.')) &&
+          !genericPraise.test(unit.text.trim()))
+      );
+    });
+  }
+
+  private validateEmotionalIntelligence(
+    units: readonly ConversationLanguageUnit[],
+  ): boolean {
+    return units.every((unit) => {
+      if (
+        UNSAFE_EMOTIONAL_LANGUAGE.some((pattern) => pattern.test(unit.text))
+      ) {
+        return false;
+      }
+      const adaptsEmotionally = unit.decisionCodes.some((decision) =>
+        EMOTIONAL_DECISIONS.has(decision),
+      );
+      return (
+        !adaptsEmotionally ||
+        unit.factKeys.some((fact) => fact.startsWith('emotional.'))
+      );
+    });
+  }
+
+  private validateDialogueProfile(
+    payload: SanitizedConversationPayload,
+    units: readonly ConversationLanguageUnit[],
+  ): boolean {
+    const decisions = new Set(units.flatMap((unit) => unit.decisionCodes));
+    const facts = new Set(units.flatMap((unit) => unit.factKeys));
+    const actionCount = units.filter(
+      (unit) => unit.claims.usesRecommendation,
+    ).length;
+    const hasTechnicalHeading = units.some((unit) =>
+      /^(?:resumo nutricional|motivação|seu ritmo|evolução longitudinal|evidência nutricional|acompanhamento comportamental)\s*:/imu.test(
+        unit.text,
+      ),
+    );
+
+    if (
+      payload.structure.blocks.length > payload.limits.maximumBlocks ||
+      payload.structure.paragraphCount > payload.limits.maximumParagraphs ||
+      facts.size > payload.limits.maximumFacts ||
+      actionCount > payload.limits.maximumActions
+    ) {
+      return false;
+    }
+    if (
+      payload.policies.closingRequirement === 'REQUIRED' &&
+      !decisions.has('CLOSE_WITHOUT_QUESTION')
+    ) {
+      return false;
+    }
+    if (
+      payload.policies.closingRequirement === 'PROHIBITED' &&
+      decisions.has('CLOSE_WITHOUT_QUESTION')
+    ) {
+      return false;
+    }
+    if (
+      payload.structure.dialogueProfile !== 'DETAILED_ANALYSIS' &&
+      (hasTechnicalHeading || decisions.has('DETAIL_ANALYSIS'))
+    ) {
+      return false;
+    }
+    if (
+      payload.structure.dialogueProfile === 'CELEBRATE' &&
+      (decisions.has('PROVIDE_RECOMMENDATION') ||
+        decisions.has('CORRECT_LIMITING_FACTOR') ||
+        payload.structure.paragraphCount > 2)
+    ) {
+      return false;
+    }
+    if (
+      payload.structure.dialogueProfile === 'RECOVERY' &&
+      (decisions.has('DETAIL_ANALYSIS') || payload.structure.paragraphCount > 3)
+    ) {
+      return false;
+    }
+    if (
+      payload.structure.dialogueProfile === 'CLARIFY_BEFORE_ANALYSIS' &&
+      ([
+        'SHOW_CALORIES',
+        'SHOW_PROTEIN',
+        'SHOW_CARBOHYDRATES',
+        'SHOW_FAT',
+        'SHOW_QUALITY',
+        'PROVIDE_RECOMMENDATION',
+      ].some((decision) =>
+        decisions.has(decision as SanitizedConversationDecision),
+      ) ||
+        !decisions.has('ASK_QUESTION'))
+    ) {
+      return false;
+    }
+    if (
+      !decisions.has('PROVIDE_RECOMMENDATION') &&
+      units.some((unit) => unit.claims.usesRecommendation)
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  private validateEpisodicMemory(
+    units: readonly ConversationLanguageUnit[],
+  ): boolean {
+    return units.every((unit) => {
+      const episodicDecision = unit.decisionCodes.some((decision) =>
+        EPISODIC_MEMORY_DECISIONS.has(decision),
+      );
+      if (!episodicDecision) return true;
+      const episodicFact = unit.factKeys.some((fact) =>
+        fact.startsWith('episodicMemory.'),
+      );
+      const createsDate =
+        /\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b|\b\d{4}-\d{2}-\d{2}\b|\b(?:janeiro|fevereiro|março|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b/iu.test(
+          unit.text,
+        );
+      return episodicFact && unit.claims.usesMemory && !createsDate;
     });
   }
   private orderUnits(

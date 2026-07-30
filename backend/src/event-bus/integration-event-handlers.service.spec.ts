@@ -1,6 +1,12 @@
-import { MediaType, OutboxEvent, OutboxStatus } from '@prisma/client';
+import {
+  MediaType,
+  OutboxEvent,
+  OutboxStatus,
+  ResponseType,
+} from '@prisma/client';
 import { ActivationJourneyService } from '../activation/activation-journey.service';
 import { ActivationOnboardingService } from '../activation/activation-onboarding.service';
+import { ProfileAcquisitionInternalRolloutService } from '../context/profile-acquisition/profile-acquisition-internal-rollout.service';
 import { CoachCommandService } from '../automation/coach-command.service';
 import { AutomationService } from '../automation/automation.service';
 import { EvolutionSendService } from '../evolution/evolution-send.service';
@@ -14,6 +20,22 @@ import { EventHandlerRegistry } from './event-handler.registry';
 import { IntegrationEventHandlersService } from './integration-event-handlers.service';
 
 describe('IntegrationEventHandlersService', () => {
+  function acquisitionRollout() {
+    return {
+      captureActiveResponse: jest.fn().mockResolvedValue({
+        handled: false,
+        duplicated: false,
+        persisted: false,
+        reason: 'NO_ACTIVE_QUESTION',
+        cycleId: null,
+        field: null,
+      }),
+      authorizeQuestionSend: jest.fn().mockResolvedValue(true),
+      afterOutboundSent: jest.fn().mockResolvedValue(undefined),
+      afterCoachResponseSent: jest.fn().mockResolvedValue(undefined),
+    };
+  }
+
   function outboxEvent(eventType: string, payload: OutboxEvent['payload']) {
     const at = new Date('2026-06-17T12:00:00.000Z');
 
@@ -55,6 +77,7 @@ describe('IntegrationEventHandlersService', () => {
       {} as AutomationService,
       activationJourney as unknown as ActivationJourneyService,
       activationOnboarding as unknown as ActivationOnboardingService,
+      acquisitionRollout() as unknown as ProfileAcquisitionInternalRolloutService,
     );
 
     handlers.onModuleInit();
@@ -96,6 +119,7 @@ describe('IntegrationEventHandlersService', () => {
       {} as AutomationService,
       {} as ActivationJourneyService,
       activationOnboarding as unknown as ActivationOnboardingService,
+      acquisitionRollout() as unknown as ProfileAcquisitionInternalRolloutService,
     );
 
     handlers.onModuleInit();
@@ -139,6 +163,7 @@ describe('IntegrationEventHandlersService', () => {
       {} as AutomationService,
       {} as ActivationJourneyService,
       activationOnboarding as unknown as ActivationOnboardingService,
+      acquisitionRollout() as unknown as ProfileAcquisitionInternalRolloutService,
     );
 
     handlers.onModuleInit();
@@ -191,6 +216,7 @@ describe('IntegrationEventHandlersService', () => {
       {} as AutomationService,
       {} as ActivationJourneyService,
       activationOnboarding as unknown as ActivationOnboardingService,
+      acquisitionRollout() as unknown as ProfileAcquisitionInternalRolloutService,
     );
 
     handlers.onModuleInit();
@@ -210,6 +236,176 @@ describe('IntegrationEventHandlersService', () => {
     expect(coachCommand.processTextMessage).toHaveBeenCalledWith({
       userId: 'user-id',
       messageId: 'message-id',
+    });
+  });
+
+  it('lets an active internal acquisition cycle consume the expected next message', async () => {
+    const registry = new EventHandlerRegistry();
+    const activationOnboarding = {
+      processTextMessage: jest.fn(),
+    };
+    const coachCommand = {
+      processTextMessage: jest.fn(),
+    };
+    const acquisition = acquisitionRollout();
+    acquisition.captureActiveResponse.mockResolvedValue({
+      handled: true,
+      duplicated: false,
+      persisted: true,
+      reason: 'ANSWER_PERSISTED',
+      cycleId: 'cycle-id',
+      field: 'DESIRED_MEAL_COUNT',
+    });
+    const handlers = new IntegrationEventHandlersService(
+      registry,
+      {} as PagBankWebhookService,
+      {} as EvolutionWebhookService,
+      {} as NutritionService,
+      {} as NutritionVisionService,
+      {} as ResponseBuilderService,
+      {} as EvolutionSendService,
+      coachCommand as unknown as CoachCommandService,
+      {} as AutomationService,
+      {} as ActivationJourneyService,
+      activationOnboarding as unknown as ActivationOnboardingService,
+      acquisition as unknown as ProfileAcquisitionInternalRolloutService,
+    );
+    handlers.onModuleInit();
+    const handler = registry.get(INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED);
+    if (!handler) throw new Error('Handler de texto não registrado');
+
+    await handler(
+      outboxEvent(INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED, {
+        userId: 'admin-id',
+        messageId: 'answer-message-id',
+      }),
+    );
+
+    expect(activationOnboarding.processTextMessage).not.toHaveBeenCalled();
+    expect(coachCommand.processTextMessage).not.toHaveBeenCalled();
+  });
+
+  it('runs acquisition only after the official outbound completes sending', async () => {
+    const registry = new EventHandlerRegistry();
+    const evolutionSend = {
+      sendText: jest.fn().mockResolvedValue({ id: 'outbound-id' }),
+    };
+    const acquisition = acquisitionRollout();
+    const handlers = new IntegrationEventHandlersService(
+      registry,
+      {} as PagBankWebhookService,
+      {} as EvolutionWebhookService,
+      {} as NutritionService,
+      {} as NutritionVisionService,
+      {} as ResponseBuilderService,
+      evolutionSend as unknown as EvolutionSendService,
+      {} as CoachCommandService,
+      {} as AutomationService,
+      {} as ActivationJourneyService,
+      {} as ActivationOnboardingService,
+      acquisition as unknown as ProfileAcquisitionInternalRolloutService,
+    );
+    handlers.onModuleInit();
+    const handler = registry.get(INTERNAL_EVENT.OUTBOUND_MESSAGE_REQUESTED);
+    if (!handler) throw new Error('Handler outbound não registrado');
+
+    await handler(
+      outboxEvent(INTERNAL_EVENT.OUTBOUND_MESSAGE_REQUESTED, {
+        outboundMessageId: 'outbound-id',
+        responseType: ResponseType.NUTRITION_ANALYSIS,
+      }),
+    );
+
+    expect(evolutionSend.sendText).toHaveBeenCalledWith('outbound-id');
+    expect(acquisition.afterOutboundSent).toHaveBeenCalledWith('outbound-id');
+    expect(evolutionSend.sendText.mock.invocationCallOrder[0]).toBeLessThan(
+      acquisition.afterOutboundSent.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('blocks a queued acquisition question before Evolution when rollback is OFF', async () => {
+    const registry = new EventHandlerRegistry();
+    const evolutionSend = {
+      sendText: jest.fn(),
+    };
+    const acquisition = acquisitionRollout();
+    acquisition.authorizeQuestionSend.mockResolvedValue(false);
+    const handlers = new IntegrationEventHandlersService(
+      registry,
+      {} as PagBankWebhookService,
+      {} as EvolutionWebhookService,
+      {} as NutritionService,
+      {} as NutritionVisionService,
+      {} as ResponseBuilderService,
+      evolutionSend as unknown as EvolutionSendService,
+      {} as CoachCommandService,
+      {} as AutomationService,
+      {} as ActivationJourneyService,
+      {} as ActivationOnboardingService,
+      acquisition as unknown as ProfileAcquisitionInternalRolloutService,
+    );
+    handlers.onModuleInit();
+    const handler = registry.get(INTERNAL_EVENT.OUTBOUND_MESSAGE_REQUESTED);
+    if (!handler) throw new Error('Handler outbound não registrado');
+
+    await handler(
+      outboxEvent(INTERNAL_EVENT.OUTBOUND_MESSAGE_REQUESTED, {
+        outboundMessageId: 'question-outbound-id',
+        responseType: ResponseType.PROFILE_ACQUISITION,
+      }),
+    );
+
+    expect(acquisition.authorizeQuestionSend).toHaveBeenCalledWith(
+      'question-outbound-id',
+    );
+    expect(evolutionSend.sendText).not.toHaveBeenCalled();
+    expect(acquisition.afterOutboundSent).not.toHaveBeenCalled();
+  });
+
+  it('starts contextual workout acquisition only after the legacy coach message was sent', async () => {
+    const registry = new EventHandlerRegistry();
+    const scheduledFor = new Date('2026-06-17T12:00:01.000Z');
+    const automation = {
+      sendScheduledMessage: jest.fn().mockResolvedValue({
+        id: 'scheduled-id',
+        status: 'SENT',
+        scheduledFor,
+      }),
+    };
+    const acquisition = acquisitionRollout();
+    const handlers = new IntegrationEventHandlersService(
+      registry,
+      {} as PagBankWebhookService,
+      {} as EvolutionWebhookService,
+      {} as NutritionService,
+      {} as NutritionVisionService,
+      {} as ResponseBuilderService,
+      {} as EvolutionSendService,
+      {} as CoachCommandService,
+      automation as unknown as AutomationService,
+      {} as ActivationJourneyService,
+      {} as ActivationOnboardingService,
+      acquisition as unknown as ProfileAcquisitionInternalRolloutService,
+    );
+    handlers.onModuleInit();
+    const handler = registry.get(INTERNAL_EVENT.AUTOMATION_TRIGGERED);
+    if (!handler) throw new Error('Handler de automação não registrado');
+
+    await handler(
+      outboxEvent(INTERNAL_EVENT.AUTOMATION_TRIGGERED, {
+        scheduledMessageId: 'scheduled-id',
+        userId: 'admin-id',
+        source: 'WHATSAPP_COACH_COMMAND',
+        sourceMessageId: 'workout-request-id',
+        intent: 'WORKOUT',
+      }),
+    );
+
+    expect(acquisition.afterCoachResponseSent).toHaveBeenCalledWith({
+      userId: 'admin-id',
+      sourceMessageId: 'workout-request-id',
+      intent: 'WORKOUT',
+      sentAt: scheduledFor,
     });
   });
 
@@ -235,6 +431,7 @@ describe('IntegrationEventHandlersService', () => {
       automation as unknown as AutomationService,
       {} as ActivationJourneyService,
       activationOnboarding as unknown as ActivationOnboardingService,
+      acquisitionRollout() as unknown as ProfileAcquisitionInternalRolloutService,
     );
 
     handlers.onModuleInit();

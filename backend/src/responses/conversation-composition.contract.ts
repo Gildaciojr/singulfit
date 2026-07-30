@@ -73,10 +73,67 @@ export type ConversationRhythm =
   | 'PROGRESSIVE'
   | 'DELIBERATIVE';
 
+export type ConversationCentralIntent =
+  | 'RECOGNIZE'
+  | 'ADJUST'
+  | 'CLARIFY'
+  | 'TEACH'
+  | 'RECOVER'
+  | 'CELEBRATE'
+  | 'FOLLOW_UP'
+  | 'REASSURE'
+  | 'ANALYZE';
+
+export type ConversationDialogueProfile =
+  | 'ACKNOWLEDGE_ONLY'
+  | 'ACKNOWLEDGE_AND_ADJUST'
+  | 'REFLECT_AND_ASK'
+  | 'TEACH_BRIEFLY'
+  | 'RECOVERY'
+  | 'CELEBRATE'
+  | 'DETAILED_ANALYSIS'
+  | 'CLARIFY_BEFORE_ANALYSIS'
+  | 'REASSURE_AND_SIMPLIFY'
+  | 'CONTINUITY_CHECK';
+
+export type ConversationClosingRequirement =
+  | 'REQUIRED'
+  | 'OPTIONAL'
+  | 'PROHIBITED';
+
+export interface ConversationProfileBudgets {
+  readonly maximumPerceptibleDecisions: number;
+  readonly maximumFactCount: number;
+  readonly maximumBlockCount: number;
+  readonly maximumParagraphCount: number;
+  readonly maximumQuestions: number;
+  readonly maximumActions: number;
+  readonly maximumEmojiCount: number;
+  readonly maximumLength: number;
+}
+
+export interface ConversationDialogueProfileDefinition {
+  readonly profile: ConversationDialogueProfile;
+  readonly centralIntent: ConversationCentralIntent;
+  readonly allowedBlocks: readonly ConversationBlockType[];
+  readonly prohibitedBlocks: readonly ConversationBlockType[];
+  readonly depth: ConversationDepth;
+  readonly density: ConversationDensity;
+  readonly rhythm: ConversationRhythm;
+  readonly budgets: ConversationProfileBudgets;
+  readonly emojiAllowed: boolean;
+  readonly closingRequirement: ConversationClosingRequirement;
+  readonly eligibilityCodes: readonly string[];
+}
+
 export interface CompositionPlan {
   readonly id: string;
   readonly decisionPlanId: string;
   readonly blocks: readonly ConversationBlock[];
+  readonly dialogueProfile: ConversationDialogueProfile;
+  readonly centralIntent: ConversationCentralIntent;
+  readonly profileBudgets: ConversationProfileBudgets;
+  readonly closingRequirement: ConversationClosingRequirement;
   readonly depth: ConversationDepth;
   readonly density: ConversationDensity;
   readonly rhythm: ConversationRhythm;

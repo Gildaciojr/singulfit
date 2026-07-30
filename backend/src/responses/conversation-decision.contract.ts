@@ -1,4 +1,8 @@
 import type { AuthorizedFactId } from './conversation-authorized-facts.contract';
+import type {
+  ConversationCentralIntent,
+  ConversationDialogueProfile,
+} from './conversation-composition.contract';
 
 export type ConversationDecisionId = string;
 export type ConversationDecisionCode = string;
@@ -58,7 +62,9 @@ export type DecisionSuppressionReason =
   | 'BUDGET_EXCEEDED'
   | 'MISSING_DEPENDENCY'
   | 'INSUFFICIENT_CONFIDENCE'
-  | 'CONTEXT_MISMATCH';
+  | 'CONTEXT_MISMATCH'
+  | 'PROFILE_MISMATCH'
+  | 'PROFILE_BUDGET';
 
 export interface SuppressedDecision {
   readonly candidateId: ConversationDecisionId;
@@ -71,6 +77,8 @@ export interface SuppressedDecision {
 export interface DecisionPlan {
   readonly id: string;
   readonly primaryDecisionId: ConversationDecisionId;
+  readonly dialogueProfile: ConversationDialogueProfile;
+  readonly centralIntent: ConversationCentralIntent;
   readonly selectedDecisions: readonly SelectedDecision[];
   readonly suppressedDecisions: readonly SuppressedDecision[];
   readonly mandatoryDecisionIds: readonly ConversationDecisionId[];
