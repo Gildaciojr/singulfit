@@ -16,6 +16,7 @@ import type {
 import { NutritionConversationRealizationExecutorService } from './nutrition-conversation-realization-executor.service';
 import { NUTRITION_CONVERSATION_REALIZATION_PROMPT } from './nutrition-conversation-realization-prompt.definition';
 import type { SanitizedConversationPayload } from './sanitized-conversation-payload.contract';
+import type { ConversationReasoningEvidence } from './reasoning-bridge/conversation-reasoning-bridge.contract';
 
 const payload = Object.freeze({
   facts: Object.freeze({
@@ -56,6 +57,32 @@ const input = Object.freeze({
   conversationId: 'conversation-id',
   messageId: 'message-id',
   payload,
+});
+
+const reasoningEvidence: ConversationReasoningEvidence = Object.freeze({
+  summary: Object.freeze({
+    goal: 'criar um plano alimentar',
+    decision: 'apoiar recuperação',
+    expectedBenefit: 'favorecer continuidade',
+  }),
+  priorities: Object.freeze([]),
+  strategies: Object.freeze([]),
+  restrictions: Object.freeze([]),
+  tradeoffs: Object.freeze([]),
+  explanations: Object.freeze([]),
+  teachingOpportunities: Object.freeze([]),
+  suggestedQuestions: Object.freeze([]),
+  safety: Object.freeze({
+    requiresCaution: false,
+    professionalGuidanceRecommended: false,
+    guidance: Object.freeze([]),
+  }),
+  longitudinal: Object.freeze({
+    continuity: null,
+    progress: null,
+    adherence: null,
+    repetitionRisk: false,
+  }),
 });
 
 function job(
@@ -182,7 +209,10 @@ function subject() {
   };
   const failUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
   const prisma = {
-    $transaction: jest.fn((callback) => callback(transaction)),
+    $transaction: jest.fn(
+      <Result>(callback: (client: typeof transaction) => Result): Result =>
+        callback(transaction),
+    ),
     aIJob: { updateMany: failUpdateMany },
   };
   const usage = {
@@ -328,6 +358,34 @@ describe('NutritionConversationRealizationExecutorService', () => {
       nextVersion.create.mock.calls[0][0].data.operationKey;
     expect(firstKey).toBe(secondKey);
     expect(nextVersionKey).not.toBe(firstKey);
+  });
+
+  it('includes semantic reasoning in realization and idempotency only when supplied', async () => {
+    const legacy = subject();
+    const enriched = subject();
+
+    await legacy.service.execute(input);
+    await enriched.service.execute({ ...input, reasoningEvidence });
+
+    const legacyKey = legacy.create.mock.calls[0][0].data.operationKey;
+    const enrichedKey = enriched.create.mock.calls[0][0].data.operationKey;
+    expect(enrichedKey).not.toBe(legacyKey);
+    expect(enriched.realize).toHaveBeenCalledWith(
+      payload,
+      expect.objectContaining({
+        operation: {
+          aiJobId: 'conversation-job-id',
+          promptVersionId: enriched.promptVersion.id,
+        },
+      }),
+      reasoningEvidence,
+    );
+    expect(legacy.realize).toHaveBeenCalledWith(
+      payload,
+      expect.objectContaining({
+        operation: expect.objectContaining({}),
+      }),
+    );
   });
 
   it('claims an existing PENDING job before executing it', async () => {

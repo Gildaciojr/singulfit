@@ -35,6 +35,13 @@ describe('NutritionKnowledgeResolverService', () => {
     readonly medicalConditions?: readonly string[];
     readonly ageYears?: number;
     readonly adherenceScore?: number;
+    readonly desiredOutcome?: string;
+    readonly experienceLevel?: string;
+    readonly sessionDurationMinutes?: number;
+    readonly intensityPreference?: string;
+    readonly activityLevel?: ActivityLevel;
+    readonly trainingTime?: string;
+    readonly mealTimes?: readonly string[];
   }
 
   const resolver = new NutritionKnowledgeResolverService();
@@ -92,11 +99,11 @@ describe('NutritionKnowledgeResolverService', () => {
         heightCm: known(165),
         currentWeightKg: known(70),
         targetWeightKg: known(64),
-        activityLevel: known(ActivityLevel.MODERATE),
+        activityLevel: known(options.activityLevel ?? ActivityLevel.MODERATE),
       }),
       nutrition: Object.freeze({
         primaryGoal: known(options.goal ?? FitnessGoal.MAINTENANCE),
-        desiredOutcome: known('Rotina sustentável'),
+        desiredOutcome: known(options.desiredOutcome ?? 'Rotina sustentável'),
         desiredMealCount: known(3),
         dietaryPattern: known(options.dietaryPattern ?? 'OMNIVORE'),
         foodIntolerances: known(
@@ -117,24 +124,33 @@ describe('NutritionKnowledgeResolverService', () => {
       }),
       training: Object.freeze({
         primaryGoal: known(options.goal ?? FitnessGoal.MAINTENANCE),
-        experienceLevel: unknown<string>(),
+        experienceLevel: options.experienceLevel
+          ? known(options.experienceLevel)
+          : unknown<string>(),
         preferredModality: options.modality
           ? known(options.modality)
           : unknown<string>(),
         weeklyFrequency: unknown<number>(),
-        sessionDurationMinutes: unknown<number>(),
+        sessionDurationMinutes:
+          options.sessionDurationMinutes === undefined
+            ? unknown<number>()
+            : known(options.sessionDurationMinutes),
         environment: unknown<string>(),
         availableEquipment: unknown<readonly string[]>(),
         perceivedConditioning: unknown<string>(),
-        intensityPreference: unknown<string>(),
+        intensityPreference: options.intensityPreference
+          ? known(options.intensityPreference)
+          : unknown<string>(),
         cardioAvailability: unknown<boolean>(),
         trainingFormatPreference: unknown<string>(),
       }),
       routine: Object.freeze({
         wakeUpTime: known('07:00'),
         sleepTime: known('23:00'),
-        trainingTime: known('18:30'),
-        mealTimes: known(Object.freeze(['08:00', '13:00', '20:00'])),
+        trainingTime: known(options.trainingTime ?? '18:30'),
+        mealTimes: known(
+          Object.freeze(options.mealTimes ?? ['08:00', '13:00', '20:00']),
+        ),
         availableTrainingDays: unknown<readonly string[]>(),
         dailyTrainingWindows: unknown<readonly string[]>(),
       }),
@@ -309,6 +325,178 @@ describe('NutritionKnowledgeResolverService', () => {
     expectPackages({ adherenceScore: 72 }, [P.BEHAVIOR_ADHERENCE]);
   });
 
+  it.each([
+    ['recomposição corporal', P.BODY_RECOMPOSITION],
+    ['cutting preservando massa', P.MUSCLE_PRESERVING_CUT],
+    ['bulking controlado', P.CONTROLLED_BULKING],
+  ] as const)(
+    'resolve o resultado corporal estruturado %s',
+    (desiredOutcome, packageId) => {
+      expectPackages({ desiredOutcome }, [packageId]);
+    },
+  );
+
+  it.each([
+    ['musculação', P.STRENGTH_NUTRITION],
+    ['treinamento funcional', P.FUNCTIONAL_TRAINING_NUTRITION],
+    ['HIIT', P.HIIT_NUTRITION],
+    ['endurance', P.ENDURANCE_NUTRITION],
+    ['treino híbrido', P.HYBRID_TRAINING_NUTRITION],
+  ] as const)('resolve a expansão esportiva %s', (modality, packageId) => {
+    expectPackages({ modality }, [
+      packageId,
+      P.SPORTS_NUTRITION_FOUNDATION,
+      P.TRAINING_DAY_CARBOHYDRATE_SUPPORT,
+    ]);
+  });
+
+  it.each([
+    ['iniciante', P.BEGINNER_NUTRITION_GUIDANCE],
+    ['intermediário', P.INTERMEDIATE_NUTRITION_GUIDANCE],
+    ['avançado', P.ADVANCED_NUTRITION_GUIDANCE],
+  ] as const)(
+    'modula conhecimento pela experiência %s',
+    (experienceLevel, packageId) => {
+      const result = resolver.resolve(snapshot({ experienceLevel }));
+      expect(result.packageIds).toContain(packageId);
+      expect(
+        result.packageIds.filter((id) =>
+          [
+            P.BEGINNER_NUTRITION_GUIDANCE,
+            P.INTERMEDIATE_NUTRITION_GUIDANCE,
+            P.ADVANCED_NUTRITION_GUIDANCE,
+          ].includes(id as typeof P.BEGINNER_NUTRITION_GUIDANCE),
+        ),
+      ).toHaveLength(1);
+    },
+  );
+
+  it('ativa timing pré e pós treino a partir dos horários estruturados', () => {
+    expectPackages({}, [
+      P.PRE_WORKOUT_NUTRITION,
+      P.POST_WORKOUT_RECOVERY,
+      P.PROTEIN_DISTRIBUTION_EDUCATION,
+    ]);
+  });
+
+  it('só ativa intra-treino e cautela com eletrólitos quando duração e modalidade sustentam', () => {
+    const longSession = resolver.resolve(
+      snapshot({ modality: 'endurance', sessionDurationMinutes: 90 }),
+    );
+    const shortSession = resolver.resolve(
+      snapshot({ modality: 'endurance', sessionDurationMinutes: 45 }),
+    );
+
+    expect(longSession.packageIds).toEqual(
+      expect.arrayContaining([
+        P.INTRA_WORKOUT_NUTRITION,
+        P.ELECTROLYTE_CAUTION,
+      ]),
+    );
+    expect(shortSession.packageIds).not.toContain(P.INTRA_WORKOUT_NUTRITION);
+    expect(shortSession.packageIds).not.toContain(P.ELECTROLYTE_CAUTION);
+  });
+
+  it('resolve hidratação insuficiente, baixa aderência e alta aderência sem sobreposição', () => {
+    expectPackages({ hydration: 'insuficiente' }, [P.HYDRATION_INSUFFICIENCY]);
+    expectPackages({ adherenceScore: 42 }, [P.LOW_ADHERENCE_SUPPORT]);
+    const high = resolver.resolve(snapshot({ adherenceScore: 91 }));
+    expect(high.packageIds).toContain(P.HIGH_ADHERENCE_AUTONOMY);
+    expect(high.packageIds).not.toContain(P.LOW_ADHERENCE_SUPPORT);
+  });
+
+  it('resolve múltiplas restrições e preserva todas como safety', () => {
+    const result = resolver.resolve(
+      snapshot({ constraints: ['lactose', 'glúten', 'soja'] }),
+    );
+    expect(result.packageIds).toEqual(
+      expect.arrayContaining([
+        P.MULTIPLE_FOOD_CONSTRAINTS,
+        P.FOOD_RESTRICTION_SAFETY,
+        P.FOOD_SUBSTITUTION,
+      ]),
+    );
+    expect(result.safetyRestricted).toBe(false);
+  });
+
+  it.each([
+    [['Diabetes tipo 2'], P.DIABETES_SAFETY],
+    [['Hipertensão'], P.HYPERTENSION_SAFETY],
+    [['Doença renal crônica'], P.RENAL_CONDITION_SAFETY],
+    [['Doença hepática'], P.HEPATIC_CONDITION_SAFETY],
+    [['Obesidade grave'], P.SEVERE_OBESITY_SAFETY],
+    [['Gestação'], P.PREGNANCY_SAFETY],
+  ] as const)(
+    'aplica boundary específico para %s',
+    (medicalConditions, packageId) => {
+      const result = resolver.resolve(snapshot({ medicalConditions }));
+      expect(result.packageIds).toContain(packageId);
+      expect(result.packageIds).toContain(P.CLINICAL_SAFETY_BOUNDARY);
+      expect(result.safetyRestricted).toBe(true);
+    },
+  );
+
+  it.each([
+    [16, P.ADOLESCENT_SAFETY],
+    [70, P.OLDER_ADULT_SAFETY],
+  ] as const)(
+    'aplica boundary de fase de vida para idade %s',
+    (ageYears, packageId) => {
+      const result = resolver.resolve(snapshot({ ageYears }));
+      expect(result.packageIds).toEqual(
+        expect.arrayContaining([packageId, P.SPECIAL_POPULATION_BOUNDARY]),
+      );
+      expect(result.safetyRestricted).toBe(true);
+    },
+  );
+
+  it('não inventa contextos ausentes do Snapshot', () => {
+    const result = resolver.resolve(snapshot());
+    expect(result.packageIds).not.toEqual(
+      expect.arrayContaining([
+        P.PREGNANCY_SAFETY,
+        P.DIABETES_SAFETY,
+        P.HYPERTENSION_SAFETY,
+        P.RENAL_CONDITION_SAFETY,
+        P.HEPATIC_CONDITION_SAFETY,
+        P.SEVERE_OBESITY_SAFETY,
+      ]),
+    );
+  });
+
+  it('resolve conflito corporal de forma determinística sem selecionar packages incompatíveis', () => {
+    const result = resolver.resolve(
+      snapshot({ desiredOutcome: 'recomposição corporal e cutting' }),
+    );
+    expect(
+      result.packageIds.filter((id) =>
+        [
+          P.BODY_RECOMPOSITION,
+          P.MUSCLE_PRESERVING_CUT,
+          P.CONTROLLED_BULKING,
+        ].includes(id as typeof P.BODY_RECOMPOSITION),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('mantém resolução determinística abaixo de 5 ms por Snapshot', () => {
+    const input = snapshot({
+      desiredOutcome: 'recomposição corporal',
+      modality: 'treino híbrido',
+      experienceLevel: 'avançado',
+      sessionDurationMinutes: 90,
+      constraints: ['lactose', 'glúten'],
+      adherenceScore: 48,
+    });
+    const iterations = 1_000;
+    const startedAt = performance.now();
+    for (let index = 0; index < iterations; index += 1) {
+      resolver.resolve(input);
+    }
+    const averageMilliseconds = (performance.now() - startedAt) / iterations;
+    expect(averageMilliseconds).toBeLessThan(5);
+  });
+
   it('é determinístico, não modifica o Snapshot e congela profundamente o resultado', () => {
     const input = snapshot({
       goal: FitnessGoal.WEIGHT_LOSS,
@@ -353,10 +541,42 @@ describe('NutritionKnowledgeResolverService', () => {
       expect(knowledgePackage.dependencyPackageIds).not.toContain(
         knowledgePackage.id,
       );
+      for (const conflictId of knowledgePackage.conflictingPackageIds) {
+        expect(
+          NUTRITION_KNOWLEDGE_PACKAGES.find((item) => item.id === conflictId)
+            ?.conflictingPackageIds,
+        ).toContain(knowledgePackage.id);
+      }
       expectDeeplyFrozen(knowledgePackage);
     }
+    expectDependencyGraphToBeAcyclic();
   });
 });
+
+function expectDependencyGraphToBeAcyclic(): void {
+  const packageById = new Map(
+    NUTRITION_KNOWLEDGE_PACKAGES.map((knowledgePackage) => [
+      knowledgePackage.id,
+      knowledgePackage,
+    ]),
+  );
+  const visited = new Set<NutritionKnowledgePackageId>();
+  const visiting = new Set<NutritionKnowledgePackageId>();
+
+  function visit(packageId: NutritionKnowledgePackageId): void {
+    expect(visiting.has(packageId)).toBe(false);
+    if (visited.has(packageId)) return;
+    visiting.add(packageId);
+    for (const dependencyId of packageById.get(packageId)
+      ?.dependencyPackageIds ?? []) {
+      visit(dependencyId);
+    }
+    visiting.delete(packageId);
+    visited.add(packageId);
+  }
+
+  for (const packageId of packageById.keys()) visit(packageId);
+}
 
 function expectDeeplyFrozen(value: unknown): void {
   if (typeof value !== 'object' || value === null) return;

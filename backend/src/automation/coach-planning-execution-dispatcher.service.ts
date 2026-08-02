@@ -6,6 +6,10 @@ import {
 import { DietGeneratorService } from '../diet/diet-generator.service';
 import { WorkoutGeneratorService } from '../workout/workout-generator.service';
 import type { CoachCommandIntent } from './coach-command.service';
+import type {
+  CoachPlanningDispatchResult,
+  CoachPlanningExecutor,
+} from './coach-planning-execution.contract';
 
 type GeneratedDietPlan = Awaited<ReturnType<DietGeneratorService['generate']>>;
 type GeneratedWorkoutPlan = Awaited<
@@ -26,6 +30,12 @@ export class CoachPlanningExecutionDispatcherService {
   ) {}
 
   async dispatch(input: CoachPlanningExecutionDispatchInput): Promise<string> {
+    return (await this.dispatchStructured(input)).content;
+  }
+
+  async dispatchStructured(
+    input: CoachPlanningExecutionDispatchInput,
+  ): Promise<CoachPlanningDispatchResult> {
     if (!input.decision) {
       return this.executeLegacyIntent(input.userId, input.legacyIntent);
     }
@@ -114,7 +124,7 @@ export class CoachPlanningExecutionDispatcherService {
   private async executeLegacyIntent(
     userId: string,
     intent: CoachCommandIntent,
-  ): Promise<string> {
+  ): Promise<CoachPlanningDispatchResult> {
     switch (intent) {
       case 'DIET':
         return this.generateDiet(userId);
@@ -123,37 +133,75 @@ export class CoachPlanningExecutionDispatcherService {
       case 'BOTH':
         return this.generateCombined(userId);
       case 'UNKNOWN':
-        return this.unknownIntentMessage();
+        return this.result(
+          this.unknownIntentMessage(),
+          'UNKNOWN_LEGACY',
+          false,
+        );
     }
 
     return this.executeUnsupportedIntent(intent);
   }
 
-  private async generateDiet(userId: string): Promise<string> {
-    return this.formatDiet(await this.dietGenerator.generate(userId));
+  private async generateDiet(
+    userId: string,
+  ): Promise<CoachPlanningDispatchResult> {
+    return this.result(
+      this.formatDiet(await this.dietGenerator.generate(userId)),
+      'DIET_LEGACY',
+      true,
+    );
   }
 
-  private async generateWorkout(userId: string): Promise<string> {
-    return this.formatWorkout(await this.workoutGenerator.generate(userId));
+  private async generateWorkout(
+    userId: string,
+  ): Promise<CoachPlanningDispatchResult> {
+    return this.result(
+      this.formatWorkout(await this.workoutGenerator.generate(userId)),
+      'WORKOUT_LEGACY',
+      true,
+    );
   }
 
-  private async generateCombined(userId: string): Promise<string> {
+  private async generateCombined(
+    userId: string,
+  ): Promise<CoachPlanningDispatchResult> {
     const diet = await this.dietGenerator.generate(userId);
     const workout = await this.workoutGenerator.generate(userId);
 
-    return `${this.formatDiet(diet)}\n\n${this.formatWorkout(workout)}`;
+    return this.result(
+      `${this.formatDiet(diet)}\n\n${this.formatWorkout(workout)}`,
+      'COMBINED_LEGACY',
+      true,
+    );
   }
 
   private executeUnsupportedGoal(
     _goal: never,
     userId: string,
     legacyIntent: CoachCommandIntent,
-  ): Promise<string> {
+  ): Promise<CoachPlanningDispatchResult> {
     return this.executeLegacyIntent(userId, legacyIntent);
   }
 
-  private executeUnsupportedIntent(_intent: never): string {
-    return this.unknownIntentMessage();
+  private executeUnsupportedIntent(
+    _intent: never,
+  ): CoachPlanningDispatchResult {
+    void _intent;
+    return this.result(this.unknownIntentMessage(), 'UNKNOWN_LEGACY', false);
+  }
+
+  private result(
+    content: string,
+    executor: CoachPlanningExecutor,
+    generationCompleted: boolean,
+  ): CoachPlanningDispatchResult {
+    return Object.freeze({
+      content,
+      executor,
+      generationCompleted,
+      fallbackApplied: false,
+    });
   }
 
   private unknownIntentMessage(): string {

@@ -141,9 +141,14 @@ describe('Nutrition V2 internal pilot integration', () => {
       publicFormatter,
     );
     const dispatcher = {
-      dispatch: jest.fn(() => {
+      dispatchStructured: jest.fn(() => {
         order.push('legacy');
-        return Promise.resolve('resposta legada');
+        return Promise.resolve({
+          content: 'resposta legada',
+          executor: 'DIET_LEGACY',
+          generationCompleted: true,
+          fallbackApplied: false,
+        });
       }),
     };
     const shadowRuntime = { execute: jest.fn() };

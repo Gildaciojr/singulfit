@@ -1,15 +1,14 @@
 import type { ConversationLanguageUnit } from './conversation-language-unit.contract';
 import type { CompositionPlan } from './conversation-composition.contract';
 import type {
-  NutritionConversationCoachLexicalVariant,
   NutritionConversationCoachPersonality,
   NutritionConversationCoachStyle,
-  NutritionConversationCoachToneStrategy,
   NutritionConversationHumanizationEvaluation,
   NutritionConversationHumanizationMetrics,
   NutritionConversationHumanizationViolation,
 } from './nutrition-conversation-coach-style.contract';
 import type { NutritionConversationContext } from './nutrition-conversation-context.interface';
+import { NutritionConversationStylePlanner } from './nutrition-conversation-style-planner';
 import type {
   SanitizedConversationDecision,
   SanitizedConversationPayload,
@@ -79,129 +78,30 @@ const MOTIVATION_DECISIONS = new Set<SanitizedConversationDecision>([
 ]);
 
 export class NutritionConversationCoachStyleEngine {
+  private readonly stylePlanner = new NutritionConversationStylePlanner();
+
   resolve(
     context: NutritionConversationContext,
     composition: CompositionPlan,
     selectedDecisions: readonly SanitizedConversationDecision[],
   ): NutritionConversationCoachStyle {
-    const recognition = new Set<string>(
-      (context.recognition?.signals ?? []).map((signal) => signal.kind),
+    const plan = this.stylePlanner.plan(
+      context,
+      composition,
+      selectedDecisions,
     );
-    const emotional = new Set<string>(
-      (context.emotional?.signals ?? []).map((signal) => signal.kind),
-    );
-    const episodes = context.episodicMemory?.episodes ?? [];
-    const victory =
-      composition.centralIntent === 'CELEBRATE' ||
-      ['BIG_WIN', 'SMALL_WIN', 'IMPROVEMENT', 'RECOVERY'].some((kind) =>
-        recognition.has(kind),
-      );
-    const plateau = recognition.has('PLATEAU');
-    const recovery =
-      composition.centralIntent === 'RECOVER' ||
-      ['SETBACK', 'RECURRENCE', 'BAD_STRATEGY'].some((kind) =>
-        recognition.has(kind),
-      );
-    const emotionallySensitive = ['FRUSTRATION', 'OVERWHELM', 'FATIGUE'].some(
-      (kind) => emotional.has(kind),
-    );
-    const correction = selectedDecisions.some((decision) =>
-      ['PROVIDE_RECOMMENDATION', 'CORRECT_LIMITING_FACTOR'].includes(decision),
-    );
-    const toneStrategy: NutritionConversationCoachToneStrategy = plateau
-      ? 'PLATEAU_REASSURANCE'
-      : recovery
-        ? 'CALM_RECOVERY'
-        : victory
-          ? recognition.has('BIG_WIN') || recognition.has('IMPROVEMENT')
-            ? 'PROGRESS_REINFORCEMENT'
-            : 'DISCREET_CELEBRATION'
-          : composition.centralIntent === 'TEACH'
-            ? 'CURIOUS_EXPLANATION'
-            : correction
-              ? 'SUPPORTIVE_CORRECTION'
-              : 'CALM_OBJECTIVE';
-    const openingStrategy =
-      episodes.length > 0 || composition.centralIntent === 'FOLLOW_UP'
-        ? ('CONTINUITY' as const)
-        : emotionallySensitive || recovery
-          ? ('VALIDATING' as const)
-          : victory
-            ? ('CELEBRATORY' as const)
-            : context.dialogue?.specificQuestion ||
-                composition.depth === 'MINIMAL'
-              ? ('DIRECT' as const)
-              : ('CONTEXTUAL' as const);
-    const closingStrategy =
-      composition.closingRequirement === 'PROHIBITED'
-        ? ('NONE' as const)
-        : composition.centralIntent === 'FOLLOW_UP'
-          ? ('REFLECTIVE' as const)
-          : recovery || emotionallySensitive
-            ? ('GROUNDING' as const)
-            : victory
-              ? ('CONTINUITY' as const)
-              : ('AUTONOMY' as const);
-    const pacing =
-      context.communication.fatigue.score >= 70 ||
-      composition.depth === 'MINIMAL'
-        ? ('COMPACT' as const)
-        : context.dialogue?.specificQuestion
-          ? ('DIRECT' as const)
-          : emotionallySensitive || recovery
-            ? ('SUPPORTIVE' as const)
-            : composition.depth === 'DEEP'
-              ? ('EXPLANATORY' as const)
-              : ('BALANCED' as const);
-    const transitionStyle =
-      composition.paragraphCount <= 1
-        ? ('SEAMLESS' as const)
-        : composition.rhythm === 'WARM'
-          ? ('GENTLE' as const)
-          : composition.rhythm === 'EXPLANATORY'
-            ? ('LOGICAL' as const)
-            : ('CONTINUITY' as const);
-    const sensitiveMemory = episodes.some(
-      (episode) => episode.sensitivity === 'SENSITIVE',
-    );
-    const humor =
-      !emotionallySensitive &&
-      !recovery &&
-      !sensitiveMemory &&
-      context.communication.fatigue.score < 40 &&
-      ['CELEBRATE', 'RECOGNIZE'].includes(composition.centralIntent)
-        ? ('SUBTLE_LIGHTNESS_ALLOWED' as const)
-        : ('PROHIBITED' as const);
-    const lexicalVariant = this.variant([
-      composition.dialogueProfile,
-      toneStrategy,
-      context.communication.communicationStyle,
-      context.communication.stageOfChange,
-      context.userContext.goal ?? 'NO_GOAL',
-      this.fatigueBand(context.communication.fatigue.score),
-      this.fatigueBand(context.communication.fatigue.repeatedThemeScore),
-      this.fatigueBand(context.communication.fatigue.repeatedPhraseScore),
-      context.communication.prefersShortMessages ? 'SHORT' : 'STANDARD',
-      [...recognition].sort().join(','),
-      [...emotional].sort().join(','),
-      episodes
-        .map((episode) => episode.category)
-        .sort()
-        .join(','),
-      composition.depth,
-    ]);
 
     return Object.freeze({
       identity: 'SINGULFIT_COACH_V1',
       role: 'SPORTS_NUTRITION_COACH',
       personality: PERSONALITY,
-      toneStrategy,
-      openingStrategy,
-      closingStrategy,
-      pacing,
-      transitionStyle,
-      lexicalVariant,
-      humor,
+      toneStrategy: plan.toneStrategy,
+      openingStrategy: plan.openingStrategy,
+      closingStrategy: plan.closingStrategy,
+      pacing: plan.pacing,
+      transitionStyle: plan.transitionStyle,
+      lexicalVariant: plan.lexicalVariant,
+      humor: plan.humor,
       evidencePolicy: EVIDENCE_POLICY,
       guardrails: GUARDRAILS,
     });
@@ -272,7 +172,7 @@ export class NutritionConversationCoachStyleEngine {
     )
       violations.push('MOTIVATION_WITHOUT_EVIDENCE');
     if (
-      /\b(?:de acordo com os dados|a an[aá]lise indica|conforme o hist[oó]rico|resumo nutricional|evid[eê]ncia nutricional|acompanhamento comportamental)\b/iu.test(
+      /\b(?:com base (?:nos?|nas?)|recomenda-se|o ideal [ée]|segue(?:m)? (?:abaixo|a seguir)|de acordo com os dados|a an[aá]lise indica|conforme o hist[oó]rico|resumo nutricional|evid[eê]ncia nutricional|acompanhamento comportamental)\b/iu.test(
         text,
       )
     )
@@ -558,20 +458,6 @@ export class NutritionConversationCoachStyleEngine {
         /\b(?:excelente|incr[ií]vel|maravilhos[oa]|fant[aá]stic[oa]|perfeit[oa]|extraordin[aá]ri[oa]|sensacional)\b/giu,
       )?.length ?? 0
     );
-  }
-
-  private variant(
-    parts: readonly string[],
-  ): NutritionConversationCoachLexicalVariant {
-    const value = parts.join('|');
-    let hash = 17;
-    for (const character of value)
-      hash = (hash * 31 + character.codePointAt(0)!) % 104729;
-    return (['A', 'B', 'C', 'D'] as const)[hash % 4];
-  }
-
-  private fatigueBand(score: number): string {
-    return score >= 70 ? 'HIGH' : score >= 40 ? 'MEDIUM' : 'LOW';
   }
 
   private count(value: string, character: string): number {

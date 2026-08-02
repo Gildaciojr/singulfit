@@ -399,6 +399,11 @@ describe('ResponseBuilderService', () => {
         }),
         episodicMemory: [],
       }),
+      reasoning: {
+        longitudinalContext: expect.objectContaining({
+          profile: expect.objectContaining({ historySize: 8 }),
+        }),
+      },
       legacyText: 'Resposta nutricional',
     });
     expect(subject.formatter.format).toHaveReturnedWith('Resposta nutricional');

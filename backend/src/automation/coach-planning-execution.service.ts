@@ -19,10 +19,22 @@ import {
 } from '../diet/v2/generate-nutrition-plan-v2-input.builder';
 import type { GenerateNutritionPlanV2Input } from '../diet/v2/nutrition-planning-generation.contract';
 import { NutritionShadowRuntimeOrchestratorService } from '../diet/v2/shadow-runtime/nutrition-shadow-runtime-orchestrator.service';
+import { NutritionKnowledgeResolverService } from '../nutrition-knowledge/nutrition-knowledge-resolver.service';
+import { NutritionReasoningEngineService } from '../nutrition-reasoning/nutrition-reasoning-engine.service';
+import type { NutritionReasoningResult } from '../nutrition-reasoning/nutrition-reasoning.contract';
+import { WorkoutKnowledgeResolverService } from '../workout-knowledge/workout-knowledge-resolver.service';
+import { WorkoutReasoningEngineService } from '../workout-reasoning/workout-reasoning-engine.service';
+import type { WorkoutReasoningResult } from '../workout-reasoning/workout-reasoning.contract';
+import { WORKOUT_ARTIFACT_TYPE } from '../workout/v2/workout-planning-artifact.contract';
 import type { CoachCommandIntent } from './coach-command.service';
 import type { LegacyCoachIntentAdaptation } from './legacy-coach-intent-adapter.contract';
 import { LegacyCoachIntentAdapter } from './legacy-coach-intent.adapter';
 import { CoachPlanningExecutionDispatcherService } from './coach-planning-execution-dispatcher.service';
+import type {
+  CoachPlanningDispatchResult,
+  CoachPlanningExecutionResult,
+  CoachPlanningReasoningState,
+} from './coach-planning-execution.contract';
 import { NutritionV2PilotService } from './nutrition-v2-pilot.service';
 
 export interface CoachPlanningRuntimeContext {
@@ -36,6 +48,7 @@ export interface CoachPlanningRuntimeContext {
 
 interface PreparedV2PlanningContext {
   readonly decision: ConversationGoalDecision;
+  readonly snapshot: CoachProfileSnapshot;
   readonly source: GenerateNutritionPlanV2InputSource;
   readonly generationInput: GenerateNutritionPlanV2Input | null;
   readonly expectedArtifactType: NutritionArtifactType | null;
@@ -54,6 +67,10 @@ export class CoachPlanningExecutionService {
     private readonly nutritionPlanningInputBuilder?: GenerateNutritionPlanV2InputBuilder,
     private readonly nutritionShadowRuntime?: NutritionShadowRuntimeOrchestratorService,
     private readonly nutritionV2Pilot?: NutritionV2PilotService,
+    private readonly nutritionKnowledge?: NutritionKnowledgeResolverService,
+    private readonly nutritionReasoningEngine?: NutritionReasoningEngineService,
+    private readonly workoutKnowledge?: WorkoutKnowledgeResolverService,
+    private readonly workoutReasoningEngine?: WorkoutReasoningEngineService,
   ) {}
 
   async execute(
@@ -61,6 +78,14 @@ export class CoachPlanningExecutionService {
     intent: CoachCommandIntent,
     runtime?: CoachPlanningRuntimeContext,
   ): Promise<string> {
+    return (await this.executeStructured(userId, intent, runtime)).content;
+  }
+
+  async executeStructured(
+    userId: string,
+    intent: CoachCommandIntent,
+    runtime?: CoachPlanningRuntimeContext,
+  ): Promise<CoachPlanningExecutionResult> {
     let preparation: PreparedV2PlanningContext | null = null;
 
     try {
@@ -73,21 +98,40 @@ export class CoachPlanningExecutionService {
       // A infraestrutura V2 permanece estritamente não bloqueante nesta fase.
     }
 
+    const reasoningEnabled = runtime !== undefined;
+    const nutrition = reasoningEnabled
+      ? this.produceNutritionReasoning(preparation)
+      : this.unavailableReasoning('CONVERSATION_LAYER_OFF');
+    const workout = reasoningEnabled
+      ? this.produceWorkoutReasoning(preparation)
+      : this.unavailableReasoning('CONVERSATION_LAYER_OFF');
+    const longitudinal = reasoningEnabled
+      ? this.unavailableReasoning('CANONICAL_INPUT_UNAVAILABLE')
+      : this.unavailableReasoning('CONVERSATION_LAYER_OFF');
+
     const legacyStartedAt = performance.now();
     let legacySucceeded = true;
-    let legacyContent: string;
+    let dispatch: CoachPlanningDispatchResult;
     try {
-      legacyContent = await this.dispatcher.dispatch({
+      dispatch = await this.dispatcher.dispatchStructured({
         userId,
         legacyIntent: intent,
         decision: preparation?.decision ?? null,
       });
     } catch (error: unknown) {
       legacySucceeded = false;
-      legacyContent = this.failureMessage(error);
+      dispatch = Object.freeze({
+        content: this.failureMessage(error),
+        executor: 'FAILURE_FALLBACK' as const,
+        generationCompleted: false,
+        fallbackApplied: true,
+      });
     }
 
+    const legacyContent = dispatch.content;
     let selectedContent = legacyContent;
+    let selectedSource: CoachPlanningExecutionResult['selectedSource'] =
+      'LEGACY';
     let suppressShadow = false;
     if (runtime && preparation && this.nutritionV2Pilot) {
       try {
@@ -101,6 +145,8 @@ export class CoachPlanningExecutionService {
           legacyContent,
         });
         selectedContent = selection.content;
+        selectedSource =
+          selection.selected === 'V2' ? 'NUTRITION_V2' : 'LEGACY';
         suppressShadow = selection.suppressShadow;
       } catch (error: unknown) {
         this.logger.warn(
@@ -146,7 +192,27 @@ export class CoachPlanningExecutionService {
       }
     }
 
-    return selectedContent;
+    return Object.freeze({
+      content: selectedContent,
+      selectedSource,
+      decision: preparation?.decision ?? null,
+      nutritionReasoning: nutrition.result,
+      workoutReasoning: workout.result,
+      longitudinalDecision: null,
+      reasoning: Object.freeze({
+        nutrition: nutrition.state,
+        workout: workout.state,
+        longitudinal: longitudinal.state,
+      }),
+      dispatch,
+      metadata: Object.freeze({
+        correlationId: runtime?.correlationId ?? null,
+        operationKey: runtime?.messageId ?? null,
+        executor: dispatch.executor,
+        fallbackApplied: dispatch.fallbackApplied,
+        generationCompleted: dispatch.generationCompleted,
+      }),
+    });
   }
 
   private async prepareV2Decision(
@@ -180,9 +246,117 @@ export class CoachPlanningExecutionService {
     const builtInput = this.nutritionPlanningInputBuilder?.build(source);
     return Object.freeze({
       decision,
+      snapshot,
       source,
       generationInput: builtInput ?? null,
       expectedArtifactType: builtInput?.explicitArtifactType ?? null,
+    });
+  }
+
+  private produceNutritionReasoning(
+    preparation: PreparedV2PlanningContext | null,
+  ): {
+    readonly result: NutritionReasoningResult | null;
+    readonly state: CoachPlanningReasoningState;
+  } {
+    const artifactType = preparation?.generationInput?.explicitArtifactType;
+    if (!preparation || !artifactType) {
+      return this.unavailableReasoning(
+        preparation ? 'DOMAIN_NOT_REQUESTED' : 'CANONICAL_INPUT_UNAVAILABLE',
+      );
+    }
+    if (!this.nutritionKnowledge || !this.nutritionReasoningEngine) {
+      return this.unavailableReasoning('CANONICAL_INPUT_UNAVAILABLE');
+    }
+    try {
+      const knowledge = this.nutritionKnowledge.resolve(preparation.snapshot);
+      const result = this.nutritionReasoningEngine.reason({
+        snapshot: preparation.snapshot,
+        knowledgePackages: knowledge.packages,
+        conversationGoal: preparation.decision,
+        artifactType,
+      });
+      return Object.freeze({
+        result,
+        state: this.observedReasoning(),
+      });
+    } catch (error: unknown) {
+      this.logger.warn(
+        `Nutrition Reasoning oficial isolado: ${this.safeMessage(error)}`,
+      );
+      return this.unavailableReasoning('PRODUCTION_FAILED');
+    }
+  }
+
+  private produceWorkoutReasoning(
+    preparation: PreparedV2PlanningContext | null,
+  ): {
+    readonly result: WorkoutReasoningResult | null;
+    readonly state: CoachPlanningReasoningState;
+  } {
+    if (!preparation || !this.isWorkoutGoal(preparation.decision)) {
+      return this.unavailableReasoning(
+        preparation ? 'DOMAIN_NOT_REQUESTED' : 'CANONICAL_INPUT_UNAVAILABLE',
+      );
+    }
+    if (!this.workoutKnowledge || !this.workoutReasoningEngine) {
+      return this.unavailableReasoning('CANONICAL_INPUT_UNAVAILABLE');
+    }
+    try {
+      const knowledgeResolution = this.workoutKnowledge.resolve(
+        preparation.snapshot,
+      );
+      const result = this.workoutReasoningEngine.reason({
+        snapshot: preparation.snapshot,
+        knowledgeResolution,
+        conversationGoal: preparation.decision,
+        artifactType: WORKOUT_ARTIFACT_TYPE.WEEKLY_PLAN,
+        recognizedModality: null,
+      });
+      return Object.freeze({
+        result,
+        state: this.observedReasoning(),
+      });
+    } catch (error: unknown) {
+      this.logger.warn(
+        `Workout Reasoning oficial isolado: ${this.safeMessage(error)}`,
+      );
+      return this.unavailableReasoning('PRODUCTION_FAILED');
+    }
+  }
+
+  private isWorkoutGoal(decision: ConversationGoalDecision): boolean {
+    return (
+      decision.goal === 'GENERATE_WORKOUT_PLAN' ||
+      decision.goal === 'GENERATE_COMBINED_PLANS'
+    );
+  }
+
+  private observedReasoning(): CoachPlanningReasoningState {
+    return Object.freeze({
+      reasoningAppliedToGeneration: false,
+      reasoningObservedOnly: true,
+      reasoningUnavailable: false,
+      unavailableReason: null,
+    });
+  }
+
+  private unavailableReasoning(
+    unavailableReason: NonNullable<
+      CoachPlanningReasoningState['unavailableReason']
+    >,
+  ): {
+    readonly result: null;
+    readonly state: CoachPlanningReasoningState;
+  } {
+    return Object.freeze({
+      result: null,
+      state: Object.freeze({
+        reasoningAppliedToGeneration: false,
+        reasoningObservedOnly: false,
+        reasoningUnavailable: true,
+        unavailableReason,
+      }),
     });
   }
 

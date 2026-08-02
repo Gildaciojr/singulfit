@@ -25,6 +25,7 @@ import type {
 import { SanitizedConversationPayloadReferenceBuilder } from './sanitized-conversation-payload-reference.builder';
 import { NutritionConversationCoachStyleEngine } from './nutrition-conversation-coach-style.engine';
 import { NUTRITION_CONVERSATION_REALIZATION_PROMPT } from './nutrition-conversation-realization-prompt.definition';
+import type { ConversationReasoningEvidence } from './reasoning-bridge/conversation-reasoning-bridge.contract';
 
 export interface NutritionConversationLanguageRealizerExecution {
   readonly prompt: {
@@ -108,13 +109,14 @@ export class NutritionConversationLanguageRealizer {
     execution: NutritionConversationLanguageRealizerExecution = {
       prompt: NUTRITION_CONVERSATION_REALIZATION_PROMPT,
     },
+    reasoning: ConversationReasoningEvidence | null = null,
   ): Promise<LanguageRealizationResult> {
     const reference = this.referenceBuilder.build(payload);
     const response = await this.conversationAI.execute({
       model: execution.prompt.model,
       instructions: execution.prompt.instructions,
       schema: execution.prompt.schema,
-      payload: payload as unknown as ConversationAIValue,
+      payload: this.realizationPayload(payload, reasoning),
       maxOutputCharacters: payload.limits.maximumLength,
       timeout: REALIZER_TIMEOUT_MS,
     });
@@ -204,6 +206,9 @@ export class NutritionConversationLanguageRealizer {
     if (!this.validatePresentation(payload, candidateText)) {
       return finalize(this.invalid(reference, 'PRESENTATION_NOT_AUTHORIZED'));
     }
+    if (!this.validateNaturalLanguage(candidateText)) {
+      return finalize(this.invalid(reference, 'ROBOTIC_LANGUAGE_PATTERN'));
+    }
     if (this.emojiCount(candidateText) > payload.limits.maximumEmojiCount) {
       return finalize(this.invalid(reference, 'EMOJI_LIMIT_EXCEEDED'));
     }
@@ -234,6 +239,48 @@ export class NutritionConversationLanguageRealizer {
         producedQuestionCount,
       ),
     );
+  }
+
+  private realizationPayload(
+    payload: SanitizedConversationPayload,
+    reasoning: ConversationReasoningEvidence | null,
+  ): ConversationAIValue {
+    const conversation = this.toConversationAIValue(payload);
+    if (!reasoning) return conversation;
+    if (!this.isRecord(conversation)) {
+      throw new Error('Payload conversacional possui estrutura inválida');
+    }
+    return Object.freeze({
+      ...conversation,
+      reasoning: this.toConversationAIValue(reasoning),
+    });
+  }
+
+  private toConversationAIValue(value: unknown): ConversationAIValue {
+    if (
+      value === null ||
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean'
+    ) {
+      return value;
+    }
+    if (Array.isArray(value)) {
+      return Object.freeze(
+        value.map((item) => this.toConversationAIValue(item)),
+      );
+    }
+    if (this.isRecord(value)) {
+      return Object.freeze(
+        Object.fromEntries(
+          Object.entries(value).map(([key, item]) => [
+            key,
+            this.toConversationAIValue(item),
+          ]),
+        ),
+      );
+    }
+    throw new Error('Payload conversacional contém valor não serializável');
   }
 
   private withOperationalMetadata(
@@ -648,6 +695,17 @@ export class NutritionConversationLanguageRealizer {
   ): boolean {
     const hasBullets = /^(?:[-*•]|\d+[.)])\s+/m.test(text);
     return payload.structure.presentation !== 'PROSE' || !hasBullets;
+  }
+
+  private validateNaturalLanguage(text: string): boolean {
+    const roboticPatterns = [
+      /(?:^|[.!?]\s+)com base (?:nos?|nas?)\b/iu,
+      /(?:^|[.!?]\s+)recomenda-se\b/iu,
+      /(?:^|[.!?]\s+)o ideal [ée]\b/iu,
+      /(?:^|[.!?]\s+)segue(?:m)? (?:abaixo|a seguir)\b/iu,
+      /(?:^|[.!?]\s+)(?:an[aá]lise|resumo|relat[oó]rio)\s*:/iu,
+    ] as const;
+    return roboticPatterns.every((pattern) => !pattern.test(text));
   }
 
   private success(

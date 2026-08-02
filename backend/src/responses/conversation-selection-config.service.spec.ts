@@ -19,7 +19,7 @@ describe('ConversationSelectionConfigService', () => {
   });
 
   it.each(['INTERNAL', 'CANARY', 'ROLLOUT', 'PRIMARY'] as const)(
-    'recognizes %s but keeps Macro H release-locked in OFF',
+    'preserves configured mode %s as operational metadata',
     (configuredMode) => {
       expect(
         subject({
@@ -27,7 +27,7 @@ describe('ConversationSelectionConfigService', () => {
         }).get(),
       ).toEqual({
         configuredMode,
-        effectiveMode: CONVERSATION_SELECTION_ROLLOUT_MODE.OFF,
+        effectiveMode: configuredMode,
         formatterVersion: 'nutrition-response-formatter:v1',
       });
     },

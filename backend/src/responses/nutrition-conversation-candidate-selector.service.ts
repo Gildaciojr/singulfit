@@ -58,6 +58,7 @@ export class NutritionConversationCandidateSelectorService {
     const candidateAvailable =
       input.candidate?.candidateText !== null &&
       input.candidate?.candidateText !== undefined &&
+      input.candidate.candidateText.trim().length > 0 &&
       passed.has('CANDIDATE_AVAILABLE');
     const candidateValid =
       candidateAvailable &&
@@ -91,7 +92,9 @@ export class NutritionConversationCandidateSelectorService {
     });
 
     return Object.freeze({
-      selectedSource: CONVERSATION_SELECTED_SOURCE.FORMATTER,
+      selectedSource: candidateValid
+        ? CONVERSATION_SELECTED_SOURCE.CANDIDATE
+        : CONVERSATION_SELECTED_SOURCE.FORMATTER,
       reason: selection.reason,
       comparisonScore: candidateAvailable
         ? this.score(
@@ -130,16 +133,10 @@ export class NutritionConversationCandidateSelectorService {
       };
     }
 
-    if (rolloutMode === CONVERSATION_SELECTION_ROLLOUT_MODE.OFF) {
-      return {
-        reason: CANDIDATE_SELECTION_REASON.ROLLOUT_MODE_OFF,
-        selectionStatus: CANDIDATE_SELECTION_STATUS.FUTURE_ROLLOUT_DISABLED,
-      };
-    }
-
+    void rolloutMode;
     return {
-      reason: CANDIDATE_SELECTION_REASON.FORMATTER_POLICY_ENFORCED,
-      selectionStatus: CANDIDATE_SELECTION_STATUS.VALID_CANDIDATE_NOT_SELECTED,
+      reason: CANDIDATE_SELECTION_REASON.CANDIDATE_PROMOTED,
+      selectionStatus: CANDIDATE_SELECTION_STATUS.CANDIDATE_SELECTED,
     };
   }
 

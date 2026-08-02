@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { CoachPlanningExecutionService } from './coach-planning-execution.service';
 import { CoachMessageType, ScheduledMessageStatus } from '@prisma/client';
 import { EventBusService } from '../event-bus/event-bus.service';
@@ -6,6 +6,8 @@ import { INTERNAL_EVENT } from '../event-bus/event-bus.constants';
 import { PrismaService } from '../prisma/prisma.service';
 import { AUTOMATION_RULE_CODES } from './automation.constants';
 import { ConversationGoalShadowPipelineService } from './conversation-goal-shadow-pipeline.service';
+import { ConversationRuntimeIntegrationService } from '../conversation/runtime/conversation-runtime-integration.service';
+import { CoachPlanningConversationResponseService } from './coach-planning-conversation-response.service';
 
 export type CoachCommandIntent = 'DIET' | 'WORKOUT' | 'BOTH' | 'UNKNOWN';
 
@@ -28,6 +30,10 @@ export class CoachCommandService {
     private readonly planningExecution: CoachPlanningExecutionService,
     private readonly eventBus: EventBusService,
     private readonly conversationGoalShadow: ConversationGoalShadowPipelineService,
+    @Optional()
+    private readonly conversationRuntime?: ConversationRuntimeIntegrationService,
+    @Optional()
+    private readonly planningConversationResponse?: CoachPlanningConversationResponseService,
   ) {}
 
   async processTextMessage(
@@ -104,13 +110,25 @@ export class CoachCommandService {
       };
     }
 
-    const content = await this.planningExecution.execute(input.userId, intent, {
+    const runtimeDecision = await this.decideOfficialExecution({
+      userId: input.userId,
       conversationId: message.conversation.id,
       messageId: message.id,
-      correlationId: message.id,
-      referenceDate: message.timestamp,
-      profileId: message.conversation.user.fitnessProfile?.id,
+      text: message.content,
+      receivedAt: message.timestamp.toISOString(),
+      legacyIntent: intent,
     });
+    const content =
+      runtimeDecision.source === 'CONVERSATION_RUNTIME'
+        ? runtimeDecision.content
+        : await this.executePlanning({
+            userId: input.userId,
+            intent,
+            conversationId: message.conversation.id,
+            messageId: message.id,
+            referenceDate: message.timestamp,
+            profileId: message.conversation.user.fitnessProfile?.id,
+          });
     await this.prisma.coachMessage.create({
       data: {
         userId: input.userId,
@@ -147,6 +165,59 @@ export class CoachCommandService {
       duplicated: false,
       intent,
     };
+  }
+
+  private async executePlanning(input: {
+    readonly userId: string;
+    readonly intent: CoachCommandIntent;
+    readonly conversationId: string;
+    readonly messageId: string;
+    readonly referenceDate: Date;
+    readonly profileId?: string;
+  }): Promise<string> {
+    const runtime = {
+      conversationId: input.conversationId,
+      messageId: input.messageId,
+      correlationId: input.messageId,
+      referenceDate: input.referenceDate,
+      profileId: input.profileId,
+    };
+    if (!this.planningConversationResponse) {
+      return this.planningExecution.execute(
+        input.userId,
+        input.intent,
+        runtime,
+      );
+    }
+    const execution = await this.planningExecution.executeStructured(
+      input.userId,
+      input.intent,
+      runtime,
+    );
+    return this.planningConversationResponse.select({
+      userId: input.userId,
+      conversationId: input.conversationId,
+      messageId: input.messageId,
+      execution,
+    });
+  }
+
+  private async decideOfficialExecution(input: {
+    userId: string;
+    conversationId: string;
+    messageId: string;
+    text: string;
+    receivedAt: string;
+    legacyIntent: CoachCommandIntent;
+  }) {
+    if (!this.conversationRuntime) {
+      return { source: 'LEGACY' as const, reason: 'RUNTIME_DISABLED' as const };
+    }
+    try {
+      return await this.conversationRuntime.decide(input);
+    } catch {
+      return { source: 'LEGACY' as const, reason: 'RUNTIME_FAILURE' as const };
+    }
   }
 
   classify(text: string): CoachCommandIntent {

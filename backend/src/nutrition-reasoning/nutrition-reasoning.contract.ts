@@ -7,7 +7,7 @@ import type {
 } from '../nutrition-knowledge/nutrition-knowledge.contract';
 
 export const NUTRITION_REASONING_SCHEMA_VERSION = 1 as const;
-export const NUTRITION_REASONING_STRATEGY_VERSION = '2026.07.1' as const;
+export const NUTRITION_REASONING_STRATEGY_VERSION = '2026.08.1' as const;
 
 export const NUTRITION_REASONING_PRIORITY = {
   CRITICAL: 'CRITICAL',

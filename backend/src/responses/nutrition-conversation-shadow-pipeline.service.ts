@@ -18,6 +18,8 @@ import { SanitizedConversationPayloadBuilder } from './sanitized-conversation-pa
 import { ConversationSelectionConfigService } from './conversation-selection-config.service';
 import { NutritionConversationCandidateSelectorService } from './nutrition-conversation-candidate-selector.service';
 import { NutritionConversationCandidateSelectionAuditService } from './nutrition-conversation-candidate-selection-audit.service';
+import type { ConversationReasoningBridgeInput } from './reasoning-bridge/conversation-reasoning-bridge.contract';
+import { ConversationReasoningBridgeService } from './reasoning-bridge/conversation-reasoning-bridge.service';
 
 const SHADOW_TOTAL_TIMEOUT_MS = 25_000;
 const SHADOW_CONCURRENCY_LIMIT = 2;
@@ -30,10 +32,12 @@ export interface ExecuteNutritionConversationShadowInput {
   };
   readonly conversation: BuildNutritionConversationContextInput;
   readonly legacyText: string;
+  readonly reasoning?: ConversationReasoningBridgeInput;
 }
 
 @Injectable()
 export class NutritionConversationShadowPipelineService implements OnApplicationShutdown {
+  private readonly reasoningBridge = new ConversationReasoningBridgeService();
   private activeExecutions = 0;
   private shuttingDown = false;
 
@@ -129,11 +133,15 @@ export class NutritionConversationShadowPipelineService implements OnApplication
         decisionPlan,
         compositionPlan,
       });
+      const reasoning = this.reasoningBridge.build(input.reasoning ?? {});
 
       component = 'REALIZER';
       const realization = await this.realizationExecutor.execute({
         ...input.operation,
         payload: sanitizedPayload,
+        ...(reasoning.evidence
+          ? { reasoningEvidence: reasoning.evidence }
+          : {}),
       });
       component = 'ADAPTER';
       const envelope = this.adapter.adapt(input.legacyText, realization);

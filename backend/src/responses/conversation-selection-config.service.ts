@@ -29,9 +29,9 @@ export class ConversationSelectionConfigService {
 
     return Object.freeze({
       configuredMode,
-      // Macro H is intentionally release-locked. A later macro must explicitly
-      // authorize modes that can select a candidate.
-      effectiveMode: CONVERSATION_SELECTION_ROLLOUT_MODE.OFF,
+      // Mantido apenas como metadado operacional. A validade do Candidate,
+      // e não o rollout histórico, governa a seleção oficial.
+      effectiveMode: configuredMode,
       formatterVersion: this.resolveFormatterVersion(
         this.configService.get<string>(FORMATTER_VERSION_KEY),
       ),

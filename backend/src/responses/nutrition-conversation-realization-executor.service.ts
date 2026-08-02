@@ -20,6 +20,7 @@ import { NutritionConversationLanguageRealizer } from './nutrition-conversation-
 import { NUTRITION_CONVERSATION_REALIZATION_PROMPT } from './nutrition-conversation-realization-prompt.definition';
 import type { SanitizedConversationPayload } from './sanitized-conversation-payload.contract';
 import { SanitizedConversationPayloadReferenceBuilder } from './sanitized-conversation-payload-reference.builder';
+import type { ConversationReasoningEvidence } from './reasoning-bridge/conversation-reasoning-bridge.contract';
 
 const JOB_FAILURE_CODE = 'CONVERSATION_REALIZATION_FAILED';
 
@@ -28,6 +29,7 @@ export interface ExecuteNutritionConversationRealizationInput {
   readonly conversationId: string;
   readonly messageId: string;
   readonly payload: SanitizedConversationPayload;
+  readonly reasoningEvidence?: ConversationReasoningEvidence;
 }
 
 type RealizationJob = Prisma.AIJobGetPayload<{
@@ -88,13 +90,20 @@ export class NutritionConversationRealizationExecutorService {
     let realization: LanguageRealizationResult;
 
     try {
-      realization = await this.languageRealizer.realize(input.payload, {
+      const execution = {
         prompt,
         operation: {
           aiJobId: prepared.job.id,
           promptVersionId: prepared.job.promptVersionId,
         },
-      });
+      };
+      realization = input.reasoningEvidence
+        ? await this.languageRealizer.realize(
+            input.payload,
+            execution,
+            input.reasoningEvidence,
+          )
+        : await this.languageRealizer.realize(input.payload, execution);
     } catch {
       await this.failJob(prepared.job.id, JOB_FAILURE_CODE);
       return this.unavailable(
@@ -430,10 +439,35 @@ export class NutritionConversationRealizationExecutorService {
           promptVersionId,
           AIJobType.CONVERSATION_REALIZATION,
           payloadReference,
+          ...(input.reasoningEvidence
+            ? [this.reasoningReference(input.reasoningEvidence)]
+            : []),
         ].join(':'),
       )
       .digest('hex');
     return `conversation-realization:${digest}`;
+  }
+
+  private reasoningReference(evidence: ConversationReasoningEvidence): string {
+    return createHash('sha256')
+      .update(this.canonicalStringify(evidence))
+      .digest('hex');
+  }
+
+  private canonicalStringify(value: unknown): string {
+    if (Array.isArray(value)) {
+      return `[${value.map((item) => this.canonicalStringify(item)).join(',')}]`;
+    }
+    if (this.isRecord(value)) {
+      return `{${Object.keys(value)
+        .sort()
+        .map(
+          (key) =>
+            `${JSON.stringify(key)}:${this.canonicalStringify(value[key])}`,
+        )
+        .join(',')}}`;
+    }
+    return JSON.stringify(value);
   }
 
   private identityLockKey(

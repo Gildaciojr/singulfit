@@ -9,6 +9,7 @@ import { NutritionConversationLanguageRealizer } from './nutrition-conversation-
 import type { SanitizedConversationPayload } from './sanitized-conversation-payload.contract';
 import { DEFAULT_NUTRITION_CONVERSATION_COACH_STYLE } from './nutrition-conversation-coach-style.engine';
 import { NUTRITION_CONVERSATION_REALIZATION_PROMPT } from './nutrition-conversation-realization-prompt.definition';
+import type { ConversationReasoningEvidence } from './reasoning-bridge/conversation-reasoning-bridge.contract';
 
 function payload(): SanitizedConversationPayload {
   return {
@@ -185,6 +186,45 @@ function realizer(response: ConversationAIResponse) {
   };
 }
 
+function reasoningEvidence(): ConversationReasoningEvidence {
+  return {
+    summary: {
+      goal: 'criar um plano alimentar',
+      decision: 'apoiar desempenho',
+      expectedBenefit: 'alinhar a orientação ao treino',
+    },
+    priorities: [
+      {
+        topic: 'segurança',
+        importance: 'essencial',
+        explanation: 'Os limites informados precisam prevalecer.',
+      },
+    ],
+    strategies: [
+      {
+        name: 'suporte à hidratação',
+        purpose: 'preservar regularidade hídrica',
+      },
+    ],
+    restrictions: [],
+    tradeoffs: [],
+    explanations: [],
+    teachingOpportunities: [],
+    suggestedQuestions: [],
+    safety: {
+      requiresCaution: true,
+      professionalGuidanceRecommended: false,
+      guidance: ['Mantenha a orientação conservadora.'],
+    },
+    longitudinal: {
+      continuity: null,
+      progress: null,
+      adherence: null,
+      repetitionRisk: false,
+    },
+  };
+}
+
 function assertDeepFrozen(value: unknown): void {
   if (typeof value !== 'object' || value === null) return;
   expect(Object.isFrozen(value)).toBe(true);
@@ -209,13 +249,26 @@ describe('NutritionConversationLanguageRealizer', () => {
     );
   });
 
+  it('rejects bureaucratic language even when the structured units are otherwise valid', async () => {
+    const output = completeOutput();
+    output.units[1].text =
+      'Com base nos dados, o frango oferece cerca de 30 g de proteína.';
+    const target = realizer(success(output));
+
+    const result = await target.service.realize(payload());
+
+    expect(result.status).toBe('INVALID_STRUCTURE');
+    expect(result.failureCode).toBe('ROBOTIC_LANGUAGE_PATTERN');
+    expect(result.candidateText).toBeNull();
+  });
+
   it('sends only instructions, schema and the sanitized payload through ConversationAIService', async () => {
     const source = payload();
     const target = realizer(success(completeOutput()));
     await target.service.realize(source);
     const request = target.execute.mock.calls[0][0];
 
-    expect(request.payload).toBe(source);
+    expect(request.payload).toEqual(source);
     expect(request.instructions).toContain('somente unidades estruturadas');
     expect(request.instructions).toContain(
       'descreva o fato observado, nunca atribua emoção ao usuário',
@@ -223,6 +276,27 @@ describe('NutritionConversationLanguageRealizer', () => {
     expect(request.schema.name).toBe('nutrition_conversation_language_units');
     expect(JSON.stringify(request)).not.toMatch(
       /mealAnalysisId|conversationId|messageId|userId|compositionPlanId/,
+    );
+  });
+
+  it('receives semantic reasoning without exposing internal reasoning identifiers', async () => {
+    const source = payload();
+    const evidence = reasoningEvidence();
+    const target = realizer(success(completeOutput()));
+
+    await target.service.realize(
+      source,
+      { prompt: NUTRITION_CONVERSATION_REALIZATION_PROMPT },
+      evidence,
+    );
+    const request = target.execute.mock.calls[0][0];
+
+    expect(request.payload).toEqual({
+      ...source,
+      reasoning: evidence,
+    });
+    expect(JSON.stringify(request.payload)).not.toMatch(
+      /PackageId|StrategyId|ReasonCode|ConflictCode|PriorityCode|SAFETY_MANDATORY/u,
     );
   });
 
@@ -766,7 +840,14 @@ describe('NutritionConversationLanguageRealizer', () => {
     expect(source).not.toMatch(
       /OpenAIGateway|(?<!Conversation)AIService|PromptService|PrismaService|Evolution|Worker|EventBus|Outbox|MediaService|NutritionResponseFormatter|ResponseBuilderService|fetch\(|HttpService|axios|Date\.now|Math\.random|console\.log/,
     );
-    expect(moduleSource).toContain('NutritionConversationLanguageRealizer');
+    expect(moduleSource).toContain('ConversationRealizationModule');
+    const realizationModule = readFileSync(
+      join(__dirname, 'conversation-realization.module.ts'),
+      'utf8',
+    );
+    expect(realizationModule).toContain(
+      'NutritionConversationLanguageRealizer',
+    );
     expect(responseBuilder).not.toContain(
       'NutritionConversationLanguageRealizer',
     );

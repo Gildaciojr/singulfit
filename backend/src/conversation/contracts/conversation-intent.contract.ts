@@ -1,0 +1,49 @@
+import {
+  CONVERSATION_RECOGNIZED_INTENT,
+  type ConversationRecognizedIntent,
+} from '../../context/conversation-goal-planner.contract';
+
+export const CONVERSATION_INTENT = CONVERSATION_RECOGNIZED_INTENT;
+
+export type ConversationIntent = ConversationRecognizedIntent;
+
+export const CONVERSATION_OPERATION = {
+  ANSWER: 'ANSWER',
+  ACQUIRE_PROFILE: 'ACQUIRE_PROFILE',
+  GENERATE_PLAN: 'GENERATE_PLAN',
+  UPDATE_PLAN: 'UPDATE_PLAN',
+  SUBSTITUTE_ITEM: 'SUBSTITUTE_ITEM',
+  REVIEW_PROGRESS: 'REVIEW_PROGRESS',
+  REQUEST_CONFIRMATION: 'REQUEST_CONFIRMATION',
+  PRESENT_CURRENT_PLAN: 'PRESENT_CURRENT_PLAN',
+  PRESENT_PLAN_STATUS: 'PRESENT_PLAN_STATUS',
+  PROVIDE_GUIDANCE: 'PROVIDE_GUIDANCE',
+  NONE: 'NONE',
+} as const;
+
+export type ConversationOperation =
+  (typeof CONVERSATION_OPERATION)[keyof typeof CONVERSATION_OPERATION];
+
+export const CONVERSATION_DOMAIN = {
+  GENERAL: 'GENERAL',
+  NUTRITION: 'NUTRITION',
+  WORKOUT: 'WORKOUT',
+  COMBINED: 'COMBINED',
+  PROFILE: 'PROFILE',
+  PROGRESS: 'PROGRESS',
+  SAFETY: 'SAFETY',
+  UNKNOWN: 'UNKNOWN',
+} as const;
+
+export type ConversationDomain =
+  (typeof CONVERSATION_DOMAIN)[keyof typeof CONVERSATION_DOMAIN];
+
+export type ConversationConfidence = 'HIGH' | 'MEDIUM' | 'LOW';
+
+export type ConversationUnderstandingSource =
+  | 'DETERMINISTIC'
+  | 'AI_STRUCTURED'
+  | 'HYBRID'
+  | 'CONTEXT_CARRYOVER'
+  | 'CURRENT_PLANNER_ADAPTER'
+  | 'FALLBACK';

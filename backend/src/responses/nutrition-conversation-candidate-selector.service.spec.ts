@@ -126,6 +126,7 @@ describe('NutritionConversationCandidateSelectorService', () => {
       'PRIMARY',
     ]);
     expect(Object.values(CANDIDATE_SELECTION_STATUS)).toEqual([
+      'CANDIDATE_SELECTED',
       'FORMATTER_SELECTED',
       'NO_CANDIDATE',
       'INVALID_CANDIDATE',
@@ -134,7 +135,7 @@ describe('NutritionConversationCandidateSelectorService', () => {
     ]);
   });
 
-  it('always selects FORMATTER for a valid candidate while rollout is OFF', () => {
+  it('selects a valid Candidate independently of historical rollout metadata', () => {
     const decision = selector.select({
       officialResponse: 'Resposta oficial.',
       candidate: realization(),
@@ -143,8 +144,8 @@ describe('NutritionConversationCandidateSelectorService', () => {
     });
     expect(decision).toEqual(
       expect.objectContaining({
-        selectedSource: CONVERSATION_SELECTED_SOURCE.FORMATTER,
-        selectionStatus: CANDIDATE_SELECTION_STATUS.FUTURE_ROLLOUT_DISABLED,
+        selectedSource: CONVERSATION_SELECTED_SOURCE.CANDIDATE,
+        selectionStatus: CANDIDATE_SELECTION_STATUS.CANDIDATE_SELECTED,
         candidateAvailable: true,
         candidateValid: true,
         comparisonScore: 100,
@@ -193,7 +194,22 @@ describe('NutritionConversationCandidateSelectorService', () => {
     expect(invalid.selectedSource).toBe(CONVERSATION_SELECTED_SOURCE.FORMATTER);
   });
 
-  it('treats declared warnings as non-blocking and still enforces formatter policy', () => {
+  it('rejects empty candidate content even when comparison metadata says available', () => {
+    const decision = selector.select({
+      officialResponse: 'Resposta oficial.',
+      candidate: realization({ candidateText: '   ' }),
+      comparison: comparison(),
+      metadata,
+    });
+
+    expect(decision.candidateAvailable).toBe(false);
+    expect(decision.candidateValid).toBe(false);
+    expect(decision.selectedSource).toBe(
+      CONVERSATION_SELECTED_SOURCE.FORMATTER,
+    );
+  });
+
+  it('treats declared warnings as non-blocking and selects the Candidate', () => {
     const decision = selector.select({
       officialResponse: 'Resposta oficial.',
       candidate: realization({ status: 'PARTIALLY_COMPLETED' }),
@@ -208,10 +224,10 @@ describe('NutritionConversationCandidateSelectorService', () => {
     });
     expect(decision.candidateValid).toBe(true);
     expect(decision.selectionStatus).toBe(
-      CANDIDATE_SELECTION_STATUS.VALID_CANDIDATE_NOT_SELECTED,
+      CANDIDATE_SELECTION_STATUS.CANDIDATE_SELECTED,
     );
     expect(decision.selectedSource).toBe(
-      CONVERSATION_SELECTED_SOURCE.FORMATTER,
+      CONVERSATION_SELECTED_SOURCE.CANDIDATE,
     );
   });
 

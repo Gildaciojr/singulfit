@@ -6,29 +6,21 @@ import { NutritionModule } from '../nutrition/nutrition.module';
 import { AIQualityModule } from '../ai-quality/ai-quality.module';
 import { RecommendationModule } from '../recommendations/recommendation.module';
 import { LongitudinalModule } from '../longitudinal/longitudinal.module';
-import { AIModule } from '../ai/ai.module';
+import { ConversationRealizationModule } from './conversation-realization.module';
 import { NutritionResponseFormatter } from './nutrition-response.formatter';
 import { ResponseBuilderService } from './response-builder.service';
 import { ResponseController } from './response.controller';
 import { NutritionConversationContextBuilder } from './nutrition-conversation-context.builder';
-import { ConversationLayerOperationalConfigService } from './conversation-layer-operational-config.service';
 import { NutritionConversationDecisionEngine } from './nutrition-conversation-decision-engine';
 import { NutritionConversationDecisionScoringPolicy } from './nutrition-conversation-decision-scoring-policy';
 import { NutritionConversationComposer } from './nutrition-conversation-composer';
 import { NutritionConversationAuthorizedFactsBuilder } from './nutrition-conversation-authorized-facts.builder';
 import { SanitizedConversationPayloadBuilder } from './sanitized-conversation-payload.builder';
-import { NutritionConversationLanguageRealizer } from './nutrition-conversation-language-realizer';
 import { NutritionConversationShadowPipelineService } from './nutrition-conversation-shadow-pipeline.service';
-import { NutritionConversationLegacyCandidateAdapter } from './nutrition-conversation-legacy-candidate.adapter';
-import { NutritionConversationComparator } from './nutrition-conversation-comparator';
 import { ConversationShadowDiagnosticsService } from './conversation-shadow-diagnostics.service';
 import { NutritionConversationEpisodicMemoryCaptureEngine } from './nutrition-conversation-episodic-memory-capture.engine';
 import { NutritionConversationEpisodicMemoryIntegrationService } from './nutrition-conversation-episodic-memory-integration.service';
 import { NutritionConversationEpisodicMemoryPersistenceService } from './nutrition-conversation-episodic-memory-persistence.service';
-import { NutritionConversationRealizationExecutorService } from './nutrition-conversation-realization-executor.service';
-import { ConversationSelectionConfigService } from './conversation-selection-config.service';
-import { NutritionConversationCandidateSelectorService } from './nutrition-conversation-candidate-selector.service';
-import { NutritionConversationCandidateSelectionAuditService } from './nutrition-conversation-candidate-selection-audit.service';
 
 @Module({
   imports: [
@@ -39,26 +31,18 @@ import { NutritionConversationCandidateSelectionAuditService } from './nutrition
     AIQualityModule,
     RecommendationModule,
     LongitudinalModule,
-    AIModule,
+    ConversationRealizationModule,
   ],
   controllers: [ResponseController],
   providers: [
     ResponseBuilderService,
     NutritionResponseFormatter,
     NutritionConversationContextBuilder,
-    ConversationLayerOperationalConfigService,
     NutritionConversationDecisionEngine,
     NutritionConversationDecisionScoringPolicy,
     NutritionConversationComposer,
     NutritionConversationAuthorizedFactsBuilder,
     SanitizedConversationPayloadBuilder,
-    NutritionConversationLanguageRealizer,
-    NutritionConversationRealizationExecutorService,
-    ConversationSelectionConfigService,
-    NutritionConversationCandidateSelectorService,
-    NutritionConversationCandidateSelectionAuditService,
-    NutritionConversationLegacyCandidateAdapter,
-    NutritionConversationComparator,
     ConversationShadowDiagnosticsService,
     NutritionConversationShadowPipelineService,
     NutritionConversationEpisodicMemoryCaptureEngine,

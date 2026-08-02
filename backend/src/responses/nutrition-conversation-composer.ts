@@ -2,10 +2,7 @@ import type {
   CompositionPlan,
   ConversationBlock,
   ConversationBlockType,
-  ConversationDensity,
-  ConversationDepth,
   ConversationPresentation,
-  ConversationRhythm,
 } from './conversation-composition.contract';
 import type {
   DecisionPlan,
@@ -13,6 +10,8 @@ import type {
 } from './conversation-decision.contract';
 import type { NutritionConversationContext } from './nutrition-conversation-context.interface';
 import { NutritionConversationDialogueProfilePolicy } from './nutrition-conversation-dialogue-profile.policy';
+import { NutritionConversationFlowPlanner } from './nutrition-conversation-flow-planner';
+import type { NutritionConversationFlowPlan } from './nutrition-conversation-planning.contract';
 
 interface BlockDefinition {
   readonly key: string;
@@ -216,6 +215,7 @@ const EMOTIONAL_DECISIONS = new Set([
 export class NutritionConversationComposer {
   private readonly dialogueProfilePolicy =
     new NutritionConversationDialogueProfilePolicy();
+  private readonly flowPlanner = new NutritionConversationFlowPlanner();
 
   compose(
     context: NutritionConversationContext,
@@ -226,6 +226,7 @@ export class NutritionConversationComposer {
     const profile = this.dialogueProfilePolicy.definition(
       decisionPlan.dialogueProfile,
     );
+    const flow = this.flowPlanner.plan(context, decisionPlan);
     const maximumLength = this.maximumLength(context, decisionPlan);
     const grouped = this.group(
       decisionPlan.selectedDecisions,
@@ -233,6 +234,8 @@ export class NutritionConversationComposer {
     );
     const ordered = [...grouped].sort(
       (left, right) =>
+        this.flowPlanner.rank(flow, left.type) -
+          this.flowPlanner.rank(flow, right.type) ||
         this.profileBlockRank(profile.allowedBlocks, left.type) -
           this.profileBlockRank(profile.allowedBlocks, right.type) ||
         left.rank - right.rank ||
@@ -240,7 +243,7 @@ export class NutritionConversationComposer {
     );
     const blocks = this.limitFacts(
       ordered.map((definition, order) =>
-        this.block(definition, order, decisionPlan, maximumLength),
+        this.block(definition, order, decisionPlan, maximumLength, flow),
       ),
       profile.budgets.maximumFactCount,
     );
@@ -267,7 +270,7 @@ export class NutritionConversationComposer {
       depth: profile.depth,
       density: profile.density,
       rhythm: profile.rhythm,
-      presentation: this.presentation(context, blocks),
+      presentation: this.presentation(context, blocks, flow),
       paragraphCount,
       maximumLength,
       emojiAllowed:
@@ -494,6 +497,7 @@ export class NutritionConversationComposer {
     order: number,
     plan: DecisionPlan,
     maximumLength: number,
+    flow: NutritionConversationFlowPlan,
   ): ConversationBlock {
     const selectedById = new Map(
       plan.selectedDecisions.map((decision) => [
@@ -518,9 +522,11 @@ export class NutritionConversationComposer {
       decisionIds: Object.freeze([...definition.decisionIds]),
       factIds,
       order,
-      paragraph: this.paragraphFor(plan.dialogueProfile, definition, order),
+      paragraph: this.flowPlanner.paragraph(flow, definition.type, order),
       presentation:
-        definition.key === 'analysis' && definition.decisionIds.length >= 3
+        flow.presentation === 'BULLETS' &&
+        definition.key === 'analysis' &&
+        definition.decisionIds.length >= 3
           ? 'BULLETS'
           : 'PROSE',
       required,
@@ -535,36 +541,6 @@ export class NutritionConversationComposer {
         ),
       ),
     });
-  }
-
-  private paragraphFor(
-    profile: DecisionPlan['dialogueProfile'],
-    definition: BlockDefinition,
-    order: number,
-  ): number {
-    if (profile === 'DETAILED_ANALYSIS') return order;
-    if (['disclaimer', 'recognition', 'analysis'].includes(definition.key)) {
-      return 0;
-    }
-    if (
-      [
-        'correction',
-        'education',
-        'continuity',
-        'memory',
-        'longitudinal',
-      ].includes(definition.key)
-    ) {
-      return 1;
-    }
-    if (
-      ['ACKNOWLEDGE_ONLY', 'CELEBRATE', 'CLARIFY_BEFORE_ANALYSIS'].includes(
-        profile,
-      )
-    ) {
-      return 1;
-    }
-    return 2;
   }
 
   private limitFacts(
@@ -603,7 +579,9 @@ export class NutritionConversationComposer {
   private presentation(
     context: NutritionConversationContext,
     blocks: readonly ConversationBlock[],
+    flow: NutritionConversationFlowPlan,
   ): ConversationPresentation {
+    if (flow.presentation === 'PROSE') return 'PROSE';
     if (context.communication.prefersShortMessages || blocks.length <= 3)
       return 'PROSE';
     return blocks.some((block) => block.presentation === 'BULLETS')

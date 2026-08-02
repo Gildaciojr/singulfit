@@ -19,11 +19,11 @@ import {
   NUTRITION_ARTIFACT_TYPE,
   type NutritionArtifactType,
 } from '../diet/v2/nutrition-planning-artifact.contract';
-import { NUTRITION_KNOWLEDGE_PACKAGE_ID as P } from '../nutrition-knowledge/nutrition-knowledge.contract';
 import { NutritionKnowledgeResolverService } from '../nutrition-knowledge/nutrition-knowledge-resolver.service';
 import {
   NUTRITION_REASONING_CONFLICT as C,
   NUTRITION_REASONING_OBJECTIVE as O,
+  NUTRITION_REASONING_STRATEGY_VERSION,
   NUTRITION_REASONING_STRATEGY as S,
   type NutritionReasoningResult,
 } from './nutrition-reasoning.contract';
@@ -45,6 +45,11 @@ describe('NutritionReasoningEngineService', () => {
     readonly medicalConditions?: readonly string[];
     readonly ageYears?: number;
     readonly adherenceScore?: number;
+    readonly experienceLevel?: string;
+    readonly intensityPreference?: string;
+    readonly weeklyFrequency?: number;
+    readonly sessionDurationMinutes?: number;
+    readonly desiredOutcome?: string;
   }
 
   const knowledgeResolver = new NutritionKnowledgeResolverService();
@@ -107,7 +112,7 @@ describe('NutritionReasoningEngineService', () => {
       }),
       nutrition: Object.freeze({
         primaryGoal: known(options.goal ?? FitnessGoal.MAINTENANCE),
-        desiredOutcome: known('Rotina sustentável'),
+        desiredOutcome: known(options.desiredOutcome ?? 'Rotina sustentável'),
         desiredMealCount: known(3),
         dietaryPattern: known(options.dietaryPattern ?? 'OMNIVORE'),
         foodIntolerances: known(
@@ -128,16 +133,28 @@ describe('NutritionReasoningEngineService', () => {
       }),
       training: Object.freeze({
         primaryGoal: known(options.goal ?? FitnessGoal.MAINTENANCE),
-        experienceLevel: unknown<string>(),
+        experienceLevel:
+          options.experienceLevel === undefined
+            ? unknown<string>()
+            : known(options.experienceLevel),
         preferredModality: options.modality
           ? known(options.modality)
           : unknown<string>(),
-        weeklyFrequency: unknown<number>(),
-        sessionDurationMinutes: unknown<number>(),
+        weeklyFrequency:
+          options.weeklyFrequency === undefined
+            ? unknown<number>()
+            : known(options.weeklyFrequency),
+        sessionDurationMinutes:
+          options.sessionDurationMinutes === undefined
+            ? unknown<number>()
+            : known(options.sessionDurationMinutes),
         environment: unknown<string>(),
         availableEquipment: unknown<readonly string[]>(),
         perceivedConditioning: unknown<string>(),
-        intensityPreference: unknown<string>(),
+        intensityPreference:
+          options.intensityPreference === undefined
+            ? unknown<string>()
+            : known(options.intensityPreference),
         cardioAvailability: unknown<boolean>(),
         trainingFormatPreference: unknown<string>(),
       }),
@@ -442,6 +459,118 @@ describe('NutritionReasoningEngineService', () => {
     expect(result.recommendedComplexity).toBe('MINIMAL');
     expect(result.interventionIntensity).toBe('LOW');
     expect(result.priorities.education).toBe('HIGH');
+  });
+
+  it('combina múltiplos objetivos, conflitos, restrições e estratégias sem perder precedência', () => {
+    const result = reason({
+      goal: FitnessGoal.MUSCLE_GAIN,
+      modality: 'CrossFit',
+      budget: 'LOW',
+      cookingAvailability: 'LIMITED',
+      rejectedFoods: ['coentro'],
+      constraints: ['lactose', 'glúten', 'soja'],
+      adherenceScore: 38,
+    });
+
+    expect(result.prioritizedObjectives.map((item) => item.objective)).toEqual(
+      expect.arrayContaining([
+        O.SAFETY,
+        O.MUSCLE_DEVELOPMENT,
+        O.ADHERENCE,
+        O.PERFORMANCE,
+        O.RECOVERY,
+        O.PRACTICALITY,
+        O.ECONOMY,
+      ]),
+    );
+    expect(result.resolvedConflicts.map((item) => item.conflict)).toEqual(
+      expect.arrayContaining([
+        C.HYPERTROPHY_LOW_BUDGET,
+        C.CROSSFIT_LIMITED_TIME,
+        C.REJECTIONS_LOW_BUDGET,
+        C.PRACTICALITY_VARIETY,
+      ]),
+    );
+    expect(result.appliedRestrictions.length).toBeGreaterThan(3);
+    expect(result.selectedStrategies.length).toBeGreaterThan(5);
+    expect(result.interventionIntensity).toBe('LOW');
+    expect(result.recommendedComplexity).toBe('SIMPLE');
+    expect(result.personalizationLevel).toBe('HIGH');
+  });
+
+  it('eleva personalização por sinais independentes de experiência e carga', () => {
+    const baseline = reason({});
+    const advanced = reason({
+      experienceLevel: 'ADVANCED',
+      intensityPreference: 'HIGH',
+      weeklyFrequency: 6,
+      sessionDurationMinutes: 90,
+    });
+
+    expect(baseline.personalizationLevel).toBe('CONTEXTUAL');
+    expect(advanced.personalizationLevel).toBe('HIGH');
+    expect(advanced.metadata.strategyVersion).toBe(
+      NUTRITION_REASONING_STRATEGY_VERSION,
+    );
+  });
+
+  it('materializa múltiplos packages esportivos novos em estratégias canônicas', () => {
+    const result = reason({
+      desiredOutcome: 'recomposição corporal',
+      modality: 'treino híbrido',
+      experienceLevel: 'avançado',
+      sessionDurationMinutes: 90,
+      intensityPreference: 'alta',
+    });
+
+    expect(result.selectedStrategies.map((item) => item.strategy)).toEqual(
+      expect.arrayContaining([
+        S.ENERGY_BALANCE,
+        S.PROTEIN_DISTRIBUTION,
+        S.SPORTS_FUELING,
+        S.RECOVERY_SUPPORT,
+        S.HYDRATION_SUPPORT,
+      ]),
+    );
+    expect(result.prioritizedObjectives.map((item) => item.objective)).toEqual(
+      expect.arrayContaining([O.PERFORMANCE, O.RECOVERY]),
+    );
+    expect(result.personalizationLevel).toBe('HIGH');
+  });
+
+  it('faz safety prevalecer sobre conhecimento esportivo em condição clínica estruturada', () => {
+    const result = reason({
+      modality: 'endurance',
+      sessionDurationMinutes: 90,
+      medicalConditions: ['Doença renal crônica'],
+    });
+
+    expect(result.metadata.safetyRestricted).toBe(true);
+    expect(result.interventionIntensity).toBe('RESTRICTED');
+    expect(result.recommendedComplexity).toBe('SIMPLE');
+    expect(result.prohibitedStrategies.map((item) => item.strategy)).toEqual(
+      expect.arrayContaining([S.CLINICAL_PROTOCOL, S.AGGRESSIVE_RESTRICTION]),
+    );
+    expect(result.selectedStrategies.map((item) => item.strategy)).toContain(
+      S.CONSTRAINT_PRESERVATION,
+    );
+  });
+
+  it('reduz complexidade para iniciante com baixa aderência sem perder educação', () => {
+    const result = reason({
+      experienceLevel: 'iniciante',
+      adherenceScore: 35,
+      cookingAvailability: 'pouco tempo',
+    });
+
+    expect(result.recommendedComplexity).toBe('SIMPLE');
+    expect(result.priorities.adherence).toBe('CRITICAL');
+    expect(result.prohibitedStrategies.map((item) => item.strategy)).toContain(
+      S.SOPHISTICATED_RECIPES,
+    );
+    expect(result.selectedStrategies.map((item) => item.strategy)).toContain(
+      S.BEHAVIOR_ADHERENCE,
+    );
   });
 
   it('é determinístico, não modifica entradas e congela profundamente o resultado', () => {

@@ -146,6 +146,21 @@ const input = Object.freeze({
   conversation,
   legacyText: 'legacy',
 });
+const reasoning = Object.freeze({
+  planner: Object.freeze({
+    recognizedIntent: 'COMBINED_PLAN_REQUEST' as const,
+    goal: 'GENERATE_COMBINED_PLANS' as const,
+    reason: 'COMBINED_PROFILE_READY' as const,
+    targetPlan: 'BOTH' as const,
+    profileCompletionState: 'COMPLETE' as const,
+    canExecute: true,
+    confidence: 'HIGH' as const,
+    selectedProfileField: null,
+    metPreconditions: Object.freeze([]),
+    missingPreconditions: Object.freeze([]),
+    pendingDependencies: Object.freeze([]),
+  }),
+});
 
 async function flush(): Promise<void> {
   await Promise.resolve();
@@ -221,9 +236,29 @@ describe('NutritionConversationShadowPipelineService', () => {
     expect(calls).toEqual([...calls].sort((left, right) => left - right));
   });
 
+  it('bridges supplied reasoning before realization without changing official selection', async () => {
+    const target = subject();
+    target.service.execute({ ...input, reasoning });
+    await flush();
+
+    expect(target.realizationExecutor.execute).toHaveBeenCalledWith({
+      ...input.operation,
+      payload: target.sanitizedPayload,
+      reasoningEvidence: expect.objectContaining({
+        summary: expect.objectContaining({
+          goal: 'criar planos de alimentação e treino',
+        }),
+      }),
+    });
+    expect(target.candidateSelector.select).toHaveBeenCalledWith(
+      expect.objectContaining({ officialResponse: 'legacy' }),
+    );
+    expect(target.selectionDecision.selectedSource).toBe('FORMATTER');
+  });
+
   it.each(['OFF', 'INTERNAL', 'CANARY', 'ROLLOUT', 'PRIMARY'] as const)(
     'does nothing in %s mode',
-    async (mode) => {
+    (mode) => {
       const target = subject('OFF');
       target.operationalConfig.get.mockReturnValue({ effectiveMode: mode });
       target.service.execute(input);
@@ -244,11 +279,37 @@ describe('NutritionConversationShadowPipelineService', () => {
     ['Candidate selector', 'candidateSelector', 'select'],
   ] as const)(
     'isolates a synchronous %s failure',
-    async (_label, dependency, method) => {
+    async (_label, dependency) => {
       const target = subject();
-      target[dependency][method].mockImplementation(() => {
+      const failure = () => {
         throw new Error('shadow failure');
-      });
+      };
+      switch (dependency) {
+        case 'contextBuilder':
+          target.contextBuilder.build.mockImplementation(failure);
+          break;
+        case 'decisionEngine':
+          target.decisionEngine.generate.mockImplementation(failure);
+          break;
+        case 'scoringPolicy':
+          target.scoringPolicy.select.mockImplementation(failure);
+          break;
+        case 'composer':
+          target.composer.compose.mockImplementation(failure);
+          break;
+        case 'authorizedFactsBuilder':
+          target.authorizedFactsBuilder.build.mockImplementation(failure);
+          break;
+        case 'sanitizedPayloadBuilder':
+          target.sanitizedPayloadBuilder.build.mockImplementation(failure);
+          break;
+        case 'selectionConfig':
+          target.selectionConfig.get.mockImplementation(failure);
+          break;
+        case 'candidateSelector':
+          target.candidateSelector.select.mockImplementation(failure);
+          break;
+      }
 
       expect(target.service.execute(input)).toBeUndefined();
       await flush();

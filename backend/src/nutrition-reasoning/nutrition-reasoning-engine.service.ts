@@ -3,6 +3,7 @@ import { CONVERSATION_GOAL } from '../context/conversation-goal-planner.contract
 import { NUTRITION_ARTIFACT_TYPE } from '../diet/v2/nutrition-planning-artifact.contract';
 import { NUTRITION_KNOWLEDGE_PACKAGES } from '../nutrition-knowledge/nutrition-knowledge.catalog';
 import {
+  NUTRITION_KNOWLEDGE_DOMAIN,
   NUTRITION_KNOWLEDGE_PACKAGE_ID,
   type NutritionKnowledgePackage,
   type NutritionKnowledgePackageId,
@@ -50,6 +51,18 @@ interface ReasoningContext {
   readonly generalGuidance: boolean;
   readonly safetyRestricted: boolean;
   readonly detailedArtifact: boolean;
+  readonly profileSignalCount: number;
+}
+
+interface FactorStrategyPolicy {
+  readonly factorCodes: ReadonlySet<string>;
+  readonly strategy: NutritionReasoningStrategy;
+  readonly polarity: 'POSITIVE' | 'NEGATIVE';
+}
+
+interface StrategyObjectivePolicy {
+  readonly strategies: ReadonlySet<NutritionReasoningStrategy>;
+  readonly objective: NutritionReasoningObjective;
 }
 
 interface StrategyAccumulator {
@@ -64,6 +77,15 @@ interface ObjectiveAccumulator {
   priority: Exclude<NutritionReasoningPriority, 'IGNORED'>;
   readonly sourcePackageIds: Set<NutritionKnowledgePackageId>;
   readonly reasonCodes: Set<NutritionReasoningReasonCode>;
+}
+
+interface PackagePriorityOverride {
+  readonly priority: Exclude<NutritionReasoningPriority, 'IGNORED'>;
+  readonly disposition: Extract<
+    NutritionKnowledgePackageDecision['disposition'],
+    'ELEVATED' | 'REDUCED'
+  >;
+  readonly reasonCodes: readonly NutritionReasoningReasonCode[];
 }
 
 const P = NUTRITION_KNOWLEDGE_PACKAGE_ID;
@@ -109,7 +131,160 @@ const BASE_PACKAGES = new Set<NutritionKnowledgePackageId>([
   P.NUTRITION_EDUCATION_FOUNDATION,
   P.HYDRATION,
   P.MEAL_TIMING,
+  P.PRE_WORKOUT_NUTRITION,
+  P.POST_WORKOUT_RECOVERY,
+  P.PROTEIN_DISTRIBUTION_EDUCATION,
 ]);
+
+const LEGACY_POLICY_PACKAGE_IDS = new Set<NutritionKnowledgePackageId>([
+  P.HEALTHY_EATING_FOUNDATION,
+  P.NUTRITION_EDUCATION_FOUNDATION,
+  P.WEIGHT_LOSS,
+  P.HYPERTROPHY,
+  P.MAINTENANCE,
+  P.SPORTS_NUTRITION_FOUNDATION,
+  P.RUNNING,
+  P.CROSSFIT,
+  P.CYCLING,
+  P.VEGETARIAN,
+  P.VEGAN,
+  P.LACTOSE_INTOLERANCE,
+  P.GLUTEN_RESTRICTION,
+  P.FOOD_RESTRICTION_SAFETY,
+  P.FOOD_SUBSTITUTION,
+  P.BUDGET_LOW,
+  P.BUDGET_MEDIUM,
+  P.BUDGET_HIGH,
+  P.LIMITED_COOKING_TIME,
+  P.MEALS_AWAY_FROM_HOME,
+  P.MEAL_TIMING,
+  P.HYDRATION,
+  P.FOOD_PREFERENCES,
+  P.FOOD_REJECTIONS,
+  P.BEHAVIOR_ADHERENCE,
+  P.CLINICAL_SAFETY_BOUNDARY,
+  P.SPECIAL_POPULATION_BOUNDARY,
+]);
+
+const FACTOR_STRATEGY_POLICIES: readonly FactorStrategyPolicy[] = Object.freeze(
+  [
+    {
+      factorCodes: new Set([
+        'ENERGY_DEFICIT',
+        'ADEQUATE_ENERGY',
+        'ENERGY_BALANCE',
+      ]),
+      strategy: S.ENERGY_BALANCE,
+      polarity: 'POSITIVE',
+    },
+    {
+      factorCodes: new Set(['PROTEIN_DISTRIBUTION', 'PLANT_PROTEIN_VARIETY']),
+      strategy: S.PROTEIN_DISTRIBUTION,
+      polarity: 'POSITIVE',
+    },
+    {
+      factorCodes: new Set([
+        'RECOVERY',
+        'RECOVERY_WINDOW',
+        'POST_RUN_RECOVERY',
+        'POST_RIDE_RECOVERY',
+      ]),
+      strategy: S.RECOVERY_SUPPORT,
+      polarity: 'POSITIVE',
+    },
+    {
+      factorCodes: new Set([
+        'TRAINING_ALIGNMENT',
+        'TRAINING_DEMAND',
+        'CARBOHYDRATE_AVAILABILITY',
+        'DURATION_AWARE_ENERGY',
+      ]),
+      strategy: S.SPORTS_FUELING,
+      polarity: 'POSITIVE',
+    },
+    {
+      factorCodes: new Set([
+        'HYDRATION',
+        'REGULAR_ACCESS',
+        'EXERCISE_CONTEXT',
+        'ENVIRONMENTAL_HYDRATION',
+        'FLUID_ACCESS_PLAN',
+      ]),
+      strategy: S.HYDRATION_SUPPORT,
+      polarity: 'POSITIVE',
+    },
+    {
+      factorCodes: new Set([
+        'FUNCTIONAL_EQUIVALENCE',
+        'ACCEPTABLE_ALTERNATIVES',
+        'SAFE_ALTERNATIVES',
+      ]),
+      strategy: S.FOOD_SUBSTITUTION,
+      polarity: 'POSITIVE',
+    },
+    {
+      factorCodes: new Set(['ROUTINE_ALIGNMENT', 'ROUTINE_STABILITY']),
+      strategy: S.ROUTINE_ALIGNMENT,
+      polarity: 'POSITIVE',
+    },
+    {
+      factorCodes: new Set(['SMALL_REPEATABLE_ACTIONS', 'FLEXIBLE_ADHERENCE']),
+      strategy: S.BEHAVIOR_ADHERENCE,
+      polarity: 'POSITIVE',
+    },
+    {
+      factorCodes: new Set(['CONFIRMED_CONSTRAINTS']),
+      strategy: S.CONSTRAINT_PRESERVATION,
+      polarity: 'POSITIVE',
+    },
+    {
+      factorCodes: new Set(['AGGRESSIVE_RESTRICTION']),
+      strategy: S.AGGRESSIVE_RESTRICTION,
+      polarity: 'NEGATIVE',
+    },
+    {
+      factorCodes: new Set(['COMPLEX_DAILY_RECIPES']),
+      strategy: S.SOPHISTICATED_RECIPES,
+      polarity: 'NEGATIVE',
+    },
+    {
+      factorCodes: new Set(['EXPENSIVE_DEFAULTS']),
+      strategy: S.HIGH_COST_DEFAULTS,
+      polarity: 'NEGATIVE',
+    },
+    {
+      factorCodes: new Set(['CLINICAL_PROTOCOL']),
+      strategy: S.CLINICAL_PROTOCOL,
+      polarity: 'NEGATIVE',
+    },
+  ],
+);
+
+const STRATEGY_OBJECTIVE_POLICIES: readonly StrategyObjectivePolicy[] =
+  Object.freeze([
+    { strategies: new Set([S.RECOVERY_SUPPORT]), objective: O.RECOVERY },
+    { strategies: new Set([S.SPORTS_FUELING]), objective: O.PERFORMANCE },
+    { strategies: new Set([S.SATIETY_SUPPORT]), objective: O.SATIETY },
+    {
+      strategies: new Set([
+        S.PRACTICAL_MEALS,
+        S.QUICK_MEALS,
+        S.ROUTINE_ALIGNMENT,
+        S.EATING_OUT_NAVIGATION,
+      ]),
+      objective: O.PRACTICALITY,
+    },
+    { strategies: new Set([S.ECONOMIC_SELECTION]), objective: O.ECONOMY },
+    {
+      strategies: new Set([S.NUTRITION_EDUCATION]),
+      objective: O.NUTRITION_EDUCATION,
+    },
+    { strategies: new Set([S.BEHAVIOR_ADHERENCE]), objective: O.ADHERENCE },
+    {
+      strategies: new Set([S.CONSTRAINT_PRESERVATION]),
+      objective: O.SAFETY,
+    },
+  ]);
 
 @Injectable()
 export class NutritionReasoningEngineService {
@@ -138,6 +313,7 @@ export class NutritionReasoningEngineService {
     const conflicts: NutritionResolvedConflict[] = [];
 
     this.mapPackagesToStrategies(
+      packageResolution.selected,
       packageDecisions,
       context,
       strategies,
@@ -163,6 +339,7 @@ export class NutritionReasoningEngineService {
     const restrictions = this.restrictions(packageResolution.selected);
     const personalizationLevel = this.personalizationLevel(
       packageResolution.selected,
+      context,
     );
 
     return deepFreeze({
@@ -270,13 +447,13 @@ export class NutritionReasoningEngineService {
       this.datumValues(input.snapshot.restrictions.foodRestrictions).length +
       this.datumValues(input.snapshot.restrictions.allergies).length +
       this.datumValues(input.snapshot.nutrition.foodIntolerances).length;
-    const sportsContext = [P.RUNNING, P.CYCLING, P.CROSSFIT].some((id) =>
-      packageIds.has(id),
+    const sportsContext = packages.some(
+      (knowledgePackage) =>
+        knowledgePackage.domain ===
+          NUTRITION_KNOWLEDGE_DOMAIN.SPORTS_NUTRITION &&
+        knowledgePackage.id !== P.SPORTS_NUTRITION_FOUNDATION,
     );
-    const safetyRestricted = [
-      P.CLINICAL_SAFETY_BOUNDARY,
-      P.SPECIAL_POPULATION_BOUNDARY,
-    ].some((id) => packageIds.has(id));
+    const safetyRestricted = this.hasSafetyBoundary(packages);
 
     return Object.freeze({
       packageIds,
@@ -302,7 +479,36 @@ export class NutritionReasoningEngineService {
       safetyRestricted,
       detailedArtifact:
         input.artifactType === NUTRITION_ARTIFACT_TYPE.WEEKLY_PLAN,
+      profileSignalCount: this.profileSignalCount(input),
     });
+  }
+
+  private hasSafetyBoundary(
+    packages: readonly NutritionKnowledgePackage[],
+  ): boolean {
+    const boundaryCodes = new Set([
+      'NO_CLINICAL_PROTOCOL',
+      'NO_SPECIAL_POPULATION_PROTOCOL',
+      'REQUIRE_PROFESSIONAL_FOLLOW_UP',
+    ]);
+    return packages.some((knowledgePackage) =>
+      knowledgePackage.limits.some((limit) => boundaryCodes.has(limit.code)),
+    );
+  }
+
+  private profileSignalCount(input: NutritionReasoningInput): number {
+    const signals = [
+      this.datumValue(input.snapshot.training.experienceLevel),
+      this.datumValue(input.snapshot.training.intensityPreference),
+      this.datumValue(input.snapshot.training.weeklyFrequency),
+      this.datumValue(input.snapshot.training.sessionDurationMinutes),
+      this.datumValue(input.snapshot.longitudinal.goalProgression),
+      this.datumValue(input.snapshot.longitudinal.nutritionEvolution),
+      this.datumValue(input.snapshot.longitudinal.coachAdaptation),
+      this.datumValue(input.snapshot.plans.currentDiet),
+      this.datumValue(input.snapshot.plans.currentWorkout),
+    ];
+    return signals.filter((value) => value !== undefined).length;
   }
 
   private packageDecisions(
@@ -313,68 +519,26 @@ export class NutritionReasoningEngineService {
     const decisions: NutritionKnowledgePackageDecision[] = selected.map(
       (knowledgePackage) => {
         const basePriority = KNOWLEDGE_PRIORITY[knowledgePackage.priority];
-        let resolvedPriority = basePriority;
         const reasons = new Set<NutritionReasoningReasonCode>([
           'KNOWLEDGE_PRIORITY',
         ]);
-        let disposition: NutritionKnowledgePackageDecision['disposition'] =
+        const baseDisposition: NutritionKnowledgePackageDecision['disposition'] =
           knowledgePackage.priority === 'CRITICAL' ? 'REQUIRED' : 'KEPT';
 
         if (knowledgePackage.priority === 'CRITICAL') {
           reasons.add('SAFETY_MANDATORY');
         }
-        if (
-          (knowledgePackage.id === P.BEHAVIOR_ADHERENCE &&
-            context.lowAdherence) ||
-          (knowledgePackage.id === P.HYDRATION &&
-            context.inadequateHydration &&
-            context.sportsContext)
-        ) {
-          resolvedPriority = R.CRITICAL;
-          disposition = 'ELEVATED';
-          reasons.add(
-            knowledgePackage.id === P.HYDRATION
-              ? 'INADEQUATE_HYDRATION'
-              : 'LOW_ADHERENCE',
-          );
-        } else if (
-          knowledgePackage.id === P.BUDGET_LOW ||
-          knowledgePackage.id === P.LIMITED_COOKING_TIME ||
-          (knowledgePackage.id === P.MEALS_AWAY_FROM_HOME &&
-            context.packageIds.has(P.WEIGHT_LOSS)) ||
-          (knowledgePackage.id === P.FOOD_SUBSTITUTION &&
-            (context.lowBudget ||
-              context.restrictionCount > 0 ||
-              context.packageIds.has(P.FOOD_REJECTIONS))) ||
-          (knowledgePackage.id === P.NUTRITION_EDUCATION_FOUNDATION &&
-            (context.lowAdherence || context.generalGuidance))
-        ) {
-          resolvedPriority = R.HIGH;
-          disposition = 'ELEVATED';
-          if (context.lowBudget) reasons.add('LOW_BUDGET');
-          if (context.limitedCookingTime) reasons.add('LIMITED_COOKING_TIME');
-          if (context.mealsAwayFromHome) reasons.add('MEALS_AWAY_FROM_HOME');
-          if (context.lowAdherence) reasons.add('LOW_ADHERENCE');
-          if (context.generalGuidance) reasons.add('GENERAL_GUIDANCE');
-        } else if (
-          (knowledgePackage.id === P.BEHAVIOR_ADHERENCE &&
-            context.highAdherence) ||
-          knowledgePackage.id === P.BUDGET_HIGH
-        ) {
-          resolvedPriority = R.LOW;
-          disposition = 'REDUCED';
-          reasons.add(
-            knowledgePackage.id === P.BUDGET_HIGH
-              ? 'HIGH_BUDGET'
-              : 'HIGH_ADHERENCE',
-          );
-        }
+        const override = this.packagePriorityOverride(
+          knowledgePackage,
+          context,
+        );
+        for (const reason of override?.reasonCodes ?? []) reasons.add(reason);
 
         return Object.freeze({
           packageId: knowledgePackage.id,
           originalPriority: knowledgePackage.priority,
-          resolvedPriority,
-          disposition,
+          resolvedPriority: override?.priority ?? basePriority,
+          disposition: override?.disposition ?? baseDisposition,
           reasonCodes: Object.freeze([...reasons].sort()),
         });
       },
@@ -400,11 +564,119 @@ export class NutritionReasoningEngineService {
     );
   }
 
+  private packagePriorityOverride(
+    knowledgePackage: NutritionKnowledgePackage,
+    context: ReasoningContext,
+  ): PackagePriorityOverride | null {
+    return (
+      this.criticalPriorityOverride(knowledgePackage, context) ??
+      this.elevatedPriorityOverride(knowledgePackage, context) ??
+      this.reducedPriorityOverride(knowledgePackage, context)
+    );
+  }
+
+  private criticalPriorityOverride(
+    knowledgePackage: NutritionKnowledgePackage,
+    context: ReasoningContext,
+  ): PackagePriorityOverride | null {
+    if (knowledgePackage.id === P.BEHAVIOR_ADHERENCE && context.lowAdherence)
+      return this.priorityOverride(R.CRITICAL, 'ELEVATED', ['LOW_ADHERENCE']);
+    if (
+      knowledgePackage.id === P.HYDRATION &&
+      context.inadequateHydration &&
+      context.sportsContext
+    )
+      return this.priorityOverride(R.CRITICAL, 'ELEVATED', [
+        'INADEQUATE_HYDRATION',
+      ]);
+    return null;
+  }
+
+  private elevatedPriorityOverride(
+    knowledgePackage: NutritionKnowledgePackage,
+    context: ReasoningContext,
+  ): PackagePriorityOverride | null {
+    const elevated =
+      knowledgePackage.id === P.BUDGET_LOW ||
+      knowledgePackage.id === P.LIMITED_COOKING_TIME ||
+      (knowledgePackage.id === P.MEALS_AWAY_FROM_HOME &&
+        context.packageIds.has(P.WEIGHT_LOSS)) ||
+      (knowledgePackage.id === P.FOOD_SUBSTITUTION &&
+        (context.lowBudget ||
+          context.restrictionCount > 0 ||
+          context.packageIds.has(P.FOOD_REJECTIONS))) ||
+      (knowledgePackage.id === P.NUTRITION_EDUCATION_FOUNDATION &&
+        (context.lowAdherence || context.generalGuidance));
+    if (!elevated) return null;
+    return this.priorityOverride(
+      R.HIGH,
+      'ELEVATED',
+      this.contextualPriorityReasons(context),
+    );
+  }
+
+  private reducedPriorityOverride(
+    knowledgePackage: NutritionKnowledgePackage,
+    context: ReasoningContext,
+  ): PackagePriorityOverride | null {
+    if (knowledgePackage.id === P.BEHAVIOR_ADHERENCE && context.highAdherence)
+      return this.priorityOverride(R.LOW, 'REDUCED', ['HIGH_ADHERENCE']);
+    if (knowledgePackage.id === P.BUDGET_HIGH)
+      return this.priorityOverride(R.LOW, 'REDUCED', ['HIGH_BUDGET']);
+    return null;
+  }
+
+  private contextualPriorityReasons(
+    context: ReasoningContext,
+  ): readonly NutritionReasoningReasonCode[] {
+    return Object.freeze([
+      ...(context.lowBudget ? (['LOW_BUDGET'] as const) : []),
+      ...(context.limitedCookingTime
+        ? (['LIMITED_COOKING_TIME'] as const)
+        : []),
+      ...(context.mealsAwayFromHome ? (['MEALS_AWAY_FROM_HOME'] as const) : []),
+      ...(context.lowAdherence ? (['LOW_ADHERENCE'] as const) : []),
+      ...(context.generalGuidance ? (['GENERAL_GUIDANCE'] as const) : []),
+    ]);
+  }
+
+  private priorityOverride(
+    priority: PackagePriorityOverride['priority'],
+    disposition: PackagePriorityOverride['disposition'],
+    reasonCodes: PackagePriorityOverride['reasonCodes'],
+  ): PackagePriorityOverride {
+    return Object.freeze({ priority, disposition, reasonCodes });
+  }
+
   private mapPackagesToStrategies(
+    packages: readonly NutritionKnowledgePackage[],
     packageDecisions: readonly NutritionKnowledgePackageDecision[],
     context: ReasoningContext,
     strategies: Map<NutritionReasoningStrategy, StrategyAccumulator>,
     prohibited: Map<NutritionReasoningStrategy, StrategyAccumulator>,
+  ): void {
+    this.applyFoundationStrategies(packageDecisions, context, strategies);
+    this.applyGoalStrategies(context, strategies, prohibited);
+    this.applySportsStrategies(context, strategies);
+    this.applyDietaryPatternStrategies(context, strategies);
+    this.applyConstraintStrategies(packageDecisions, context, strategies);
+    this.applyBudgetStrategies(context, strategies, prohibited);
+    this.applyRoutineStrategies(context, strategies, prohibited);
+    this.applyBehaviorStrategies(context, strategies);
+    this.applySafetyStrategies(context, prohibited);
+    this.applyArtifactStrategies(context, strategies);
+    this.applyExtensibleFactorStrategies(
+      packages,
+      packageDecisions,
+      strategies,
+      prohibited,
+    );
+  }
+
+  private applyFoundationStrategies(
+    packageDecisions: readonly NutritionKnowledgePackageDecision[],
+    context: ReasoningContext,
+    strategies: Map<NutritionReasoningStrategy, StrategyAccumulator>,
   ): void {
     const priority = (id: NutritionKnowledgePackageId) =>
       this.decisionPriority(packageDecisions, id);
@@ -436,7 +708,14 @@ export class NutritionReasoningEngineService {
         P.NUTRITION_EDUCATION_FOUNDATION,
         context.generalGuidance ? 'GENERAL_GUIDANCE' : 'KNOWLEDGE_PRIORITY',
       );
+  }
 
+  private applyGoalStrategies(
+    context: ReasoningContext,
+    strategies: Map<NutritionReasoningStrategy, StrategyAccumulator>,
+    prohibited: Map<NutritionReasoningStrategy, StrategyAccumulator>,
+  ): void {
+    const has = (id: NutritionKnowledgePackageId) => context.packageIds.has(id);
     if (has(P.WEIGHT_LOSS)) {
       this.addStrategy(
         strategies,
@@ -505,8 +784,14 @@ export class NutritionReasoningEngineService {
         'GOAL_ALIGNMENT',
       );
     }
+  }
+
+  private applySportsStrategies(
+    context: ReasoningContext,
+    strategies: Map<NutritionReasoningStrategy, StrategyAccumulator>,
+  ): void {
     for (const sportId of [P.RUNNING, P.CYCLING, P.CROSSFIT] as const) {
-      if (!has(sportId)) continue;
+      if (!context.packageIds.has(sportId)) continue;
       this.addStrategy(
         strategies,
         S.SPORTS_FUELING,
@@ -529,8 +814,14 @@ export class NutritionReasoningEngineService {
         context.inadequateHydration ? 'INADEQUATE_HYDRATION' : 'SPORTS_CONTEXT',
       );
     }
+  }
+
+  private applyDietaryPatternStrategies(
+    context: ReasoningContext,
+    strategies: Map<NutritionReasoningStrategy, StrategyAccumulator>,
+  ): void {
     for (const patternId of [P.VEGETARIAN, P.VEGAN] as const) {
-      if (!has(patternId)) continue;
+      if (!context.packageIds.has(patternId)) continue;
       this.addStrategy(
         strategies,
         S.PROTEIN_PRIORITY,
@@ -546,16 +837,23 @@ export class NutritionReasoningEngineService {
         'FOOD_RESTRICTIONS',
       );
     }
-    if (has(P.FOOD_SUBSTITUTION)) {
+  }
+
+  private applyConstraintStrategies(
+    packageDecisions: readonly NutritionKnowledgePackageDecision[],
+    context: ReasoningContext,
+    strategies: Map<NutritionReasoningStrategy, StrategyAccumulator>,
+  ): void {
+    if (context.packageIds.has(P.FOOD_SUBSTITUTION)) {
       this.addStrategy(
         strategies,
         S.FOOD_SUBSTITUTION,
-        priority(P.FOOD_SUBSTITUTION),
+        this.decisionPriority(packageDecisions, P.FOOD_SUBSTITUTION),
         P.FOOD_SUBSTITUTION,
         context.lowBudget ? 'LOW_BUDGET' : 'FOOD_RESTRICTIONS',
       );
     }
-    if (has(P.FOOD_RESTRICTION_SAFETY)) {
+    if (context.packageIds.has(P.FOOD_RESTRICTION_SAFETY)) {
       this.addStrategy(
         strategies,
         S.CONSTRAINT_PRESERVATION,
@@ -564,7 +862,23 @@ export class NutritionReasoningEngineService {
         'SAFETY_MANDATORY',
       );
     }
-    if (has(P.BUDGET_LOW)) {
+    if (context.packageIds.has(P.FOOD_REJECTIONS)) {
+      this.addStrategy(
+        strategies,
+        S.FOOD_SUBSTITUTION,
+        R.HIGH,
+        P.FOOD_REJECTIONS,
+        'FOOD_REJECTIONS',
+      );
+    }
+  }
+
+  private applyBudgetStrategies(
+    context: ReasoningContext,
+    strategies: Map<NutritionReasoningStrategy, StrategyAccumulator>,
+    prohibited: Map<NutritionReasoningStrategy, StrategyAccumulator>,
+  ): void {
+    if (context.packageIds.has(P.BUDGET_LOW)) {
       this.addStrategy(
         strategies,
         S.ECONOMIC_SELECTION,
@@ -585,7 +899,7 @@ export class NutritionReasoningEngineService {
         P.BUDGET_LOW,
         'LOW_BUDGET',
       );
-    } else if (has(P.BUDGET_HIGH)) {
+    } else if (context.packageIds.has(P.BUDGET_HIGH)) {
       this.addStrategy(
         strategies,
         S.ECONOMIC_SELECTION,
@@ -600,7 +914,7 @@ export class NutritionReasoningEngineService {
         P.BUDGET_HIGH,
         'HIGH_BUDGET',
       );
-    } else if (has(P.BUDGET_MEDIUM)) {
+    } else if (context.packageIds.has(P.BUDGET_MEDIUM)) {
       this.addStrategy(
         strategies,
         S.ECONOMIC_SELECTION,
@@ -609,7 +923,14 @@ export class NutritionReasoningEngineService {
         'KNOWLEDGE_PRIORITY',
       );
     }
-    if (has(P.LIMITED_COOKING_TIME)) {
+  }
+
+  private applyRoutineStrategies(
+    context: ReasoningContext,
+    strategies: Map<NutritionReasoningStrategy, StrategyAccumulator>,
+    prohibited: Map<NutritionReasoningStrategy, StrategyAccumulator>,
+  ): void {
+    if (context.packageIds.has(P.LIMITED_COOKING_TIME)) {
       this.addStrategy(
         strategies,
         S.QUICK_MEALS,
@@ -631,7 +952,7 @@ export class NutritionReasoningEngineService {
         'LIMITED_COOKING_TIME',
       );
     }
-    if (has(P.MEALS_AWAY_FROM_HOME)) {
+    if (context.packageIds.has(P.MEALS_AWAY_FROM_HOME)) {
       this.addStrategy(
         strategies,
         S.EATING_OUT_NAVIGATION,
@@ -647,7 +968,7 @@ export class NutritionReasoningEngineService {
         'MEALS_AWAY_FROM_HOME',
       );
     }
-    if (has(P.MEAL_TIMING)) {
+    if (context.packageIds.has(P.MEAL_TIMING)) {
       this.addStrategy(
         strategies,
         S.ROUTINE_ALIGNMENT,
@@ -656,16 +977,13 @@ export class NutritionReasoningEngineService {
         'KNOWLEDGE_PRIORITY',
       );
     }
-    if (has(P.FOOD_REJECTIONS)) {
-      this.addStrategy(
-        strategies,
-        S.FOOD_SUBSTITUTION,
-        R.HIGH,
-        P.FOOD_REJECTIONS,
-        'FOOD_REJECTIONS',
-      );
-    }
-    if (has(P.BEHAVIOR_ADHERENCE)) {
+  }
+
+  private applyBehaviorStrategies(
+    context: ReasoningContext,
+    strategies: Map<NutritionReasoningStrategy, StrategyAccumulator>,
+  ): void {
+    if (context.packageIds.has(P.BEHAVIOR_ADHERENCE)) {
       this.addStrategy(
         strategies,
         S.BEHAVIOR_ADHERENCE,
@@ -682,8 +1000,14 @@ export class NutritionReasoningEngineService {
             : 'KNOWLEDGE_PRIORITY',
       );
     }
+  }
+
+  private applySafetyStrategies(
+    context: ReasoningContext,
+    prohibited: Map<NutritionReasoningStrategy, StrategyAccumulator>,
+  ): void {
     if (context.safetyRestricted) {
-      const source = has(P.CLINICAL_SAFETY_BOUNDARY)
+      const source = context.packageIds.has(P.CLINICAL_SAFETY_BOUNDARY)
         ? P.CLINICAL_SAFETY_BOUNDARY
         : P.SPECIAL_POPULATION_BOUNDARY;
       this.addProhibited(
@@ -693,7 +1017,12 @@ export class NutritionReasoningEngineService {
         'CLINICAL_BOUNDARY',
       );
     }
+  }
 
+  private applyArtifactStrategies(
+    context: ReasoningContext,
+    strategies: Map<NutritionReasoningStrategy, StrategyAccumulator>,
+  ): void {
     if (
       context.detailedArtifact &&
       !context.lowBudget &&
@@ -711,163 +1040,268 @@ export class NutritionReasoningEngineService {
     }
   }
 
+  private applyExtensibleFactorStrategies(
+    packages: readonly NutritionKnowledgePackage[],
+    packageDecisions: readonly NutritionKnowledgePackageDecision[],
+    strategies: Map<NutritionReasoningStrategy, StrategyAccumulator>,
+    prohibited: Map<NutritionReasoningStrategy, StrategyAccumulator>,
+  ): void {
+    for (const knowledgePackage of packages) {
+      if (LEGACY_POLICY_PACKAGE_IDS.has(knowledgePackage.id)) continue;
+      for (const policy of FACTOR_STRATEGY_POLICIES) {
+        if (!this.packageMatchesFactorPolicy(knowledgePackage, policy))
+          continue;
+        if (policy.polarity === 'NEGATIVE') {
+          this.addProhibited(
+            prohibited,
+            policy.strategy,
+            knowledgePackage.id,
+            'KNOWLEDGE_PRIORITY',
+          );
+          continue;
+        }
+        this.addStrategy(
+          strategies,
+          policy.strategy,
+          this.decisionPriority(packageDecisions, knowledgePackage.id),
+          knowledgePackage.id,
+          'KNOWLEDGE_PRIORITY',
+        );
+      }
+    }
+  }
+
+  private packageMatchesFactorPolicy(
+    knowledgePackage: NutritionKnowledgePackage,
+    policy: FactorStrategyPolicy,
+  ): boolean {
+    const factors =
+      policy.polarity === 'POSITIVE'
+        ? knowledgePackage.positiveFactors
+        : knowledgePackage.negativeFactors;
+    return factors.some((factor) => policy.factorCodes.has(factor.code));
+  }
+
   private resolveContextConflicts(
     context: ReasoningContext,
     strategies: Map<NutritionReasoningStrategy, StrategyAccumulator>,
     prohibited: Map<NutritionReasoningStrategy, StrategyAccumulator>,
     conflicts: NutritionResolvedConflict[],
   ): void {
-    if (context.packageIds.has(P.HYPERTROPHY) && context.lowBudget) {
-      this.addStrategy(
-        strategies,
-        S.PROTEIN_PRIORITY,
-        R.HIGH,
-        P.HYPERTROPHY,
-        'CONFLICT_RESOLUTION',
-      );
-      this.addStrategy(
-        strategies,
-        S.ECONOMIC_SELECTION,
-        R.HIGH,
-        P.BUDGET_LOW,
-        'CONFLICT_RESOLUTION',
-      );
-      this.addStrategy(
-        strategies,
-        S.FOOD_SUBSTITUTION,
-        R.HIGH,
-        P.BUDGET_LOW,
-        'CONFLICT_RESOLUTION',
-      );
-      this.addProhibited(
-        prohibited,
-        S.SOPHISTICATED_RECIPES,
-        P.BUDGET_LOW,
-        'CONFLICT_RESOLUTION',
-      );
-      this.conflict(
-        conflicts,
-        NUTRITION_REASONING_CONFLICT.HYPERTROPHY_LOW_BUDGET,
-        [P.HYPERTROPHY, P.BUDGET_LOW],
-        [S.PROTEIN_PRIORITY, S.ECONOMIC_SELECTION, S.FOOD_SUBSTITUTION],
-        [S.EXTENSIVE_VARIETY],
-        [S.SOPHISTICATED_RECIPES],
-      );
-    }
+    this.resolveHypertrophyBudgetConflict(
+      context,
+      strategies,
+      prohibited,
+      conflicts,
+    );
+    this.resolveWeightLossAdherenceConflict(context, strategies, conflicts);
+    this.resolveCrossfitRoutineConflict(context, conflicts);
+    this.resolveRunningHydrationConflict(context, strategies, conflicts);
+    this.resolveVeganProteinConflict(context, conflicts);
+    this.resolveRejectionBudgetConflict(context, conflicts);
+    this.resolvePracticalityVarietyConflict(
+      context,
+      strategies,
+      prohibited,
+      conflicts,
+    );
+  }
+
+  private resolveHypertrophyBudgetConflict(
+    context: ReasoningContext,
+    strategies: Map<NutritionReasoningStrategy, StrategyAccumulator>,
+    prohibited: Map<NutritionReasoningStrategy, StrategyAccumulator>,
+    conflicts: NutritionResolvedConflict[],
+  ): void {
+    if (!context.packageIds.has(P.HYPERTROPHY) || !context.lowBudget) return;
+    this.addStrategy(
+      strategies,
+      S.PROTEIN_PRIORITY,
+      R.HIGH,
+      P.HYPERTROPHY,
+      'CONFLICT_RESOLUTION',
+    );
+    this.addStrategy(
+      strategies,
+      S.ECONOMIC_SELECTION,
+      R.HIGH,
+      P.BUDGET_LOW,
+      'CONFLICT_RESOLUTION',
+    );
+    this.addStrategy(
+      strategies,
+      S.FOOD_SUBSTITUTION,
+      R.HIGH,
+      P.BUDGET_LOW,
+      'CONFLICT_RESOLUTION',
+    );
+    this.addProhibited(
+      prohibited,
+      S.SOPHISTICATED_RECIPES,
+      P.BUDGET_LOW,
+      'CONFLICT_RESOLUTION',
+    );
+    this.conflict(
+      conflicts,
+      NUTRITION_REASONING_CONFLICT.HYPERTROPHY_LOW_BUDGET,
+      [P.HYPERTROPHY, P.BUDGET_LOW],
+      [S.PROTEIN_PRIORITY, S.ECONOMIC_SELECTION, S.FOOD_SUBSTITUTION],
+      [S.EXTENSIVE_VARIETY],
+      [S.SOPHISTICATED_RECIPES],
+    );
+  }
+
+  private resolveWeightLossAdherenceConflict(
+    context: ReasoningContext,
+    strategies: Map<NutritionReasoningStrategy, StrategyAccumulator>,
+    conflicts: NutritionResolvedConflict[],
+  ): void {
     if (
-      context.packageIds.has(P.WEIGHT_LOSS) &&
-      context.mealsAwayFromHome &&
-      context.lowAdherence
-    ) {
-      this.addStrategy(
-        strategies,
+      !context.packageIds.has(P.WEIGHT_LOSS) ||
+      !context.mealsAwayFromHome ||
+      !context.lowAdherence
+    )
+      return;
+    this.addStrategy(
+      strategies,
+      S.BEHAVIOR_ADHERENCE,
+      R.CRITICAL,
+      P.BEHAVIOR_ADHERENCE,
+      'CONFLICT_RESOLUTION',
+    );
+    this.addStrategy(
+      strategies,
+      S.SATIETY_SUPPORT,
+      R.HIGH,
+      P.WEIGHT_LOSS,
+      'CONFLICT_RESOLUTION',
+    );
+    this.addStrategy(
+      strategies,
+      S.NUTRITION_EDUCATION,
+      R.HIGH,
+      P.NUTRITION_EDUCATION_FOUNDATION,
+      'CONFLICT_RESOLUTION',
+    );
+    this.conflict(
+      conflicts,
+      NUTRITION_REASONING_CONFLICT.WEIGHT_LOSS_EATING_OUT_LOW_ADHERENCE,
+      [P.WEIGHT_LOSS, P.MEALS_AWAY_FROM_HOME, P.BEHAVIOR_ADHERENCE],
+      [
         S.BEHAVIOR_ADHERENCE,
-        R.CRITICAL,
-        P.BEHAVIOR_ADHERENCE,
-        'CONFLICT_RESOLUTION',
-      );
-      this.addStrategy(
-        strategies,
         S.SATIETY_SUPPORT,
-        R.HIGH,
-        P.WEIGHT_LOSS,
-        'CONFLICT_RESOLUTION',
-      );
-      this.addStrategy(
-        strategies,
+        S.PRACTICAL_MEALS,
         S.NUTRITION_EDUCATION,
-        R.HIGH,
-        P.NUTRITION_EDUCATION_FOUNDATION,
-        'CONFLICT_RESOLUTION',
-      );
-      this.conflict(
-        conflicts,
-        NUTRITION_REASONING_CONFLICT.WEIGHT_LOSS_EATING_OUT_LOW_ADHERENCE,
-        [P.WEIGHT_LOSS, P.MEALS_AWAY_FROM_HOME, P.BEHAVIOR_ADHERENCE],
-        [
-          S.BEHAVIOR_ADHERENCE,
-          S.SATIETY_SUPPORT,
-          S.PRACTICAL_MEALS,
-          S.NUTRITION_EDUCATION,
-        ],
-        [S.EXTENSIVE_VARIETY],
-        [],
-      );
-    }
-    if (context.packageIds.has(P.CROSSFIT) && context.limitedCookingTime) {
-      this.conflict(
-        conflicts,
-        NUTRITION_REASONING_CONFLICT.CROSSFIT_LIMITED_TIME,
-        [P.CROSSFIT, P.LIMITED_COOKING_TIME],
-        [S.SPORTS_FUELING, S.RECOVERY_SUPPORT, S.QUICK_MEALS],
-        [S.EXTENSIVE_VARIETY],
-        [S.SOPHISTICATED_RECIPES],
-      );
-    }
-    if (context.packageIds.has(P.RUNNING) && context.inadequateHydration) {
-      this.addStrategy(
-        strategies,
-        S.HYDRATION_SUPPORT,
-        R.CRITICAL,
-        P.HYDRATION,
-        'CONFLICT_RESOLUTION',
-      );
-      this.conflict(
-        conflicts,
-        NUTRITION_REASONING_CONFLICT.RUNNING_INADEQUATE_HYDRATION,
-        [P.RUNNING, P.HYDRATION],
-        [S.HYDRATION_SUPPORT, S.RECOVERY_SUPPORT],
-        [],
-        [],
-      );
-    }
-    if (context.packageIds.has(P.VEGAN)) {
-      this.conflict(
-        conflicts,
-        NUTRITION_REASONING_CONFLICT.VEGAN_PROTEIN,
-        [P.VEGAN],
-        [S.PROTEIN_PRIORITY, S.FOOD_SUBSTITUTION],
-        [],
-        [],
-      );
-    }
-    if (context.packageIds.has(P.FOOD_REJECTIONS) && context.lowBudget) {
-      this.conflict(
-        conflicts,
-        NUTRITION_REASONING_CONFLICT.REJECTIONS_LOW_BUDGET,
-        [P.FOOD_REJECTIONS, P.BUDGET_LOW],
-        [S.FOOD_SUBSTITUTION, S.ECONOMIC_SELECTION],
-        [S.EXTENSIVE_VARIETY],
-        [S.HIGH_COST_DEFAULTS],
-      );
-    }
+      ],
+      [S.EXTENSIVE_VARIETY],
+      [],
+    );
+  }
+
+  private resolveCrossfitRoutineConflict(
+    context: ReasoningContext,
+    conflicts: NutritionResolvedConflict[],
+  ): void {
+    if (!context.packageIds.has(P.CROSSFIT) || !context.limitedCookingTime)
+      return;
+    this.conflict(
+      conflicts,
+      NUTRITION_REASONING_CONFLICT.CROSSFIT_LIMITED_TIME,
+      [P.CROSSFIT, P.LIMITED_COOKING_TIME],
+      [S.SPORTS_FUELING, S.RECOVERY_SUPPORT, S.QUICK_MEALS],
+      [S.EXTENSIVE_VARIETY],
+      [S.SOPHISTICATED_RECIPES],
+    );
+  }
+
+  private resolveRunningHydrationConflict(
+    context: ReasoningContext,
+    strategies: Map<NutritionReasoningStrategy, StrategyAccumulator>,
+    conflicts: NutritionResolvedConflict[],
+  ): void {
+    if (!context.packageIds.has(P.RUNNING) || !context.inadequateHydration)
+      return;
+    this.addStrategy(
+      strategies,
+      S.HYDRATION_SUPPORT,
+      R.CRITICAL,
+      P.HYDRATION,
+      'CONFLICT_RESOLUTION',
+    );
+    this.conflict(
+      conflicts,
+      NUTRITION_REASONING_CONFLICT.RUNNING_INADEQUATE_HYDRATION,
+      [P.RUNNING, P.HYDRATION],
+      [S.HYDRATION_SUPPORT, S.RECOVERY_SUPPORT],
+      [],
+      [],
+    );
+  }
+
+  private resolveVeganProteinConflict(
+    context: ReasoningContext,
+    conflicts: NutritionResolvedConflict[],
+  ): void {
+    if (!context.packageIds.has(P.VEGAN)) return;
+    this.conflict(
+      conflicts,
+      NUTRITION_REASONING_CONFLICT.VEGAN_PROTEIN,
+      [P.VEGAN],
+      [S.PROTEIN_PRIORITY, S.FOOD_SUBSTITUTION],
+      [],
+      [],
+    );
+  }
+
+  private resolveRejectionBudgetConflict(
+    context: ReasoningContext,
+    conflicts: NutritionResolvedConflict[],
+  ): void {
+    if (!context.packageIds.has(P.FOOD_REJECTIONS) || !context.lowBudget)
+      return;
+    this.conflict(
+      conflicts,
+      NUTRITION_REASONING_CONFLICT.REJECTIONS_LOW_BUDGET,
+      [P.FOOD_REJECTIONS, P.BUDGET_LOW],
+      [S.FOOD_SUBSTITUTION, S.ECONOMIC_SELECTION],
+      [S.EXTENSIVE_VARIETY],
+      [S.HIGH_COST_DEFAULTS],
+    );
+  }
+
+  private resolvePracticalityVarietyConflict(
+    context: ReasoningContext,
+    strategies: Map<NutritionReasoningStrategy, StrategyAccumulator>,
+    prohibited: Map<NutritionReasoningStrategy, StrategyAccumulator>,
+    conflicts: NutritionResolvedConflict[],
+  ): void {
     if (
-      context.limitedCookingTime &&
-      (strategies.has(S.CONTROLLED_VARIETY) ||
-        strategies.has(S.EXTENSIVE_VARIETY))
-    ) {
-      this.reduceStrategy(
-        strategies,
-        S.CONTROLLED_VARIETY,
-        R.LOW,
-        P.LIMITED_COOKING_TIME,
-        'VARIETY_REDUCTION',
-      );
-      this.addProhibited(
-        prohibited,
-        S.EXTENSIVE_VARIETY,
-        P.LIMITED_COOKING_TIME,
-        'VARIETY_REDUCTION',
-      );
-      this.conflict(
-        conflicts,
-        NUTRITION_REASONING_CONFLICT.PRACTICALITY_VARIETY,
-        [P.LIMITED_COOKING_TIME, P.HEALTHY_EATING_FOUNDATION],
-        [S.PRACTICAL_MEALS, S.QUICK_MEALS],
-        [S.CONTROLLED_VARIETY],
-        [S.EXTENSIVE_VARIETY],
-      );
-    }
+      !context.limitedCookingTime ||
+      (!strategies.has(S.CONTROLLED_VARIETY) &&
+        !strategies.has(S.EXTENSIVE_VARIETY))
+    )
+      return;
+    this.reduceStrategy(
+      strategies,
+      S.CONTROLLED_VARIETY,
+      R.LOW,
+      P.LIMITED_COOKING_TIME,
+      'VARIETY_REDUCTION',
+    );
+    this.addProhibited(
+      prohibited,
+      S.EXTENSIVE_VARIETY,
+      P.LIMITED_COOKING_TIME,
+      'VARIETY_REDUCTION',
+    );
+    this.conflict(
+      conflicts,
+      NUTRITION_REASONING_CONFLICT.PRACTICALITY_VARIETY,
+      [P.LIMITED_COOKING_TIME, P.HEALTHY_EATING_FOUNDATION],
+      [S.PRACTICAL_MEALS, S.QUICK_MEALS],
+      [S.CONTROLLED_VARIETY],
+      [S.EXTENSIVE_VARIETY],
+    );
   }
 
   private objectives(
@@ -958,6 +1392,8 @@ export class NutritionReasoningEngineService {
         'KNOWLEDGE_PRIORITY',
       );
 
+    this.applyExtensibleObjectives(values, strategies);
+
     const sorted = [...values.values()].sort(
       (left, right) =>
         PRIORITY_ORDER[right.priority] - PRIORITY_ORDER[left.priority] ||
@@ -975,6 +1411,30 @@ export class NutritionReasoningEngineService {
         }),
       ),
     );
+  }
+
+  private applyExtensibleObjectives(
+    objectives: Map<NutritionReasoningObjective, ObjectiveAccumulator>,
+    strategies: readonly NutritionSelectedStrategy[],
+  ): void {
+    for (const selectedStrategy of strategies) {
+      const futureSources = selectedStrategy.sourcePackageIds.filter(
+        (packageId) => !LEGACY_POLICY_PACKAGE_IDS.has(packageId),
+      );
+      if (futureSources.length === 0) continue;
+      for (const policy of STRATEGY_OBJECTIVE_POLICIES) {
+        if (!policy.strategies.has(selectedStrategy.strategy)) continue;
+        for (const packageId of futureSources) {
+          this.addObjective(
+            objectives,
+            policy.objective,
+            selectedStrategy.priority,
+            packageId,
+            'KNOWLEDGE_PRIORITY',
+          );
+        }
+      }
+    }
   }
 
   private activeFactors(
@@ -1122,30 +1582,44 @@ export class NutritionReasoningEngineService {
     input: NutritionReasoningInput,
     context: ReasoningContext,
   ): NutritionReasoningResult['interventionIntensity'] {
-    if (context.safetyRestricted) return 'RESTRICTED';
-    if (
+    if (this.requiresRestrictedIntervention(context)) return 'RESTRICTED';
+    if (this.requiresLowIntervention(input, context)) return 'LOW';
+    if (this.supportsHighIntervention(context)) return 'HIGH';
+    return 'MODERATE';
+  }
+
+  private requiresRestrictedIntervention(context: ReasoningContext): boolean {
+    return context.safetyRestricted;
+  }
+
+  private requiresLowIntervention(
+    input: NutritionReasoningInput,
+    context: ReasoningContext,
+  ): boolean {
+    return (
       input.artifactType === NUTRITION_ARTIFACT_TYPE.POINT_GUIDANCE ||
       context.lowAdherence
-    )
-      return 'LOW';
-    if (
-      context.sportsContext &&
-      !context.limitedCookingTime &&
-      !context.lowBudget
-    )
-      return 'HIGH';
-    return 'MODERATE';
+    );
+  }
+
+  private supportsHighIntervention(context: ReasoningContext): boolean {
+    return (
+      context.sportsContext && !context.limitedCookingTime && !context.lowBudget
+    );
   }
 
   private personalizationLevel(
     packages: readonly NutritionKnowledgePackage[],
+    context: ReasoningContext,
   ): NutritionPersonalizationLevel {
     const contextualCount = packages.filter(
       (knowledgePackage) => !BASE_PACKAGES.has(knowledgePackage.id),
     ).length;
-    return contextualCount >= 5
+    const personalizationSignals =
+      contextualCount + Math.min(context.profileSignalCount, 2);
+    return personalizationSignals >= 5
       ? 'HIGH'
-      : contextualCount >= 2
+      : personalizationSignals >= 2
         ? 'CONTEXTUAL'
         : 'BASIC';
   }
@@ -1154,19 +1628,28 @@ export class NutritionReasoningEngineService {
     input: NutritionReasoningInput,
     context: ReasoningContext,
   ): NutritionRecommendedComplexity {
-    if (input.artifactType === NUTRITION_ARTIFACT_TYPE.POINT_GUIDANCE)
-      return 'MINIMAL';
-    if (
+    if (this.requiresMinimalComplexity(input)) return 'MINIMAL';
+    if (this.requiresSimpleComplexity(context)) return 'SIMPLE';
+    if (this.supportsDetailedComplexity(input)) return 'DETAILED';
+    return 'MODERATE';
+  }
+
+  private requiresMinimalComplexity(input: NutritionReasoningInput): boolean {
+    return input.artifactType === NUTRITION_ARTIFACT_TYPE.POINT_GUIDANCE;
+  }
+
+  private requiresSimpleComplexity(context: ReasoningContext): boolean {
+    return (
       context.safetyRestricted ||
       context.lowAdherence ||
       context.lowBudget ||
       context.limitedCookingTime ||
       context.manyRestrictions
-    )
-      return 'SIMPLE';
-    if (input.artifactType === NUTRITION_ARTIFACT_TYPE.WEEKLY_PLAN)
-      return 'DETAILED';
-    return 'MODERATE';
+    );
+  }
+
+  private supportsDetailedComplexity(input: NutritionReasoningInput): boolean {
+    return input.artifactType === NUTRITION_ARTIFACT_TYPE.WEEKLY_PLAN;
   }
 
   private addStrategy(

@@ -119,4 +119,23 @@ describe('CoachPlanningExecutionDispatcherService', () => {
       subject.workoutGenerator.generate.mock.invocationCallOrder[0],
     );
   });
+
+  it('returns structured execution metadata without executing generators twice', async () => {
+    const subject = createSubject();
+
+    const result = await subject.dispatcher.dispatchStructured({
+      userId: 'user-id',
+      legacyIntent: 'DIET',
+      decision: decision(CONVERSATION_GOAL.GENERATE_DIET_PLAN),
+    });
+
+    expect(result).toMatchObject({
+      executor: 'DIET_LEGACY',
+      generationCompleted: true,
+      fallbackApplied: false,
+    });
+    expect(result.content).toContain('Plano alimentar');
+    expect(subject.dietGenerator.generate).toHaveBeenCalledTimes(1);
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+  });
 });

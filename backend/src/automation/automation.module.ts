@@ -9,7 +9,11 @@ import { RecommendationModule } from '../recommendations/recommendation.module';
 import { LongitudinalModule } from '../longitudinal/longitudinal.module';
 import { AdaptiveIntelligenceModule } from '../adaptive-intelligence/adaptive-intelligence.module';
 import { ContextModule } from '../context/context.module';
-import { ConversationLayerOperationalConfigService } from '../responses/conversation-layer-operational-config.service';
+import { ConversationRealizationModule } from '../responses/conversation-realization.module';
+import { NutritionKnowledgeResolverService } from '../nutrition-knowledge/nutrition-knowledge-resolver.service';
+import { NutritionReasoningEngineService } from '../nutrition-reasoning/nutrition-reasoning-engine.service';
+import { WorkoutKnowledgeResolverService } from '../workout-knowledge/workout-knowledge-resolver.service';
+import { WorkoutReasoningEngineService } from '../workout-reasoning/workout-reasoning-engine.service';
 import { WorkoutModule } from '../workout/workout.module';
 import { AutomationController } from './automation.controller';
 import { AutomationService } from './automation.service';
@@ -31,6 +35,8 @@ import { NutritionShadowRuntimeModule } from '../diet/v2/shadow-runtime/nutritio
 import { NutritionExecutionModule } from '../diet/v2/execution/nutrition-execution.module';
 import { NutritionV2PilotConfigService } from './nutrition-v2-pilot-config.service';
 import { NutritionV2PilotService } from './nutrition-v2-pilot.service';
+import { ConversationRuntimeModule } from '../conversation/runtime/conversation-runtime.module';
+import { CoachPlanningConversationResponseService } from './coach-planning-conversation-response.service';
 
 @Module({
   imports: [
@@ -47,12 +53,15 @@ import { NutritionV2PilotService } from './nutrition-v2-pilot.service';
     ContextModule,
     NutritionShadowRuntimeModule,
     NutritionExecutionModule,
+    ConversationRuntimeModule,
+    ConversationRealizationModule,
   ],
   controllers: [AutomationController, CoachAdminController],
   providers: [
     AutomationService,
     CoachPlanningExecutionDispatcherService,
     CoachPlanningExecutionService,
+    CoachPlanningConversationResponseService,
     CoachCommandService,
     CoachService,
     CoachIntelligenceService,
@@ -60,7 +69,10 @@ import { NutritionV2PilotService } from './nutrition-v2-pilot.service';
     CoachExperienceService,
     CoachMetricsService,
     UserGoalEngineService,
-    ConversationLayerOperationalConfigService,
+    NutritionKnowledgeResolverService,
+    NutritionReasoningEngineService,
+    WorkoutKnowledgeResolverService,
+    WorkoutReasoningEngineService,
     ConversationGoalShadowConfigService,
     LegacyCoachIntentAdapter,
     ConversationGoalShadowComparator,

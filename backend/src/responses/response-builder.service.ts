@@ -219,6 +219,9 @@ export class ResponseBuilderService {
             ...result.conversationInput,
             episodicMemory,
           },
+          reasoning: {
+            longitudinalContext: result.conversationInput.longitudinal,
+          },
           legacyText: result.legacyText,
         });
       })

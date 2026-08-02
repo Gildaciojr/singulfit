@@ -14,6 +14,7 @@ import {
   type NutritionKnowledgeBooleanFact,
   type NutritionKnowledgeCondition,
   type NutritionKnowledgeMatchedFact,
+  type NutritionKnowledgeNumberFact,
   type NutritionKnowledgePackage,
   type NutritionKnowledgePackageId,
   type NutritionKnowledgePriority,
@@ -27,6 +28,9 @@ interface NutritionKnowledgeSignals {
     Record<NutritionKnowledgeStringFact, readonly string[]>
   >;
   readonly booleans: Readonly<Record<NutritionKnowledgeBooleanFact, boolean>>;
+  readonly numbers: Readonly<
+    Record<NutritionKnowledgeNumberFact, number | undefined>
+  >;
 }
 
 const PRIORITY_ORDER: Readonly<Record<NutritionKnowledgePriority, number>> =
@@ -155,12 +159,19 @@ export class NutritionKnowledgeResolverService {
     if (condition.operator === 'IS') {
       return signals.booleans[condition.fact] === condition.value;
     }
-    const values = signals.strings[condition.fact];
-    return values.some((actual) =>
-      condition.values.some((expected) =>
-        actual.includes(this.normalize(expected)),
-      ),
-    );
+    if (condition.operator === 'CONTAINS_ANY') {
+      const values = signals.strings[condition.fact];
+      return values.some((actual) =>
+        condition.values.some((expected) =>
+          actual.includes(this.normalize(expected)),
+        ),
+      );
+    }
+    const actual = signals.numbers[condition.fact];
+    if (actual === undefined) return false;
+    return condition.operator === 'GREATER_THAN_OR_EQUAL'
+      ? actual >= condition.value
+      : actual <= condition.value;
   }
 
   private matchedFactNames(
@@ -183,18 +194,28 @@ export class NutritionKnowledgeResolverService {
     const medicalConditions = this.datumValues(
       snapshot.restrictions.medicalConditions,
     );
-    const allSafetyText = [...foodConstraints, ...medicalConditions]
+    const normalizedFoodConstraints = foodConstraints
       .flatMap((constraint) => [constraint.type ?? '', constraint.description])
       .map((value) => this.normalize(value))
       .filter(Boolean);
+    const normalizedMedicalConditions = medicalConditions
+      .flatMap((condition) => [condition.type ?? '', condition.description])
+      .map((value) => this.normalize(value))
+      .filter(Boolean);
+    const allSafetyText = [
+      ...normalizedFoodConstraints,
+      ...normalizedMedicalConditions,
+    ];
     const age = this.datumValue(snapshot.physical.ageYears);
-    const specialPopulation =
-      (typeof age === 'number' && (age < 18 || age >= 65)) ||
-      allSafetyText.some((value) =>
-        ['GESTANTE', 'GESTACAO', 'GRAVIDEZ', 'PREGNANCY'].some((token) =>
-          value.includes(token),
-        ),
-      );
+    const isAdolescent = typeof age === 'number' && age < 18;
+    const isOlderAdult = typeof age === 'number' && age >= 65;
+    const isPregnant = this.containsAny(normalizedMedicalConditions, [
+      'GESTANTE',
+      'GESTACAO',
+      'GRAVIDEZ',
+      'PREGNANCY',
+    ]);
+    const specialPopulation = isAdolescent || isOlderAdult || isPregnant;
     const preferences = this.datumValues(snapshot.preferences.foodPreferences);
     const dietaryPattern = this.datumValue(snapshot.nutrition.dietaryPattern);
     const patternIsRestrictive =
@@ -202,6 +223,17 @@ export class NutritionKnowledgeResolverService {
       !['', 'OMNIVORE', 'ONIVORO', 'ONIVORA'].includes(
         this.normalize(dietaryPattern),
       );
+    const experience = this.normalizedDatum(snapshot.training.experienceLevel);
+    const adherence = this.datumValue(snapshot.longitudinal.adherenceScore);
+    const cookingAvailability = this.normalizedDatum(
+      snapshot.nutrition.cookingAvailability,
+    );
+    const eatingOutFrequency = this.normalizedOptionalDatum(
+      snapshot.nutrition.eatingOutFrequency,
+    );
+    const budget = this.normalizedDatum(snapshot.nutrition.foodBudget);
+    const hydration = this.normalizedDatum(snapshot.nutrition.hydration);
+    const restrictionCount = foodConstraints.length;
 
     return Object.freeze({
       primaryGoal: snapshot.nutrition.primaryGoal,
@@ -213,14 +245,27 @@ export class NutritionKnowledgeResolverService {
           snapshot.nutrition.dietaryPattern,
         ),
         FOOD_CONSTRAINT: Object.freeze(allSafetyText),
-        FOOD_BUDGET: this.normalizedDatum(snapshot.nutrition.foodBudget),
-        COOKING_AVAILABILITY: this.normalizedDatum(
-          snapshot.nutrition.cookingAvailability,
+        FOOD_BUDGET: budget,
+        COOKING_AVAILABILITY: cookingAvailability,
+        EATING_OUT_FREQUENCY: eatingOutFrequency,
+        HYDRATION: hydration,
+        EXPERIENCE_LEVEL: experience,
+        DESIRED_OUTCOME: this.normalizedDatum(
+          snapshot.nutrition.desiredOutcome,
         ),
-        EATING_OUT_FREQUENCY: this.normalizedOptionalDatum(
-          snapshot.nutrition.eatingOutFrequency,
+        TRAINING_TIME: this.normalizedDatum(snapshot.routine.trainingTime),
+        MEAL_TIMING_PATTERN: Object.freeze(
+          this.datumValues(snapshot.routine.mealTimes).map((value) =>
+            this.normalize(value),
+          ),
         ),
-        HYDRATION: this.normalizedDatum(snapshot.nutrition.hydration),
+        ACTIVITY_LEVEL: this.normalizedValue(
+          this.datumValue(snapshot.physical.activityLevel),
+        ),
+        MEDICAL_CONTEXT: Object.freeze(normalizedMedicalConditions),
+        TRAINING_INTENSITY: this.normalizedDatum(
+          snapshot.training.intensityPreference,
+        ),
       }),
       booleans: Object.freeze({
         HAS_FOOD_CONSTRAINTS:
@@ -245,6 +290,92 @@ export class NutritionKnowledgeResolverService {
           this.datumValue(snapshot.conversation.behavioralStage) !== undefined,
         HAS_MEDICAL_CONTEXT: medicalConditions.length > 0,
         IS_SPECIAL_POPULATION: specialPopulation,
+        HAS_MULTIPLE_RESTRICTIONS: restrictionCount >= 2,
+        IS_BEGINNER: this.containsAny(experience, [
+          'BEGINNER',
+          'INICIANTE',
+          'NOVATO',
+        ]),
+        IS_INTERMEDIATE: this.containsAny(experience, [
+          'INTERMEDIATE',
+          'INTERMEDIARIO',
+          'INTERMEDIARIA',
+        ]),
+        IS_ADVANCED: this.containsAny(experience, [
+          'ADVANCED',
+          'AVANCADO',
+          'AVANCADA',
+        ]),
+        IS_ADOLESCENT: isAdolescent,
+        IS_OLDER_ADULT: isOlderAdult,
+        IS_PREGNANT: isPregnant,
+        HAS_DIABETES_CONTEXT: this.containsAny(normalizedMedicalConditions, [
+          'DIABETES',
+          'DIABETICO',
+          'DIABETICA',
+        ]),
+        HAS_HYPERTENSION_CONTEXT: this.containsAny(
+          normalizedMedicalConditions,
+          ['HIPERTENSAO', 'HIPERTENSO', 'HIPERTENSA', 'HIGH BLOOD PRESSURE'],
+        ),
+        HAS_RENAL_CONTEXT: this.containsAny(normalizedMedicalConditions, [
+          'RENAL',
+          'RIM',
+          'RINS',
+          'KIDNEY',
+        ]),
+        HAS_HEPATIC_CONTEXT: this.containsAny(normalizedMedicalConditions, [
+          'HEPATIC',
+          'FIGADO',
+          'LIVER',
+        ]),
+        HAS_SEVERE_OBESITY_CONTEXT: this.containsAny(
+          normalizedMedicalConditions,
+          [
+            'OBESIDADE GRAVE',
+            'OBESIDADE SEVERA',
+            'OBESIDADE MORBIDA',
+            'SEVERE OBESITY',
+            'MORBID OBESITY',
+          ],
+        ),
+        HAS_LOW_ADHERENCE: typeof adherence === 'number' && adherence < 60,
+        HAS_HIGH_ADHERENCE: typeof adherence === 'number' && adherence >= 80,
+        HAS_LIMITED_COOKING_TIME: this.containsAny(cookingAvailability, [
+          'LOW',
+          'LIMITED',
+          'POUCO',
+          'BAIXA',
+          'SEM TEMPO',
+        ]),
+        EATS_OUT_FREQUENTLY:
+          this.datumValue(snapshot.nutrition.mealsAwayFromHome) === true ||
+          this.containsAny(eatingOutFrequency, [
+            'FREQUENT',
+            'FREQUENTE',
+            'OFTEN',
+            'ALTA',
+          ]),
+        HAS_LOW_BUDGET: this.containsAny(budget, ['LOW', 'BAIXO', 'BAIXA']),
+        HAS_INADEQUATE_HYDRATION: this.containsAny(hydration, [
+          'LOW',
+          'BAIXA',
+          'INADEQUATE',
+          'INADEQUADA',
+          'INSUFFICIENT',
+          'INSUFICIENTE',
+        ]),
+        HAS_ADEQUATE_HYDRATION: this.containsAny(hydration, [
+          'ADEQUATE',
+          'ADEQUADA',
+          'GOOD',
+          'BOA',
+        ]),
+      }),
+      numbers: Object.freeze({
+        SESSION_DURATION_MINUTES: this.datumValue(
+          snapshot.training.sessionDurationMinutes,
+        ),
       }),
     });
   }
@@ -270,6 +401,21 @@ export class NutritionKnowledgeResolverService {
     datum: CoachProfileDatum<string> | undefined,
   ): readonly string[] {
     return datum ? this.normalizedDatum(datum) : Object.freeze([]);
+  }
+
+  private normalizedValue(value: string | undefined): readonly string[] {
+    return typeof value === 'string' && value.trim()
+      ? Object.freeze([this.normalize(value)])
+      : Object.freeze([]);
+  }
+
+  private containsAny(
+    values: readonly string[],
+    tokens: readonly string[],
+  ): boolean {
+    return values.some((value) =>
+      tokens.some((token) => value.includes(this.normalize(token))),
+    );
   }
 
   private datumValue<T>(datum: CoachProfileDatum<T>): T | undefined {
