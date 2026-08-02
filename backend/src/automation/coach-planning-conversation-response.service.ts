@@ -47,6 +47,7 @@ export class CoachPlanningConversationResponseService {
         nutrition: input.execution.nutritionReasoning,
         workout: input.execution.workoutReasoning,
         longitudinal: input.execution.longitudinalDecision,
+        human: input.execution.humanContext,
         application: Object.freeze({
           nutrition: this.application(input.execution.reasoning.nutrition),
           workout: this.application(input.execution.reasoning.workout),
@@ -58,7 +59,10 @@ export class CoachPlanningConversationResponseService {
       if (!bridge.evidence) return official;
 
       const startedAt = performance.now();
-      const payload = this.payloadBuilder.build(official);
+      const payload = this.payloadBuilder.build(
+        official,
+        bridge.evidence.human ?? null,
+      );
       const candidate = await this.realizer.execute({
         userId: input.userId,
         conversationId: input.conversationId,

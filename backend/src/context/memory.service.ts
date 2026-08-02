@@ -77,7 +77,13 @@ export class MemoryService {
     }
 
     if (statistics.adherenceScore !== null) {
-      summaryParts.push(`aderência ${statistics.adherenceScore}/100`);
+      summaryParts.push(
+        statistics.adherenceScore >= 70
+          ? 'boa aderência recente'
+          : statistics.adherenceScore >= 45
+            ? 'aderência recente oscilante'
+            : 'dificuldade recente de aderência',
+      );
     }
 
     return {

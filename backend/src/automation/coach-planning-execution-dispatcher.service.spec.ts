@@ -97,7 +97,7 @@ describe('CoachPlanningExecutionDispatcherService', () => {
           legacyIntent: 'DIET',
           decision: decision(goal),
         }),
-      ).resolves.toContain('Plano alimentar');
+      ).resolves.toContain('Montei Dieta legado');
       expect(subject.dietGenerator.generate).toHaveBeenCalledWith('user-id');
       expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
     },
@@ -134,7 +134,7 @@ describe('CoachPlanningExecutionDispatcherService', () => {
       generationCompleted: true,
       fallbackApplied: false,
     });
-    expect(result.content).toContain('Plano alimentar');
+    expect(result.content).toContain('Montei Dieta legado');
     expect(subject.dietGenerator.generate).toHaveBeenCalledTimes(1);
     expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
   });

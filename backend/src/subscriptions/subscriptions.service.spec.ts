@@ -9,6 +9,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { SubscriptionsService } from './subscriptions.service';
 import { SubscriptionAccessService } from './subscription-access.service';
+import { AuditService } from '../observability/audit.service';
 
 describe('SubscriptionsService', () => {
   it('does not extend a subscription activated by the same invoice', async () => {
@@ -23,6 +24,15 @@ describe('SubscriptionsService', () => {
       },
     };
     const transaction = {
+      invoice: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'invoice-id',
+          subscriptionId: subscription.id,
+          cycleNumber: 1,
+          periodStart: new Date('2026-06-06T18:30:00.000Z'),
+          periodEnd: currentPeriodEnd,
+        }),
+      },
       subscription: {
         findUnique: jest.fn().mockResolvedValue(subscription),
         update: jest.fn(),
@@ -34,6 +44,7 @@ describe('SubscriptionsService', () => {
         get: jest.fn().mockReturnValue('3'),
       } as unknown as ConfigService,
       {} as SubscriptionAccessService,
+      {} as AuditService,
     );
 
     const result = await service.activateForInvoiceInTransaction(
@@ -69,6 +80,15 @@ describe('SubscriptionsService', () => {
         },
       };
       const transaction = {
+        invoice: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'invoice-id',
+            subscriptionId: subscription.id,
+            cycleNumber: 1,
+            periodStart: approvedAt,
+            periodEnd: new Date('2026-07-06T18:30:00.000Z'),
+          }),
+        },
         subscription: {
           findUnique: jest.fn().mockResolvedValue(subscription),
           update: jest.fn().mockResolvedValue({
@@ -84,6 +104,7 @@ describe('SubscriptionsService', () => {
           get: jest.fn().mockReturnValue('3'),
         } as unknown as ConfigService,
         {} as SubscriptionAccessService,
+        {} as AuditService,
       );
 
       const result = await service.activateForInvoiceInTransaction(
@@ -123,6 +144,7 @@ describe('SubscriptionsService', () => {
         {} as PrismaService,
         {} as ConfigService,
         accessService as unknown as SubscriptionAccessService,
+        {} as AuditService,
       );
 
       await expect(service.getProfileSubscription('user-id')).resolves.toBe(
@@ -130,6 +152,120 @@ describe('SubscriptionsService', () => {
       );
     },
   );
+
+  it('reactivates the same subscription for a later paid cycle', async () => {
+    const approvedAt = new Date('2026-08-14T12:00:00.000Z');
+    const subscription = {
+      id: 'subscription-id',
+      userId: 'user-id',
+      planId: 'plan-id',
+      status: SubscriptionStatus.EXPIRED,
+      activationInvoiceId: 'invoice-1',
+      currentPeriodEnd: new Date('2026-07-10T12:00:00.000Z'),
+      startedAt: new Date('2026-01-10T12:00:00.000Z'),
+      plan: { billingIntervalCount: 1 },
+    };
+    const transaction = {
+      invoice: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'invoice-4',
+          subscriptionId: subscription.id,
+          cycleNumber: 4,
+          periodStart: new Date('2026-07-10T12:00:00.000Z'),
+          periodEnd: new Date('2026-08-10T12:00:00.000Z'),
+        }),
+      },
+      subscription: {
+        findUnique: jest.fn().mockResolvedValue(subscription),
+        update: jest.fn().mockResolvedValue({
+          ...subscription,
+          status: SubscriptionStatus.ACTIVE,
+        }),
+      },
+    };
+    const service = new SubscriptionsService(
+      {} as PrismaService,
+      { get: jest.fn().mockReturnValue('3') } as unknown as ConfigService,
+      {} as SubscriptionAccessService,
+      {} as AuditService,
+    );
+
+    const result = await service.activateForInvoiceInTransaction(
+      transaction as unknown as Prisma.TransactionClient,
+      {
+        subscriptionId: subscription.id,
+        invoiceId: 'invoice-4',
+        approvedAt,
+        provider: PaymentProvider.PAGBANK,
+        providerPaymentId: 'CHAR_RENEWAL',
+        paymentMethod: PaymentMethod.PIX,
+      },
+    );
+
+    expect(result).toMatchObject({
+      changed: true,
+      reactivated: true,
+      cycleNumber: 4,
+    });
+    expect(transaction.subscription.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: subscription.id },
+        data: expect.objectContaining({
+          activationInvoiceId: 'invoice-1',
+          startedAt: subscription.startedAt,
+          cancelAtPeriodEnd: false,
+          endedAt: null,
+        }),
+      }),
+    );
+  });
+
+  it('cancels immediately in one audited transaction', async () => {
+    const subscription = {
+      id: 'subscription-id',
+      userId: 'user-id',
+      status: SubscriptionStatus.ACTIVE,
+      cancelAtPeriodEnd: false,
+    };
+    const transaction = {
+      $queryRaw: jest.fn().mockResolvedValue([{ locked: true }]),
+      subscription: {
+        findUnique: jest.fn().mockResolvedValue(subscription),
+        update: jest.fn().mockResolvedValue({
+          ...subscription,
+          status: SubscriptionStatus.CANCELED,
+        }),
+      },
+    };
+    const prisma = {
+      $transaction: jest.fn(
+        (operation: (client: typeof transaction) => Promise<unknown>) =>
+          operation(transaction),
+      ),
+    };
+    const audit = { recordInTransaction: jest.fn().mockResolvedValue({}) };
+    const service = new SubscriptionsService(
+      prisma as unknown as PrismaService,
+      {} as ConfigService,
+      {} as SubscriptionAccessService,
+      audit as unknown as AuditService,
+    );
+
+    await expect(
+      service.cancelSubscription(
+        subscription.id,
+        'IMMEDIATE',
+        new Date('2026-08-14T12:00:00.000Z'),
+      ),
+    ).resolves.toMatchObject({ status: SubscriptionStatus.CANCELED });
+    expect(audit.recordInTransaction).toHaveBeenCalledWith(
+      transaction,
+      expect.objectContaining({
+        action: 'SUBSCRIPTION_CANCELED',
+        entityId: subscription.id,
+      }),
+    );
+  });
 
   it('blocks profile access without an eligible subscription', async () => {
     const accessService = {
@@ -141,6 +277,7 @@ describe('SubscriptionsService', () => {
       {} as PrismaService,
       {} as ConfigService,
       accessService as unknown as SubscriptionAccessService,
+      {} as AuditService,
     );
 
     await expect(

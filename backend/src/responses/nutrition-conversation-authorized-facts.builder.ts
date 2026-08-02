@@ -98,9 +98,7 @@ export class NutritionConversationAuthorizedFactsBuilder {
         this.fact(
           'facts.qualityScore',
           'MEAL_ANALYSIS',
-          context.facts.qualityScore,
-          false,
-          context.facts.confidence,
+          this.qualityMeaning(context.facts.qualityScore),
         ),
       );
     }
@@ -109,7 +107,9 @@ export class NutritionConversationAuthorizedFactsBuilder {
         this.fact(
           'facts.confidence',
           'MEAL_ANALYSIS',
-          context.facts.confidence,
+          context.facts.confidence < 0.7
+            ? 'a estimativa visual possui incerteza relevante'
+            : 'a estimativa visual possui boa nitidez',
         ),
       );
     }
@@ -291,7 +291,10 @@ export class NutritionConversationAuthorizedFactsBuilder {
         ),
       );
     }
-    if (context.userContext.memory) {
+    if (
+      context.userContext.memory &&
+      !this.containsTechnicalValue(context.userContext.memory.summary)
+    ) {
       facts.push(
         this.fact(
           'userContext.memory',
@@ -311,7 +314,7 @@ export class NutritionConversationAuthorizedFactsBuilder {
           context.userContext.recentMeals.map((meal) => ({
             occurredAt: meal.occurredAt,
             category: meal.category,
-            score: meal.score,
+            quality: meal.score === null ? null : this.scoreMeaning(meal.score),
             foods: [...meal.foods],
           })),
           false,
@@ -320,7 +323,10 @@ export class NutritionConversationAuthorizedFactsBuilder {
         ),
       );
     }
-    if (context.userContext.insight) {
+    if (
+      context.userContext.insight &&
+      !this.containsTechnicalValue(context.userContext.insight)
+    ) {
       facts.push(
         this.fact(
           'userContext.insight',
@@ -337,7 +343,12 @@ export class NutritionConversationAuthorizedFactsBuilder {
         this.fact(
           'userContext.trend',
           'LONGITUDINAL',
-          context.userContext.trend,
+          {
+            windowDays: context.userContext.trend.windowDays,
+            direction: this.directionMeaning(
+              context.userContext.trend.direction,
+            ),
+          },
           false,
           undefined,
           true,
@@ -349,7 +360,16 @@ export class NutritionConversationAuthorizedFactsBuilder {
         this.fact(
           'userContext.longitudinalSignal',
           'LONGITUDINAL',
-          context.userContext.longitudinalSignal,
+          {
+            kind:
+              context.userContext.longitudinalSignal.kind ===
+              'NUTRITION_EVOLUTION'
+                ? 'evolução das escolhas alimentares'
+                : 'evolução em direção ao objetivo',
+            direction: this.directionMeaning(
+              context.userContext.longitudinalSignal.direction,
+            ),
+          },
           false,
           undefined,
           true,
@@ -366,8 +386,43 @@ export class NutritionConversationAuthorizedFactsBuilder {
     confidence: number | undefined,
   ): void {
     if (value !== null) {
-      target.push(this.fact(id, 'MEAL_ANALYSIS', value, true, confidence));
+      void confidence;
+      target.push(this.fact(id, 'MEAL_ANALYSIS', value, true));
     }
+  }
+
+  private qualityMeaning(score: number): AuthorizedFactValue {
+    return this.scoreMeaning(score);
+  }
+
+  private scoreMeaning(score: number): string {
+    if (score >= 80) return 'muito bom';
+    if (score >= 60) return 'bom, com espaço para um ajuste pequeno';
+    if (score >= 40) return 'parcial, com pontos importantes a equilibrar';
+    return 'baixo isoladamente, pedindo equilíbrio na próxima escolha';
+  }
+
+  private directionMeaning(direction: string): string {
+    if (direction === 'IMPROVING') return 'em evolução';
+    if (direction === 'DECLINING') return 'oscilou para baixo recentemente';
+    return 'estável';
+  }
+
+  private containsTechnicalValue(value: AuthorizedFactValue): boolean {
+    if (typeof value === 'string') {
+      return /(?:\bscore\b|\bíndice\b|\bconfidence\b|\bmomentum\b|\bretention\b|\brisk\b|\d+\s*\/\s*100)/iu.test(
+        value,
+      );
+    }
+    if (Array.isArray(value)) {
+      return value.some((item) => this.containsTechnicalValue(item));
+    }
+    if (typeof value === 'object' && value !== null) {
+      return Object.values(value).some((item) =>
+        this.containsTechnicalValue(item),
+      );
+    }
+    return false;
   }
 
   private fact(

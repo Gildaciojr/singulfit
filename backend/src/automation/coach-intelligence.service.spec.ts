@@ -503,7 +503,7 @@ describe('CoachIntelligenceService', () => {
 
       expect(review.content).toContain(
         type === CoachReviewType.WEEKLY
-          ? 'Progresso: qualidade 73/100'
+          ? 'Progresso: a qualidade está em nível intermediário'
           : 'evolução consolidada do mês',
       );
       expect(subject.transaction.coachReview.create).toHaveBeenCalledWith({

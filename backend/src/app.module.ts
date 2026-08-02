@@ -36,6 +36,7 @@ import { ActivationModule } from './activation/activation.module';
 import { LongitudinalModule } from './longitudinal/longitudinal.module';
 import { PilotModule } from './pilot/pilot.module';
 import { CheckoutModule } from './checkout/checkout.module';
+import { SubscriptionLifecycleModule } from './subscriptions/subscription-lifecycle.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { CheckoutModule } from './checkout/checkout.module';
     AuthModule,
     EntitlementsModule,
     SubscriptionsModule,
+    SubscriptionLifecycleModule,
     BillingModule,
     PaymentsModule,
     WebhooksModule,

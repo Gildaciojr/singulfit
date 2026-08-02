@@ -2,6 +2,7 @@ import { MessageDirection } from '@prisma/client';
 import { CoachProfileSnapshotConversationAdapter } from '../adapters/coach-profile-snapshot.adapter';
 import { ProfileAcquisitionDecisionConversationAdapter } from '../adapters/profile-acquisition-decision.adapter';
 import { ConversationTurnContextBuilderService } from '../runtime/conversation-turn-context-builder.service';
+import { CoachConversationHumanContextBuilder } from '../../context/coach-conversation-human-context.builder';
 import {
   readyAdaptiveDecision,
   routingSnapshot,
@@ -37,6 +38,7 @@ describe('ConversationTurnContextBuilderService', () => {
       new CoachProfileSnapshotConversationAdapter(),
       new ProfileAcquisitionDecisionConversationAdapter(),
       questions as never,
+      new CoachConversationHumanContextBuilder(),
     );
     return { service, prisma, snapshotBuilder, collector };
   }
@@ -88,6 +90,7 @@ describe('ConversationTurnContextBuilderService', () => {
       dietAvailable: false,
       workoutAvailable: false,
     });
+    expect(result.humanContext.turnCue).toBe('COMMON');
     expect(
       subject.prisma.conversation.findFirst.mock.calls[0][0].select.messages
         .select,

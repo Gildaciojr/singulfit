@@ -54,7 +54,8 @@ describe('MemoryService', () => {
     expect(messages).toHaveLength(2);
     expect((messages[1] as Prisma.JsonObject).content).toHaveLength(500);
     expect(prepared.summary).toContain('3 mensagens');
-    expect(prepared.summary).toContain('aderência 80/100');
+    expect(prepared.summary).toContain('boa aderência recente');
+    expect(prepared.summary).not.toMatch(/\d+\s*\/\s*100/u);
   });
 
   it('upserts the consolidated memory without creating retry duplicates', async () => {

@@ -1,4 +1,5 @@
 import type { ConversationRoutingDecision } from './conversation-execution-route.contract';
+import type { CoachConversationHumanContext } from '../../context/coach-conversation-human-context.contract';
 
 export const CONVERSATION_RUNTIME_MODE = {
   OFF: 'OFF',
@@ -64,6 +65,7 @@ export interface ConversationRuntimeSummary {
 export interface ConversationRuntimeEvaluation {
   readonly summary: ConversationRuntimeSummary;
   readonly decision: ConversationRoutingDecision | null;
+  readonly humanContext: CoachConversationHumanContext | null;
 }
 
 export type ConversationBridgeResult =

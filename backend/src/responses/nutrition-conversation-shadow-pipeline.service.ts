@@ -20,6 +20,11 @@ import { NutritionConversationCandidateSelectorService } from './nutrition-conve
 import { NutritionConversationCandidateSelectionAuditService } from './nutrition-conversation-candidate-selection-audit.service';
 import type { ConversationReasoningBridgeInput } from './reasoning-bridge/conversation-reasoning-bridge.contract';
 import { ConversationReasoningBridgeService } from './reasoning-bridge/conversation-reasoning-bridge.service';
+import {
+  CONVERSATION_SELECTED_SOURCE,
+  CONVERSATION_SELECTION_ROLLOUT_MODE,
+  type ConversationSelectedSource,
+} from './conversation-candidate-selection.contract';
 
 const SHADOW_TOTAL_TIMEOUT_MS = 25_000;
 const SHADOW_CONCURRENCY_LIMIT = 2;
@@ -33,6 +38,12 @@ export interface ExecuteNutritionConversationShadowInput {
   readonly conversation: BuildNutritionConversationContextInput;
   readonly legacyText: string;
   readonly reasoning?: ConversationReasoningBridgeInput;
+}
+
+export interface NutritionConversationOfficialSelectionResult {
+  readonly content: string;
+  readonly selectedSource: ConversationSelectedSource;
+  readonly candidateExecutionAttempted: boolean;
 }
 
 @Injectable()
@@ -106,6 +117,45 @@ export class NutritionConversationShadowPipelineService implements OnApplication
     }
   }
 
+  async selectOfficial(
+    input: ExecuteNutritionConversationShadowInput,
+  ): Promise<NutritionConversationOfficialSelectionResult> {
+    if (!this.isOfficialSelectionEnabled()) {
+      return Object.freeze({
+        content: input.legacyText,
+        selectedSource: CONVERSATION_SELECTED_SOURCE.FORMATTER,
+        candidateExecutionAttempted: false,
+      });
+    }
+
+    const startedAt = performance.now();
+    try {
+      const result = await this.runSelection(input, startedAt);
+      return Object.freeze({
+        ...result,
+        candidateExecutionAttempted: true,
+      });
+    } catch {
+      this.safeDiagnostic({ event: 'FAILED', component: 'OFFICIAL_SELECTION' });
+      return Object.freeze({
+        content: input.legacyText,
+        selectedSource: CONVERSATION_SELECTED_SOURCE.FORMATTER,
+        candidateExecutionAttempted: true,
+      });
+    }
+  }
+
+  isOfficialSelectionEnabled(): boolean {
+    const layer = this.operationalConfig.get();
+    const selection = this.selectionConfig.get();
+    return !(
+      this.shuttingDown ||
+      layer.effectiveMode === CONVERSATION_LAYER_MODE.OFF ||
+      layer.effectiveMode === CONVERSATION_LAYER_MODE.SHADOW ||
+      selection.effectiveMode === CONVERSATION_SELECTION_ROLLOUT_MODE.OFF
+    );
+  }
+
   onApplicationShutdown(): void {
     this.shuttingDown = true;
   }
@@ -114,6 +164,22 @@ export class NutritionConversationShadowPipelineService implements OnApplication
     input: ExecuteNutritionConversationShadowInput,
     startedAt: number,
   ): Promise<void> {
+    try {
+      await this.runSelection(input, startedAt);
+    } catch {
+      return;
+    }
+  }
+
+  private async runSelection(
+    input: ExecuteNutritionConversationShadowInput,
+    startedAt: number,
+  ): Promise<
+    Pick<
+      NutritionConversationOfficialSelectionResult,
+      'content' | 'selectedSource'
+    >
+  > {
     let component = 'CONTEXT';
 
     try {
@@ -213,8 +279,17 @@ export class NutritionConversationShadowPipelineService implements OnApplication
         candidateJobId: selectionDecision.candidateJobId,
         selectionAuditPersisted,
       });
-    } catch {
+      return Object.freeze({
+        content:
+          selectionDecision.selectedSource ===
+          CONVERSATION_SELECTED_SOURCE.CANDIDATE
+            ? (realization.candidateText ?? input.legacyText)
+            : input.legacyText,
+        selectedSource: selectionDecision.selectedSource,
+      });
+    } catch (error: unknown) {
       this.safeDiagnostic({ event: 'FAILED', component });
+      throw error;
     }
   }
 

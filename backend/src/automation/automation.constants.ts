@@ -9,6 +9,7 @@ export const AUTOMATION_RULE_CODES = {
   WEEKLY_REVIEW: 'WEEKLY_REVIEW',
   MONTHLY_REVIEW: 'MONTHLY_REVIEW',
   REENGAGEMENT: 'REENGAGEMENT',
+  SUBSCRIPTION_LIFECYCLE: 'SUBSCRIPTION_LIFECYCLE',
 } as const;
 
 export type AutomationRuleCode =
@@ -57,5 +58,9 @@ export const INITIAL_AUTOMATION_RULES: ReadonlyArray<{
   {
     code: AUTOMATION_RULE_CODES.REENGAGEMENT,
     name: 'Reengajamento',
+  },
+  {
+    code: AUTOMATION_RULE_CODES.SUBSCRIPTION_LIFECYCLE,
+    name: 'Ciclo da assinatura',
   },
 ];

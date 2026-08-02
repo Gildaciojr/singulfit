@@ -16,6 +16,7 @@ import { validateEnvironment } from '../production/environment.validation';
 import { ProductionModule } from '../production/production.module';
 import { RUNTIME_MODE } from '../production/runtime-mode';
 import { ActivationModule } from '../activation/activation.module';
+import { SubscriptionLifecycleModule } from '../subscriptions/subscription-lifecycle.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { ActivationModule } from '../activation/activation.module';
     AIModule,
     ContextModule,
     ActivationModule,
+    SubscriptionLifecycleModule,
     IntegrationEventsModule,
     OperationsModule,
   ],

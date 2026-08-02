@@ -38,7 +38,7 @@ export class ConversationReasoningBridgeService {
       longitudinal:
         input.longitudinal != null || input.longitudinalContext != null,
     });
-    if (!Object.values(availability).some(Boolean)) {
+    if (!Object.values(availability).some(Boolean) && !input.human) {
       return Object.freeze({ evidence: null, availability });
     }
 
@@ -64,6 +64,27 @@ export class ConversationReasoningBridgeService {
       suggestedQuestions: this.questionBuilder.build(input),
       safety: safetyResult.safety,
       longitudinal: this.summaryBuilder.longitudinal(input),
+      human: input.human
+        ? Object.freeze({
+            preferredName: input.human.preferredName?.value ?? null,
+            goal: input.human.goal?.value ?? null,
+            desiredOutcome: input.human.desiredOutcome?.value ?? null,
+            trainingTime: input.human.routine.trainingTime?.value ?? null,
+            trainingModality: input.human.training.modality?.value ?? null,
+            trainingExperience: input.human.training.experience?.value ?? null,
+            foodPreferences: input.human.nutrition.preferredFoods?.value ?? [],
+            rejectedFoods: input.human.nutrition.rejectedFoods?.value ?? [],
+            restrictions: input.human.restrictions?.value ?? [],
+            communicationStyle: input.human.communication.style?.value ?? null,
+            motivation: input.human.communication.motivation?.value ?? null,
+            messagePreference: input.human.communication.messagePreference,
+            memory: input.human.memory.map((entry) => entry.summary),
+            continuity: input.human.continuity?.value ?? null,
+            progress: input.human.progress?.value ?? null,
+            currentDiet: input.human.currentPlans.diet?.value ?? null,
+            currentWorkout: input.human.currentPlans.workout?.value ?? null,
+          })
+        : null,
       application:
         input.application ??
         Object.freeze({

@@ -3,6 +3,7 @@ import type { LongitudinalCoachingDecision } from '../../longitudinal-coaching/l
 import type { LongitudinalResponseContext } from '../../longitudinal/interfaces/longitudinal.interface';
 import type { NutritionReasoningResult } from '../../nutrition-reasoning/nutrition-reasoning.contract';
 import type { WorkoutReasoningResult } from '../../workout-reasoning/workout-reasoning.contract';
+import type { CoachConversationHumanContext } from '../../context/coach-conversation-human-context.contract';
 
 export type ConversationReasoningImportance =
   | 'essencial'
@@ -30,6 +31,7 @@ export interface ConversationReasoningBridgeInput {
   readonly longitudinalContext?: LongitudinalResponseContext | null;
   readonly previouslyTaughtTopics?: readonly ConversationReasoningTeachingTopic[];
   readonly application?: ConversationReasoningApplication;
+  readonly human?: CoachConversationHumanContext | null;
 }
 
 export interface ConversationReasoningApplication {
@@ -102,6 +104,26 @@ export interface ConversationReasoningLongitudinalEvidence {
   readonly repetitionRisk: boolean;
 }
 
+export interface ConversationReasoningHumanEvidence {
+  readonly preferredName: string | null;
+  readonly goal: string | null;
+  readonly desiredOutcome: string | null;
+  readonly trainingTime: string | null;
+  readonly trainingModality: string | null;
+  readonly trainingExperience: string | null;
+  readonly foodPreferences: readonly string[];
+  readonly rejectedFoods: readonly string[];
+  readonly restrictions: readonly string[];
+  readonly communicationStyle: string | null;
+  readonly motivation: string | null;
+  readonly messagePreference: 'SHORT' | 'BALANCED' | 'DETAILED';
+  readonly memory: readonly string[];
+  readonly continuity: string | null;
+  readonly progress: string | null;
+  readonly currentDiet: string | null;
+  readonly currentWorkout: string | null;
+}
+
 export interface ConversationReasoningEvidence {
   readonly summary: ConversationReasoningSummary;
   readonly priorities: readonly ConversationReasoningPriorityEvidence[];
@@ -113,6 +135,7 @@ export interface ConversationReasoningEvidence {
   readonly suggestedQuestions: readonly ConversationReasoningQuestionEvidence[];
   readonly safety: ConversationReasoningSafetyEvidence;
   readonly longitudinal: ConversationReasoningLongitudinalEvidence;
+  readonly human?: ConversationReasoningHumanEvidence | null;
   readonly application: ConversationReasoningApplication;
 }
 

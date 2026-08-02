@@ -80,6 +80,9 @@ export class AutomationService {
         where: {
           userId,
           status: ScheduledMessageStatus.PENDING,
+          automationRule: {
+            code: { not: AUTOMATION_RULE_CODES.SUBSCRIPTION_LIFECYCLE },
+          },
         },
         data: {
           status: ScheduledMessageStatus.CANCELED,
@@ -304,6 +307,91 @@ export class AutomationService {
     });
   }
 
+  async scheduleSubscriptionNotice(input: {
+    userId: string;
+    noticeKey: string;
+    content: string;
+    scheduledFor: Date;
+    availableAt?: Date;
+  }) {
+    if (
+      !input.noticeKey.trim() ||
+      !input.content.trim() ||
+      Number.isNaN(input.scheduledFor.getTime())
+    ) {
+      throw new BadRequestException('Aviso de assinatura inválido');
+    }
+
+    return this.prisma.$transaction(async (transaction) => {
+      await transaction.userAutomationPreference.upsert({
+        where: { userId: input.userId },
+        update: {},
+        create: { userId: input.userId },
+      });
+      const rule = await transaction.automationRule.upsert({
+        where: { code: AUTOMATION_RULE_CODES.SUBSCRIPTION_LIFECYCLE },
+        update: {},
+        create: {
+          code: AUTOMATION_RULE_CODES.SUBSCRIPTION_LIFECYCLE,
+          name: 'Ciclo da assinatura',
+        },
+      });
+      const coachMessage = await transaction.coachMessage.upsert({
+        where: {
+          idempotencyKey: `subscription:${input.userId}:${input.noticeKey}`,
+        },
+        update: {},
+        create: {
+          userId: input.userId,
+          type: 'FOLLOW_UP',
+          idempotencyKey: `subscription:${input.userId}:${input.noticeKey}`,
+          content: input.content,
+          context: {
+            source: 'SUBSCRIPTION_LIFECYCLE',
+            noticeKey: input.noticeKey,
+          },
+          scheduledFor: input.scheduledFor,
+        },
+      });
+      const scheduledMessage = await transaction.scheduledMessage.upsert({
+        where: {
+          userId_automationRuleId_scheduledFor: {
+            userId: input.userId,
+            automationRuleId: rule.id,
+            scheduledFor: input.scheduledFor,
+          },
+        },
+        update: {},
+        create: {
+          userId: input.userId,
+          automationRuleId: rule.id,
+          scheduledFor: input.scheduledFor,
+          content: coachMessage.content,
+        },
+        include: { automationRule: true },
+      });
+
+      await this.eventBus.publish(
+        {
+          eventType: INTERNAL_EVENT.AUTOMATION_TRIGGERED,
+          aggregateType: 'SCHEDULED_MESSAGE',
+          aggregateId: scheduledMessage.id,
+          payload: {
+            scheduledMessageId: scheduledMessage.id,
+            userId: input.userId,
+            automationRuleId: rule.id,
+            ruleCode: AUTOMATION_RULE_CODES.SUBSCRIPTION_LIFECYCLE,
+            noticeKey: input.noticeKey,
+          },
+          availableAt: input.availableAt ?? input.scheduledFor,
+        },
+        transaction,
+      );
+
+      return scheduledMessage;
+    });
+  }
+
   async dispatchDue(at = new Date(), limit = 100) {
     if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
       throw new BadRequestException('Limite de despacho inválido');
@@ -430,13 +518,18 @@ export class AutomationService {
             },
           });
 
+        const subscriptionLifecycleNotice =
+          current.automationRule.code ===
+          AUTOMATION_RULE_CODES.SUBSCRIPTION_LIFECYCLE;
+
         if (
           !current.automationRule.enabled ||
           !preferences ||
-          !this.isRuleEnabled(
-            current.automationRule.code as AutomationRuleCode,
-            preferences,
-          )
+          (!subscriptionLifecycleNotice &&
+            !this.isRuleEnabled(
+              current.automationRule.code as AutomationRuleCode,
+              preferences,
+            ))
         ) {
           const canceled = await transaction.scheduledMessage.update({
             where: {
@@ -456,34 +549,36 @@ export class AutomationService {
           };
         }
 
-        try {
-          await this.subscriptionAccessService.requireAccessInTransaction(
-            transaction,
-            current.userId,
-            at,
-          );
-        } catch (error: unknown) {
-          if (!(error instanceof ForbiddenException)) {
-            throw error;
+        if (!subscriptionLifecycleNotice) {
+          try {
+            await this.subscriptionAccessService.requireAccessInTransaction(
+              transaction,
+              current.userId,
+              at,
+            );
+          } catch (error: unknown) {
+            if (!(error instanceof ForbiddenException)) {
+              throw error;
+            }
+
+            const canceled = await transaction.scheduledMessage.update({
+              where: {
+                id: current.id,
+              },
+              data: {
+                status: ScheduledMessageStatus.CANCELED,
+                leaseExpiresAt: null,
+              },
+              include: {
+                automationRule: true,
+              },
+            });
+
+            return {
+              shouldSend: false as const,
+              message: canceled,
+            };
           }
-
-          const canceled = await transaction.scheduledMessage.update({
-            where: {
-              id: current.id,
-            },
-            data: {
-              status: ScheduledMessageStatus.CANCELED,
-              leaseExpiresAt: null,
-            },
-            include: {
-              automationRule: true,
-            },
-          });
-
-          return {
-            shouldSend: false as const,
-            message: canceled,
-          };
         }
 
         const message = await transaction.scheduledMessage.update({
@@ -608,6 +703,7 @@ export class AutomationService {
       case AUTOMATION_RULE_CODES.WEEKLY_REVIEW:
       case AUTOMATION_RULE_CODES.MONTHLY_REVIEW:
       case AUTOMATION_RULE_CODES.REENGAGEMENT:
+      case AUTOMATION_RULE_CODES.SUBSCRIPTION_LIFECYCLE:
         return preferences.progressReminderEnabled;
       case AUTOMATION_RULE_CODES.GOOD_MORNING:
         return true;
@@ -688,6 +784,15 @@ export class AutomationService {
 
       for (const user of users) {
         try {
+          try {
+            await this.subscriptionAccessService.requireAccess(user.id, at);
+          } catch (error: unknown) {
+            if (error instanceof ForbiddenException) {
+              continue;
+            }
+            throw error;
+          }
+
           const existingHabit = await this.prisma.habitSnapshot.findUnique({
             where: {
               userId_snapshotDate: {

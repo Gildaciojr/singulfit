@@ -18,6 +18,7 @@ import { PagBankWebhookService } from '../webhooks/pagbank-webhook.service';
 import { INTERNAL_EVENT } from './event-bus.constants';
 import { EventHandlerRegistry } from './event-handler.registry';
 import { IntegrationEventHandlersService } from './integration-event-handlers.service';
+import { SubscriptionLifecycleService } from '../subscriptions/subscription-lifecycle.service';
 
 describe('IntegrationEventHandlersService', () => {
   function acquisitionRollout() {
@@ -33,6 +34,13 @@ describe('IntegrationEventHandlersService', () => {
       authorizeQuestionSend: jest.fn().mockResolvedValue(true),
       afterOutboundSent: jest.fn().mockResolvedValue(undefined),
       afterCoachResponseSent: jest.fn().mockResolvedValue(undefined),
+    };
+  }
+
+  function subscriptionLifecycle() {
+    return {
+      authorizeOrNotify: jest.fn().mockResolvedValue(true),
+      notifyActivated: jest.fn().mockResolvedValue(undefined),
     };
   }
 
@@ -78,6 +86,7 @@ describe('IntegrationEventHandlersService', () => {
       activationJourney as unknown as ActivationJourneyService,
       activationOnboarding as unknown as ActivationOnboardingService,
       acquisitionRollout() as unknown as ProfileAcquisitionInternalRolloutService,
+      subscriptionLifecycle() as unknown as SubscriptionLifecycleService,
     );
 
     handlers.onModuleInit();
@@ -120,6 +129,7 @@ describe('IntegrationEventHandlersService', () => {
       {} as ActivationJourneyService,
       activationOnboarding as unknown as ActivationOnboardingService,
       acquisitionRollout() as unknown as ProfileAcquisitionInternalRolloutService,
+      subscriptionLifecycle() as unknown as SubscriptionLifecycleService,
     );
 
     handlers.onModuleInit();
@@ -164,6 +174,7 @@ describe('IntegrationEventHandlersService', () => {
       {} as ActivationJourneyService,
       activationOnboarding as unknown as ActivationOnboardingService,
       acquisitionRollout() as unknown as ProfileAcquisitionInternalRolloutService,
+      subscriptionLifecycle() as unknown as SubscriptionLifecycleService,
     );
 
     handlers.onModuleInit();
@@ -217,6 +228,7 @@ describe('IntegrationEventHandlersService', () => {
       {} as ActivationJourneyService,
       activationOnboarding as unknown as ActivationOnboardingService,
       acquisitionRollout() as unknown as ProfileAcquisitionInternalRolloutService,
+      subscriptionLifecycle() as unknown as SubscriptionLifecycleService,
     );
 
     handlers.onModuleInit();
@@ -237,6 +249,44 @@ describe('IntegrationEventHandlersService', () => {
       userId: 'user-id',
       messageId: 'message-id',
     });
+  });
+
+  it('blocks expired users before acquisition, onboarding and coach runtime', async () => {
+    const registry = new EventHandlerRegistry();
+    const acquisition = acquisitionRollout();
+    const onboarding = { processTextMessage: jest.fn() };
+    const coach = { processTextMessage: jest.fn() };
+    const lifecycle = subscriptionLifecycle();
+    lifecycle.authorizeOrNotify.mockResolvedValue(false);
+    const handlers = new IntegrationEventHandlersService(
+      registry,
+      {} as PagBankWebhookService,
+      {} as EvolutionWebhookService,
+      {} as NutritionService,
+      {} as NutritionVisionService,
+      {} as ResponseBuilderService,
+      {} as EvolutionSendService,
+      coach as unknown as CoachCommandService,
+      {} as AutomationService,
+      {} as ActivationJourneyService,
+      onboarding as unknown as ActivationOnboardingService,
+      acquisition as unknown as ProfileAcquisitionInternalRolloutService,
+      lifecycle as unknown as SubscriptionLifecycleService,
+    );
+    handlers.onModuleInit();
+    const handler = registry.get(INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED);
+    if (!handler) throw new Error('Handler de texto não registrado');
+
+    await handler(
+      outboxEvent(INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED, {
+        userId: 'user-id',
+        messageId: 'expired-message-id',
+      }),
+    );
+
+    expect(acquisition.captureActiveResponse).not.toHaveBeenCalled();
+    expect(onboarding.processTextMessage).not.toHaveBeenCalled();
+    expect(coach.processTextMessage).not.toHaveBeenCalled();
   });
 
   it('lets an active internal acquisition cycle consume the expected next message', async () => {
@@ -269,6 +319,7 @@ describe('IntegrationEventHandlersService', () => {
       {} as ActivationJourneyService,
       activationOnboarding as unknown as ActivationOnboardingService,
       acquisition as unknown as ProfileAcquisitionInternalRolloutService,
+      subscriptionLifecycle() as unknown as SubscriptionLifecycleService,
     );
     handlers.onModuleInit();
     const handler = registry.get(INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED);
@@ -304,6 +355,7 @@ describe('IntegrationEventHandlersService', () => {
       {} as ActivationJourneyService,
       {} as ActivationOnboardingService,
       acquisition as unknown as ProfileAcquisitionInternalRolloutService,
+      subscriptionLifecycle() as unknown as SubscriptionLifecycleService,
     );
     handlers.onModuleInit();
     const handler = registry.get(INTERNAL_EVENT.OUTBOUND_MESSAGE_REQUESTED);
@@ -343,6 +395,7 @@ describe('IntegrationEventHandlersService', () => {
       {} as ActivationJourneyService,
       {} as ActivationOnboardingService,
       acquisition as unknown as ProfileAcquisitionInternalRolloutService,
+      subscriptionLifecycle() as unknown as SubscriptionLifecycleService,
     );
     handlers.onModuleInit();
     const handler = registry.get(INTERNAL_EVENT.OUTBOUND_MESSAGE_REQUESTED);
@@ -386,6 +439,7 @@ describe('IntegrationEventHandlersService', () => {
       {} as ActivationJourneyService,
       {} as ActivationOnboardingService,
       acquisition as unknown as ProfileAcquisitionInternalRolloutService,
+      subscriptionLifecycle() as unknown as SubscriptionLifecycleService,
     );
     handlers.onModuleInit();
     const handler = registry.get(INTERNAL_EVENT.AUTOMATION_TRIGGERED);
@@ -432,6 +486,7 @@ describe('IntegrationEventHandlersService', () => {
       {} as ActivationJourneyService,
       activationOnboarding as unknown as ActivationOnboardingService,
       acquisitionRollout() as unknown as ProfileAcquisitionInternalRolloutService,
+      subscriptionLifecycle() as unknown as SubscriptionLifecycleService,
     );
 
     handlers.onModuleInit();

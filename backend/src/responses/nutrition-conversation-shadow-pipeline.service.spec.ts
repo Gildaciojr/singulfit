@@ -256,6 +256,67 @@ describe('NutritionConversationShadowPipelineService', () => {
     expect(target.selectionDecision.selectedSource).toBe('FORMATTER');
   });
 
+  it('returns the selected Candidate from the reusable official boundary', async () => {
+    const target = subject();
+    target.operationalConfig.get.mockReturnValue({ effectiveMode: 'INTERNAL' });
+    target.selectionConfig.get.mockReturnValue({
+      effectiveMode: 'INTERNAL',
+      formatterVersion: 'nutrition-response-formatter:v1',
+    });
+    target.candidateSelector.select.mockReturnValue({
+      ...target.selectionDecision,
+      selectedSource: 'CANDIDATE',
+      reason: 'CANDIDATE_PROMOTED',
+      selectionStatus: 'CANDIDATE_SELECTED',
+      rolloutMode: 'INTERNAL',
+    });
+
+    await expect(target.service.selectOfficial(input)).resolves.toEqual({
+      content: 'candidate',
+      selectedSource: 'CANDIDATE',
+      candidateExecutionAttempted: true,
+    });
+    expect(target.realizationExecutor.execute).toHaveBeenCalledTimes(1);
+    expect(target.selectionAudit.record).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns Formatter without retry after an official Realizer failure', async () => {
+    const target = subject();
+    target.operationalConfig.get.mockReturnValue({ effectiveMode: 'INTERNAL' });
+    target.selectionConfig.get.mockReturnValue({
+      effectiveMode: 'INTERNAL',
+      formatterVersion: 'nutrition-response-formatter:v1',
+    });
+    target.realizationExecutor.execute.mockRejectedValue(
+      new Error('realizer failure'),
+    );
+
+    await expect(target.service.selectOfficial(input)).resolves.toEqual({
+      content: 'legacy',
+      selectedSource: 'FORMATTER',
+      candidateExecutionAttempted: true,
+    });
+    expect(target.realizationExecutor.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['OFF', 'SHADOW'] as const)(
+    'keeps official selection on Formatter in %s mode',
+    async (mode) => {
+      const target = subject(mode);
+      target.selectionConfig.get.mockReturnValue({
+        effectiveMode: 'INTERNAL',
+        formatterVersion: 'nutrition-response-formatter:v1',
+      });
+
+      await expect(target.service.selectOfficial(input)).resolves.toEqual({
+        content: 'legacy',
+        selectedSource: 'FORMATTER',
+        candidateExecutionAttempted: false,
+      });
+      expect(target.realizationExecutor.execute).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(['OFF', 'INTERNAL', 'CANARY', 'ROLLOUT', 'PRIMARY'] as const)(
     'does nothing in %s mode',
     (mode) => {

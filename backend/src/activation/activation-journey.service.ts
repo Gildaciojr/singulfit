@@ -90,6 +90,18 @@ export class ActivationJourneyService {
   async processUser(userId: string, at = new Date()) {
     let activation = await this.activationService.reconcile(userId, at);
 
+    const latestSubscription = await this.prisma.subscription.findFirst({
+      where: { userId },
+      select: { status: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+    if (
+      latestSubscription?.status === SubscriptionStatus.EXPIRED ||
+      latestSubscription?.status === SubscriptionStatus.CANCELED
+    ) {
+      return activation;
+    }
+
     if (TERMINAL_ACTIVATION_STAGES.has(activation.currentStage)) {
       return activation;
     }
@@ -479,7 +491,6 @@ export class ActivationJourneyService {
       name,
       nextAction,
       contextLine,
-      activation?.score ?? 0,
     );
 
     return {
@@ -511,7 +522,6 @@ export class ActivationJourneyService {
     name: string,
     nextAction: string,
     context: string,
-    score: number,
   ): string {
     const suffix = context ? ` ${context}` : '';
 
@@ -519,7 +529,7 @@ export class ActivationJourneyService {
       case 'D0':
         return `Olá ${name}.\n\nFico muito feliz em ter você aqui.\n\nA partir de agora vou acompanhar sua alimentação, seus treinos, seus objetivos e sua evolução para te ajudar a alcançar resultados de forma saudável e consistente.\n\nTudo será personalizado para sua realidade, rotina e necessidades.\n\nAntes de começarmos nossa jornada, preciso conhecer um pouco mais sobre você.\n\nVamos lá?${suffix}`;
       case 'D1':
-        return `${name}, seu progresso de ativação está em ${score}/100. O passo mais útil agora é: ${nextAction}${suffix}`;
+        return `${name}, você já começou sua jornada. O passo mais útil agora é: ${nextAction}${suffix}`;
       case 'D3':
         return `${name}, observei onde sua jornada parou. Vamos reduzir a fricção: ${nextAction}${suffix}`;
       case 'D5':

@@ -24,6 +24,8 @@ import type {
 import type { ConversationGoalPreparationInput } from '../contracts/conversation-goal-preparation.contract';
 import type { CoachProfileSnapshot } from '../../context/coach-profile-snapshot.contract';
 import type { ProfileAcquisitionDecision } from '../../context/coach-adaptive-profile-collector.contract';
+import { CoachConversationHumanContextBuilder } from '../../context/coach-conversation-human-context.builder';
+import type { CoachConversationHumanContext } from '../../context/coach-conversation-human-context.contract';
 
 export interface ConversationTurnContext {
   readonly understandingInput: ConversationUnderstandingInput;
@@ -33,6 +35,7 @@ export interface ConversationTurnContext {
     ConversationGoalPreparationInput,
     'understanding'
   >;
+  readonly humanContext: CoachConversationHumanContext;
 }
 
 @Injectable()
@@ -44,6 +47,7 @@ export class ConversationTurnContextBuilderService {
     private readonly snapshotAdapter: CoachProfileSnapshotConversationAdapter,
     private readonly collectorAdapter: ProfileAcquisitionDecisionConversationAdapter,
     private readonly questions: ProfileQuestionSpecificationService,
+    private readonly humanContextBuilder: CoachConversationHumanContextBuilder,
   ) {}
 
   async build(
@@ -135,11 +139,16 @@ export class ConversationTurnContextBuilderService {
       continuity,
       referenceDate: snapshot.referenceDate,
     });
+    const humanContext = this.humanContextBuilder.build(snapshot, {
+      currentMessage: input.text,
+      recentHistory: history,
+    });
     return Object.freeze({
       understandingInput,
       snapshot,
       adaptiveDecision,
       preparationBase,
+      humanContext,
     });
   }
 

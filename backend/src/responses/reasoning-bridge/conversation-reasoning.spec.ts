@@ -349,7 +349,7 @@ describe('ConversationReasoningBridgeService', () => {
     expect(result.evidence?.longitudinal).toEqual({
       continuity: 'A continuidade pode conectar o próximo passo ao desempenho.',
       progress: 'A evolução recente está em melhora.',
-      adherence: 'A aderência observada está em 82 de 100.',
+      adherence: 'A aderência observada está consistente.',
       repetitionRisk: false,
     });
   });

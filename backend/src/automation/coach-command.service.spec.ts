@@ -326,7 +326,7 @@ describe('CoachCommandService', () => {
     expect(subject.prisma.coachMessage.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          content: expect.stringContaining('Plano de treino'),
+          content: expect.stringContaining('Organizei Treino inicial'),
         }),
       }),
     );
@@ -580,10 +580,10 @@ describe('CoachCommandService', () => {
     const subject = createSubject();
 
     expect(subject.planningDispatcher.formatDiet(dietPlan())).toContain(
-      'Refeições principais',
+      'refeições para consultar',
     );
     expect(subject.planningDispatcher.formatWorkout(workoutPlan())).toContain(
-      'Divisão semanal',
+      'divisão semanal',
     );
   });
 });

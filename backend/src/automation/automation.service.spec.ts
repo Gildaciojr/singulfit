@@ -143,6 +143,14 @@ describe('AutomationService', () => {
           }),
     };
     const subscriptionAccessService = {
+      requireAccess:
+        options?.subscriptionStatus === null
+          ? jest
+              .fn()
+              .mockRejectedValue(new ForbiddenException('Assinatura expirada'))
+          : jest.fn().mockResolvedValue({
+              status: options?.subscriptionStatus ?? SubscriptionStatus.ACTIVE,
+            }),
       requireAccessInTransaction:
         options?.subscriptionStatus === null
           ? jest

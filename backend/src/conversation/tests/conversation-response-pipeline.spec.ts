@@ -7,6 +7,51 @@ describe('Conversation response pipeline', () => {
   const formatter = new ConversationResponseFormatterService();
   const validator = new ConversationResponseValidatorService();
 
+  it('uses human context naturally for a greeting without repeating the name', () => {
+    const result = realizer.realize({
+      kind: 'CONTEXTUAL_RESPONSE',
+      cue: 'GREETING',
+      preferredName: 'Gil',
+      goal: 'ganho de massa muscular',
+      continuity: null,
+      trainingTime: 'depois do trabalho',
+      currentDiet: null,
+      currentWorkout: null,
+    });
+
+    expect(result.message).toBe('Oi, Gil! Que bom falar com você.');
+    expect(result.followUpQuestion).toContain('ganho de massa muscular');
+    expect(
+      `${result.message} ${result.followUpQuestion}`.match(/Gil/gu),
+    ).toHaveLength(1);
+  });
+
+  it('uses continuity only when persisted context is supplied', () => {
+    const withMemory = realizer.realize({
+      kind: 'CONTEXTUAL_RESPONSE',
+      cue: 'CONTINUITY',
+      preferredName: null,
+      goal: null,
+      continuity: 'quero ajustar o lanche antes do treino',
+      trainingTime: null,
+      currentDiet: null,
+      currentWorkout: null,
+    });
+    const withoutMemory = realizer.realize({
+      kind: 'CONTEXTUAL_RESPONSE',
+      cue: 'CONTINUITY',
+      preferredName: null,
+      goal: null,
+      continuity: null,
+      trainingTime: null,
+      currentDiet: null,
+      currentWorkout: null,
+    });
+
+    expect(withMemory.message).toContain('quero ajustar o lanche');
+    expect(withoutMemory.message).not.toContain('você comentou');
+  });
+
   it.each([
     ['DIET', 'plano alimentar'],
     ['WORKOUT', 'treino'],

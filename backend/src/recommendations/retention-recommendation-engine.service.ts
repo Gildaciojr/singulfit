@@ -49,7 +49,7 @@ export class RetentionRecommendationEngineService {
         title: 'Reative o acompanhamento com uma interação curta',
         description:
           'Faça um registro simples hoje ou responda com a principal dificuldade da sua rotina alimentar.',
-        reason: `O engajamento recente está em ${input.engagement.score}/100.`,
+        reason: 'O engajamento recente diminuiu e pede uma retomada simples.',
         evidence: {
           engagementScore: input.engagement.score,
           messagesLast7Days: input.engagement.messagesLast7Days,
@@ -74,7 +74,8 @@ export class RetentionRecommendationEngineService {
         title: 'Proteja a continuidade antes da perfeição',
         description:
           'Escolha um único horário ou refeição para manter o registro pelos próximos dias.',
-        reason: `A consistência está em ${input.consistency.score}/100 e a continuidade em ${input.consistency.continuityScore}/100.`,
+        reason:
+          'A consistência e a continuidade recentes podem melhorar com um passo fácil de repetir.',
         evidence: {
           consistencyScore: input.consistency.score,
           continuityScore: input.consistency.continuityScore,

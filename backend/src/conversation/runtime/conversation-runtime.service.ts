@@ -38,6 +38,7 @@ export class ConversationRuntimeService {
           durationMs: Date.now() - startedAt,
         }),
         decision: null,
+        humanContext: null,
       });
     }
     try {
@@ -64,6 +65,7 @@ export class ConversationRuntimeService {
             durationMs: Date.now() - startedAt,
           }),
           decision: null,
+          humanContext: context.humanContext,
         });
       }
       const decision = this.routing.decide({
@@ -86,6 +88,7 @@ export class ConversationRuntimeService {
           durationMs: Date.now() - startedAt,
         }),
         decision,
+        humanContext: context.humanContext,
       });
     } catch (error) {
       return Object.freeze({
@@ -98,6 +101,7 @@ export class ConversationRuntimeService {
           durationMs: Date.now() - startedAt,
         }),
         decision: null,
+        humanContext: null,
       });
     }
   }

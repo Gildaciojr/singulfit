@@ -42,126 +42,125 @@ export class ResponseBuilderService {
   ) {}
 
   async buildNutritionResponse(mealAnalysisId: string) {
-    const reference = await this.prisma.mealAnalysis.findUnique({
-      where: {
-        id: mealAnalysisId,
-      },
-      select: {
-        meal: {
+    const analysis = await this.prisma.mealAnalysis.findUnique({
+      where: { id: mealAnalysisId },
+      include: {
+        items: { orderBy: { id: 'asc' } },
+        meal: true,
+        qualityScore: true,
+        aiJob: {
           select: {
-            userId: true,
+            id: true,
+            promptVersionId: true,
+            usage: { select: { estimatedCost: true } },
           },
         },
       },
     });
-
-    if (!reference) {
+    if (!analysis) {
       throw new NotFoundException('Análise nutricional não encontrada');
     }
+    if (analysis.status !== MealAnalysisStatus.COMPLETED) {
+      throw new ConflictException(
+        'Análise nutricional ainda não foi concluída',
+      );
+    }
+    if (
+      !analysis.meal.conversationId ||
+      !analysis.meal.messageId ||
+      analysis.meal.source !== MealSource.WHATSAPP
+    ) {
+      throw new ConflictException(
+        'Análise não possui origem WhatsApp compatível com resposta',
+      );
+    }
+    const conversationId = analysis.meal.conversationId;
+    const sourceMessageId = analysis.meal.messageId;
 
     const [context, longitudinal] = await Promise.all([
-      this.intelligenceService.buildUserNutritionContext(reference.meal.userId),
-      this.longitudinal.getResponseContext(reference.meal.userId),
+      this.intelligenceService.buildUserNutritionContext(analysis.meal.userId),
+      this.longitudinal.getResponseContext(analysis.meal.userId),
     ]);
     const behavior = await this.behavioralIntelligence.refreshSignals(
-      reference.meal.userId,
+      analysis.meal.userId,
     );
     const proactiveRecommendations =
-      await this.recommendationService.refreshForUser(reference.meal.userId);
+      await this.recommendationService.refreshForUser(analysis.meal.userId);
     const coach = await this.coachIntelligence.getResponseSignals(
-      reference.meal.userId,
+      analysis.meal.userId,
     );
     const adaptive = coach.adaptive;
-
-    const result = await this.prisma.$transaction(async (transaction) => {
-      const analysis = await transaction.mealAnalysis.findUnique({
-        where: {
-          id: mealAnalysisId,
-        },
-        include: {
-          items: {
-            orderBy: {
-              id: 'asc',
-            },
-          },
-          meal: true,
-          qualityScore: true,
-          aiJob: {
-            select: {
-              id: true,
-              promptVersionId: true,
-              usage: {
-                select: {
-                  estimatedCost: true,
-                },
-              },
-            },
-          },
-        },
+    const nutritionRecommendations =
+      await this.prisma.nutritionRecommendation.findMany({
+        where: { userId: analysis.meal.userId, active: true },
+        orderBy: [{ priority: 'asc' }, { generatedAt: 'desc' }],
+        take: 3,
       });
-
-      if (!analysis) {
-        throw new NotFoundException('Análise nutricional não encontrada');
-      }
-
-      if (analysis.status !== MealAnalysisStatus.COMPLETED) {
-        throw new ConflictException(
-          'Análise nutricional ainda não foi concluída',
-        );
-      }
-
-      if (
-        !analysis.meal.conversationId ||
-        !analysis.meal.messageId ||
-        analysis.meal.source !== MealSource.WHATSAPP
-      ) {
-        throw new ConflictException(
-          'Análise não possui origem WhatsApp compatível com resposta',
-        );
-      }
-
-      const nutritionRecommendations =
-        await transaction.nutritionRecommendation.findMany({
-          where: {
-            userId: analysis.meal.userId,
-            active: true,
-          },
-          orderBy: [{ priority: 'asc' }, { generatedAt: 'desc' }],
-          take: 3,
-        });
-      const recommendations = this.mergeRecommendations(
-        proactiveRecommendations,
-        nutritionRecommendations,
-        adaptive,
+    const recommendations = this.mergeRecommendations(
+      proactiveRecommendations,
+      nutritionRecommendations,
+      adaptive,
+    );
+    const conversationInput = {
+      analysis,
+      context,
+      recommendations,
+      coach,
+      behavior,
+      longitudinal,
+    };
+    const formatterContent = this.nutritionFormatter.format(analysis, {
+      context,
+      recommendations,
+      coach,
+      behavior,
+      longitudinal,
+    });
+    const evaluationContext = {
+      goal: context.goal,
+      memoryCount: context.memories.length,
+      recentMealCount: context.recentMeals.length,
+      insightCount: context.activeInsights.length,
+      recommendationCount: recommendations.length,
+      behaviorStage: behavior.stage,
+      adherenceScore: behavior.adherenceScore,
+    };
+    const legacyDecision = this.responseEvaluation.evaluate(
+      formatterContent,
+      AIResponseEvaluationType.NUTRITION_RESPONSE,
+      evaluationContext,
+    );
+    const officialSelectionEnabled =
+      this.nutritionConversationShadowPipeline.isOfficialSelectionEnabled();
+    const episodicMemory = officialSelectionEnabled
+      ? await this.episodicMemoryIntegration
+          .loadForContext(conversationInput)
+          .catch(() => Object.freeze([]))
+      : Object.freeze([]);
+    const selectionInput = {
+      operation: {
+        userId: analysis.meal.userId,
+        conversationId,
+        messageId: sourceMessageId,
+      },
+      conversation: { ...conversationInput, episodicMemory },
+      reasoning: { longitudinalContext: conversationInput.longitudinal },
+      legacyText: legacyDecision.finalContent,
+    };
+    const selection =
+      await this.nutritionConversationShadowPipeline.selectOfficial(
+        selectionInput,
       );
-      const conversationInput = {
-        analysis,
-        context,
-        recommendations,
-        coach,
-        behavior,
-        longitudinal,
-      };
-      const content = this.nutritionFormatter.format(analysis, {
-        context,
-        recommendations,
-        coach,
-        behavior,
-        longitudinal,
-      });
-      const decision = this.responseEvaluation.evaluate(
-        content,
-        AIResponseEvaluationType.NUTRITION_RESPONSE,
-        {
-          goal: context.goal,
-          memoryCount: context.memories.length,
-          recentMealCount: context.recentMeals.length,
-          insightCount: context.activeInsights.length,
-          recommendationCount: recommendations.length,
-          behaviorStage: behavior.stage,
-          adherenceScore: behavior.adherenceScore,
-        },
-      );
+    const decision =
+      selection.content === legacyDecision.finalContent
+        ? legacyDecision
+        : this.responseEvaluation.evaluate(
+            selection.content,
+            AIResponseEvaluationType.NUTRITION_RESPONSE,
+            evaluationContext,
+          );
+
+    const outbound = await this.prisma.$transaction(async (transaction) => {
       const outbound = await transaction.outboundMessage.upsert({
         where: {
           mealAnalysisId,
@@ -171,8 +170,8 @@ export class ResponseBuilderService {
         },
         create: {
           userId: analysis.meal.userId,
-          conversationId: analysis.meal.conversationId,
-          sourceMessageId: analysis.meal.messageId,
+          conversationId,
+          sourceMessageId,
           mealAnalysisId: analysis.id,
           responseType: ResponseType.NUTRITION_ANALYSIS,
           content: decision.finalContent,
@@ -187,7 +186,7 @@ export class ResponseBuilderService {
       await this.responseEvaluation.persistInTransaction(transaction, {
         userId: analysis.meal.userId,
         aiJobId: analysis.aiJob?.id ?? null,
-        messageId: analysis.meal.messageId,
+        messageId: sourceMessageId,
         responseId: outbound.id,
         promptVersionId: analysis.aiJob?.promptVersionId ?? null,
         estimatedCost,
@@ -195,40 +194,27 @@ export class ResponseBuilderService {
       });
 
       await this.publishOutbound(transaction, outbound);
-
-      return {
-        outbound,
-        operation: {
-          userId: analysis.meal.userId,
-          conversationId: analysis.meal.conversationId,
-          messageId: analysis.meal.messageId,
-        },
-        conversationInput,
-        legacyText: decision.finalContent,
-      };
+      return outbound;
     });
 
-    void this.episodicMemoryIntegration
-      .loadForContext(result.conversationInput)
-      .then((episodicMemory) => {
-        this.nutritionConversationShadowPipeline.execute({
-          operation: {
-            ...result.operation,
-          },
-          conversation: {
-            ...result.conversationInput,
-            episodicMemory,
-          },
-          reasoning: {
-            longitudinalContext: result.conversationInput.longitudinal,
-          },
-          legacyText: result.legacyText,
-        });
-      })
-      .catch(() => undefined);
-    this.episodicMemoryIntegration.captureAfterCommit(result.conversationInput);
+    if (!selection.candidateExecutionAttempted) {
+      void this.episodicMemoryIntegration
+        .loadForContext(conversationInput)
+        .then((shadowMemory) =>
+          this.nutritionConversationShadowPipeline.execute({
+            ...selectionInput,
+            conversation: {
+              ...selectionInput.conversation,
+              episodicMemory: shadowMemory,
+            },
+            legacyText: decision.finalContent,
+          }),
+        )
+        .catch(() => undefined);
+    }
+    this.episodicMemoryIntegration.captureAfterCommit(conversationInput);
 
-    return result.outbound;
+    return outbound;
   }
 
   async buildUsageLimitResponse(mealId: string, content: string) {

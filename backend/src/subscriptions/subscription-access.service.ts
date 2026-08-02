@@ -62,7 +62,12 @@ export class SubscriptionAccessService {
       : (subscription.gracePeriodEnd ?? periodEnd);
 
     if (ended || accessEnd <= at) {
-      await this.expire(client, subscription.id, at);
+      await this.expire(
+        client,
+        subscription.id,
+        subscription.cancelAtPeriodEnd,
+        at,
+      );
       throw new ForbiddenException('A assinatura do usuário expirou');
     }
 
@@ -94,6 +99,7 @@ export class SubscriptionAccessService {
   private async expire(
     client: DatabaseClient,
     subscriptionId: string,
+    canceledAtPeriodEnd: boolean,
     at: Date,
   ): Promise<void> {
     await client.subscription.updateMany({
@@ -104,7 +110,9 @@ export class SubscriptionAccessService {
         },
       },
       data: {
-        status: SubscriptionStatus.EXPIRED,
+        status: canceledAtPeriodEnd
+          ? SubscriptionStatus.CANCELED
+          : SubscriptionStatus.EXPIRED,
         endedAt: at,
         version: {
           increment: 1,

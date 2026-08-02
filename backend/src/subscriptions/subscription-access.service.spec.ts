@@ -94,6 +94,13 @@ describe('SubscriptionAccessService', () => {
         new Date('2026-06-10T12:00:00.000Z'),
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(subject.prisma.subscription.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: SubscriptionStatus.CANCELED,
+        }),
+      }),
+    );
   });
 
   it('rejects malformed subscriptions without an access period', async () => {

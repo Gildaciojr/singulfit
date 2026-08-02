@@ -348,7 +348,11 @@ export class ConversationReasoningSummaryBuilder {
           ? `A evolução recente está ${this.lowerLabel(context.evolution.overallDirection)}.`
           : null,
       adherence: context.profile
-        ? `A aderência observada está em ${context.profile.adherenceScore} de 100.`
+        ? context.profile.adherenceScore >= 70
+          ? 'A aderência observada está consistente.'
+          : context.profile.adherenceScore >= 45
+            ? 'A aderência observada está oscilante.'
+            : 'A aderência observada pede um próximo passo mais simples.'
         : null,
       repetitionRisk: false,
     });

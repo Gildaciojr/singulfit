@@ -129,19 +129,23 @@ export class PaymentSettlementService {
             paymentId: payment.id,
             planId: activation.subscription.planId,
             provider: PaymentProvider.PAGBANK,
+            cycleNumber: activation.cycleNumber,
+            reactivated: activation.reactivated,
           },
         });
         await this.eventBus.publish(
           {
             eventType: INTERNAL_EVENT.SUBSCRIPTION_ACTIVATED,
-            aggregateType: 'SUBSCRIPTION',
-            aggregateId: activation.subscription.id,
+            aggregateType: 'SUBSCRIPTION_CYCLE',
+            aggregateId: payment.invoiceId,
             payload: {
               subscriptionId: activation.subscription.id,
               invoiceId: payment.invoiceId,
               paymentId: payment.id,
               userId: activation.subscription.userId,
               planId: activation.subscription.planId,
+              cycleNumber: activation.cycleNumber,
+              reactivated: activation.reactivated,
             },
           },
           transaction,

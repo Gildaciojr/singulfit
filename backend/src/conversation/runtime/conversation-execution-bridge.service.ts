@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { ConversationRoutingDecision } from '../contracts/conversation-execution-route.contract';
 import type { ConversationBridgeResult } from '../contracts/conversation-runtime.contract';
+import type { CoachConversationHumanContext } from '../../context/coach-conversation-human-context.contract';
 import { ConversationLanguageRealizerService } from './conversation-language-realizer.service';
 import { ConversationResponseFormatterService } from './conversation-response-formatter.service';
 import { ConversationResponsePayloadBuilder } from './conversation-response-payload.builder';
@@ -17,9 +18,10 @@ export class ConversationExecutionBridgeService {
 
   execute(
     decision: ConversationRoutingDecision,
+    humanContext: CoachConversationHumanContext | null = null,
   ): Promise<ConversationBridgeResult> {
     const route = decision.executionRoute;
-    const payload = this.payloadBuilder.build(route);
+    const payload = this.payloadBuilder.build(route, humanContext);
     if (!payload) {
       return Promise.resolve(
         Object.freeze({

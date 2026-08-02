@@ -586,7 +586,7 @@ export class CoachIntelligenceService {
         : item.windowDays === 30,
     );
     const trendSummary = trend
-      ? `Qualidade ${this.trendLabel(trend.direction)}, média ${trend.averageQualityScore}/100 e aderência ${trend.goalAdherenceScore}/100.`
+      ? `A qualidade está ${this.trendLabel(trend.direction)}, com ${this.metricMeaning(trend.averageQualityScore)} e ${this.metricMeaning(trend.goalAdherenceScore)} ao objetivo.`
       : 'Ainda não há histórico suficiente para uma tendência consolidada.';
     const achievements = this.reviewAchievements(
       averageNutritionScore,
@@ -917,12 +917,12 @@ export class CoachIntelligenceService {
       );
     } else if (type === CoachMessageType.POSITIVE_REINFORCEMENT) {
       parts.push(
-        `Sua consistência está em ${state.consistency.score}/100, com ${state.habit.consecutiveDays} dia(s) consecutivo(s) de atividade.`,
+        `Você manteve ${state.habit.consecutiveDays} dia(s) consecutivo(s) de atividade, o que mostra uma consistência ${this.metricMeaning(state.consistency.score)}.`,
         `Esse ritmo está sustentando seu objetivo de ${goal}.`,
       );
     } else if (type === CoachMessageType.FOLLOW_UP) {
       parts.push(
-        `Sua consistência recente está em ${state.consistency.score}/100 e o engajamento em ${state.engagement.score}/100.`,
+        `Sua consistência recente está ${this.metricMeaning(state.consistency.score)} e sua participação está ${this.metricMeaning(state.engagement.score)}.`,
         `Para avançar em ${goal}, vamos reduzir a exigência e proteger a continuidade.`,
       );
     } else {
@@ -937,7 +937,7 @@ export class CoachIntelligenceService {
         behavior.communicationStyle === 'ANALYTICAL')
     ) {
       parts.push(
-        `A tendência de 7 dias está ${this.trendLabel(trend.direction)}, com qualidade média ${trend.averageQualityScore}/100.`,
+        `A tendência dos últimos dias está ${this.trendLabel(trend.direction)}, com qualidade ${this.metricMeaning(trend.averageQualityScore)}.`,
       );
     }
 
@@ -947,7 +947,7 @@ export class CoachIntelligenceService {
       );
     } else if (pattern) {
       parts.push(
-        `Seu padrão mais frequente aparece em ${pattern.category.toLocaleLowerCase('pt-BR')}, com média ${pattern.averageQualityScore}/100.`,
+        `Seu padrão mais frequente aparece em ${pattern.category.toLocaleLowerCase('pt-BR')}, com qualidade ${this.metricMeaning(pattern.averageQualityScore)}.`,
       );
     }
 
@@ -1001,21 +1001,21 @@ export class CoachIntelligenceService {
       input.type === CoachReviewType.WEEKLY
         ? [
             `${state.context.name}, aqui está sua evolução da semana.`,
-            `Progresso: qualidade ${input.averageNutritionScore}/100, consistência ${state.consistency.score}/100 e momentum ${experience.momentum.score}/100.`,
+            `Progresso: a qualidade está ${this.metricMeaning(input.averageNutritionScore)}, a consistência está ${this.metricMeaning(state.consistency.score)} e seu ritmo está ${this.metricMeaning(experience.momentum.score)}.`,
             `Pontos fortes: ${input.achievements.length > 0 ? input.achievements.join('; ') : 'você manteve o acompanhamento ativo e produziu dados para ajustar o próximo passo'}.`,
             `Recaídas: ${relapse ? `houve sinais ${relapse.severity.toLocaleLowerCase('pt-BR')} em ${relapse.reasons.join(', ')}` : 'nenhuma recaída relevante foi consolidada'}.`,
             `Aprendizado: ${this.weeklyLearning(experience, behavior)}.`,
-            `Evidência nutricional: ${adaptive.nutritionEvidence.score}/100; padrão predominante ${this.patternLabel(adaptive.dietaryPatterns[0]?.pattern)}.`,
+            `Nas escolhas recentes, o padrão predominante foi ${this.patternLabel(adaptive.dietaryPatterns[0]?.pattern)}.`,
             `Memória útil: ${this.reinforcedMemoryLine(adaptive)}`,
             `Foco da próxima semana: ${nextFocus}`,
           ]
         : [
             `${state.context.name}, sua evolução consolidada do mês.`,
-            `Tendências: ${input.trendSummary} Momentum ${experience.momentum.score}/100 e força de retenção ${experience.retention.score}/100.`,
+            `Tendências: ${input.trendSummary} Seu ritmo está ${this.metricMeaning(experience.momentum.score)} e a continuidade está ${this.metricMeaning(experience.retention.score)}.`,
             `Hábitos fortalecidos: ${strengthenedHabits.length > 0 ? strengthenedHabits.join('; ') : input.achievements.join('; ') || 'continuidade do registro e observação das refeições'}.`,
             `Hábitos frágeis: ${fragileHabits.length > 0 ? fragileHabits.join('; ') : 'nenhum padrão frágil recorrente foi confirmado'}.`,
             `Evolução alimentar: ${this.evolutionSummary(adaptive)}.`,
-            `Aprendizado adaptativo: temas priorizados ${adaptive.learning.preferredTopics.join(', ') || 'ainda em formação'}; risco precoce ${adaptive.earlyChurn.level.toLocaleLowerCase('pt-BR')}.`,
+            `Aprendizado: os temas que mais ajudam são ${adaptive.learning.preferredTopics.join(', ') || 'ainda estão em formação'}.`,
             `Plano recomendado: ${nextFocus}`,
           ];
 
@@ -1114,19 +1114,19 @@ export class CoachIntelligenceService {
   }
 
   private adaptiveCoachOpening(adaptive: AdaptiveIntelligenceSignals): string {
-    const evidence = adaptive.nutritionEvidence.score;
+    const evidence = this.metricMeaning(adaptive.nutritionEvidence.score);
 
     switch (adaptive.communication.profile) {
       case 'EXECUTIVE':
-        return `Resumo: evidência nutricional ${evidence}/100 e risco precoce ${adaptive.earlyChurn.level.toLocaleLowerCase('pt-BR')}.`;
+        return `Resumo: suas escolhas recentes estão ${evidence}; vamos focar na próxima ação útil.`;
       case 'TECHNICAL':
-        return `Sinais atuais: evidência ${evidence}/100, proteína ${adaptive.nutritionEvidence.proteinScore}/100, fibras ${adaptive.nutritionEvidence.fiberScore}/100 e hidratação ${adaptive.nutritionEvidence.hydrationScore}/100.`;
+        return `Nas escolhas recentes, a base está ${evidence}; proteína, fibras e hidratação orientam o próximo ajuste.`;
       case 'DISCIPLINED':
-        return `Indicador atual ${evidence}/100. Vamos proteger uma ação mensurável e repetível.`;
+        return `Sua base recente está ${evidence}. Vamos proteger uma ação clara e repetível.`;
       case 'WARM':
-        return `Seu histórico está sendo usado para ajustar o acompanhamento sem julgamento; o indicador atual é ${evidence}/100.`;
+        return `Seu histórico mostra uma base ${evidence}; vou ajustar o acompanhamento sem julgamento.`;
       case 'INSPIRATIONAL':
-        return `Seu histórico mostra onde uma escolha pequena pode ganhar força; o indicador atual é ${evidence}/100.`;
+        return `Seu histórico está ${evidence} e mostra onde uma escolha pequena pode ganhar força.`;
     }
   }
 
@@ -1137,6 +1137,14 @@ export class CoachIntelligenceService {
       return 'Seu histórico ainda está formando uma memória confiável; cada registro melhora o próximo ajuste.';
     }
 
+    if (
+      /(?:\bscore\b|\bíndice\b|\bconfidence\b|\bmomentum\b|\bretention\b|\brisk\b|\d+\s*\/\s*100)/iu.test(
+        `${memory.title} ${memory.summary}`,
+      )
+    ) {
+      return 'Seu histórico está sendo considerado sem expor medidas internas; vamos focar no próximo passo útil.';
+    }
+
     return `Lembrando do seu histórico: ${memory.title.toLocaleLowerCase('pt-BR')}. ${memory.summary}`;
   }
 
@@ -1144,7 +1152,7 @@ export class CoachIntelligenceService {
     return adaptive.evolution
       .map(
         (item) =>
-          `${item.windowDays} dias ${this.trendLabel(item.direction)} (${item.score}/100)`,
+          `${item.windowDays} dias ${this.trendLabel(item.direction)}, com evolução ${this.metricMeaning(item.score)}`,
       )
       .join('; ');
   }
@@ -1210,7 +1218,7 @@ export class CoachIntelligenceService {
       case CoachCommunicationProfileType.DIRECT:
         return 'Direto ao ponto: escolha uma ação clara para hoje.';
       case CoachCommunicationProfileType.TECHNICAL:
-        return `Leitura objetiva: adesão ${behavior.adherenceScore}/100, momentum ${experience.momentum.score}/100.`;
+        return `Leitura objetiva: sua adesão está ${this.metricMeaning(behavior.adherenceScore)} e seu ritmo está ${this.metricMeaning(experience.momentum.score)}.`;
       case CoachCommunicationProfileType.MOTIVATIONAL:
         return 'Seu próximo passo pode recolocar o processo em movimento.';
       case CoachCommunicationProfileType.DISCIPLINARIAN:
@@ -1287,14 +1295,14 @@ export class CoachIntelligenceService {
 
   private momentumLine(score: number): string {
     if (score >= 75) {
-      return `Seu momentum está forte (${score}/100); preserve a estrutura que já funciona.`;
+      return 'Seu ritmo está forte; preserve a estrutura que já funciona.';
     }
 
     if (score >= 45) {
-      return `Seu momentum está em construção (${score}/100); consistência vale mais que intensidade agora.`;
+      return 'Seu ritmo está em construção; consistência vale mais que intensidade agora.';
     }
 
-    return `Seu momentum está baixo (${score}/100); reduza o esforço e proteja apenas o próximo passo.`;
+    return 'Seu ritmo caiu; reduza o esforço e proteja apenas o próximo passo.';
   }
 
   private weeklyLearning(
@@ -1403,7 +1411,7 @@ export class CoachIntelligenceService {
       case 'DIRECT':
         return 'Prioridade de hoje: uma ação clara e executável.';
       case 'ANALYTICAL':
-        return `Leitura atual: adesão prevista ${behavior.adherenceScore}/100 e engajamento ${behavior.engagementScore}/100.`;
+        return `Leitura atual: sua adesão está ${this.metricMeaning(behavior.adherenceScore)} e sua participação está ${this.metricMeaning(behavior.engagementScore)}.`;
       case 'COACH':
         return 'Vamos escolher um passo que caiba no seu dia real.';
       case 'MOTIVATIONAL':
@@ -1527,11 +1535,11 @@ export class CoachIntelligenceService {
     const achievements: string[] = [];
 
     if (nutritionScore >= 70) {
-      achievements.push(`qualidade média de ${nutritionScore}/100`);
+      achievements.push('boa qualidade média nas escolhas registradas');
     }
 
     if (consistencyScore >= 70) {
-      achievements.push(`consistência de ${consistencyScore}/100`);
+      achievements.push('boa consistência no acompanhamento');
     }
 
     if (habit.consecutiveDays >= 3) {
@@ -1723,6 +1731,12 @@ export class CoachIntelligenceService {
       : direction === 'DECLINING'
         ? 'em queda'
         : 'estável';
+  }
+
+  private metricMeaning(value: number): string {
+    if (value >= 75) return 'em bom nível e consistente';
+    if (value >= 50) return 'em nível intermediário, com alguma oscilação';
+    return 'em nível baixo e pedindo um passo mais simples';
   }
 
   private average(values: number[]): number {

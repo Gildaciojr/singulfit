@@ -8,6 +8,7 @@ import { ContextSnapshotService } from './context-snapshot.service';
 import { ContextService } from './context.service';
 import { MemoryService } from './memory.service';
 import { CoachProfileSnapshotBuilder } from './coach-profile-snapshot.builder';
+import { CoachConversationHumanContextBuilder } from './coach-conversation-human-context.builder';
 import { CoachAdaptiveProfileCollectorService } from './coach-adaptive-profile-collector.service';
 import { ConversationGoalPlannerService } from './conversation-goal-planner.service';
 import { CoachProfileAcquisitionProjectionService } from './profile-acquisition/coach-profile-acquisition-projection.service';
@@ -26,9 +27,15 @@ import {
   ProfileQuestionRealizerService,
   ProfileQuestionSpecificationService,
 } from './profile-acquisition/profile-question.service';
+import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 
 @Module({
-  imports: [AuthModule, EventBusModule, ObservabilityModule],
+  imports: [
+    AuthModule,
+    EventBusModule,
+    ObservabilityModule,
+    SubscriptionsModule,
+  ],
   controllers: [ContextAdminController],
   providers: [
     ContextService,
@@ -36,6 +43,7 @@ import {
     ContextSnapshotService,
     ContextEventHandlerService,
     CoachProfileSnapshotBuilder,
+    CoachConversationHumanContextBuilder,
     CoachAdaptiveProfileCollectorService,
     ConversationGoalPlannerService,
     CoachProfileFieldRegistryService,
@@ -56,6 +64,7 @@ import {
     MemoryService,
     ContextSnapshotService,
     CoachProfileSnapshotBuilder,
+    CoachConversationHumanContextBuilder,
     CoachAdaptiveProfileCollectorService,
     ConversationGoalPlannerService,
     CoachProfileFieldRegistryService,

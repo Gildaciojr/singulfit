@@ -801,7 +801,12 @@ export class LongitudinalService {
         sourceKey: `${input.sourceKey}:memory:achievement`,
         kind: LongitudinalMemoryKind.ACHIEVEMENT,
         title: 'Progresso no objetivo',
-        summary: `Progressão comportamental estimada em ${input.goalProgression.score}/100.`,
+        summary:
+          input.goalProgression.score >= 70
+            ? 'A progressão comportamental recente mostra evolução consistente.'
+            : input.goalProgression.score >= 45
+              ? 'A progressão comportamental recente está estável, com espaço para um passo simples.'
+              : 'A progressão comportamental recente oscilou e pede uma retomada gradual.',
         evidence: { adherenceScore: input.adherenceScore },
         confidence: new Prisma.Decimal('0.8500'),
         generatedAt: input.generatedAt,

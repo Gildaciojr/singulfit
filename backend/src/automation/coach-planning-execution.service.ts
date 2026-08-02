@@ -7,6 +7,7 @@ import type {
 } from '../context/coach-adaptive-profile-collector.contract';
 import { CoachAdaptiveProfileCollectorService } from '../context/coach-adaptive-profile-collector.service';
 import { CoachProfileSnapshotBuilder } from '../context/coach-profile-snapshot.builder';
+import { CoachConversationHumanContextBuilder } from '../context/coach-conversation-human-context.builder';
 import type { CoachProfileSnapshot } from '../context/coach-profile-snapshot.contract';
 import type {
   ConversationGoalDecision,
@@ -44,6 +45,7 @@ export interface CoachPlanningRuntimeContext {
   readonly traceId?: string;
   readonly referenceDate: Date;
   readonly profileId?: string;
+  readonly currentMessage?: string;
 }
 
 interface PreparedV2PlanningContext {
@@ -71,6 +73,7 @@ export class CoachPlanningExecutionService {
     private readonly nutritionReasoningEngine?: NutritionReasoningEngineService,
     private readonly workoutKnowledge?: WorkoutKnowledgeResolverService,
     private readonly workoutReasoningEngine?: WorkoutReasoningEngineService,
+    private readonly humanContextBuilder?: CoachConversationHumanContextBuilder,
   ) {}
 
   async execute(
@@ -199,6 +202,12 @@ export class CoachPlanningExecutionService {
       nutritionReasoning: nutrition.result,
       workoutReasoning: workout.result,
       longitudinalDecision: null,
+      humanContext:
+        preparation && this.humanContextBuilder
+          ? this.humanContextBuilder.build(preparation.snapshot, {
+              currentMessage: runtime?.currentMessage,
+            })
+          : null,
       reasoning: Object.freeze({
         nutrition: nutrition.state,
         workout: workout.state,

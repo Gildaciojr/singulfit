@@ -2,6 +2,7 @@ import type { ConversationGoalDecision } from '../context/conversation-goal-plan
 import type { LongitudinalCoachingDecision } from '../longitudinal-coaching/longitudinal-coaching.contract';
 import type { NutritionReasoningResult } from '../nutrition-reasoning/nutrition-reasoning.contract';
 import type { WorkoutReasoningResult } from '../workout-reasoning/workout-reasoning.contract';
+import type { CoachConversationHumanContext } from '../context/coach-conversation-human-context.contract';
 
 export type CoachPlanningExecutor =
   | 'DIET_LEGACY'
@@ -46,6 +47,7 @@ export interface CoachPlanningExecutionResult {
   readonly nutritionReasoning: NutritionReasoningResult | null;
   readonly workoutReasoning: WorkoutReasoningResult | null;
   readonly longitudinalDecision: LongitudinalCoachingDecision | null;
+  readonly humanContext: CoachConversationHumanContext | null;
   readonly reasoning: {
     readonly nutrition: CoachPlanningReasoningState;
     readonly workout: CoachPlanningReasoningState;

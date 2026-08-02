@@ -21,6 +21,7 @@ import { PagBankWebhookService } from '../webhooks/pagbank-webhook.service';
 import { INTERNAL_EVENT } from './event-bus.constants';
 import { EventHandlerRegistry } from './event-handler.registry';
 import { ProfileAcquisitionInternalRolloutService } from '../context/profile-acquisition/profile-acquisition-internal-rollout.service';
+import { SubscriptionLifecycleService } from '../subscriptions/subscription-lifecycle.service';
 
 @Injectable()
 export class IntegrationEventHandlersService implements OnModuleInit {
@@ -37,6 +38,7 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     private readonly activationJourneyService: ActivationJourneyService,
     private readonly activationOnboardingService: ActivationOnboardingService,
     private readonly profileAcquisitionRollout: ProfileAcquisitionInternalRolloutService,
+    private readonly subscriptionLifecycle: SubscriptionLifecycleService,
   ) {}
 
   onModuleInit(): void {
@@ -89,6 +91,15 @@ export class IntegrationEventHandlersService implements OnModuleInit {
       userId: this.requiredString(event.payload, 'userId'),
       messageId: this.requiredString(event.payload, 'messageId'),
     };
+    if (
+      !(await this.subscriptionLifecycle.authorizeOrNotify(
+        input.userId,
+        input.messageId,
+        event.createdAt,
+      ))
+    ) {
+      return;
+    }
     const acquisition =
       await this.profileAcquisitionRollout.captureActiveResponse(input);
 
@@ -106,6 +117,18 @@ export class IntegrationEventHandlersService implements OnModuleInit {
 
   private async processMedia(event: OutboxEvent): Promise<void> {
     if (this.requiredString(event.payload, 'mediaType') !== MediaType.IMAGE) {
+      return;
+    }
+
+    const userId = this.requiredString(event.payload, 'userId');
+    const messageId = this.requiredString(event.payload, 'messageId');
+    if (
+      !(await this.subscriptionLifecycle.authorizeOrNotify(
+        userId,
+        messageId,
+        event.createdAt,
+      ))
+    ) {
       return;
     }
 
@@ -199,6 +222,12 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     await this.activationJourneyService.processUser(
       this.requiredString(event.payload, 'userId'),
     );
+    await this.subscriptionLifecycle.notifyActivated(
+      this.requiredString(event.payload, 'userId'),
+      this.optionalNumber(event.payload, 'cycleNumber') ?? 1,
+      this.optionalBoolean(event.payload, 'reactivated') ?? false,
+      event.createdAt,
+    );
   }
 
   private requiredString(payload: Prisma.JsonValue, key: string): string {
@@ -230,6 +259,39 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     }
 
     return payload[key].trim();
+  }
+
+  private optionalNumber(
+    payload: Prisma.JsonValue,
+    key: string,
+  ): number | undefined {
+    if (
+      typeof payload !== 'object' ||
+      payload === null ||
+      Array.isArray(payload) ||
+      typeof payload[key] !== 'number' ||
+      !Number.isFinite(payload[key])
+    ) {
+      return undefined;
+    }
+
+    return payload[key];
+  }
+
+  private optionalBoolean(
+    payload: Prisma.JsonValue,
+    key: string,
+  ): boolean | undefined {
+    if (
+      typeof payload !== 'object' ||
+      payload === null ||
+      Array.isArray(payload) ||
+      typeof payload[key] !== 'boolean'
+    ) {
+      return undefined;
+    }
+
+    return payload[key];
   }
 
   private coachIntent(

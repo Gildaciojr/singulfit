@@ -126,6 +126,7 @@ export class CoachCommandService {
             intent,
             conversationId: message.conversation.id,
             messageId: message.id,
+            text: message.content,
             referenceDate: message.timestamp,
             profileId: message.conversation.user.fitnessProfile?.id,
           });
@@ -172,6 +173,7 @@ export class CoachCommandService {
     readonly intent: CoachCommandIntent;
     readonly conversationId: string;
     readonly messageId: string;
+    readonly text: string;
     readonly referenceDate: Date;
     readonly profileId?: string;
   }): Promise<string> {
@@ -181,6 +183,7 @@ export class CoachCommandService {
       correlationId: input.messageId,
       referenceDate: input.referenceDate,
       profileId: input.profileId,
+      currentMessage: input.text,
     };
     if (!this.planningConversationResponse) {
       return this.planningExecution.execute(

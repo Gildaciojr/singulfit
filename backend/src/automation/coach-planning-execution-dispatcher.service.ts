@@ -83,13 +83,12 @@ export class CoachPlanningExecutionDispatcherService {
       .join('\n');
 
     return [
-      `🥗 Plano alimentar: ${plan.title}`,
+      `🥗 Montei ${plan.title} como uma base prática para ${this.goalLabel(plan.objective)}.`,
       '',
-      `Objetivo: ${this.goalLabel(plan.objective)}`,
       `Calorias diárias: ${this.formatNumber(plan.dailyCaloriesTarget.toNumber())} kcal`,
       `Macros: ${this.formatNumber(plan.proteinTarget.toNumber())}g proteína, ${this.formatNumber(plan.carbsTarget.toNumber())}g carboidratos, ${this.formatNumber(plan.fatTarget.toNumber())}g gorduras.`,
       '',
-      'Refeições principais:',
+      'Estas são as refeições para consultar no dia a dia:',
       meals,
       '',
       'Use este plano como guia inicial. Se quiser, depois posso ajudar a ajustar substituições conforme sua rotina.',
@@ -110,11 +109,9 @@ export class CoachPlanningExecutionDispatcherService {
       .join('\n');
 
     return [
-      `🏋️ Plano de treino: ${plan.title}`,
+      `🏋️ Organizei ${plan.title} para apoiar seu objetivo de ${this.goalLabel(plan.objective)}.`,
       '',
-      `Objetivo: ${this.goalLabel(plan.objective)}`,
-      '',
-      'Divisão semanal:',
+      'Sua divisão semanal ficou assim:',
       days,
       '',
       'Respeite sua técnica, carga atual e recuperação. Se sentir dor fora do normal, pare e procure orientação profissional.',

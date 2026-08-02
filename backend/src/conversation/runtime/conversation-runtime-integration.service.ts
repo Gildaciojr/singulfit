@@ -71,7 +71,7 @@ export class ConversationRuntimeIntegrationService {
   ): Promise<ConversationRuntimePreExecutionDecision> {
     const evaluation = await this.runtime.evaluate(input);
     const bridge: ConversationBridgeResult = evaluation.decision
-      ? await this.bridge.execute(evaluation.decision)
+      ? await this.bridge.execute(evaluation.decision, evaluation.humanContext)
       : Object.freeze({
           status: 'FALLBACK_REQUIRED',
           content: null,

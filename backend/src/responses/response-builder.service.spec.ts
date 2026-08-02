@@ -91,11 +91,17 @@ describe('ResponseBuilderService', () => {
           operation(transaction),
       ),
       mealAnalysis: {
-        findUnique: jest.fn().mockResolvedValue({
-          meal: {
-            userId: 'user-id',
+        findUnique: jest.fn().mockResolvedValue(analysis),
+      },
+      nutritionRecommendation: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'nutrition-recommendation-id',
+            title: 'Ajuste prático',
+            rationale: 'Histórico recente',
+            action: 'Inclua vegetais.',
           },
-        }),
+        ]),
       },
       outboundMessage: {
         findMany: jest.fn(),
@@ -277,6 +283,14 @@ describe('ResponseBuilderService', () => {
     };
     const nutritionConversationShadowPipeline = {
       execute: jest.fn().mockResolvedValue(undefined),
+      isOfficialSelectionEnabled: jest.fn().mockReturnValue(false),
+      selectOfficial: jest.fn().mockImplementation((input) =>
+        Promise.resolve({
+          content: input.legacyText,
+          selectedSource: 'FORMATTER',
+          candidateExecutionAttempted: false,
+        }),
+      ),
     };
     const episodicMemoryIntegration = {
       loadForContext: jest.fn().mockResolvedValue(Object.freeze([])),
@@ -455,6 +469,67 @@ describe('ResponseBuilderService', () => {
       }),
     );
   });
+
+  it('selects a valid Candidate before the single official persistence', async () => {
+    const subject = createSubject();
+    subject.nutritionConversationShadowPipeline.isOfficialSelectionEnabled.mockReturnValue(
+      true,
+    );
+    subject.nutritionConversationShadowPipeline.selectOfficial.mockResolvedValue(
+      {
+        content: 'Resposta humana selecionada',
+        selectedSource: 'CANDIDATE',
+        candidateExecutionAttempted: true,
+      },
+    );
+
+    await subject.service.buildNutritionResponse('analysis-id');
+
+    expect(
+      subject.nutritionConversationShadowPipeline.selectOfficial,
+    ).toHaveBeenCalledTimes(1);
+    expect(subject.transaction.outboundMessage.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: { content: 'Resposta humana selecionada' },
+        create: expect.objectContaining({
+          content: 'Resposta humana selecionada',
+        }),
+      }),
+    );
+    expect(subject.transaction.outboundMessage.upsert).toHaveBeenCalledTimes(1);
+    expect(subject.eventBus.publish).toHaveBeenCalledTimes(1);
+    expect(
+      subject.nutritionConversationShadowPipeline.execute,
+    ).not.toHaveBeenCalled();
+    expect(
+      subject.nutritionConversationShadowPipeline.selectOfficial.mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(
+      subject.transaction.outboundMessage.upsert.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('persists the Formatter once when the official Candidate attempt falls back', async () => {
+    const subject = createSubject();
+    subject.nutritionConversationShadowPipeline.isOfficialSelectionEnabled.mockReturnValue(
+      true,
+    );
+    subject.nutritionConversationShadowPipeline.selectOfficial.mockResolvedValue(
+      {
+        content: 'Resposta nutricional',
+        selectedSource: 'FORMATTER',
+        candidateExecutionAttempted: true,
+      },
+    );
+
+    await subject.service.buildNutritionResponse('analysis-id');
+
+    expect(subject.transaction.outboundMessage.upsert).toHaveBeenCalledTimes(1);
+    expect(subject.eventBus.publish).toHaveBeenCalledTimes(1);
+    expect(
+      subject.nutritionConversationShadowPipeline.execute,
+    ).not.toHaveBeenCalled();
+  });
   it('replaces a risky response with the safe fallback before publishing', async () => {
     const subject = createSubject();
     subject.responseEvaluation.evaluate.mockReturnValue({
@@ -509,7 +584,7 @@ describe('ResponseBuilderService', () => {
 
   it('rejects an analysis that is not completed', async () => {
     const subject = createSubject();
-    subject.transaction.mealAnalysis.findUnique.mockResolvedValue({
+    subject.prisma.mealAnalysis.findUnique.mockResolvedValue({
       ...subject.analysis,
       status: MealAnalysisStatus.PROCESSING,
     });

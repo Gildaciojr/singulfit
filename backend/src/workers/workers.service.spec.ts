@@ -74,6 +74,9 @@ describe('dedicated workers', () => {
         {
           processDue: jest.fn().mockResolvedValue(0),
         } as unknown as ActivationJourneyService,
+        {
+          processDue: jest.fn().mockResolvedValue({ scanned: 0, processed: 0 }),
+        } as import('../subscriptions/subscription-lifecycle.service').SubscriptionLifecycleService,
       ),
     ];
 

@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -45,10 +44,22 @@ export class BillingService {
   }
 
   async getOrCreateInitialInvoice(userId: string) {
+    return this.getOrCreatePayableInvoice(userId);
+  }
+
+  async getOrCreatePayableInvoice(userId: string, at = new Date()) {
     const subscription = await this.prisma.subscription.findFirst({
       where: {
         userId,
-        status: SubscriptionStatus.PENDING_PAYMENT,
+        status: {
+          in: [
+            SubscriptionStatus.PENDING_PAYMENT,
+            SubscriptionStatus.ACTIVE,
+            SubscriptionStatus.PAST_DUE,
+            SubscriptionStatus.EXPIRED,
+            SubscriptionStatus.CANCELED,
+          ],
+        },
       },
       include: {
         plan: true,
@@ -68,36 +79,41 @@ export class BillingService {
     });
 
     if (!subscription) {
-      throw new NotFoundException('Assinatura pendente não encontrada');
+      throw new NotFoundException('Assinatura não encontrada');
     }
 
     if (!subscription.plan.isActive) {
       throw new BadRequestException('O plano selecionado não está ativo');
     }
 
-    const existingInvoice = await this.prisma.invoice.findUnique({
+    const existingInvoice = await this.prisma.invoice.findFirst({
       where: {
-        subscriptionId_cycleNumber: {
-          subscriptionId: subscription.id,
-          cycleNumber: 1,
-        },
+        subscriptionId: subscription.id,
+        status: InvoiceStatus.OPEN,
       },
+      orderBy: { cycleNumber: 'desc' },
     });
 
     if (existingInvoice) {
-      if (existingInvoice.status !== InvoiceStatus.OPEN) {
-        throw new ConflictException(
-          'A fatura inicial desta assinatura não está disponível para cobrança',
-        );
-      }
-
       return {
         subscription,
         invoice: existingInvoice,
       };
     }
 
-    const periodStart = dayjs();
+    const latestInvoice = await this.prisma.invoice.findFirst({
+      where: { subscriptionId: subscription.id },
+      orderBy: { cycleNumber: 'desc' },
+      select: { cycleNumber: true },
+    });
+    const cycleNumber = (latestInvoice?.cycleNumber ?? 0) + 1;
+    const currentPeriodEnd = subscription.currentPeriodEnd
+      ? dayjs(subscription.currentPeriodEnd)
+      : null;
+    const periodStart =
+      currentPeriodEnd && currentPeriodEnd.isAfter(at)
+        ? currentPeriodEnd
+        : dayjs(at);
     const periodEnd = periodStart.add(
       subscription.plan.billingIntervalCount,
       'month',
@@ -106,12 +122,12 @@ export class BillingService {
     try {
       const invoice = await this.invoicesService.create({
         subscriptionId: subscription.id,
-        cycleNumber: 1,
+        cycleNumber,
         currency: subscription.plan.currency,
         subtotal: subscription.plan.price.toFixed(2),
         periodStart: periodStart.toISOString(),
         periodEnd: periodEnd.toISOString(),
-        dueAt: periodStart.add(1, 'day').toISOString(),
+        dueAt: dayjs(at).add(1, 'day').toISOString(),
       });
 
       return {
@@ -127,7 +143,7 @@ export class BillingService {
           where: {
             subscriptionId_cycleNumber: {
               subscriptionId: subscription.id,
-              cycleNumber: 1,
+              cycleNumber,
             },
           },
         });

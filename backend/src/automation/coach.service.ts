@@ -146,6 +146,8 @@ export class CoachService {
             scheduledFor,
           )
         ).content;
+      case AUTOMATION_RULE_CODES.SUBSCRIPTION_LIFECYCLE:
+        return `${name}, vamos manter seu acompanhamento em dia. Posso ajudar com a continuidade da sua assinatura.`;
     }
   }
 
@@ -274,7 +276,11 @@ export class CoachService {
     const previous =
       adherenceScore === undefined
         ? ''
-        : ` Seu último índice de aderência foi ${adherenceScore}/100.`;
+        : adherenceScore >= 70
+          ? ' Você vinha mantendo uma boa regularidade.'
+          : adherenceScore >= 45
+            ? ' Sua regularidade vinha oscilando.'
+            : ' Sua rotina vinha pedindo um passo mais simples.';
 
     return `${name}, faça seu check-in diário: como estão seu humor, energia e aderência hoje?${previous}`;
   }

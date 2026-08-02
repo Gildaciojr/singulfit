@@ -33,7 +33,8 @@ export class BehavioralRecommendationEngineService {
         title: 'Reduza o próximo passo',
         description:
           'Escolha uma única ação alimentar que caiba no seu dia e repita-a antes de aumentar a exigência.',
-        reason: `A adesão prevista está em ${input.adherence.score}/100, com espaço para uma ação mais simples e sustentável.`,
+        reason:
+          'A rotina recente mostra espaço para uma ação mais simples e sustentável.',
         evidence: {
           adherenceScore: input.adherence.score,
           consistencyScore: input.adherence.consistencyScore,

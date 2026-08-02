@@ -256,26 +256,16 @@ describe('NutritionResponseFormatter', () => {
     expect(content).toContain('🍚 Arroz Branco (180g)');
     expect(content).toContain('🫘 Feijão Carioca (120g)');
     expect(content).toContain('🥩 Peito de Frango (150g)');
-    expect(content).toContain('🔥 Calorias: 523 kcal');
-    expect(content).toContain('🥩 Proteínas: 41g');
-    expect(content).toContain('🍞 Carboidratos: 52g');
-    expect(content).toContain('🥑 Gorduras: 11g');
-    expect(content).toContain('Qualidade nutricional: 82/100');
-    expect(content).toContain('Impacto no seu objetivo:');
-    expect(content).toContain('Insight contextual:');
-    expect(content).toContain('Proteína oscilando');
-    expect(content).toContain('Recomendação prática:');
-    expect(content).toContain('Inclua uma fonte de proteína no almoço.');
-    expect(content).toContain('Consistência 72/100');
-    expect(content).toContain('Leitura baseada em seis dimensões');
-    expect(content).toContain('adesão prevista 78/100');
-    expect(content).toContain('Evolução longitudinal:');
-    expect(content).toContain('Peito de frango (92%)');
     expect(content).toContain(
-      'A próxima escolha pode apoiar desempenho e recuperação.',
+      'A estimativa ficou em 523 kcal, com 41g de proteína, 52g de carboidratos e 11g de gorduras.',
     );
+    expect(content).not.toMatch(/(?:score|índice|momentum|retenção|\/100)/iu);
+    expect(content).toContain('base nutricional bem equilibrada');
+    expect(content).toContain('Para ganho de massa');
+    expect(content).toContain('Proteína oscilando');
+    expect(content).toContain('Inclua uma fonte de proteína no almoço.');
     expect(content).toContain(
-      'Estimativa baseada em visão computacional. As quantidades podem variar.',
+      'Como a leitura foi feita pela imagem, as quantidades são estimadas e podem variar.',
     );
   });
 });
