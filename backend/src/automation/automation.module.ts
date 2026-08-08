@@ -37,6 +37,8 @@ import { NutritionV2PilotConfigService } from './nutrition-v2-pilot-config.servi
 import { NutritionV2PilotService } from './nutrition-v2-pilot.service';
 import { ConversationRuntimeModule } from '../conversation/runtime/conversation-runtime.module';
 import { CoachPlanningConversationResponseService } from './coach-planning-conversation-response.service';
+import { PlanningExecutionRoutePolicyService } from './planning-execution-route-policy.service';
+import { CoachPlanningBothApplicationExecutorService } from './coach-planning-both-application-executor.service';
 
 @Module({
   imports: [
@@ -79,6 +81,8 @@ import { CoachPlanningConversationResponseService } from './coach-planning-conve
     ConversationGoalShadowPipelineService,
     NutritionV2PilotConfigService,
     NutritionV2PilotService,
+    PlanningExecutionRoutePolicyService,
+    CoachPlanningBothApplicationExecutorService,
   ],
   exports: [
     AutomationService,

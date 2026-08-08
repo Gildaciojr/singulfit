@@ -8,9 +8,10 @@ import { NutritionPlanV2PersistenceService } from './nutrition-plan-v2-persisten
 import { NutritionPlanV2PersistenceValidator } from './nutrition-plan-v2-persistence.validator';
 import { NUTRITION_PLAN_V2_REPOSITORY } from './nutrition-plan-v2.repository';
 import { PrismaNutritionPlanV2Gateway } from './prisma-nutrition-plan-v2.gateway';
+import { NutritionPlanOwnershipModule } from '../../ownership/nutrition-plan-ownership.module';
 
 @Module({
-  imports: [AIModule],
+  imports: [AIModule, NutritionPlanOwnershipModule],
   providers: [
     NutritionPlanV2PersistenceValidator,
     PrismaNutritionPlanV2Gateway,

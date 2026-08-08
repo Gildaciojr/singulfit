@@ -1,9 +1,11 @@
 import {
   BadGatewayException,
+  ConflictException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
-import { AIJobType, Prisma, WorkoutStatus } from '@prisma/client';
+import { AIJobStatus, AIJobType, Prisma, WorkoutStatus } from '@prisma/client';
 import { AIService } from '../ai/ai.service';
 import { OpenAIResponseResult } from '../ai/interfaces/openai.interface';
 import { PrismaService } from '../prisma/prisma.service';
@@ -13,6 +15,7 @@ import {
   GeneratedWorkoutExercise,
   GeneratedWorkoutPlan,
 } from './interfaces/generated-workout.interface';
+import type { LegacyWorkoutCandidate } from './interfaces/legacy-workout-candidate.interface';
 import {
   WORKOUT_JSON_SCHEMA,
   WORKOUT_JSON_SCHEMA_NAME,
@@ -37,6 +40,11 @@ export class WorkoutGeneratorService {
   ) {}
 
   async generate(userId: string) {
+    const candidate = await this.generateCandidate(userId);
+    return this.commitCandidate(candidate);
+  }
+
+  async generateCandidate(userId: string): Promise<LegacyWorkoutCandidate> {
     await this.subscriptionsService.getProfileSubscription(userId);
     const profile = await this.prisma.fitnessProfile.findUnique({
       where: {
@@ -73,6 +81,16 @@ export class WorkoutGeneratorService {
       type: AIJobType.WORKOUT,
       promptName: WORKOUT_PROMPT_BY_GOAL[profile.goal],
     });
+    if (job.status === AIJobStatus.PROCESSING)
+      throw new ServiceUnavailableException(
+        'Geração legacy de treino já está em andamento',
+      );
+    if (job.status === AIJobStatus.COMPLETED)
+      throw new ConflictException(
+        'AIJob legacy de treino já concluído sem candidato reutilizável',
+      );
+    if (job.status === AIJobStatus.FAILED)
+      throw new ServiceUnavailableException('AIJob legacy de treino já falhou');
     let response: OpenAIResponseResult | undefined;
 
     try {
@@ -85,87 +103,291 @@ export class WorkoutGeneratorService {
           schema: WORKOUT_JSON_SCHEMA,
         },
       });
-      const generatedWorkout = this.parseResponse(response.outputText);
-      const successfulResponse = response;
-      const generatedAt = new Date();
+      const output = this.freezeGeneratedWorkout(
+        this.parseResponse(response.outputText),
+      );
+      const storedResult = Object.freeze({
+        candidateOutput: response.outputText,
+        model: response.model,
+      });
+      return Object.freeze({
+        status: 'PENDING_COMPLETION' as const,
+        userId,
+        profileId: profile.id,
+        objective: profile.goal,
+        aiJobId: job.id,
+        operationKey: job.operationKey ?? null,
+        generatedAt: new Date(),
+        output,
+        storedResult,
+        completion: Object.freeze({
+          userId,
+          aiJobId: job.id,
+          jobType: AIJobType.WORKOUT,
+          response,
+          result: storedResult,
+        }),
+      });
+    } catch (error: unknown) {
+      await this.aiService.failJob(job.id, error, response);
+      throw error;
+    }
+  }
 
-      return await this.prisma.$transaction(
-        async (transaction) => {
-          await transaction.$queryRaw`
-            WITH advisory_lock AS (
-              SELECT pg_advisory_xact_lock(hashtext(${`workout:${userId}`}))
-            )
-            SELECT true AS "locked"
-            FROM advisory_lock
-          `;
-
-          await transaction.workoutPlan.updateMany({
-            where: {
-              userId,
-              status: WorkoutStatus.ACTIVE,
-            },
-            data: {
-              status: WorkoutStatus.ARCHIVED,
-            },
-          });
-          await this.aiService.completeJobInTransaction(transaction, {
-            userId,
-            aiJobId: job.id,
-            jobType: AIJobType.WORKOUT,
-            response: successfulResponse,
-          });
-
-          const workoutPlan = await transaction.workoutPlan.create({
-            data: {
-              userId,
-              profileId: profile.id,
-              aiJobId: job.id,
-              title: generatedWorkout.title,
-              objective: profile.goal,
-              status: WorkoutStatus.ACTIVE,
-              generatedAt,
-              days: {
-                create: generatedWorkout.days.map((day) => ({
-                  dayNumber: day.dayNumber,
-                  title: day.title,
-                  exercises: {
-                    create: day.exercises.map((exercise) => ({
-                      exerciseName: exercise.exerciseName,
-                      sets: exercise.sets,
-                      reps: exercise.reps,
-                      restSeconds: exercise.restSeconds,
-                      notes: exercise.notes,
-                    })),
-                  },
-                })),
-              },
-            },
-            include: WORKOUT_PLAN_INCLUDE,
-          });
-
-          await this.auditService.recordInTransaction(transaction, {
-            userId,
-            action: AUDIT_ACTION.WORKOUT_GENERATED,
-            entityType: AUDIT_ENTITY.WORKOUT_PLAN,
-            entityId: workoutPlan.id,
-            metadata: {
-              profileId: profile.id,
-              objective: profile.goal,
-              generatedAt: generatedAt.toISOString(),
-            },
-          });
-
-          return workoutPlan;
-        },
+  async commitCandidate(candidate: LegacyWorkoutCandidate) {
+    try {
+      const committed = await this.prisma.$transaction(
+        (transaction) =>
+          this.commitCandidateInTransaction(transaction, candidate),
         {
           maxWait: 5_000,
           timeout: 15_000,
         },
       );
+      return committed.plan;
     } catch (error: unknown) {
-      await this.aiService.failJob(job.id, error, response);
+      await this.failCandidate(candidate, error);
       throw error;
     }
+  }
+
+  async commitCandidateInTransaction(
+    transaction: Prisma.TransactionClient,
+    candidate: LegacyWorkoutCandidate,
+  ) {
+    await transaction.$queryRaw`
+            WITH advisory_lock AS (
+              SELECT pg_advisory_xact_lock(hashtext(${`workout:${candidate.userId}`}))
+            )
+            SELECT true AS "locked"
+            FROM advisory_lock
+          `;
+
+    const [profile, job, existing] = await Promise.all([
+      transaction.fitnessProfile.findFirst({
+        where: {
+          id: candidate.profileId,
+          userId: candidate.userId,
+        },
+        select: { goal: true },
+      }),
+      transaction.aIJob.findUnique({
+        where: { id: candidate.aiJobId },
+        select: {
+          id: true,
+          userId: true,
+          type: true,
+          status: true,
+          operationKey: true,
+        },
+      }),
+      transaction.workoutPlan.findUnique({
+        where: { aiJobId: candidate.aiJobId },
+        include: WORKOUT_PLAN_INCLUDE,
+      }),
+    ]);
+    this.assertCandidateApplicability(candidate, profile, job);
+    if (existing) {
+      if (job?.status !== AIJobStatus.COMPLETED)
+        throw new ConflictException(
+          'Plano legacy de treino existe sem AIJob concluído',
+        );
+      this.assertIdempotentWorkout(existing, candidate);
+      return Object.freeze({ persistence: 'REUSED' as const, plan: existing });
+    }
+    if (job?.status === AIJobStatus.COMPLETED)
+      throw new ConflictException(
+        'AIJob legacy de treino concluído sem plano persistido',
+      );
+    if (job?.status !== AIJobStatus.PROCESSING)
+      throw new ConflictException(
+        'AIJob legacy de treino não está disponível para commit',
+      );
+
+    await transaction.workoutPlan.updateMany({
+      where: {
+        userId: candidate.userId,
+        status: WorkoutStatus.ACTIVE,
+      },
+      data: {
+        status: WorkoutStatus.ARCHIVED,
+      },
+    });
+    await this.aiService.completeJobInTransaction(transaction, {
+      userId: candidate.completion.userId,
+      aiJobId: candidate.completion.aiJobId,
+      jobType: candidate.completion.jobType,
+      response: candidate.completion.response,
+    });
+
+    const workoutPlan = await transaction.workoutPlan.create({
+      data: {
+        userId: candidate.userId,
+        profileId: candidate.profileId,
+        aiJobId: candidate.aiJobId,
+        title: candidate.output.title,
+        objective: candidate.objective,
+        status: WorkoutStatus.ACTIVE,
+        generatedAt: candidate.generatedAt,
+        days: {
+          create: candidate.output.days.map((day) => ({
+            dayNumber: day.dayNumber,
+            title: day.title,
+            exercises: {
+              create: day.exercises.map((exercise) => ({
+                exerciseName: exercise.exerciseName,
+                sets: exercise.sets,
+                reps: exercise.reps,
+                restSeconds: exercise.restSeconds,
+                notes: exercise.notes,
+              })),
+            },
+          })),
+        },
+      },
+      include: WORKOUT_PLAN_INCLUDE,
+    });
+
+    await this.auditService.recordInTransaction(transaction, {
+      userId: candidate.userId,
+      action: AUDIT_ACTION.WORKOUT_GENERATED,
+      entityType: AUDIT_ENTITY.WORKOUT_PLAN,
+      entityId: workoutPlan.id,
+      metadata: {
+        profileId: candidate.profileId,
+        objective: candidate.objective,
+        generatedAt: candidate.generatedAt.toISOString(),
+      },
+    });
+
+    return Object.freeze({
+      persistence: 'CREATED' as const,
+      plan: workoutPlan,
+    });
+  }
+
+  failCandidate(
+    candidate: LegacyWorkoutCandidate,
+    error: unknown,
+  ): Promise<void> {
+    return this.aiService.failJob(
+      candidate.aiJobId,
+      error,
+      candidate.completion.response,
+    );
+  }
+
+  private assertCandidateApplicability(
+    candidate: LegacyWorkoutCandidate,
+    profile: { readonly goal: string } | null,
+    job: {
+      readonly userId: string;
+      readonly type: AIJobType;
+      readonly operationKey: string | null;
+    } | null,
+  ): void {
+    if (!profile)
+      throw new NotFoundException(
+        'Perfil do candidato legacy de treino não pertence ao usuário',
+      );
+    if (profile.goal !== candidate.objective)
+      throw new ConflictException(
+        'Objetivo do candidato legacy de treino divergiu do perfil',
+      );
+    if (
+      !job ||
+      job.userId !== candidate.userId ||
+      job.type !== AIJobType.WORKOUT ||
+      job.operationKey !== candidate.operationKey ||
+      candidate.completion.userId !== candidate.userId ||
+      candidate.completion.aiJobId !== candidate.aiJobId ||
+      candidate.completion.jobType !== AIJobType.WORKOUT ||
+      candidate.completion.result.candidateOutput !==
+        candidate.storedResult.candidateOutput ||
+      candidate.completion.result.model !== candidate.storedResult.model ||
+      candidate.completion.response.model !== candidate.storedResult.model
+    )
+      throw new ConflictException(
+        'Ownership ou lifecycle do candidato legacy de treino inconsistente',
+      );
+    if (!Number.isFinite(candidate.generatedAt.getTime()))
+      throw new ConflictException(
+        'Data de geração do candidato legacy de treino inválida',
+      );
+    const parsed = this.parseResponse(candidate.storedResult.candidateOutput);
+    if (JSON.stringify(parsed) !== JSON.stringify(candidate.output))
+      throw new ConflictException(
+        'Conteúdo do candidato legacy de treino divergiu do resultado validado',
+      );
+  }
+
+  private assertIdempotentWorkout(
+    existing: Prisma.WorkoutPlanGetPayload<{
+      include: typeof WORKOUT_PLAN_INCLUDE;
+    }>,
+    candidate: LegacyWorkoutCandidate,
+  ): void {
+    const existingShape = {
+      userId: existing.userId,
+      profileId: existing.profileId,
+      aiJobId: existing.aiJobId,
+      title: existing.title,
+      objective: existing.objective,
+      generatedAt: existing.generatedAt.toISOString(),
+      days: existing.days.map((day) => ({
+        dayNumber: day.dayNumber,
+        title: day.title,
+        exercises: day.exercises
+          .map((exercise) => ({
+            exerciseName: exercise.exerciseName,
+            sets: exercise.sets,
+            reps: exercise.reps,
+            restSeconds: exercise.restSeconds,
+            notes: exercise.notes,
+          }))
+          .sort((left, right) =>
+            JSON.stringify(left).localeCompare(JSON.stringify(right)),
+          ),
+      })),
+    };
+    const candidateShape = {
+      userId: candidate.userId,
+      profileId: candidate.profileId,
+      aiJobId: candidate.aiJobId,
+      title: candidate.output.title,
+      objective: candidate.objective,
+      generatedAt: candidate.generatedAt.toISOString(),
+      days: candidate.output.days.map((day) => ({
+        dayNumber: day.dayNumber,
+        title: day.title,
+        exercises: [...day.exercises].sort((left, right) =>
+          JSON.stringify(left).localeCompare(JSON.stringify(right)),
+        ),
+      })),
+    };
+    if (JSON.stringify(existingShape) !== JSON.stringify(candidateShape))
+      throw new ConflictException(
+        'Retry do candidato legacy de treino divergiu do plano persistido',
+      );
+  }
+
+  private freezeGeneratedWorkout(
+    workout: GeneratedWorkoutPlan,
+  ): GeneratedWorkoutPlan {
+    return Object.freeze({
+      title: workout.title,
+      days: Object.freeze(
+        workout.days.map((day) =>
+          Object.freeze({
+            dayNumber: day.dayNumber,
+            title: day.title,
+            exercises: Object.freeze(
+              day.exercises.map((exercise) => Object.freeze(exercise)),
+            ),
+          }),
+        ),
+      ),
+    });
   }
 
   private buildContext(profile: {

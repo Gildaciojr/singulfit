@@ -13,6 +13,11 @@ import { WorkoutPlanningEngineV2Service } from './v2/workout-planning-engine-v2.
 import { WorkoutPlanningReadinessService } from './v2/workout-planning-readiness.service';
 import { WorkoutPlanningSafetyService } from './v2/workout-planning-safety.service';
 import { WorkoutPlanningStrategyService } from './v2/workout-planning-strategy.service';
+import { WorkoutApplicationExecutorService } from './v2/execution/workout-application-executor.service';
+import { WorkoutPlanV2PersistenceService } from './v2/persistence/workout-plan-v2-persistence.service';
+import { WorkoutPlanV2PersistenceValidator } from './v2/persistence/workout-plan-v2-persistence.validator';
+import { PrismaWorkoutPlanV2Gateway } from './v2/persistence/prisma-workout-plan-v2.gateway';
+import { WORKOUT_PLAN_V2_REPOSITORY } from './v2/persistence/workout-plan-v2.repository';
 
 @Module({
   imports: [AuthModule, AIModule, SubscriptionsModule],
@@ -28,6 +33,14 @@ import { WorkoutPlanningStrategyService } from './v2/workout-planning-strategy.s
     WorkoutPlanV2Validator,
     WorkoutPlanV2Formatter,
     WorkoutPlanningEngineV2Service,
+    WorkoutPlanV2PersistenceValidator,
+    PrismaWorkoutPlanV2Gateway,
+    {
+      provide: WORKOUT_PLAN_V2_REPOSITORY,
+      useExisting: PrismaWorkoutPlanV2Gateway,
+    },
+    WorkoutPlanV2PersistenceService,
+    WorkoutApplicationExecutorService,
   ],
   exports: [
     WorkoutService,

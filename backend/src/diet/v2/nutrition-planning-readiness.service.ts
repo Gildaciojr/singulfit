@@ -200,7 +200,8 @@ export class NutritionPlanningReadinessService {
       EATING_OUT_FREQUENCY: snapshot.nutrition.eatingOutFrequency,
       FOOD_BUDGET: snapshot.nutrition.foodBudget,
       HYDRATION: snapshot.nutrition.hydration,
-      CURRENT_DIET: snapshot.plans.currentDiet,
+      CURRENT_DIET:
+        snapshot.plans.currentNutritionPlan ?? snapshot.plans.currentDiet,
     };
     return values[field] ?? null;
   }

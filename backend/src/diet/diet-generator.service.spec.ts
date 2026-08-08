@@ -159,11 +159,24 @@ describe('DietGeneratorService', () => {
     };
     const transaction = {
       $queryRaw: jest.fn().mockResolvedValue([{ locked: true }]),
+      fitnessProfile: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(profile ? { goal: profile.goal } : null),
+      },
       dietPlan: {
+        findUnique: jest.fn().mockResolvedValue(null),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         create: jest.fn().mockResolvedValue(persistedPlan),
       },
       aIJob: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'diet-job-id',
+          userId: 'user-id',
+          type: AIJobType.DIET,
+          status: AIJobStatus.PROCESSING,
+          operationKey: null,
+        }),
         update: jest.fn().mockResolvedValue({
           id: 'diet-job-id',
           status: AIJobStatus.COMPLETED,
@@ -201,6 +214,8 @@ describe('DietGeneratorService', () => {
       createStandaloneJob: jest.fn().mockResolvedValue({
         id: 'diet-job-id',
         type: AIJobType.DIET,
+        status: AIJobStatus.PENDING,
+        operationKey: null,
         promptVersion: {
           id: 'prompt-id',
           prompt: 'Prompt especializado em emagrecimento e comida brasileira',
@@ -217,11 +232,19 @@ describe('DietGeneratorService', () => {
         id: 'audit-id',
       }),
     };
+    const nutritionPlanOwnership = {
+      acquireCanonicalLockInTransaction: jest.fn().mockResolvedValue(undefined),
+      transitionInTransaction: jest.fn().mockResolvedValue({
+        transition: 'CREATED',
+      }),
+      assertInTransaction: jest.fn().mockResolvedValue(undefined),
+    };
     const service = new DietGeneratorService(
       prisma as unknown as PrismaService,
       subscriptionsService as unknown as SubscriptionsService,
       aiService as unknown as AIService,
       auditService as unknown as AuditService,
+      nutritionPlanOwnership as never,
     );
 
     return {
@@ -231,10 +254,28 @@ describe('DietGeneratorService', () => {
       subscriptionsService,
       aiService,
       auditService,
+      nutritionPlanOwnership,
       profile,
       persistedPlan,
     };
   }
+
+  it('uses the received transaction client without opening a nested transaction', async () => {
+    const subject = createSubject();
+    const candidate = await subject.service.generateCandidate('user-id');
+    subject.prisma.$transaction.mockClear();
+
+    await expect(
+      subject.service.commitCandidateInTransaction(
+        subject.transaction as unknown as Prisma.TransactionClient,
+        candidate,
+      ),
+    ).resolves.toMatchObject({ persistence: 'CREATED' });
+    expect(subject.prisma.$transaction).not.toHaveBeenCalled();
+    expect(
+      subject.nutritionPlanOwnership.acquireCanonicalLockInTransaction,
+    ).toHaveBeenCalledWith(subject.transaction, 'user-id');
+  });
 
   it('generates a structured diet from the complete longitudinal context', async () => {
     const subject = createSubject();
@@ -300,7 +341,9 @@ describe('DietGeneratorService', () => {
 
     await subject.service.generate('user-id');
 
-    expect(subject.transaction.$queryRaw).toHaveBeenCalled();
+    expect(
+      subject.nutritionPlanOwnership.acquireCanonicalLockInTransaction,
+    ).toHaveBeenCalledWith(subject.transaction, 'user-id');
     expect(subject.transaction.dietPlan.updateMany).toHaveBeenCalledWith({
       where: {
         userId: 'user-id',
@@ -312,14 +355,14 @@ describe('DietGeneratorService', () => {
     });
     expect(subject.aiService.completeJobInTransaction).toHaveBeenCalledWith(
       subject.transaction,
-      {
+      expect.objectContaining({
         userId: 'user-id',
         aiJobId: 'diet-job-id',
         jobType: AIJobType.DIET,
         response: expect.objectContaining({
           totalTokens: 850,
         }),
-      },
+      }),
     );
     expect(subject.transaction.dietPlan.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -420,5 +463,253 @@ describe('DietGeneratorService', () => {
       expect.any(BadGatewayException),
       undefined,
     );
+  });
+
+  it('generates a validated immutable candidate without persisting or completing', async () => {
+    const subject = createSubject();
+
+    const candidate = await subject.service.generateCandidate('user-id');
+
+    expect(candidate).toMatchObject({
+      status: 'PENDING_COMPLETION',
+      userId: 'user-id',
+      profileId: 'profile-id',
+      objective: FitnessGoal.WEIGHT_LOSS,
+      aiJobId: 'diet-job-id',
+      operationKey: null,
+      output: {
+        title: 'Plano brasileiro personalizado',
+        meals: [{ order: 1 }, { order: 2 }],
+      },
+      completion: {
+        userId: 'user-id',
+        aiJobId: 'diet-job-id',
+        jobType: AIJobType.DIET,
+      },
+    });
+    expect(Object.isFrozen(candidate)).toBe(true);
+    expect(Object.isFrozen(candidate.output)).toBe(true);
+    expect(subject.aiService.runTextJob).toHaveBeenCalledTimes(1);
+    expect(subject.prisma.$transaction).not.toHaveBeenCalled();
+    expect(subject.transaction.dietPlan.updateMany).not.toHaveBeenCalled();
+    expect(subject.transaction.dietPlan.create).not.toHaveBeenCalled();
+    expect(subject.aiService.completeJobInTransaction).not.toHaveBeenCalled();
+    expect(subject.auditService.recordInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('does not call or fail the provider when the diet AIJob is PROCESSING', async () => {
+    const subject = createSubject();
+    subject.aiService.createStandaloneJob.mockResolvedValue({
+      id: 'diet-job-id',
+      type: AIJobType.DIET,
+      status: AIJobStatus.PROCESSING,
+      operationKey: null,
+      promptVersion: { id: 'prompt-id', prompt: 'prompt' },
+    });
+
+    await expect(subject.service.generateCandidate('user-id')).rejects.toThrow(
+      'já está em andamento',
+    );
+    expect(subject.aiService.runTextJob).not.toHaveBeenCalled();
+    expect(subject.aiService.failJob).not.toHaveBeenCalled();
+  });
+
+  it('does not regenerate when the diet standalone job reports COMPLETED', async () => {
+    const subject = createSubject();
+    subject.aiService.createStandaloneJob.mockResolvedValue({
+      id: 'diet-job-id',
+      type: AIJobType.DIET,
+      status: AIJobStatus.COMPLETED,
+      operationKey: null,
+      promptVersion: { id: 'prompt-id', prompt: 'prompt' },
+    });
+
+    await expect(subject.service.generateCandidate('user-id')).rejects.toThrow(
+      'já concluído sem candidato reutilizável',
+    );
+    expect(subject.aiService.runTextJob).not.toHaveBeenCalled();
+    expect(subject.aiService.failJob).not.toHaveBeenCalled();
+  });
+
+  it('commits a diet candidate without invoking the provider', async () => {
+    const subject = createSubject();
+    const candidate = await subject.service.generateCandidate('user-id');
+    subject.aiService.runTextJob.mockClear();
+
+    await subject.service.commitCandidate(candidate);
+
+    expect(subject.aiService.runTextJob).not.toHaveBeenCalled();
+    expect(subject.transaction.dietPlan.create).toHaveBeenCalledTimes(1);
+    expect(subject.aiService.completeJobInTransaction).toHaveBeenCalledWith(
+      subject.transaction,
+      {
+        userId: candidate.userId,
+        aiJobId: candidate.aiJobId,
+        jobType: AIJobType.DIET,
+        response: candidate.completion.response,
+      },
+    );
+  });
+
+  it('rolls back the logical diet transaction when persistence fails', async () => {
+    const subject = createSubject();
+    const candidate = await subject.service.generateCandidate('user-id');
+    let committed = false;
+    subject.prisma.$transaction.mockImplementation(
+      async (operation: (client: typeof subject.transaction) => unknown) => {
+        const result = await operation(subject.transaction);
+        committed = true;
+        return result;
+      },
+    );
+    subject.transaction.dietPlan.create.mockRejectedValue(
+      new Error('persistence failed'),
+    );
+
+    await expect(subject.service.commitCandidate(candidate)).rejects.toThrow(
+      'persistence failed',
+    );
+    expect(committed).toBe(false);
+    expect(subject.aiService.failJob).toHaveBeenCalledWith(
+      candidate.aiJobId,
+      expect.any(Error),
+      candidate.completion.response,
+    );
+  });
+
+  it('does not leave a committed diet when AIJob completion fails', async () => {
+    const subject = createSubject();
+    const candidate = await subject.service.generateCandidate('user-id');
+    let committed = false;
+    subject.prisma.$transaction.mockImplementation(
+      async (operation: (client: typeof subject.transaction) => unknown) => {
+        const result = await operation(subject.transaction);
+        committed = true;
+        return result;
+      },
+    );
+    subject.aiService.completeJobInTransaction.mockRejectedValue(
+      new Error('completion failed'),
+    );
+
+    await expect(subject.service.commitCandidate(candidate)).rejects.toThrow(
+      'completion failed',
+    );
+    expect(committed).toBe(false);
+    expect(subject.transaction.dietPlan.create).not.toHaveBeenCalled();
+  });
+
+  it('rolls back diet application when audit fails', async () => {
+    const subject = createSubject();
+    const candidate = await subject.service.generateCandidate('user-id');
+    let committed = false;
+    subject.prisma.$transaction.mockImplementation(
+      async (operation: (client: typeof subject.transaction) => unknown) => {
+        const result = await operation(subject.transaction);
+        committed = true;
+        return result;
+      },
+    );
+    subject.auditService.recordInTransaction.mockRejectedValue(
+      new Error('audit failed'),
+    );
+
+    await expect(subject.service.commitCandidate(candidate)).rejects.toThrow(
+      'audit failed',
+    );
+    expect(subject.transaction.dietPlan.create).toHaveBeenCalledTimes(1);
+    expect(committed).toBe(false);
+  });
+
+  it('reuses a completed diet candidate commit without duplication', async () => {
+    const subject = createSubject();
+    const candidate = await subject.service.generateCandidate('user-id');
+    const existing = {
+      id: 'diet-plan-id',
+      userId: candidate.userId,
+      profileId: candidate.profileId,
+      aiJobId: candidate.aiJobId,
+      title: candidate.output.title,
+      objective: candidate.objective,
+      dailyCaloriesTarget: new Prisma.Decimal(
+        candidate.output.dailyCaloriesTarget,
+      ),
+      proteinTarget: new Prisma.Decimal(candidate.output.proteinTarget),
+      carbsTarget: new Prisma.Decimal(candidate.output.carbsTarget),
+      fatTarget: new Prisma.Decimal(candidate.output.fatTarget),
+      status: DietPlanStatus.ACTIVE,
+      generatedAt: candidate.generatedAt,
+      createdAt: candidate.generatedAt,
+      updatedAt: candidate.generatedAt,
+      meals: candidate.output.meals.map((meal) => ({
+        id: `meal-${meal.order}`,
+        dietPlanId: 'diet-plan-id',
+        name: meal.name,
+        order: meal.order,
+        caloriesTarget: new Prisma.Decimal(meal.caloriesTarget),
+        notes: meal.notes,
+        items: meal.items.map((item, index) => ({
+          id: `item-${index}`,
+          dietMealId: `meal-${meal.order}`,
+          foodName: item.foodName,
+          quantity: item.quantity,
+          calories: new Prisma.Decimal(item.calories),
+          protein: new Prisma.Decimal(item.protein),
+          carbs: new Prisma.Decimal(item.carbs),
+          fat: new Prisma.Decimal(item.fat),
+          substitutionGroup: item.substitutionGroup,
+        })),
+      })),
+      aiJob: { usage: [] },
+    };
+    subject.transaction.aIJob.findUnique.mockResolvedValue({
+      id: candidate.aiJobId,
+      userId: candidate.userId,
+      type: AIJobType.DIET,
+      status: AIJobStatus.COMPLETED,
+      operationKey: null,
+    });
+    subject.transaction.dietPlan.findUnique.mockResolvedValue(existing);
+
+    await expect(subject.service.commitCandidate(candidate)).resolves.toBe(
+      existing,
+    );
+    expect(subject.transaction.dietPlan.updateMany).not.toHaveBeenCalled();
+    expect(subject.transaction.dietPlan.create).not.toHaveBeenCalled();
+    expect(subject.aiService.completeJobInTransaction).not.toHaveBeenCalled();
+    expect(subject.auditService.recordInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a completed diet AIJob without its canonical plan', async () => {
+    const subject = createSubject();
+    const candidate = await subject.service.generateCandidate('user-id');
+    subject.transaction.aIJob.findUnique.mockResolvedValue({
+      id: candidate.aiJobId,
+      userId: candidate.userId,
+      type: AIJobType.DIET,
+      status: AIJobStatus.COMPLETED,
+      operationKey: null,
+    });
+
+    await expect(subject.service.commitCandidate(candidate)).rejects.toThrow(
+      'concluído sem plano persistido',
+    );
+    expect(subject.transaction.dietPlan.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps generate as the compatible diet candidate-plus-commit facade', async () => {
+    const subject = createSubject();
+    const generateCandidate = jest.spyOn(subject.service, 'generateCandidate');
+    const commitCandidate = jest.spyOn(subject.service, 'commitCandidate');
+
+    await expect(subject.service.generate('user-id')).resolves.toBe(
+      subject.persistedPlan,
+    );
+    expect(generateCandidate).toHaveBeenCalledWith('user-id');
+    expect(commitCandidate).toHaveBeenCalledTimes(1);
+    expect(commitCandidate.mock.calls[0][0]).toMatchObject({
+      status: 'PENDING_COMPLETION',
+      output: { title: 'Plano brasileiro personalizado' },
+    });
   });
 });

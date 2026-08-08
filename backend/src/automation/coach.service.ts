@@ -1,11 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { CoachReviewType, DietPlanStatus, WorkoutStatus } from '@prisma/client';
+import { CoachReviewType, WorkoutStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   AUTOMATION_RULE_CODES,
   AutomationRuleCode,
 } from './automation.constants';
 import { CoachIntelligenceService } from './coach-intelligence.service';
+import { CurrentNutritionPlanReaderService } from '../diet/current-nutrition-plan-reader.service';
+import type { CurrentNutritionPlan } from '../diet/current-nutrition-plan-reader.contract';
+import type { NutritionPlanMeal } from '../diet/v2/nutrition-plan-v2.contract';
 
 const GOAL_LABELS: Record<string, string> = {
   WEIGHT_LOSS: 'emagrecimento',
@@ -13,11 +16,22 @@ const GOAL_LABELS: Record<string, string> = {
   MAINTENANCE: 'manutenção',
 };
 
+const MEAL_PERIOD_LABELS: Record<NutritionPlanMeal['period'], string> = {
+  BREAKFAST: 'café da manhã',
+  MORNING_SNACK: 'lanche da manhã',
+  LUNCH: 'almoço',
+  AFTERNOON_SNACK: 'lanche da tarde',
+  DINNER: 'jantar',
+  EVENING_SNACK: 'ceia',
+  FLEXIBLE: 'horário flexível',
+};
+
 @Injectable()
 export class CoachService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly coachIntelligence: CoachIntelligenceService,
+    private readonly currentNutritionPlanReader: CurrentNutritionPlanReaderService,
   ) {}
 
   async generateContent(
@@ -25,87 +39,73 @@ export class CoachService {
     ruleCode: AutomationRuleCode,
     scheduledFor: Date,
   ): Promise<string> {
-    const [user, workout, diet, snapshots, latestCheckIn] = await Promise.all([
-      this.prisma.user.findUnique({
-        where: {
-          id: userId,
-        },
-        select: {
-          name: true,
-          fitnessProfile: {
-            select: {
-              currentWeightKg: true,
-              targetWeightKg: true,
-              goal: true,
+    const [user, workout, nutritionPlan, snapshots, latestCheckIn] =
+      await Promise.all([
+        this.prisma.user.findUnique({
+          where: {
+            id: userId,
+          },
+          select: {
+            name: true,
+            fitnessProfile: {
+              select: {
+                currentWeightKg: true,
+                targetWeightKg: true,
+                goal: true,
+              },
             },
           },
-        },
-      }),
-      this.prisma.workoutPlan.findFirst({
-        where: {
-          userId,
-          status: WorkoutStatus.ACTIVE,
-        },
-        include: {
-          days: {
-            orderBy: {
-              dayNumber: 'asc',
-            },
-            include: {
-              exercises: {
-                orderBy: {
-                  id: 'asc',
+        }),
+        this.prisma.workoutPlan.findFirst({
+          where: {
+            userId,
+            status: WorkoutStatus.ACTIVE,
+          },
+          include: {
+            days: {
+              orderBy: {
+                dayNumber: 'asc',
+              },
+              include: {
+                exercises: {
+                  orderBy: {
+                    id: 'asc',
+                  },
                 },
               },
             },
           },
-        },
-        orderBy: {
-          generatedAt: 'desc',
-        },
-      }),
-      this.prisma.dietPlan.findFirst({
-        where: {
-          userId,
-          status: DietPlanStatus.ACTIVE,
-        },
-        include: {
-          meals: {
-            orderBy: {
-              order: 'asc',
+          orderBy: {
+            generatedAt: 'desc',
+          },
+        }),
+        this.currentNutritionPlanReader.getCurrent(userId),
+        this.prisma.progressSnapshot.findMany({
+          where: {
+            userId,
+          },
+          include: {
+            insights: {
+              orderBy: {
+                createdAt: 'desc',
+              },
+              take: 1,
             },
           },
-        },
-        orderBy: {
-          generatedAt: 'desc',
-        },
-      }),
-      this.prisma.progressSnapshot.findMany({
-        where: {
-          userId,
-        },
-        include: {
-          insights: {
-            orderBy: {
-              createdAt: 'desc',
-            },
-            take: 1,
+          orderBy: {
+            createdAt: 'desc',
           },
-        },
-        orderBy: {
-          createdAt: 'desc',
-        },
-        take: 2,
-      }),
-      this.prisma.fitnessCheckIn.findFirst({
-        where: {
-          userId,
-        },
-        orderBy: {
-          createdAt: 'desc',
-        },
-      }),
-    ]);
+          take: 2,
+        }),
+        this.prisma.fitnessCheckIn.findFirst({
+          where: {
+            userId,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+        }),
+      ]);
     const name = user?.name?.trim()?.split(/\s+/, 1)[0] || 'atleta';
 
     switch (ruleCode) {
@@ -114,13 +114,18 @@ export class CoachService {
       case AUTOMATION_RULE_CODES.DAILY_WORKOUT:
         return this.workoutReminder(name, workout, scheduledFor);
       case AUTOMATION_RULE_CODES.MEAL_REMINDER:
-        return this.mealReminder(name, diet);
+        return this.mealReminder(name, nutritionPlan, scheduledFor);
       case AUTOMATION_RULE_CODES.HYDRATION_REMINDER:
         return `Hora de beber água, ${name}. Mantenha sua garrafa por perto e distribua a hidratação ao longo do dia.`;
       case AUTOMATION_RULE_CODES.DAILY_CHECK_IN:
         return this.checkInReminder(name, latestCheckIn?.adherenceScore);
       case AUTOMATION_RULE_CODES.WEEKLY_SUMMARY:
-        return this.weeklySummary(name, snapshots, workout?.title, diet?.title);
+        return this.weeklySummary(
+          name,
+          snapshots,
+          workout?.title,
+          nutritionPlan?.title,
+        );
       case AUTOMATION_RULE_CODES.DAILY_COACH:
       case AUTOMATION_RULE_CODES.REENGAGEMENT:
         return (
@@ -193,9 +198,7 @@ export class CoachService {
       '',
       'O que você gostaria de fazer primeiro?',
       '',
-      '1. Plano alimentar',
-      '2. Plano de treino',
-      '3. Os dois',
+      'Pode me contar com suas palavras se quer começar pela alimentação, pelo treino ou pelo acompanhamento da sua evolução.',
     ].join('\n');
   }
 
@@ -252,24 +255,42 @@ export class CoachService {
 
   private mealReminder(
     name: string,
-    diet: {
-      title: string;
-      meals: Array<{ name: string; caloriesTarget: { toNumber(): number } }>;
-    } | null,
+    plan: CurrentNutritionPlan | null,
+    scheduledFor: Date,
   ): string {
-    if (!diet) {
+    if (!plan) {
       return `${name}, você ainda não possui uma dieta ativa. Gere seu plano alimentar para receber lembretes personalizados.`;
     }
 
-    const meals = diet.meals
-      .slice(0, 5)
+    if (plan.implementation === 'LEGACY') {
+      const meals = plan.meals
+        .slice(0, 5)
+        .map(
+          (meal) =>
+            `${meal.name} (${this.formatNumber(meal.caloriesTarget)} kcal)`,
+        )
+        .join(', ');
+      return `${name}, lembrete do plano "${plan.title}": ${meals}. Escolha a refeição correspondente ao seu horário e siga as porções planejadas.`;
+    }
+
+    const weekday = scheduledFor.getUTCDay() || 7;
+    const day =
+      plan.document.days.find((item) => item.dayNumber === weekday) ??
+      plan.document.days[0];
+    const scheduledMeals =
+      day?.meals.filter((meal) => meal.suggestedTime !== null).slice(0, 5) ??
+      [];
+    if (scheduledMeals.length === 0) {
+      return `${name}, consulte o plano "${plan.title}" para a refeição de hoje. Os horários ainda não estão definidos, então o lembrete personalizado fica adiado.`;
+    }
+    const meals = scheduledMeals
       .map(
         (meal) =>
-          `${meal.name} (${this.formatNumber(meal.caloriesTarget.toNumber())} kcal)`,
+          `${meal.name} (${MEAL_PERIOD_LABELS[meal.period]}, ${meal.suggestedTime})`,
       )
       .join(', ');
 
-    return `${name}, lembrete do plano "${diet.title}": ${meals}. Escolha a refeição correspondente ao seu horário e siga as porções planejadas.`;
+    return `${name}, lembrete do plano "${plan.title}": ${meals}. Siga as porções planejadas para o período correspondente.`;
   }
 
   private checkInReminder(name: string, adherenceScore?: number): string {

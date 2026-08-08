@@ -63,9 +63,11 @@ describe('ConversationOfficialSelectionService', () => {
   it.each([
     [{ ...config, mode: 'OFF' as const }, true],
     [{ ...config, mode: 'SHADOW' as const }, true],
+    [{ ...config, killSwitch: true }, true],
+    [{ ...config, valid: false }, true],
     [config, false],
   ] as const)(
-    'does not use historical rollout metadata or eligibility as a release gate',
+    'keeps legacy when runtime governance does not authorize release',
     (runtimeConfig, eligible) => {
       expect(
         service.select({
@@ -75,11 +77,7 @@ describe('ConversationOfficialSelectionService', () => {
           evaluation,
           bridge,
         }),
-      ).toEqual({
-        source: 'CONVERSATION_RUNTIME',
-        content: 'Resposta runtime',
-        reason: 'RUNTIME_SELECTED',
-      });
+      ).toMatchObject({ source: 'LEGACY' });
     },
   );
 

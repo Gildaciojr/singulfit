@@ -6,6 +6,7 @@ import {
 } from './automation.constants';
 import { CoachService } from './coach.service';
 import { CoachIntelligenceService } from './coach-intelligence.service';
+import type { CurrentNutritionPlanReaderService } from '../diet/current-nutrition-plan-reader.service';
 
 describe('CoachService', () => {
   function createSubject() {
@@ -87,15 +88,27 @@ describe('CoachService', () => {
         content: 'Revisão contextualizada',
       }),
     };
+    const currentNutritionPlanReader = {
+      getCurrent: jest.fn().mockResolvedValue({
+        implementation: 'LEGACY',
+        title: 'Dieta brasileira',
+        meals: [
+          { name: 'Café da manhã', caloriesTarget: 430 },
+          { name: 'Almoço', caloriesTarget: 620 },
+        ],
+      }),
+    };
     const service = new CoachService(
       prisma as unknown as PrismaService,
       coachIntelligence as unknown as CoachIntelligenceService,
+      currentNutritionPlanReader as unknown as CurrentNutritionPlanReaderService,
     );
 
     return {
       service,
       prisma,
       coachIntelligence,
+      currentNutritionPlanReader,
     };
   }
 
@@ -142,6 +155,92 @@ describe('CoachService', () => {
     expect(content).toContain('Dieta brasileira');
   });
 
+  it('uses V2 day, period and suggestedTime without fabricating nullable nutrition', async () => {
+    const subject = createSubject();
+    subject.currentNutritionPlanReader.getCurrent.mockResolvedValueOnce({
+      implementation: 'V2',
+      title: 'Plano canônico V2',
+      document: {
+        days: [
+          {
+            dayNumber: 1,
+            meals: [
+              {
+                name: 'Café prático',
+                period: 'BREAKFAST',
+                suggestedTime: '07:30',
+                items: [
+                  {
+                    caloriesKcal: null,
+                    macros: {
+                      proteinGrams: null,
+                      carbohydrateGrams: null,
+                      fatGrams: null,
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    } as never);
+
+    const content = await subject.service.generateContent(
+      'user-id',
+      AUTOMATION_RULE_CODES.MEAL_REMINDER,
+      new Date('2026-06-08T12:00:00.000Z'),
+    );
+    expect(content).toContain('Café prático (café da manhã, 07:30)');
+    expect(content).not.toContain('0 kcal');
+    expect(content).not.toContain('0g');
+  });
+
+  it('explicitly defers a V2 meal reminder when no time exists', async () => {
+    const subject = createSubject();
+    subject.currentNutritionPlanReader.getCurrent.mockResolvedValueOnce({
+      implementation: 'V2',
+      title: 'Plano sem horários',
+      document: {
+        days: [
+          {
+            dayNumber: 1,
+            meals: [
+              {
+                name: 'Refeição flexível',
+                period: 'FLEXIBLE',
+                suggestedTime: null,
+              },
+            ],
+          },
+        ],
+      },
+    } as never);
+    await expect(
+      subject.service.generateContent(
+        'user-id',
+        AUTOMATION_RULE_CODES.MEAL_REMINDER,
+        new Date('2026-06-08T12:00:00.000Z'),
+      ),
+    ).resolves.toContain('fica adiado');
+  });
+
+  it('uses the V2 canonical title in the weekly summary', async () => {
+    const subject = createSubject();
+    subject.currentNutritionPlanReader.getCurrent.mockResolvedValueOnce({
+      implementation: 'V2',
+      title: 'Plano semanal V2',
+      document: { days: [] },
+    } as never);
+    await expect(
+      subject.service.generateContent(
+        'user-id',
+        AUTOMATION_RULE_CODES.WEEKLY_SUMMARY,
+        new Date('2026-06-08T12:00:00.000Z'),
+      ),
+    ).resolves.toContain('Plano semanal V2');
+  });
+
   it('builds the premium onboarding kickoff with the real user goal', async () => {
     const subject = createSubject();
 
@@ -149,8 +248,7 @@ describe('CoachService', () => {
 
     expect(content).toContain('Olá SingulFit');
     expect(content).toContain('emagrecimento');
-    expect(content).toContain('1. Plano alimentar');
-    expect(content).toContain('2. Plano de treino');
-    expect(content).toContain('3. Os dois');
+    expect(content).toContain('Pode me contar com suas palavras');
+    expect(content).not.toMatch(/\b[123]\./u);
   });
 });

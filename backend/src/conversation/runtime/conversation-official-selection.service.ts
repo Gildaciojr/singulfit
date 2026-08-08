@@ -15,8 +15,19 @@ export class ConversationOfficialSelectionService {
     readonly evaluation: ConversationRuntimeEvaluation;
     readonly bridge: ConversationBridgeResult;
   }): ConversationOfficialSelection {
-    void input.config;
-    void input.eligible;
+    if (
+      !input.config.valid ||
+      input.config.killSwitch ||
+      input.config.mode === 'OFF'
+    ) {
+      return this.legacy(input.legacyContent, 'RUNTIME_DISABLED');
+    }
+    if (input.config.mode === 'SHADOW') {
+      return this.legacy(input.legacyContent, 'SHADOW_ONLY');
+    }
+    if (!input.eligible) {
+      return this.legacy(input.legacyContent, 'USER_NOT_ELIGIBLE');
+    }
     if (
       input.evaluation.summary.status === 'OFFICIAL_CANDIDATE' &&
       input.evaluation.summary.ambiguityPresent === false &&

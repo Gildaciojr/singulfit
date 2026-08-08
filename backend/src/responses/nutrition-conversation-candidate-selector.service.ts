@@ -71,6 +71,9 @@ export class NutritionConversationCandidateSelectorService {
       candidateValid,
       input.metadata.rolloutMode,
     );
+    const candidateSelected =
+      candidateValid &&
+      input.metadata.rolloutMode !== CONVERSATION_SELECTION_ROLLOUT_MODE.OFF;
     const metrics = Object.freeze({
       formatterLength: Array.from(input.officialResponse).length,
       candidateLength: input.comparison.metrics.candidateCharacters,
@@ -92,7 +95,7 @@ export class NutritionConversationCandidateSelectorService {
     });
 
     return Object.freeze({
-      selectedSource: candidateValid
+      selectedSource: candidateSelected
         ? CONVERSATION_SELECTED_SOURCE.CANDIDATE
         : CONVERSATION_SELECTED_SOURCE.FORMATTER,
       reason: selection.reason,
@@ -133,7 +136,12 @@ export class NutritionConversationCandidateSelectorService {
       };
     }
 
-    void rolloutMode;
+    if (rolloutMode === CONVERSATION_SELECTION_ROLLOUT_MODE.OFF) {
+      return {
+        reason: CANDIDATE_SELECTION_REASON.ROLLOUT_MODE_OFF,
+        selectionStatus: CANDIDATE_SELECTION_STATUS.FUTURE_ROLLOUT_DISABLED,
+      };
+    }
     return {
       reason: CANDIDATE_SELECTION_REASON.CANDIDATE_PROMOTED,
       selectionStatus: CANDIDATE_SELECTION_STATUS.CANDIDATE_SELECTED,

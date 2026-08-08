@@ -16,10 +16,19 @@ import { NutritionPlanningEngineV2Service } from './v2/nutrition-planning-engine
 import { NutritionPlanningReadinessService } from './v2/nutrition-planning-readiness.service';
 import { NutritionPlanningSafetyService } from './v2/nutrition-planning-safety.service';
 import { NutritionPlanningStrategyService } from './v2/nutrition-planning-strategy.service';
+import { CurrentNutritionPlanReaderService } from './current-nutrition-plan-reader.service';
+import { NutritionPlanV2PersistenceValidator } from './v2/persistence/nutrition-plan-v2-persistence.validator';
+import { NutritionPlanOwnershipModule } from './ownership/nutrition-plan-ownership.module';
+import { CanonicalNutritionController } from './canonical-nutrition.controller';
 
 @Module({
-  imports: [AuthModule, AIModule, SubscriptionsModule],
-  controllers: [DietController],
+  imports: [
+    AuthModule,
+    AIModule,
+    SubscriptionsModule,
+    NutritionPlanOwnershipModule,
+  ],
+  controllers: [DietController, CanonicalNutritionController],
   providers: [
     DietService,
     DietGeneratorService,
@@ -34,6 +43,8 @@ import { NutritionPlanningStrategyService } from './v2/nutrition-planning-strate
     NutritionGenerationRunnerV2Service,
     NutritionPlanV2Formatter,
     NutritionPlanningEngineV2Service,
+    NutritionPlanV2PersistenceValidator,
+    CurrentNutritionPlanReaderService,
   ],
   exports: [
     DietService,
@@ -42,6 +53,7 @@ import { NutritionPlanningStrategyService } from './v2/nutrition-planning-strate
     NutritionPlanningEngineV2Service,
     NutritionPlanV2Formatter,
     NutritionGenerationRunnerV2Service,
+    CurrentNutritionPlanReaderService,
   ],
 })
 export class DietModule {}

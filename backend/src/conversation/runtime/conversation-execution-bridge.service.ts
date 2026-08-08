@@ -78,12 +78,12 @@ export class ConversationExecutionBridgeService {
         return 'PROFILE_ACQUISITION_NOT_CONNECTED';
       case 'CURRENT_PLAN_PRESENTATION':
       case 'PLAN_STATUS':
-      case 'PROGRESS_REVIEW':
-      case 'NUTRITION_GUIDANCE':
         return 'READ_OR_GUIDANCE_EXECUTOR_NOT_CONNECTED';
       case 'LEGACY_FALLBACK':
         return 'ROUTER_REQUESTED_LEGACY_FALLBACK';
       case 'ANSWER_MESSAGE':
+      case 'PROGRESS_REVIEW':
+      case 'NUTRITION_GUIDANCE':
       case 'CONFIRMATION':
       case 'SAFETY_RESPONSE':
         return 'SUPPORTED_ROUTE_WITHOUT_PAYLOAD';

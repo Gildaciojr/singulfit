@@ -1,3 +1,5 @@
+import { AIJobType, Prisma } from '@prisma/client';
+import type { PendingAIJobCompletion } from '../../ai/pending-ai-job-completion.contract';
 import type { CoachProfileSnapshot } from '../../context/coach-profile-snapshot.contract';
 import type { ConversationGoalDecision } from '../../context/conversation-goal-planner.contract';
 import type {
@@ -39,3 +41,36 @@ export interface PreparedWorkoutPlanningV2 {
   readonly strategy: WorkoutPlanningStrategy | null;
   readonly safety: WorkoutSafetyGateResult | null;
 }
+
+export type WorkoutPlanningStoredAIJobResult = Prisma.InputJsonObject & {
+  readonly candidateOutput: string;
+  readonly model: string;
+};
+
+export type WorkoutPlanningAIJobCompletion = PendingAIJobCompletion<
+  typeof AIJobType.WORKOUT,
+  WorkoutPlanningStoredAIJobResult
+>;
+
+interface WorkoutPlanningGenerationResultBase {
+  readonly output: WorkoutPlanV2;
+  readonly aiJobId: string;
+  readonly operationKey: string;
+  readonly storedResult: WorkoutPlanningStoredAIJobResult;
+}
+
+export interface PendingWorkoutPlanningGenerationResult extends WorkoutPlanningGenerationResultBase {
+  readonly status: 'PENDING_COMPLETION';
+  readonly reused: false;
+  readonly completion: WorkoutPlanningAIJobCompletion;
+}
+
+export interface CompletedWorkoutPlanningGenerationResult extends WorkoutPlanningGenerationResultBase {
+  readonly status: 'ALREADY_COMPLETED';
+  readonly reused: true;
+  readonly completion: null;
+}
+
+export type WorkoutPlanningGenerationResult =
+  | PendingWorkoutPlanningGenerationResult
+  | CompletedWorkoutPlanningGenerationResult;

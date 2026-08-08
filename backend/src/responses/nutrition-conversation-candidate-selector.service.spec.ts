@@ -135,7 +135,7 @@ describe('NutritionConversationCandidateSelectorService', () => {
     ]);
   });
 
-  it('selects a valid Candidate independently of historical rollout metadata', () => {
+  it('keeps Formatter official when Candidate rollout is OFF', () => {
     const decision = selector.select({
       officialResponse: 'Resposta oficial.',
       candidate: realization(),
@@ -144,8 +144,8 @@ describe('NutritionConversationCandidateSelectorService', () => {
     });
     expect(decision).toEqual(
       expect.objectContaining({
-        selectedSource: CONVERSATION_SELECTED_SOURCE.CANDIDATE,
-        selectionStatus: CANDIDATE_SELECTION_STATUS.CANDIDATE_SELECTED,
+        selectedSource: CONVERSATION_SELECTED_SOURCE.FORMATTER,
+        selectionStatus: CANDIDATE_SELECTION_STATUS.FUTURE_ROLLOUT_DISABLED,
         candidateAvailable: true,
         candidateValid: true,
         comparisonScore: 100,
@@ -162,6 +162,24 @@ describe('NutritionConversationCandidateSelectorService', () => {
       structureValid: true,
       humanizerScore: 100,
       validatorScore: 100,
+    });
+  });
+
+  it('selects a valid Candidate when rollout is authorized', () => {
+    const decision = selector.select({
+      officialResponse: 'Resposta oficial.',
+      candidate: realization(),
+      comparison: comparison(),
+      metadata: {
+        ...metadata,
+        rolloutMode: CONVERSATION_SELECTION_ROLLOUT_MODE.PRIMARY,
+      },
+    });
+
+    expect(decision).toMatchObject({
+      selectedSource: CONVERSATION_SELECTED_SOURCE.CANDIDATE,
+      selectionStatus: CANDIDATE_SELECTION_STATUS.CANDIDATE_SELECTED,
+      candidateValid: true,
     });
   });
 

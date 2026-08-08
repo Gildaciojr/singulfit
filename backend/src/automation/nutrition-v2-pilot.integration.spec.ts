@@ -19,11 +19,13 @@ import type { EventBusService } from '../event-bus/event-bus.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import { CoachCommandService } from './coach-command.service';
 import type { CoachPlanningExecutionDispatcherService } from './coach-planning-execution-dispatcher.service';
+import type { CoachPlanningExecutionDispatchInput } from './coach-planning-execution-dispatcher.service';
 import { CoachPlanningExecutionService } from './coach-planning-execution.service';
 import type { ConversationGoalShadowPipelineService } from './conversation-goal-shadow-pipeline.service';
 import type { LegacyCoachIntentAdapter } from './legacy-coach-intent.adapter';
 import { NutritionV2PilotConfigService } from './nutrition-v2-pilot-config.service';
 import { NutritionV2PilotService } from './nutrition-v2-pilot.service';
+import { PlanningExecutionRoutePolicyService } from './planning-execution-route-policy.service';
 
 const USER_ID = '123e4567-e89b-42d3-a456-426614174000';
 
@@ -98,7 +100,7 @@ describe('Nutrition V2 internal pilot integration', () => {
       completion: Object.freeze({}),
     }) as unknown as NutritionPlanningGenerationResult;
     const engine = {
-      generate: jest.fn(() => {
+      generateCandidate: jest.fn(() => {
         order.push('v2');
         if (options?.engineFailure)
           return Promise.reject(options.engineFailure);
@@ -131,25 +133,37 @@ describe('Nutrition V2 internal pilot integration', () => {
         NUTRITION_V2_PILOT_USER_IDS: options?.allowed ?? USER_ID,
       }),
     );
-    if (options?.timeoutMs)
-      jest
-        .spyOn(operationalConfig, 'timeoutMs')
-        .mockReturnValue(options.timeoutMs);
-    const pilot = new NutritionV2PilotService(
-      operationalConfig,
-      executor,
-      publicFormatter,
-    );
+    const pilot = new NutritionV2PilotService(operationalConfig);
+    const routePolicy = new PlanningExecutionRoutePolicyService(pilot);
     const dispatcher = {
-      dispatchStructured: jest.fn(() => {
-        order.push('legacy');
-        return Promise.resolve({
-          content: 'resposta legada',
-          executor: 'DIET_LEGACY',
-          generationCompleted: true,
-          fallbackApplied: false,
-        });
-      }),
+      dispatchStructured: jest.fn(
+        async (input: CoachPlanningExecutionDispatchInput) => {
+          if (input.routeSelection?.nutrition === 'V2' && input.nutritionV2) {
+            const result = await executor.execute({
+              generationInput: input.nutritionV2.generationInput,
+              ownership: {
+                userId: input.userId,
+                profileId: input.nutritionV2.profileId,
+              },
+              correlationId: input.nutritionV2.correlationId,
+              traceId: input.nutritionV2.traceId,
+            });
+            return {
+              content: publicFormatter.format(result),
+              executor: 'DIET_V2' as const,
+              generationCompleted: result.aiJobCompleted,
+              fallbackApplied: false,
+            };
+          }
+          order.push('legacy');
+          return {
+            content: 'resposta legada',
+            executor: 'DIET_LEGACY' as const,
+            generationCompleted: true,
+            fallbackApplied: false,
+          };
+        },
+      ),
     };
     const shadowRuntime = { execute: jest.fn() };
     const planning = new CoachPlanningExecutionService(
@@ -175,6 +189,12 @@ describe('Nutrition V2 internal pilot integration', () => {
       ),
       shadowRuntime as unknown as NutritionShadowRuntimeOrchestratorService,
       pilot,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      routePolicy,
     );
     const transaction = {
       scheduledMessage: {
@@ -237,7 +257,7 @@ describe('Nutrition V2 internal pilot integration', () => {
     };
   }
 
-  it('runs legacy first and sends exactly one selected V2 string through the existing objects', async () => {
+  it('routes an eligible pilot request through V2 only and emits one official response', async () => {
     const test = setup();
 
     await test.command.processTextMessage({
@@ -245,25 +265,30 @@ describe('Nutrition V2 internal pilot integration', () => {
       messageId: 'message-id',
     });
 
-    expect(test.order).toEqual(['legacy', 'v2']);
-    const content = expect.stringContaining('Plano diário V2');
+    expect(test.order).toEqual(['v2']);
     expect(test.prisma.coachMessage.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ content }),
+        data: expect.objectContaining({
+          content: expect.stringContaining('Plano diário V2'),
+        }),
       }),
     );
     expect(test.transaction.scheduledMessage.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        create: expect.objectContaining({ content }),
+        create: expect.objectContaining({
+          content: expect.stringContaining('Plano diário V2'),
+        }),
       }),
     );
     expect(test.eventBus.publish).toHaveBeenCalledTimes(1);
     expect(test.prisma.coachMessage.create).toHaveBeenCalledTimes(1);
     expect(test.transaction.scheduledMessage.upsert).toHaveBeenCalledTimes(1);
+    expect(test.engine.generateCandidate).toHaveBeenCalledTimes(1);
+    expect(test.planPersistence.persist).toHaveBeenCalledTimes(1);
     expect(test.shadowRuntime.execute).not.toHaveBeenCalled();
   });
 
-  it('keeps the same legacy string when V2 fails after legacy completion', async () => {
+  it('does not attempt cross-route fallback when the selected V2 provider fails', async () => {
     const test = setup({ engineFailure: new Error('provider unavailable') });
 
     await test.command.processTextMessage({
@@ -271,13 +296,17 @@ describe('Nutrition V2 internal pilot integration', () => {
       messageId: 'message-id',
     });
 
-    expect(test.order).toEqual(['legacy', 'v2']);
+    expect(test.order).toEqual(['v2']);
     expect(test.prisma.coachMessage.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ content: 'resposta legada' }),
+        data: expect.objectContaining({
+          content: expect.not.stringMatching(/resposta legada/u),
+        }),
       }),
     );
     expect(test.transaction.scheduledMessage.upsert).toHaveBeenCalledTimes(1);
+    expect(test.engine.generateCandidate).toHaveBeenCalledTimes(1);
+    expect(test.planPersistence.persist).not.toHaveBeenCalled();
     expect(test.shadowRuntime.execute).not.toHaveBeenCalled();
   });
 
@@ -290,26 +319,24 @@ describe('Nutrition V2 internal pilot integration', () => {
     });
 
     expect(test.order).toEqual(['legacy']);
-    expect(test.engine.generate).not.toHaveBeenCalled();
+    expect(test.engine.generateCandidate).not.toHaveBeenCalled();
     expect(test.shadowRuntime.execute).toHaveBeenCalledTimes(1);
   });
 
-  it('falls back after the external timeout and creates only one official message', async () => {
-    const test = setup({ timeoutMs: 5 });
+  it('does not call any V2 provider when the user is outside the existing allowlist', async () => {
+    const test = setup({
+      allowed: '223e4567-e89b-42d3-a456-426614174000',
+    });
 
     await test.command.processTextMessage({
       userId: USER_ID,
       messageId: 'message-id',
     });
 
-    expect(test.order).toEqual(['legacy', 'v2']);
-    expect(test.prisma.coachMessage.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ content: 'resposta legada' }),
-      }),
-    );
-    expect(test.prisma.coachMessage.create).toHaveBeenCalledTimes(1);
-    expect(test.transaction.scheduledMessage.upsert).toHaveBeenCalledTimes(1);
+    expect(test.order).toEqual(['legacy']);
+    expect(test.engine.generateCandidate).not.toHaveBeenCalled();
+    expect(test.planPersistence.persist).not.toHaveBeenCalled();
+    expect(test.shadowRuntime.execute).toHaveBeenCalledTimes(1);
   });
 
   it('preserves legacy and Shadow for an ineligible goal', async () => {
@@ -321,7 +348,7 @@ describe('Nutrition V2 internal pilot integration', () => {
     });
 
     expect(test.order).toEqual(['legacy']);
-    expect(test.engine.generate).not.toHaveBeenCalled();
+    expect(test.engine.generateCandidate).not.toHaveBeenCalled();
     expect(test.shadowRuntime.execute).toHaveBeenCalledTimes(1);
   });
 });

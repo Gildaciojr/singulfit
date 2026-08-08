@@ -408,7 +408,8 @@ export class ConversationGoalPlannerService {
   ): boolean {
     const datum =
       plan === 'DIET'
-        ? input.snapshot.plans.currentDiet
+        ? (input.snapshot.plans.currentNutritionPlan ??
+          input.snapshot.plans.currentDiet)
         : input.snapshot.plans.currentWorkout;
 
     return 'value' in datum;

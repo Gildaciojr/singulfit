@@ -37,6 +37,7 @@ export class CoachConversationHumanContextBuilder {
     const coachStyle = this.value(snapshot.conversation.coachStyle);
 
     return Object.freeze({
+      currentMessage: input.currentMessage?.trim().slice(0, 1_000) ?? '',
       turnCue: this.turnCue(input.currentMessage),
       preferredName: this.firstName(snapshot.identity.displayName),
       goal: this.map(snapshot.nutrition.primaryGoal, (goal) =>
@@ -103,7 +104,10 @@ export class CoachConversationHumanContextBuilder {
       continuity: this.continuity(input),
       progress: this.progress(snapshot),
       currentPlans: Object.freeze({
-        diet: this.map(snapshot.plans.currentDiet, (plan) => plan.title.trim()),
+        diet: this.map(
+          snapshot.plans.currentNutritionPlan ?? snapshot.plans.currentDiet,
+          (plan) => plan.title.trim(),
+        ),
         workout: this.map(snapshot.plans.currentWorkout, (plan) =>
           plan.title.trim(),
         ),

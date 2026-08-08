@@ -1,26 +1,26 @@
 export interface GeneratedDietMealItem {
-  foodName: string;
-  quantity: string;
-  calories: number;
-  protein: number;
-  carbs: number;
-  fat: number;
-  substitutionGroup: string | null;
+  readonly foodName: string;
+  readonly quantity: string;
+  readonly calories: number;
+  readonly protein: number;
+  readonly carbs: number;
+  readonly fat: number;
+  readonly substitutionGroup: string | null;
 }
 
 export interface GeneratedDietMeal {
-  name: string;
-  order: number;
-  caloriesTarget: number;
-  notes: string | null;
-  items: GeneratedDietMealItem[];
+  readonly name: string;
+  readonly order: number;
+  readonly caloriesTarget: number;
+  readonly notes: string | null;
+  readonly items: readonly GeneratedDietMealItem[];
 }
 
 export interface GeneratedDietPlan {
-  title: string;
-  dailyCaloriesTarget: number;
-  proteinTarget: number;
-  carbsTarget: number;
-  fatTarget: number;
-  meals: GeneratedDietMeal[];
+  readonly title: string;
+  readonly dailyCaloriesTarget: number;
+  readonly proteinTarget: number;
+  readonly carbsTarget: number;
+  readonly fatTarget: number;
+  readonly meals: readonly GeneratedDietMeal[];
 }

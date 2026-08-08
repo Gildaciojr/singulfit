@@ -145,7 +145,7 @@ describe('CoachPlanningConversationResponseService', () => {
         selectedSource === 'CANDIDATE'
           ? 'CANDIDATE_SELECTED'
           : 'INVALID_CANDIDATE',
-      rolloutMode: 'OFF',
+      rolloutMode: 'PRIMARY',
       candidateAvailable: true,
       candidateValid: true,
       timestamp: '2026-08-02T12:00:00.000Z',
@@ -169,7 +169,7 @@ describe('CoachPlanningConversationResponseService', () => {
       comparator as unknown as NutritionConversationComparator,
       {
         get: jest.fn().mockReturnValue({
-          effectiveMode: 'OFF',
+          effectiveMode: 'PRIMARY',
           formatterVersion: 'formatter:v1',
         }),
       } as unknown as ConversationSelectionConfigService,

@@ -325,6 +325,31 @@ describe('Nutrition Planning Engine V2', () => {
     return module.get(NutritionPlanningEngineV2Service);
   }
 
+  it('prepares Nutrition V2 without AIJob or provider side effects', async () => {
+    const aiService = {
+      createStandaloneJob: jest.fn(),
+      runTextJob: jest.fn(),
+      completeJobInTransaction: jest.fn(),
+      failJob: jest.fn(),
+    };
+    const engine = await engineWith(aiService);
+
+    const prepared = engine.prepare({
+      userId: 'user-id',
+      decision: decision(),
+      snapshot: snapshot(),
+      referenceDate,
+      explicitArtifactType: 'DAILY_STRUCTURE',
+    });
+
+    expect(prepared.resolution.status).toBe('RESOLVED');
+    expect(Object.isFrozen(prepared)).toBe(true);
+    expect(aiService.createStandaloneJob).not.toHaveBeenCalled();
+    expect(aiService.runTextJob).not.toHaveBeenCalled();
+    expect(aiService.completeJobInTransaction).not.toHaveBeenCalled();
+    expect(aiService.failJob).not.toHaveBeenCalled();
+  });
+
   it('resolves only explicit plan granularity and never classifies free text', () => {
     const resolver = new NutritionArtifactResolverService();
     expect(resolver.resolve({ decision: decision() })).toEqual({
@@ -792,6 +817,33 @@ describe('Nutrition Planning Engine V2', () => {
         artifact: { artifactType: 'POINT_GUIDANCE' },
       },
     });
+    expect(aiService.runTextJob).not.toHaveBeenCalled();
+    expect(aiService.completeJobInTransaction).not.toHaveBeenCalled();
+    expect(aiService.failJob).not.toHaveBeenCalled();
+  });
+
+  it('does not reclaim or fail an idempotent Nutrition job already processing', async () => {
+    const aiService = {
+      createStandaloneJob: jest.fn().mockResolvedValue({
+        id: 'processing-job-id',
+        status: AIJobStatus.PROCESSING,
+        promptVersionId: 'prompt-version-id',
+        result: null,
+      }),
+      runTextJob: jest.fn(),
+      completeJobInTransaction: jest.fn(),
+      failJob: jest.fn(),
+    };
+    const engine = await engineWith(aiService);
+
+    await expect(
+      engine.generateCandidate({
+        userId: 'user-id',
+        decision: decision(CONVERSATION_GOAL.GENERAL_GUIDANCE),
+        snapshot: snapshot(),
+        referenceDate,
+      }),
+    ).rejects.toThrow('em andamento');
     expect(aiService.runTextJob).not.toHaveBeenCalled();
     expect(aiService.completeJobInTransaction).not.toHaveBeenCalled();
     expect(aiService.failJob).not.toHaveBeenCalled();
