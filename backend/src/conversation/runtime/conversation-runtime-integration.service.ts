@@ -55,8 +55,18 @@ export class ConversationRuntimeIntegrationService {
     input: ConversationRuntimeDecisionInput,
   ): Promise<ConversationRuntimePreExecutionDecision> {
     const config = this.config.get();
+    if (!config.valid || config.killSwitch || config.mode === 'OFF') {
+      return this.legacyDecision('RUNTIME_DISABLED');
+    }
+    const eligible = this.config.isOfficiallyEligible(input.userId, config);
+    if (config.mode !== 'SHADOW' && !eligible) {
+      return this.legacyDecision('USER_NOT_ELIGIBLE');
+    }
     try {
-      return await this.withTimeout(this.run(input), config.timeoutMs);
+      return await this.withTimeout(
+        this.run(input, config, eligible),
+        config.timeoutMs,
+      );
     } catch (error) {
       return this.legacyDecision(
         error instanceof ConversationRuntimeTimeoutError
@@ -68,6 +78,8 @@ export class ConversationRuntimeIntegrationService {
 
   private async run(
     input: ConversationRuntimeDecisionInput,
+    config: ReturnType<ConversationRuntimeOperationalConfigService['get']>,
+    eligible: boolean,
   ): Promise<ConversationRuntimePreExecutionDecision> {
     const evaluation = await this.runtime.evaluate(input);
     const bridge: ConversationBridgeResult = evaluation.decision
@@ -78,11 +90,10 @@ export class ConversationRuntimeIntegrationService {
           routeKind: null,
           reason: evaluation.summary.fallbackReason ?? 'NO_RUNTIME_DECISION',
         });
-    const config = this.config.get();
     const selection = this.selection.select({
       legacyContent: '',
       config,
-      eligible: true,
+      eligible,
       evaluation,
       bridge,
     });

@@ -3,9 +3,11 @@ import type { LongitudinalCoachingDecision } from '../longitudinal-coaching/long
 import type { NutritionReasoningResult } from '../nutrition-reasoning/nutrition-reasoning.contract';
 import type { WorkoutReasoningResult } from '../workout-reasoning/workout-reasoning.contract';
 import type { CoachConversationHumanContext } from '../context/coach-conversation-human-context.contract';
+import type { PlanningExecutionRouteSelection } from './planning-execution-route-policy.service';
 
 export type CoachPlanningExecutor =
   | 'DIET_LEGACY'
+  | 'DIET_V2'
   | 'WORKOUT_LEGACY'
   | 'COMBINED_LEGACY'
   | 'UNKNOWN_LEGACY'
@@ -18,7 +20,10 @@ export interface CoachPlanningDispatchResult {
   readonly fallbackApplied: boolean;
 }
 
-export type CoachPlanningSelectedSource = 'LEGACY' | 'NUTRITION_V2';
+export type CoachPlanningSelectedSource =
+  | 'LEGACY'
+  | 'NUTRITION_V2'
+  | 'WORKOUT_V2';
 
 export interface CoachPlanningReasoningState {
   readonly reasoningAppliedToGeneration: boolean;
@@ -38,6 +43,7 @@ export interface CoachPlanningExecutionMetadata {
   readonly executor: CoachPlanningExecutor;
   readonly fallbackApplied: boolean;
   readonly generationCompleted: boolean;
+  readonly routeSelection: PlanningExecutionRouteSelection;
 }
 
 export interface CoachPlanningExecutionResult {

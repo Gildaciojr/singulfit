@@ -24,6 +24,12 @@ export class NutritionPlanningEngineV2Service {
   async generate(
     input: GenerateNutritionPlanV2Input,
   ): Promise<NutritionPlanningGenerationResult> {
+    return this.generateCandidate(input);
+  }
+
+  async generateCandidate(
+    input: GenerateNutritionPlanV2Input,
+  ): Promise<NutritionPlanningGenerationResult> {
     const prepared = this.runner.prepare(input);
     if (prepared.resolution.artifactType === 'CURRENT_PLAN_PRESENTATION')
       return Object.freeze({
@@ -76,6 +82,10 @@ export class NutritionPlanningEngineV2Service {
     if (job.status === AIJobStatus.FAILED)
       throw new ServiceUnavailableException(
         'Operação idempotente do plano nutricional V2 já falhou',
+      );
+    if (job.status === AIJobStatus.PROCESSING)
+      throw new ServiceUnavailableException(
+        'Operação idempotente do plano nutricional V2 em andamento',
       );
 
     let response: Awaited<ReturnType<AIService['runTextJob']>> | undefined;

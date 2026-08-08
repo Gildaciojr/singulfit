@@ -32,10 +32,13 @@ import {
   CoachProfileCoachStyle,
   CoachProfileClassifiedGoal,
   CoachProfilePlanReference,
+  CoachProfileCanonicalNutritionPlanReference,
   CoachProfileSectionCompletion,
   CoachProfileSnapshot,
 } from './coach-profile-snapshot.contract';
 import { CoachProfileAcquisitionProjectionService } from './profile-acquisition/coach-profile-acquisition-projection.service';
+import { CurrentNutritionPlanReaderService } from '../diet/current-nutrition-plan-reader.service';
+import type { CurrentNutritionPlan } from '../diet/current-nutrition-plan-reader.contract';
 
 const COACH_PROFILE_SNAPSHOT_USER_SELECT = {
   id: true,
@@ -212,6 +215,7 @@ export class CoachProfileSnapshotBuilder {
   constructor(
     private readonly prisma: PrismaService,
     private readonly acquisitionProjection: CoachProfileAcquisitionProjectionService,
+    private readonly currentNutritionPlanReader: CurrentNutritionPlanReaderService,
   ) {}
 
   async build(
@@ -222,7 +226,7 @@ export class CoachProfileSnapshotBuilder {
       throw new Error('Data de referência do CoachProfileSnapshot inválida');
     }
 
-    const [user, activationMemory] = await Promise.all([
+    const [user, activationMemory, currentNutritionPlan] = await Promise.all([
       this.prisma.user.findUnique({
         where: { id: userId },
         select: COACH_PROFILE_SNAPSHOT_USER_SELECT,
@@ -237,6 +241,7 @@ export class CoachProfileSnapshotBuilder {
         },
         select: { content: true },
       }),
+      this.currentNutritionPlanReader.getCurrent(userId),
     ]);
 
     if (!user) {
@@ -245,13 +250,19 @@ export class CoachProfileSnapshotBuilder {
       );
     }
 
-    return this.assemble(user, activationMemory?.content, referenceDate);
+    return this.assemble(
+      user,
+      activationMemory?.content,
+      referenceDate,
+      currentNutritionPlan,
+    );
   }
 
   private assemble(
     user: CoachProfileSnapshotUser,
     activationContent: Prisma.JsonValue | undefined,
     referenceDate: Date,
+    currentNutritionPlan: CurrentNutritionPlan | null,
   ): CoachProfileSnapshot {
     const conflicts: CoachProfileConflict[] = [];
     const fitness = user.fitnessProfile;
@@ -530,7 +541,7 @@ export class CoachProfileSnapshotBuilder {
     });
     const preferences = Object.freeze({ foodPreferences });
     const longitudinal = this.longitudinal(user);
-    const plans = this.plans(user);
+    const plans = this.plans(user, currentNutritionPlan);
     const conversation = this.conversation(user);
     const completion = this.completion({
       identity,
@@ -621,9 +632,33 @@ export class CoachProfileSnapshotBuilder {
     });
   }
 
-  private plans(user: CoachProfileSnapshotUser): CoachProfileSnapshot['plans'] {
+  private plans(
+    user: CoachProfileSnapshotUser,
+    currentNutritionPlan: CurrentNutritionPlan | null,
+  ): CoachProfileSnapshot['plans'] {
     const diet = user.dietPlans[0];
     const workout = user.workoutPlans[0];
+    const canonical: CoachProfileCanonicalNutritionPlanReference | null =
+      currentNutritionPlan?.implementation === 'LEGACY'
+        ? Object.freeze({
+            implementation: 'LEGACY' as const,
+            id: currentNutritionPlan.id,
+            title: currentNutritionPlan.title,
+            objective: currentNutritionPlan.objective,
+            status: currentNutritionPlan.status,
+            generatedAt: currentNutritionPlan.generatedAt,
+          })
+        : currentNutritionPlan?.implementation === 'V2'
+          ? Object.freeze({
+              implementation: 'V2' as const,
+              id: currentNutritionPlan.id,
+              title: currentNutritionPlan.title,
+              objective: currentNutritionPlan.objectiveSummary,
+              status: currentNutritionPlan.status,
+              artifactType: currentNutritionPlan.artifactType,
+              generatedAt: currentNutritionPlan.generatedAt,
+            })
+          : null;
 
     return Object.freeze({
       currentDiet: diet
@@ -638,6 +673,9 @@ export class CoachProfileSnapshotBuilder {
             COACH_PROFILE_DATA_SOURCE.WORKOUT_PLAN,
           )
         : this.unknown<CoachProfilePlanReference<WorkoutStatus>>(),
+      currentNutritionPlan: canonical
+        ? this.known(canonical, COACH_PROFILE_DATA_SOURCE.NUTRITION_PLAN)
+        : this.unknown<CoachProfileCanonicalNutritionPlanReference>(),
     });
   }
 

@@ -11,6 +11,7 @@ import { WorkoutGeneratorService } from '../workout/workout-generator.service';
 import { AUTOMATION_RULE_CODES } from './automation.constants';
 import { CoachCommandService } from './coach-command.service';
 import { CoachPlanningExecutionDispatcherService } from './coach-planning-execution-dispatcher.service';
+import type { CoachPlanningBothApplicationExecutorService } from './coach-planning-both-application-executor.service';
 import { CoachPlanningExecutionService } from './coach-planning-execution.service';
 import { ConversationGoalShadowPipelineService } from './conversation-goal-shadow-pipeline.service';
 import { ConversationRuntimeIntegrationService } from '../conversation/runtime/conversation-runtime-integration.service';
@@ -183,11 +184,24 @@ describe('CoachCommandService', () => {
       generate: options?.dietFailure
         ? jest.fn().mockRejectedValue(options.dietFailure)
         : jest.fn().mockResolvedValue(dietPlan()),
+      generateCandidate: options?.dietFailure
+        ? jest.fn().mockRejectedValue(options.dietFailure)
+        : jest.fn().mockResolvedValue({ domain: 'DIET' }),
+      failCandidate: jest.fn().mockResolvedValue(undefined),
     };
     const workoutGenerator = {
       generate: options?.workoutFailure
         ? jest.fn().mockRejectedValue(options.workoutFailure)
         : jest.fn().mockResolvedValue(workoutPlan()),
+      generateCandidate: options?.workoutFailure
+        ? jest.fn().mockRejectedValue(options.workoutFailure)
+        : jest.fn().mockResolvedValue({ domain: 'WORKOUT' }),
+    };
+    const bothExecutor = {
+      execute: jest.fn().mockResolvedValue({
+        dietPlan: dietPlan(),
+        workoutPlan: workoutPlan(),
+      }),
     };
     const eventBus = {
       publish: jest.fn().mockResolvedValue({
@@ -213,6 +227,7 @@ describe('CoachCommandService', () => {
     const planningDispatcher = new CoachPlanningExecutionDispatcherService(
       dietGenerator as unknown as DietGeneratorService,
       workoutGenerator as unknown as WorkoutGeneratorService,
+      bothExecutor as unknown as CoachPlanningBothApplicationExecutorService,
     );
     const planningExecution = new CoachPlanningExecutionService(
       planningDispatcher,
@@ -340,8 +355,14 @@ describe('CoachCommandService', () => {
       messageId: 'message-id',
     });
 
-    expect(subject.dietGenerator.generate).toHaveBeenCalledWith('user-id');
-    expect(subject.workoutGenerator.generate).toHaveBeenCalledWith('user-id');
+    expect(subject.dietGenerator.generateCandidate).toHaveBeenCalledWith(
+      'user-id',
+    );
+    expect(subject.workoutGenerator.generateCandidate).toHaveBeenCalledWith(
+      'user-id',
+    );
+    expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
     expect(subject.prisma.coachMessage.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -351,7 +372,7 @@ describe('CoachCommandService', () => {
     );
   });
 
-  it('responds with a menu for unknown commands', async () => {
+  it('responds conversationally without a numbered menu for unknown commands', async () => {
     const subject = createSubject({ content: 'oi' });
 
     await subject.service.processTextMessage({
@@ -364,10 +385,13 @@ describe('CoachCommandService', () => {
     expect(subject.prisma.coachMessage.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          content: expect.stringContaining('Escolha uma opção'),
+          content: expect.stringContaining('Me conta com suas palavras'),
         }),
       }),
     );
+    const persisted = subject.prisma.coachMessage.create.mock.calls[0][0].data
+      .content as string;
+    expect(persisted).not.toMatch(/Escolha uma opção|\b[123]\./u);
   });
 
   it('decides and uses runtime content before any legacy planning effect', async () => {

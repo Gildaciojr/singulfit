@@ -159,6 +159,13 @@ function subject(existing: PersistedNutritionPlanV2 | null = null) {
   const aiService = {
     completeJobInTransaction: jest.fn().mockResolvedValue({ id: 'usage-id' }),
   };
+  const nutritionPlanOwnership = {
+    acquireCanonicalLockInTransaction: jest.fn().mockResolvedValue(undefined),
+    transitionInTransaction: jest
+      .fn()
+      .mockResolvedValue({ transition: 'CREATED' }),
+    assertInTransaction: jest.fn().mockResolvedValue(undefined),
+  };
   const validator = new NutritionPlanV2PersistenceValidator();
   return {
     transaction,
@@ -173,7 +180,9 @@ function subject(existing: PersistedNutritionPlanV2 | null = null) {
       auditService as unknown as AuditService,
       projectionWriter as NutritionPlanV2ProjectionWriter,
       aiService as unknown as AIService,
+      nutritionPlanOwnership as never,
     ),
+    nutritionPlanOwnership,
   };
 }
 
@@ -192,6 +201,10 @@ describe('NutritionPlanV2PersistenceService', () => {
       test.transaction,
       'user-id',
     );
+    expect(
+      test.nutritionPlanOwnership.acquireCanonicalLockInTransaction.mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(test.repository.acquireUserLock.mock.invocationCallOrder[0]);
     expect(test.repository.archiveActive).toHaveBeenCalledWith(
       test.transaction,
       'user-id',

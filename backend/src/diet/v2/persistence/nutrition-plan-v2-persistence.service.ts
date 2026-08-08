@@ -1,5 +1,6 @@
 import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import {
+  NutritionPlanImplementation,
   NutritionPlanStatus,
   type NutritionPlanV2 as PersistedNutritionPlanV2,
 } from '@prisma/client';
@@ -19,6 +20,7 @@ import {
   type NutritionPlanV2Repository,
 } from './nutrition-plan-v2.repository';
 import { NutritionPlanV2PersistenceValidator } from './nutrition-plan-v2-persistence.validator';
+import { NutritionPlanOwnershipService } from '../../ownership/nutrition-plan-ownership.service';
 
 const AUDIT_ACTION = 'NUTRITION_PLAN_V2_PERSISTED';
 const AUDIT_ENTITY = 'NUTRITION_PLAN_V2';
@@ -33,6 +35,7 @@ export class NutritionPlanV2PersistenceService {
     @Inject(NUTRITION_PLAN_V2_PROJECTION_WRITER)
     private readonly projectionWriter: NutritionPlanV2ProjectionWriter,
     private readonly aiService: AIService,
+    private readonly nutritionPlanOwnership: NutritionPlanOwnershipService,
   ) {}
 
   async persist(
@@ -41,6 +44,10 @@ export class NutritionPlanV2PersistenceService {
     const document = this.validator.validateInput(input);
 
     return this.repository.inTransaction(async (transaction) => {
+      await this.nutritionPlanOwnership.acquireCanonicalLockInTransaction(
+        transaction,
+        input.ownership.userId,
+      );
       await this.repository.acquireUserLock(
         transaction,
         input.ownership.userId,
@@ -58,6 +65,13 @@ export class NutritionPlanV2PersistenceService {
       );
       if (existing) {
         this.validator.assertIdempotentMatch(existing, input);
+        await this.nutritionPlanOwnership.assertInTransaction(transaction, {
+          userId: input.ownership.userId,
+          profileId: input.ownership.profileId,
+          implementation: NutritionPlanImplementation.V2,
+          planId: existing.id,
+          aiJobId: input.generation.aiJobId,
+        });
         return this.result('REUSED', existing, input);
       }
       if (input.generation.status === 'ALREADY_COMPLETED') {
@@ -84,6 +98,13 @@ export class NutritionPlanV2PersistenceService {
       const aggregate = this.validator.reconstruct(persisted);
 
       await this.projectionWriter.prepareInTransaction(transaction, aggregate);
+      await this.nutritionPlanOwnership.transitionInTransaction(transaction, {
+        userId: input.ownership.userId,
+        profileId: input.ownership.profileId,
+        implementation: NutritionPlanImplementation.V2,
+        planId: persisted.id,
+        aiJobId: input.generation.aiJobId,
+      });
       await this.auditService.recordInTransaction(transaction, {
         userId: input.ownership.userId,
         action: AUDIT_ACTION,

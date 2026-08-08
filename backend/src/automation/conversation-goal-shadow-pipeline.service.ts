@@ -274,7 +274,9 @@ export class ConversationGoalShadowPipelineService implements OnApplicationShutd
         plannerVersion: comparison.plannerVersion,
         comparatorVersion: comparison.comparatorVersion,
         referenceTimestamp: comparison.referenceTimestamp,
-        activeDietAvailable: 'value' in snapshot.plans.currentDiet,
+        activeDietAvailable:
+          'value' in
+          (snapshot.plans.currentNutritionPlan ?? snapshot.plans.currentDiet),
         activeWorkoutAvailable: 'value' in snapshot.plans.currentWorkout,
         acquisitionHistoryAvailable: false,
         goalHistoryAvailable: input.equivalentGenerationInProgress,

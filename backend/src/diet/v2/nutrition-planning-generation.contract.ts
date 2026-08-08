@@ -1,5 +1,5 @@
 import { AIJobType, Prisma } from '@prisma/client';
-import type { OpenAIResponseResult } from '../../ai/interfaces/openai.interface';
+import type { PendingAIJobCompletion } from '../../ai/pending-ai-job-completion.contract';
 import type { CoachProfileSnapshot } from '../../context/coach-profile-snapshot.contract';
 import type { ConversationGoalDecision } from '../../context/conversation-goal-planner.contract';
 import type {
@@ -71,13 +71,10 @@ export type NutritionPlanningStoredAIJobResult = Prisma.InputJsonObject & {
   readonly model: string;
 };
 
-export interface NutritionPlanningAIJobCompletion {
-  readonly userId: string;
-  readonly aiJobId: string;
-  readonly jobType: typeof AIJobType.DIET;
-  readonly response: Readonly<OpenAIResponseResult>;
-  readonly result: NutritionPlanningStoredAIJobResult;
-}
+export type NutritionPlanningAIJobCompletion = PendingAIJobCompletion<
+  typeof AIJobType.DIET,
+  NutritionPlanningStoredAIJobResult
+>;
 
 export type NutritionGenerationOutputV2 =
   | {

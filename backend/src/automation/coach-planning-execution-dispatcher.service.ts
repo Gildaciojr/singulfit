@@ -1,15 +1,25 @@
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  Optional,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import {
   CONVERSATION_GOAL,
   type ConversationGoalDecision,
 } from '../context/conversation-goal-planner.contract';
 import { DietGeneratorService } from '../diet/diet-generator.service';
 import { WorkoutGeneratorService } from '../workout/workout-generator.service';
+import type { LegacyWorkoutCandidate } from '../workout/interfaces/legacy-workout-candidate.interface';
 import type { CoachCommandIntent } from './coach-command.service';
 import type {
   CoachPlanningDispatchResult,
   CoachPlanningExecutor,
 } from './coach-planning-execution.contract';
+import { CoachPlanningBothApplicationExecutorService } from './coach-planning-both-application-executor.service';
+import type { GenerateNutritionPlanV2Input } from '../diet/v2/nutrition-planning-generation.contract';
+import { NutritionApplicationExecutorService } from '../diet/v2/execution/nutrition-application-executor.service';
+import { NutritionPublicResultFormatter } from '../diet/v2/execution/nutrition-public-result.formatter';
+import type { PlanningExecutionRouteSelection } from './planning-execution-route-policy.service';
 
 type GeneratedDietPlan = Awaited<ReturnType<DietGeneratorService['generate']>>;
 type GeneratedWorkoutPlan = Awaited<
@@ -20,6 +30,13 @@ export interface CoachPlanningExecutionDispatchInput {
   readonly userId: string;
   readonly legacyIntent: CoachCommandIntent;
   readonly decision: ConversationGoalDecision | null;
+  readonly routeSelection?: PlanningExecutionRouteSelection;
+  readonly nutritionV2?: {
+    readonly generationInput: GenerateNutritionPlanV2Input;
+    readonly profileId: string;
+    readonly correlationId: string;
+    readonly traceId?: string;
+  };
 }
 
 @Injectable()
@@ -27,6 +44,11 @@ export class CoachPlanningExecutionDispatcherService {
   constructor(
     private readonly dietGenerator: DietGeneratorService,
     private readonly workoutGenerator: WorkoutGeneratorService,
+    private readonly bothExecutor: CoachPlanningBothApplicationExecutorService,
+    @Optional()
+    private readonly nutritionV2Executor?: NutritionApplicationExecutorService,
+    @Optional()
+    private readonly nutritionV2Formatter?: NutritionPublicResultFormatter,
   ) {}
 
   async dispatch(input: CoachPlanningExecutionDispatchInput): Promise<string> {
@@ -42,7 +64,9 @@ export class CoachPlanningExecutionDispatcherService {
 
     switch (input.decision.goal) {
       case CONVERSATION_GOAL.GENERATE_DIET_PLAN:
-        return this.generateDiet(input.userId);
+        return input.routeSelection?.nutrition === 'V2'
+          ? this.generateDietV2(input)
+          : this.generateDiet(input.userId);
       case CONVERSATION_GOAL.GENERATE_WORKOUT_PLAN:
         return this.generateWorkout(input.userId);
       case CONVERSATION_GOAL.GENERATE_COMBINED_PLANS:
@@ -150,6 +174,34 @@ export class CoachPlanningExecutionDispatcherService {
     );
   }
 
+  private async generateDietV2(
+    input: CoachPlanningExecutionDispatchInput,
+  ): Promise<CoachPlanningDispatchResult> {
+    if (
+      !input.nutritionV2 ||
+      !this.nutritionV2Executor ||
+      !this.nutritionV2Formatter
+    ) {
+      throw new ServiceUnavailableException(
+        'Rota Nutrition V2 selecionada sem infraestrutura executável',
+      );
+    }
+    const result = await this.nutritionV2Executor.execute({
+      generationInput: input.nutritionV2.generationInput,
+      ownership: {
+        userId: input.userId,
+        profileId: input.nutritionV2.profileId,
+      },
+      correlationId: input.nutritionV2.correlationId,
+      traceId: input.nutritionV2.traceId,
+    });
+    return this.result(
+      this.nutritionV2Formatter.format(result),
+      'DIET_V2',
+      result.aiJobCompleted,
+    );
+  }
+
   private async generateWorkout(
     userId: string,
   ): Promise<CoachPlanningDispatchResult> {
@@ -163,11 +215,26 @@ export class CoachPlanningExecutionDispatcherService {
   private async generateCombined(
     userId: string,
   ): Promise<CoachPlanningDispatchResult> {
-    const diet = await this.dietGenerator.generate(userId);
-    const workout = await this.workoutGenerator.generate(userId);
+    const dietCandidate = await this.dietGenerator.generateCandidate(userId);
+    let workoutCandidate: LegacyWorkoutCandidate;
+    try {
+      workoutCandidate = await this.workoutGenerator.generateCandidate(userId);
+    } catch (error: unknown) {
+      await this.dietGenerator.failCandidate(
+        dietCandidate,
+        new Error(
+          `Planejamento combinado abortado antes do commit: ${this.errorMessage(error)}`,
+        ),
+      );
+      throw error;
+    }
+    const committed = await this.bothExecutor.execute(
+      dietCandidate,
+      workoutCandidate,
+    );
 
     return this.result(
-      `${this.formatDiet(diet)}\n\n${this.formatWorkout(workout)}`,
+      `${this.formatDiet(committed.dietPlan)}\n\n${this.formatWorkout(committed.workoutPlan)}`,
       'COMBINED_LEGACY',
       true,
     );
@@ -202,17 +269,7 @@ export class CoachPlanningExecutionDispatcherService {
   }
 
   private unknownIntentMessage(): string {
-    return [
-      'Posso te ajudar com isso 😊',
-      '',
-      'Escolha uma opção:',
-      '',
-      '1. Plano alimentar',
-      '2. Plano de treino',
-      '3. Os dois',
-      '',
-      'Você também pode responder com “quero uma dieta”, “monte meu treino” ou “quero os dois”.',
-    ].join('\n');
+    return 'Posso te ajudar com alimentação, treino ou acompanhar sua evolução. Me conta com suas palavras o que você precisa agora.';
   }
 
   private goalLabel(goal: string): string {
@@ -227,5 +284,11 @@ export class CoachPlanningExecutionDispatcherService {
 
   private formatNumber(value: number): string {
     return Number(value.toFixed(2)).toString().replace('.', ',');
+  }
+
+  private errorMessage(error: unknown): string {
+    return error instanceof Error && error.message.trim()
+      ? error.message.trim().slice(0, 1_000)
+      : 'falha não identificada';
   }
 }

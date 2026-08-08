@@ -37,6 +37,7 @@ import {
 } from './coach-profile-snapshot.contract';
 import { ContextModule } from './context.module';
 import { CoachProfileAcquisitionProjectionService } from './profile-acquisition/coach-profile-acquisition-projection.service';
+import { CurrentNutritionPlanReaderService } from '../diet/current-nutrition-plan-reader.service';
 
 describe('CoachProfileSnapshotBuilder', () => {
   const referenceDate = new Date('2026-07-15T12:00:00.000Z');
@@ -172,6 +173,10 @@ describe('CoachProfileSnapshotBuilder', () => {
         CoachProfileSnapshotBuilder,
         CoachProfileAcquisitionProjectionService,
         { provide: PrismaService, useValue: prisma },
+        {
+          provide: CurrentNutritionPlanReaderService,
+          useValue: { getCurrent: jest.fn().mockResolvedValue(null) },
+        },
       ],
     }).compile();
 

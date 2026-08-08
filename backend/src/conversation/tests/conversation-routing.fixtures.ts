@@ -125,6 +125,16 @@ export function routingSnapshot(
             generatedAt: REFERENCE_DATE,
           })
         : unknownDatum(),
+      currentNutritionPlan: options.dietAvailable
+        ? knownDatum({
+            implementation: 'LEGACY' as const,
+            id: 'diet-plan-id',
+            title: 'Plano alimentar',
+            objective: FitnessGoal.WEIGHT_LOSS,
+            status: DietPlanStatus.ACTIVE,
+            generatedAt: REFERENCE_DATE,
+          })
+        : unknownDatum(),
       currentWorkout: options.workoutAvailable
         ? knownDatum({
             id: 'workout-plan-id',

@@ -28,6 +28,7 @@ import {
   ProfileQuestionSpecificationService,
 } from './profile-acquisition/profile-question.service';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
+import { DietModule } from '../diet/diet.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
     EventBusModule,
     ObservabilityModule,
     SubscriptionsModule,
+    DietModule,
   ],
   controllers: [ContextAdminController],
   providers: [

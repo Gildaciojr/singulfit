@@ -12,6 +12,8 @@ import type { NutritionKnowledgeResolverService } from '../nutrition-knowledge/n
 import type { NutritionReasoningEngineService } from '../nutrition-reasoning/nutrition-reasoning-engine.service';
 import type { WorkoutKnowledgeResolverService } from '../workout-knowledge/workout-knowledge-resolver.service';
 import type { WorkoutReasoningEngineService } from '../workout-reasoning/workout-reasoning-engine.service';
+import type { NutritionV2PilotService } from './nutrition-v2-pilot.service';
+import type { PlanningExecutionRoutePolicyService } from './planning-execution-route-policy.service';
 
 describe('CoachPlanningExecutionService', () => {
   it('builds the V2 input with the same snapshot and reference date without executing it', async () => {
@@ -95,6 +97,14 @@ describe('CoachPlanningExecutionService', () => {
       userId: 'user-id',
       legacyIntent: 'DIET',
       decision,
+      routeSelection: {
+        nutrition: 'LEGACY',
+        workout: null,
+        reason: 'LEGACY_INTENT_OR_UNSUPPORTED_GOAL',
+        nutritionPilotStatus: null,
+        suppressNutritionShadow: false,
+      },
+      nutritionV2: undefined,
     });
   });
 
@@ -321,5 +331,60 @@ describe('CoachPlanningExecutionService', () => {
     );
     expect(nutritionReasoning.reason).not.toHaveBeenCalled();
     expect(workoutReasoning.reason).not.toHaveBeenCalled();
+  });
+
+  it('selects the route before dispatch and never executes the old post-Legacy pilot', async () => {
+    const dispatcher = {
+      dispatchStructured: jest.fn().mockResolvedValue({
+        content: 'somente V2',
+        executor: 'DIET_V2',
+        generationCompleted: true,
+        fallbackApplied: false,
+      }),
+    };
+    const oldPilot = { select: jest.fn() };
+    const routeSelection = Object.freeze({
+      nutrition: 'V2' as const,
+      workout: null,
+      reason: 'NUTRITION_V2_ELIGIBLE' as const,
+      nutritionPilotStatus: 'ELIGIBLE' as const,
+      suppressNutritionShadow: true,
+    });
+    const routePolicy = {
+      select: jest.fn().mockReturnValue(routeSelection),
+    };
+    const service = new CoachPlanningExecutionService(
+      dispatcher as unknown as CoachPlanningExecutionDispatcherService,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      oldPilot as unknown as NutritionV2PilotService,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      routePolicy as unknown as PlanningExecutionRoutePolicyService,
+    );
+
+    const result = await service.executeStructured('user-id', 'DIET', {
+      conversationId: 'conversation-id',
+      messageId: 'message-id',
+      correlationId: 'correlation-id',
+      profileId: 'profile-id',
+      referenceDate: new Date('2026-08-07T12:00:00.000Z'),
+    });
+
+    expect(routePolicy.select.mock.invocationCallOrder[0]).toBeLessThan(
+      dispatcher.dispatchStructured.mock.invocationCallOrder[0],
+    );
+    expect(dispatcher.dispatchStructured).toHaveBeenCalledTimes(1);
+    expect(oldPilot.select).not.toHaveBeenCalled();
+    expect(result.content).toBe('somente V2');
+    expect(result.selectedSource).toBe('NUTRITION_V2');
+    expect(result.metadata.routeSelection).toBe(routeSelection);
   });
 });

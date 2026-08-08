@@ -21,6 +21,7 @@
     "prisma:migrate": "prisma migrate deploy",
     "prisma:migrate:status": "prisma migrate status",
     "prisma:seed": "prisma db seed",
+    "prisma:nutrition-ownership:dry-run": "tsx prisma/nutrition-ownership-backfill.ts",
     "smoke": "node dist/smoke.js",
     "smoke:test": "npm run smoke",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",

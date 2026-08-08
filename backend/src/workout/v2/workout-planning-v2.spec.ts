@@ -1,4 +1,5 @@
 import { Test } from '@nestjs/testing';
+import { BadGatewayException } from '@nestjs/common';
 import {
   ActivityLevel,
   AIJobStatus,
@@ -340,6 +341,48 @@ describe('Workout Planning Engine V2', () => {
       safetyFlags: Object.freeze([]),
     });
   }
+
+  async function engineWith(aiService: object) {
+    const module = await Test.createTestingModule({
+      providers: [
+        WorkoutPlanningEngineV2Service,
+        WorkoutArtifactResolverService,
+        WorkoutPlanningReadinessService,
+        WorkoutPlanningContextBuilder,
+        WorkoutPlanningStrategyService,
+        WorkoutPlanningSafetyService,
+        WorkoutPlanV2Validator,
+        { provide: AIService, useValue: aiService },
+      ],
+    }).compile();
+
+    return module.get(WorkoutPlanningEngineV2Service);
+  }
+
+  it('prepares Workout V2 without AIJob or provider side effects', async () => {
+    const aiService = {
+      createStandaloneJob: jest.fn(),
+      runTextJob: jest.fn(),
+      completeJobInTransaction: jest.fn(),
+      failJob: jest.fn(),
+    };
+    const engine = await engineWith(aiService);
+
+    const prepared = engine.prepare({
+      userId: 'user-id',
+      decision: decision(),
+      snapshot: snapshot(),
+      recognizedContext: recognized('HOME_WORKOUT', ['BODYWEIGHT']),
+      referenceDate,
+    });
+
+    expect(prepared.resolution.status).toBe('RESOLVED');
+    expect(Object.isFrozen(prepared)).toBe(true);
+    expect(aiService.createStandaloneJob).not.toHaveBeenCalled();
+    expect(aiService.runTextJob).not.toHaveBeenCalled();
+    expect(aiService.completeJobInTransaction).not.toHaveBeenCalled();
+    expect(aiService.failJob).not.toHaveBeenCalled();
+  });
 
   it('resolves explicit artifacts without classifying free text', () => {
     const resolver = new WorkoutArtifactResolverService();
@@ -703,7 +746,7 @@ describe('Workout Planning Engine V2', () => {
       }),
     ).rejects.toThrow('BLOCKED');
     expect(ai.createStandaloneJob).not.toHaveBeenCalled();
-    expect(new WorkoutPlanV2Formatter().format).toBeDefined();
+    expect(new WorkoutPlanV2Formatter()).toBeDefined();
   });
 
   it('uses AIJob lifecycle without creating a productive WorkoutPlan', async () => {
@@ -750,15 +793,38 @@ describe('Workout Planning Engine V2', () => {
         { provide: PrismaService, useValue: prisma },
       ],
     }).compile();
-    const plan = await module.get(WorkoutPlanningEngineV2Service).generate({
-      userId: 'user-id',
-      decision: decision(CONVERSATION_GOAL.GENERAL_GUIDANCE),
-      snapshot: snapshot(),
-      recognizedContext: input,
-      referenceDate,
+    const generation = await module
+      .get(WorkoutPlanningEngineV2Service)
+      .generateCandidate({
+        userId: 'user-id',
+        decision: decision(CONVERSATION_GOAL.GENERAL_GUIDANCE),
+        snapshot: snapshot(),
+        recognizedContext: input,
+        referenceDate,
+      });
+    expect(generation).toMatchObject({
+      status: 'PENDING_COMPLETION',
+      reused: false,
+      aiJobId: 'job-id',
+      operationKey: expect.stringMatching(/^workout-planning-v2:/),
+      storedResult: {
+        candidateOutput: response.outputText,
+        model: response.model,
+      },
+      output: { validation: { status: 'VALID' } },
     });
-    expect(plan.validation.status).toBe('VALID');
-    expect(Object.isFrozen(plan)).toBe(true);
+    expect(generation.completion).toEqual({
+      userId: 'user-id',
+      aiJobId: 'job-id',
+      jobType: AIJobType.WORKOUT,
+      response,
+      result: {
+        candidateOutput: response.outputText,
+        model: response.model,
+      },
+    });
+    expect(Object.isFrozen(generation)).toBe(true);
+    expect(Object.isFrozen(generation.output)).toBe(true);
     expect(ai.createStandaloneJob).toHaveBeenCalledWith(
       expect.objectContaining({
         type: AIJobType.WORKOUT,
@@ -766,7 +832,110 @@ describe('Workout Planning Engine V2', () => {
       }),
     );
     expect(ai.runTextJob.mock.calls[0][1].input).not.toContain('user-id');
+    expect(ai.completeJobInTransaction).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(prisma).not.toHaveProperty('workoutPlan');
+  });
+
+  it('reuses a completed Workout candidate without calling the provider', async () => {
+    const input = recognized('HOME_WORKOUT', ['BODYWEIGHT'], {
+      artifact: 'POINT_GUIDANCE',
+    });
+    const storedResult = {
+      candidateOutput: JSON.stringify(candidate(input)),
+      model: 'stored-model',
+    };
+    const aiService = {
+      createStandaloneJob: jest.fn().mockResolvedValue({
+        id: 'completed-job-id',
+        status: AIJobStatus.COMPLETED,
+        promptVersionId: 'prompt-id',
+        result: storedResult,
+      }),
+      runTextJob: jest.fn(),
+      completeJobInTransaction: jest.fn(),
+      failJob: jest.fn(),
+    };
+
+    const generation = await (
+      await engineWith(aiService)
+    ).generateCandidate({
+      userId: 'user-id',
+      decision: decision(CONVERSATION_GOAL.GENERAL_GUIDANCE),
+      snapshot: snapshot(),
+      recognizedContext: input,
+      referenceDate,
+    });
+
+    expect(generation).toMatchObject({
+      status: 'ALREADY_COMPLETED',
+      aiJobId: 'completed-job-id',
+      reused: true,
+      completion: null,
+      storedResult,
+      output: { validation: { status: 'VALID' } },
+    });
+    expect(aiService.runTextJob).not.toHaveBeenCalled();
+    expect(aiService.completeJobInTransaction).not.toHaveBeenCalled();
+    expect(aiService.failJob).not.toHaveBeenCalled();
+  });
+
+  it('does not reclaim or fail an idempotent Workout job already processing', async () => {
+    const aiService = {
+      createStandaloneJob: jest.fn().mockResolvedValue({
+        id: 'processing-job-id',
+        status: AIJobStatus.PROCESSING,
+        promptVersionId: 'prompt-id',
+        result: null,
+      }),
+      runTextJob: jest.fn(),
+      completeJobInTransaction: jest.fn(),
+      failJob: jest.fn(),
+    };
+
+    await expect(
+      (await engineWith(aiService)).generateCandidate({
+        userId: 'user-id',
+        decision: decision(),
+        snapshot: snapshot(),
+        recognizedContext: recognized('HOME_WORKOUT', ['BODYWEIGHT']),
+        referenceDate,
+      }),
+    ).rejects.toThrow('em andamento');
+    expect(aiService.runTextJob).not.toHaveBeenCalled();
+    expect(aiService.completeJobInTransaction).not.toHaveBeenCalled();
+    expect(aiService.failJob).not.toHaveBeenCalled();
+  });
+
+  it('fails the Workout AIJob when fresh candidate generation fails', async () => {
+    const providerError = new BadGatewayException('provider unavailable');
+    const aiService = {
+      createStandaloneJob: jest.fn().mockResolvedValue({
+        id: 'job-id',
+        status: AIJobStatus.PENDING,
+        promptVersionId: 'prompt-id',
+        result: null,
+      }),
+      runTextJob: jest.fn().mockRejectedValue(providerError),
+      completeJobInTransaction: jest.fn(),
+      failJob: jest.fn().mockResolvedValue(undefined),
+    };
+
+    await expect(
+      (await engineWith(aiService)).generateCandidate({
+        userId: 'user-id',
+        decision: decision(),
+        snapshot: snapshot(),
+        recognizedContext: recognized('HOME_WORKOUT', ['BODYWEIGHT']),
+        referenceDate,
+      }),
+    ).rejects.toBe(providerError);
+    expect(aiService.failJob).toHaveBeenCalledWith(
+      'job-id',
+      providerError,
+      undefined,
+    );
+    expect(aiService.completeJobInTransaction).not.toHaveBeenCalled();
   });
 
   it('strictly parses discriminated activities and rejects malformed JSON', () => {

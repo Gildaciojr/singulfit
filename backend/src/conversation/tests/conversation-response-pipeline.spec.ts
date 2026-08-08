@@ -1,23 +1,58 @@
 import { ConversationLanguageRealizerService } from '../runtime/conversation-language-realizer.service';
 import { ConversationResponseFormatterService } from '../runtime/conversation-response-formatter.service';
 import { ConversationResponseValidatorService } from '../runtime/conversation-response-validator.service';
+import type { ConversationResponsePayload } from '../runtime/conversation-response-payload.builder';
 
 describe('Conversation response pipeline', () => {
   const realizer = new ConversationLanguageRealizerService();
   const formatter = new ConversationResponseFormatterService();
   const validator = new ConversationResponseValidatorService();
 
-  it('uses human context naturally for a greeting without repeating the name', () => {
-    const result = realizer.realize({
+  function contextual(
+    overrides: Partial<
+      Extract<ConversationResponsePayload, { kind: 'CONTEXTUAL_RESPONSE' }>
+    > = {},
+  ): Extract<ConversationResponsePayload, { kind: 'CONTEXTUAL_RESPONSE' }> {
+    return {
       kind: 'CONTEXTUAL_RESPONSE',
-      cue: 'GREETING',
-      preferredName: 'Gil',
-      goal: 'ganho de massa muscular',
+      routeKind: 'ANSWER_MESSAGE',
+      cue: 'COMMON',
+      currentMessage: '',
+      preferredName: null,
+      goal: null,
+      desiredOutcome: null,
       continuity: null,
-      trainingTime: 'depois do trabalho',
+      trainingTime: null,
+      mealTimes: [],
+      cookingAvailability: null,
+      mealsAwayFromHome: null,
+      trainingModality: null,
+      trainingExperience: null,
+      dietaryPattern: null,
+      preferredFoods: [],
+      rejectedFoods: [],
+      restrictions: [],
+      communicationStyle: null,
+      motivation: null,
+      messagePreference: 'BALANCED',
+      journeyStage: null,
+      memories: [],
+      progress: null,
       currentDiet: null,
       currentWorkout: null,
-    });
+      ...overrides,
+    };
+  }
+
+  it('uses human context naturally for a greeting without repeating the name', () => {
+    const result = realizer.realize(
+      contextual({
+        cue: 'GREETING',
+        preferredName: 'Gil',
+        goal: 'ganho de massa muscular',
+        trainingTime: 'depois do trabalho',
+      }),
+    );
 
     expect(result.message).toBe('Oi, Gil! Que bom falar com você.');
     expect(result.followUpQuestion).toContain('ganho de massa muscular');
@@ -27,29 +62,68 @@ describe('Conversation response pipeline', () => {
   });
 
   it('uses continuity only when persisted context is supplied', () => {
-    const withMemory = realizer.realize({
-      kind: 'CONTEXTUAL_RESPONSE',
-      cue: 'CONTINUITY',
-      preferredName: null,
-      goal: null,
-      continuity: 'quero ajustar o lanche antes do treino',
-      trainingTime: null,
-      currentDiet: null,
-      currentWorkout: null,
-    });
-    const withoutMemory = realizer.realize({
-      kind: 'CONTEXTUAL_RESPONSE',
-      cue: 'CONTINUITY',
-      preferredName: null,
-      goal: null,
-      continuity: null,
-      trainingTime: null,
-      currentDiet: null,
-      currentWorkout: null,
-    });
+    const withMemory = realizer.realize(
+      contextual({
+        cue: 'CONTINUITY',
+        continuity: 'quero ajustar o lanche antes do treino',
+      }),
+    );
+    const withoutMemory = realizer.realize(
+      contextual({
+        cue: 'CONTINUITY',
+      }),
+    );
 
     expect(withMemory.message).toContain('quero ajustar o lanche');
     expect(withoutMemory.message).not.toContain('você comentou');
+  });
+
+  it('responds to adherence difficulty with persisted human context', () => {
+    const result = realizer.realize(
+      contextual({
+        currentMessage: 'Hoje foi difícil seguir a dieta',
+        preferredName: 'Gil',
+        preferredFoods: ['arroz e feijão'],
+        progress: 'as escolhas alimentares recentes estão evoluindo',
+      }),
+    );
+
+    expect(result.message).toContain('Gil');
+    expect(result.message).toContain('arroz e feijão');
+    expect(result.message).toContain('estão evoluindo');
+    expect(result.message).not.toMatch(/Escolha uma opção|\b[123]\./u);
+  });
+
+  it('uses motivation and progress to change a low-motivation response', () => {
+    const base = contextual({
+      currentMessage: 'Estou desanimado',
+      currentWorkout: 'Treino A',
+    });
+    const resultDriven = realizer.realize({
+      ...base,
+      motivation: 'foco em progresso e resultados',
+    });
+    const autonomyDriven = realizer.realize({
+      ...base,
+      motivation: 'autonomia',
+    });
+
+    expect(resultDriven.message).not.toBe(autonomyDriven.message);
+    expect(resultDriven.message).not.toMatch(/\b[123]\./u);
+  });
+
+  it('answers a pizza question conversationally without a numbered menu', () => {
+    const result = realizer.realize(
+      contextual({
+        routeKind: 'NUTRITION_GUIDANCE',
+        currentMessage: 'Posso comer pizza hoje?',
+        goal: 'emagrecimento',
+      }),
+    );
+
+    expect(result.message).toContain('Pode comer');
+    expect(result.message).toContain('emagrecimento');
+    expect(result.message).not.toMatch(/Escolha uma opção|\b[123]\./u);
   });
 
   it.each([

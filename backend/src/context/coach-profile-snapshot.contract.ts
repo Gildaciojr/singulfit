@@ -18,6 +18,8 @@ import {
   StageOfChange,
   UserGoalType,
   WorkoutStatus,
+  NutritionPlanStatus,
+  NutritionArtifactType,
 } from '@prisma/client';
 
 export const COACH_PROFILE_KNOWLEDGE_STATUS = {
@@ -42,6 +44,7 @@ export const COACH_PROFILE_DATA_SOURCE = {
   LONGITUDINAL: 'LONGITUDINAL',
   FOOD_PREFERENCE: 'FOOD_PREFERENCE',
   DIET_PLAN: 'DIET_PLAN',
+  NUTRITION_PLAN: 'NUTRITION_PLAN',
   WORKOUT_PLAN: 'WORKOUT_PLAN',
   COACH_PROFILE: 'COACH_PROFILE',
   BEHAVIORAL_PROFILE: 'BEHAVIORAL_PROFILE',
@@ -197,6 +200,20 @@ export interface CoachProfilePlanReference<
   readonly generatedAt: string;
 }
 
+export type CoachProfileCanonicalNutritionPlanReference =
+  | (CoachProfilePlanReference<DietPlanStatus> & {
+      readonly implementation: 'LEGACY';
+    })
+  | {
+      readonly implementation: 'V2';
+      readonly id: string;
+      readonly title: string;
+      readonly objective: string;
+      readonly status: NutritionPlanStatus;
+      readonly artifactType: NutritionArtifactType;
+      readonly generatedAt: string;
+    };
+
 export interface CoachProfilePlanProfile {
   readonly currentDiet: CoachProfileDatum<
     CoachProfilePlanReference<DietPlanStatus>
@@ -204,6 +221,7 @@ export interface CoachProfilePlanProfile {
   readonly currentWorkout: CoachProfileDatum<
     CoachProfilePlanReference<WorkoutStatus>
   >;
+  readonly currentNutritionPlan: CoachProfileDatum<CoachProfileCanonicalNutritionPlanReference>;
 }
 
 export interface CoachProfileCoachStyle {

@@ -37,6 +37,10 @@ import type {
   CoachPlanningReasoningState,
 } from './coach-planning-execution.contract';
 import { NutritionV2PilotService } from './nutrition-v2-pilot.service';
+import {
+  PlanningExecutionRoutePolicyService,
+  type PlanningExecutionRouteSelection,
+} from './planning-execution-route-policy.service';
 
 export interface CoachPlanningRuntimeContext {
   readonly conversationId: string;
@@ -68,12 +72,13 @@ export class CoachPlanningExecutionService {
     private readonly planner?: ConversationGoalPlannerService,
     private readonly nutritionPlanningInputBuilder?: GenerateNutritionPlanV2InputBuilder,
     private readonly nutritionShadowRuntime?: NutritionShadowRuntimeOrchestratorService,
-    private readonly nutritionV2Pilot?: NutritionV2PilotService,
+    _nutritionV2Pilot?: NutritionV2PilotService,
     private readonly nutritionKnowledge?: NutritionKnowledgeResolverService,
     private readonly nutritionReasoningEngine?: NutritionReasoningEngineService,
     private readonly workoutKnowledge?: WorkoutKnowledgeResolverService,
     private readonly workoutReasoningEngine?: WorkoutReasoningEngineService,
     private readonly humanContextBuilder?: CoachConversationHumanContextBuilder,
+    private readonly routePolicy?: PlanningExecutionRoutePolicyService,
   ) {}
 
   async execute(
@@ -112,6 +117,9 @@ export class CoachPlanningExecutionService {
       ? this.unavailableReasoning('CANONICAL_INPUT_UNAVAILABLE')
       : this.unavailableReasoning('CONVERSATION_LAYER_OFF');
 
+    const routeSelection = this.selectRoute(userId, runtime, preparation);
+    this.observeRouteSelection(routeSelection, runtime?.correlationId);
+
     const legacyStartedAt = performance.now();
     let legacySucceeded = true;
     let dispatch: CoachPlanningDispatchResult;
@@ -120,9 +128,31 @@ export class CoachPlanningExecutionService {
         userId,
         legacyIntent: intent,
         decision: preparation?.decision ?? null,
+        routeSelection,
+        nutritionV2:
+          routeSelection.nutrition === 'V2' &&
+          preparation?.generationInput &&
+          runtime?.profileId
+            ? {
+                generationInput: preparation.generationInput,
+                profileId: runtime.profileId,
+                correlationId: runtime.correlationId,
+                traceId: runtime.traceId,
+              }
+            : undefined,
       });
     } catch (error: unknown) {
       legacySucceeded = false;
+      this.logger.warn(
+        `Planning route failed: ${JSON.stringify({
+          domain: routeSelection.nutrition ? 'NUTRITION' : 'WORKOUT',
+          selectedRoute:
+            routeSelection.nutrition ?? routeSelection.workout ?? 'LEGACY',
+          reason: routeSelection.reason,
+          correlationId: runtime?.correlationId ?? null,
+          failure: this.safeMessage(error),
+        })}`,
+      );
       dispatch = Object.freeze({
         content: this.failureMessage(error),
         executor: 'FAILURE_FALLBACK' as const,
@@ -132,36 +162,35 @@ export class CoachPlanningExecutionService {
     }
 
     const legacyContent = dispatch.content;
-    let selectedContent = legacyContent;
-    let selectedSource: CoachPlanningExecutionResult['selectedSource'] =
-      'LEGACY';
-    let suppressShadow = false;
-    if (runtime && preparation && this.nutritionV2Pilot) {
-      try {
-        const selection = await this.nutritionV2Pilot.select({
-          userId,
-          profileId: runtime.profileId ?? null,
-          decision: preparation.decision,
-          generationInput: preparation.generationInput,
-          correlationId: runtime.correlationId,
-          traceId: runtime.traceId,
-          legacyContent,
-        });
-        selectedContent = selection.content;
-        selectedSource =
-          selection.selected === 'V2' ? 'NUTRITION_V2' : 'LEGACY';
-        suppressShadow = selection.suppressShadow;
-      } catch (error: unknown) {
-        this.logger.warn(
-          `Nutrition V2 Pilot isolado: ${this.safeMessage(error)}`,
-        );
-      }
-    }
+    const selectedContent = legacyContent;
+    const selectedSource: CoachPlanningExecutionResult['selectedSource'] =
+      routeSelection.nutrition === 'V2' ? 'NUTRITION_V2' : 'LEGACY';
+    const suppressShadow = routeSelection.suppressNutritionShadow;
+
+    this.logger.log(
+      `Planning route completed: ${JSON.stringify({
+        domain: routeSelection.nutrition ? 'NUTRITION' : 'WORKOUT',
+        selectedRoute:
+          routeSelection.nutrition ?? routeSelection.workout ?? 'LEGACY',
+        reason: routeSelection.reason,
+        pilotStatus: routeSelection.nutritionPilotStatus,
+        correlationId: runtime?.correlationId ?? null,
+        executor: dispatch.executor,
+        generationCompleted: dispatch.generationCompleted,
+        fallbackApplied: dispatch.fallbackApplied,
+        responseImplementation: selectedSource,
+        durationMs: Math.max(
+          0,
+          Math.round(performance.now() - legacyStartedAt),
+        ),
+      })}`,
+    );
 
     if (
       runtime &&
       preparation &&
       this.nutritionShadowRuntime &&
+      selectedSource === 'LEGACY' &&
       !suppressShadow
     ) {
       try {
@@ -220,8 +249,46 @@ export class CoachPlanningExecutionService {
         executor: dispatch.executor,
         fallbackApplied: dispatch.fallbackApplied,
         generationCompleted: dispatch.generationCompleted,
+        routeSelection,
       }),
     });
+  }
+
+  private selectRoute(
+    userId: string,
+    runtime: CoachPlanningRuntimeContext | undefined,
+    preparation: PreparedV2PlanningContext | null,
+  ): PlanningExecutionRouteSelection {
+    if (this.routePolicy) {
+      return this.routePolicy.select({
+        userId,
+        profileId: runtime?.profileId ?? null,
+        decision: preparation?.decision ?? null,
+        generationInput: preparation?.generationInput ?? null,
+      });
+    }
+    return Object.freeze({
+      nutrition: 'LEGACY' as const,
+      workout: null,
+      reason: 'LEGACY_INTENT_OR_UNSUPPORTED_GOAL' as const,
+      nutritionPilotStatus: null,
+      suppressNutritionShadow: false,
+    });
+  }
+
+  private observeRouteSelection(
+    selection: PlanningExecutionRouteSelection,
+    correlationId: string | undefined,
+  ): void {
+    this.logger.debug(
+      `Planning route selected: ${JSON.stringify({
+        nutrition: selection.nutrition,
+        workout: selection.workout,
+        reason: selection.reason,
+        nutritionPilotStatus: selection.nutritionPilotStatus,
+        correlationId: correlationId ?? null,
+      })}`,
+    );
   }
 
   private async prepareV2Decision(

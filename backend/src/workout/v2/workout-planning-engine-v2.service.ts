@@ -7,7 +7,6 @@ import {
 import { AIJobStatus, AIJobType, Prisma } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { AIService } from '../../ai/ai.service';
-import { PrismaService } from '../../prisma/prisma.service';
 import { WorkoutArtifactResolverService } from './workout-artifact-resolver.service';
 import { freezeWorkoutPlanV2 } from './workout-plan-v2.freeze';
 import { WorkoutPlanV2Parser } from './workout-plan-v2.parser';
@@ -20,6 +19,8 @@ import { WorkoutPlanningContextBuilder } from './workout-planning-context.builde
 import type {
   GenerateWorkoutPlanV2Input,
   PreparedWorkoutPlanningV2,
+  WorkoutPlanningGenerationResult,
+  WorkoutPlanningStoredAIJobResult,
 } from './workout-planning-generation.contract';
 import { WorkoutPlanningReadinessService } from './workout-planning-readiness.service';
 import { WorkoutPlanningSafetyService } from './workout-planning-safety.service';
@@ -37,7 +38,6 @@ export class WorkoutPlanningEngineV2Service {
     private readonly safety: WorkoutPlanningSafetyService,
     private readonly validator: WorkoutPlanV2Validator,
     private readonly aiService: AIService,
-    private readonly prisma: PrismaService,
   ) {}
 
   prepare(input: GenerateWorkoutPlanV2Input): PreparedWorkoutPlanningV2 {
@@ -82,7 +82,15 @@ export class WorkoutPlanningEngineV2Service {
     return Object.freeze({ resolution, readiness, context, strategy, safety });
   }
 
-  async generate(input: GenerateWorkoutPlanV2Input): Promise<WorkoutPlanV2> {
+  async generate(
+    input: GenerateWorkoutPlanV2Input,
+  ): Promise<WorkoutPlanningGenerationResult> {
+    return this.generateCandidate(input);
+  }
+
+  async generateCandidate(
+    input: GenerateWorkoutPlanV2Input,
+  ): Promise<WorkoutPlanningGenerationResult> {
     const prepared = this.prepare(input);
     if (!prepared.context || !prepared.strategy || !prepared.safety)
       throw new BadRequestException(
@@ -121,19 +129,36 @@ export class WorkoutPlanningEngineV2Service {
         throw new ServiceUnavailableException(
           'Resultado idempotente do treino V2 indisponível',
         );
-      return this.finalize(this.parser.parse(stored.output), prepared, {
-        engineVersion: 2,
-        promptVersionId: job.promptVersionId,
+      const output = this.finalize(
+        this.parser.parse(stored.candidateOutput),
+        prepared,
+        {
+          engineVersion: 2,
+          promptVersionId: job.promptVersionId,
+          aiJobId: job.id,
+          operationKey,
+          model: stored.model,
+          generatedAt: input.referenceDate.toISOString(),
+          reused: true,
+        },
+      );
+      return Object.freeze({
+        status: 'ALREADY_COMPLETED' as const,
+        output,
         aiJobId: job.id,
         operationKey,
-        model: stored.model,
-        generatedAt: input.referenceDate.toISOString(),
-        reused: true,
+        storedResult: stored,
+        reused: true as const,
+        completion: null,
       });
     }
     if (job.status === AIJobStatus.FAILED)
       throw new ServiceUnavailableException(
         'Operação idempotente do treino V2 já falhou',
+      );
+    if (job.status === AIJobStatus.PROCESSING)
+      throw new ServiceUnavailableException(
+        'Operação idempotente do treino V2 em andamento',
       );
     let response: Awaited<ReturnType<AIService['runTextJob']>> | undefined;
     try {
@@ -141,8 +166,7 @@ export class WorkoutPlanningEngineV2Service {
         input: canonical,
         jsonSchema: WORKOUT_PLANNING_V2_PROMPT.schema,
       });
-      const completed = response;
-      const plan = this.finalize(
+      const output = this.finalize(
         this.parser.parse(response.outputText),
         prepared,
         {
@@ -155,20 +179,25 @@ export class WorkoutPlanningEngineV2Service {
           reused: false,
         },
       );
-      const result: Prisma.InputJsonObject = {
+      const storedResult: WorkoutPlanningStoredAIJobResult = Object.freeze({
         candidateOutput: response.outputText,
         model: response.model,
-      };
-      await this.prisma.$transaction(async (transaction) =>
-        this.aiService.completeJobInTransaction(transaction, {
+      });
+      return Object.freeze({
+        status: 'PENDING_COMPLETION' as const,
+        output,
+        aiJobId: job.id,
+        operationKey,
+        storedResult,
+        reused: false as const,
+        completion: Object.freeze({
           userId: input.userId,
           aiJobId: job.id,
           jobType: AIJobType.WORKOUT,
-          response: completed,
-          result,
+          response,
+          result: storedResult,
         }),
-      );
-      return plan;
+      });
     } catch (error: unknown) {
       await this.aiService.failJob(job.id, error, response);
       throw error;
@@ -222,14 +251,17 @@ export class WorkoutPlanningEngineV2Service {
   }
   private stored(
     value: Prisma.JsonValue | null,
-  ): { output: string; model: string } | null {
+  ): WorkoutPlanningStoredAIJobResult | null {
     if (
       !this.isRecord(value) ||
       typeof value.candidateOutput !== 'string' ||
       typeof value.model !== 'string'
     )
       return null;
-    return { output: value.candidateOutput, model: value.model };
+    return Object.freeze({
+      candidateOutput: value.candidateOutput,
+      model: value.model,
+    });
   }
   private canonicalJson(value: unknown): string {
     if (

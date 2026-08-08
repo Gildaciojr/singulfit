@@ -1,13 +1,16 @@
 import {
   BadGatewayException,
+  ConflictException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import {
+  AIJobStatus,
   AIJobType,
   DietPlanStatus,
-  FitnessGoal,
   MealAnalysisStatus,
+  NutritionPlanImplementation,
   Prisma,
   WorkoutStatus,
 } from '@prisma/client';
@@ -26,11 +29,13 @@ import {
   GeneratedDietMealItem,
   GeneratedDietPlan,
 } from './interfaces/generated-diet.interface';
+import type { LegacyDietCandidate } from './interfaces/legacy-diet-candidate.interface';
 import { AuditService } from '../observability/audit.service';
 import {
   AUDIT_ACTION,
   AUDIT_ENTITY,
 } from '../observability/observability.constants';
+import { NutritionPlanOwnershipService } from './ownership/nutrition-plan-ownership.service';
 
 const MAX_MEASUREMENTS_IN_CONTEXT = 12;
 const MAX_PROGRESS_SNAPSHOTS_IN_CONTEXT = 12;
@@ -43,9 +48,15 @@ export class DietGeneratorService {
     private readonly subscriptionsService: SubscriptionsService,
     private readonly aiService: AIService,
     private readonly auditService: AuditService,
+    private readonly nutritionPlanOwnership: NutritionPlanOwnershipService,
   ) {}
 
   async generate(userId: string) {
+    const candidate = await this.generateCandidate(userId);
+    return this.commitCandidate(candidate);
+  }
+
+  async generateCandidate(userId: string): Promise<LegacyDietCandidate> {
     await this.subscriptionsService.getProfileSubscription(userId);
     const [profile, nutritionHistory, progressHistory, currentWorkout] =
       await Promise.all([
@@ -144,6 +155,16 @@ export class DietGeneratorService {
       type: AIJobType.DIET,
       promptName: DIET_PROMPT_BY_GOAL[profile.goal],
     });
+    if (job.status === AIJobStatus.PROCESSING)
+      throw new ServiceUnavailableException(
+        'Geração legacy de dieta já está em andamento',
+      );
+    if (job.status === AIJobStatus.COMPLETED)
+      throw new ConflictException(
+        'AIJob legacy de dieta já concluído sem candidato reutilizável',
+      );
+    if (job.status === AIJobStatus.FAILED)
+      throw new ServiceUnavailableException('AIJob legacy de dieta já falhou');
     let response: OpenAIResponseResult | undefined;
 
     try {
@@ -212,116 +233,320 @@ export class DietGeneratorService {
           schema: DIET_JSON_SCHEMA,
         },
       });
-      const generatedDiet = this.parseResponse(response.outputText);
-
-      return await this.completeGeneration(
-        userId,
-        profile.id,
-        profile.goal,
-        job.id,
-        response,
-        generatedDiet,
+      const output = this.freezeGeneratedDiet(
+        this.parseResponse(response.outputText),
       );
+      const storedResult = Object.freeze({
+        candidateOutput: response.outputText,
+        model: response.model,
+      });
+      return Object.freeze({
+        status: 'PENDING_COMPLETION' as const,
+        userId,
+        profileId: profile.id,
+        objective: profile.goal,
+        aiJobId: job.id,
+        operationKey: job.operationKey ?? null,
+        generatedAt: new Date(),
+        output,
+        storedResult,
+        completion: Object.freeze({
+          userId,
+          aiJobId: job.id,
+          jobType: AIJobType.DIET,
+          response,
+          result: storedResult,
+        }),
+      });
     } catch (error: unknown) {
       await this.aiService.failJob(job.id, error, response);
       throw error;
     }
   }
 
-  private completeGeneration(
-    userId: string,
-    profileId: string,
-    objective: FitnessGoal,
-    aiJobId: string,
-    response: OpenAIResponseResult,
-    generatedDiet: GeneratedDietPlan,
+  async commitCandidate(candidate: LegacyDietCandidate) {
+    try {
+      const committed = await this.prisma.$transaction(
+        (transaction) =>
+          this.commitCandidateInTransaction(transaction, candidate),
+        {
+          maxWait: 5_000,
+          timeout: 15_000,
+        },
+      );
+      return committed.plan;
+    } catch (error: unknown) {
+      await this.failCandidate(candidate, error);
+      throw error;
+    }
+  }
+
+  async commitCandidateInTransaction(
+    transaction: Prisma.TransactionClient,
+    candidate: LegacyDietCandidate,
   ) {
-    const generatedAt = new Date();
+    await this.nutritionPlanOwnership.acquireCanonicalLockInTransaction(
+      transaction,
+      candidate.userId,
+    );
 
-    return this.prisma.$transaction(
-      async (transaction) => {
-        await transaction.$queryRaw`
-          WITH advisory_lock AS (
-            SELECT pg_advisory_xact_lock(hashtext(${`diet:${userId}`}))
-          )
-          SELECT true AS "locked"
-          FROM advisory_lock
-        `;
+    const [profile, job, existing] = await Promise.all([
+      transaction.fitnessProfile.findFirst({
+        where: {
+          id: candidate.profileId,
+          userId: candidate.userId,
+        },
+        select: { goal: true },
+      }),
+      transaction.aIJob.findUnique({
+        where: { id: candidate.aiJobId },
+        select: {
+          id: true,
+          userId: true,
+          type: true,
+          status: true,
+          operationKey: true,
+        },
+      }),
+      transaction.dietPlan.findUnique({
+        where: { aiJobId: candidate.aiJobId },
+        include: DIET_PLAN_INCLUDE,
+      }),
+    ]);
+    this.assertCandidateApplicability(candidate, profile, job);
+    if (existing) {
+      if (job?.status !== AIJobStatus.COMPLETED)
+        throw new ConflictException(
+          'Plano legacy de dieta existe sem AIJob concluído',
+        );
+      this.assertIdempotentDiet(existing, candidate);
+      await this.nutritionPlanOwnership.assertInTransaction(transaction, {
+        userId: candidate.userId,
+        profileId: candidate.profileId,
+        implementation: NutritionPlanImplementation.LEGACY,
+        planId: existing.id,
+        aiJobId: candidate.aiJobId,
+      });
+      return Object.freeze({ persistence: 'REUSED' as const, plan: existing });
+    }
+    if (job?.status === AIJobStatus.COMPLETED)
+      throw new ConflictException(
+        'AIJob legacy de dieta concluído sem plano persistido',
+      );
+    if (job?.status !== AIJobStatus.PROCESSING)
+      throw new ConflictException(
+        'AIJob legacy de dieta não está disponível para commit',
+      );
 
-        await transaction.dietPlan.updateMany({
-          where: {
-            userId,
-            status: DietPlanStatus.ACTIVE,
-          },
-          data: {
-            status: DietPlanStatus.ARCHIVED,
-          },
-        });
-        await this.aiService.completeJobInTransaction(transaction, {
-          userId,
-          aiJobId,
-          jobType: AIJobType.DIET,
-          response,
-        });
+    await transaction.dietPlan.updateMany({
+      where: {
+        userId: candidate.userId,
+        status: DietPlanStatus.ACTIVE,
+      },
+      data: {
+        status: DietPlanStatus.ARCHIVED,
+      },
+    });
+    await this.aiService.completeJobInTransaction(transaction, {
+      userId: candidate.completion.userId,
+      aiJobId: candidate.completion.aiJobId,
+      jobType: candidate.completion.jobType,
+      response: candidate.completion.response,
+    });
 
-        const dietPlan = await transaction.dietPlan.create({
-          data: {
-            userId,
-            profileId,
-            aiJobId,
-            title: generatedDiet.title,
-            objective,
-            dailyCaloriesTarget: this.decimal(
-              generatedDiet.dailyCaloriesTarget,
-            ),
-            proteinTarget: this.decimal(generatedDiet.proteinTarget),
-            carbsTarget: this.decimal(generatedDiet.carbsTarget),
-            fatTarget: this.decimal(generatedDiet.fatTarget),
-            status: DietPlanStatus.ACTIVE,
-            generatedAt,
-            meals: {
-              create: generatedDiet.meals.map((meal) => ({
-                name: meal.name,
-                order: meal.order,
-                caloriesTarget: this.decimal(meal.caloriesTarget),
-                notes: meal.notes,
-                items: {
-                  create: meal.items.map((item) => ({
-                    foodName: item.foodName,
-                    quantity: item.quantity,
-                    calories: this.decimal(item.calories),
-                    protein: this.decimal(item.protein),
-                    carbs: this.decimal(item.carbs),
-                    fat: this.decimal(item.fat),
-                    substitutionGroup: item.substitutionGroup,
-                  })),
-                },
+    const dietPlan = await transaction.dietPlan.create({
+      data: {
+        userId: candidate.userId,
+        profileId: candidate.profileId,
+        aiJobId: candidate.aiJobId,
+        title: candidate.output.title,
+        objective: candidate.objective,
+        dailyCaloriesTarget: this.decimal(candidate.output.dailyCaloriesTarget),
+        proteinTarget: this.decimal(candidate.output.proteinTarget),
+        carbsTarget: this.decimal(candidate.output.carbsTarget),
+        fatTarget: this.decimal(candidate.output.fatTarget),
+        status: DietPlanStatus.ACTIVE,
+        generatedAt: candidate.generatedAt,
+        meals: {
+          create: candidate.output.meals.map((meal) => ({
+            name: meal.name,
+            order: meal.order,
+            caloriesTarget: this.decimal(meal.caloriesTarget),
+            notes: meal.notes,
+            items: {
+              create: meal.items.map((item) => ({
+                foodName: item.foodName,
+                quantity: item.quantity,
+                calories: this.decimal(item.calories),
+                protein: this.decimal(item.protein),
+                carbs: this.decimal(item.carbs),
+                fat: this.decimal(item.fat),
+                substitutionGroup: item.substitutionGroup,
               })),
             },
-          },
-          include: DIET_PLAN_INCLUDE,
-        });
-
-        await this.auditService.recordInTransaction(transaction, {
-          userId,
-          action: AUDIT_ACTION.DIET_GENERATED,
-          entityType: AUDIT_ENTITY.DIET_PLAN,
-          entityId: dietPlan.id,
-          metadata: {
-            profileId,
-            aiJobId,
-            objective,
-            generatedAt: generatedAt.toISOString(),
-          },
-        });
-
-        return dietPlan;
+          })),
+        },
       },
-      {
-        maxWait: 5_000,
-        timeout: 15_000,
+      include: DIET_PLAN_INCLUDE,
+    });
+
+    await this.nutritionPlanOwnership.transitionInTransaction(transaction, {
+      userId: candidate.userId,
+      profileId: candidate.profileId,
+      implementation: NutritionPlanImplementation.LEGACY,
+      planId: dietPlan.id,
+      aiJobId: candidate.aiJobId,
+    });
+
+    await this.auditService.recordInTransaction(transaction, {
+      userId: candidate.userId,
+      action: AUDIT_ACTION.DIET_GENERATED,
+      entityType: AUDIT_ENTITY.DIET_PLAN,
+      entityId: dietPlan.id,
+      metadata: {
+        profileId: candidate.profileId,
+        aiJobId: candidate.aiJobId,
+        objective: candidate.objective,
+        generatedAt: candidate.generatedAt.toISOString(),
       },
+    });
+
+    return Object.freeze({ persistence: 'CREATED' as const, plan: dietPlan });
+  }
+
+  failCandidate(candidate: LegacyDietCandidate, error: unknown): Promise<void> {
+    return this.aiService.failJob(
+      candidate.aiJobId,
+      error,
+      candidate.completion.response,
     );
+  }
+
+  private assertCandidateApplicability(
+    candidate: LegacyDietCandidate,
+    profile: { readonly goal: string } | null,
+    job: {
+      readonly userId: string;
+      readonly type: AIJobType;
+      readonly operationKey: string | null;
+    } | null,
+  ): void {
+    if (!profile)
+      throw new NotFoundException(
+        'Perfil do candidato legacy de dieta não pertence ao usuário',
+      );
+    if (profile.goal !== candidate.objective)
+      throw new ConflictException(
+        'Objetivo do candidato legacy de dieta divergiu do perfil',
+      );
+    if (
+      !job ||
+      job.userId !== candidate.userId ||
+      job.type !== AIJobType.DIET ||
+      job.operationKey !== candidate.operationKey ||
+      candidate.completion.userId !== candidate.userId ||
+      candidate.completion.aiJobId !== candidate.aiJobId ||
+      candidate.completion.jobType !== AIJobType.DIET ||
+      candidate.completion.result.candidateOutput !==
+        candidate.storedResult.candidateOutput ||
+      candidate.completion.result.model !== candidate.storedResult.model ||
+      candidate.completion.response.model !== candidate.storedResult.model
+    )
+      throw new ConflictException(
+        'Ownership ou lifecycle do candidato legacy de dieta inconsistente',
+      );
+    if (!Number.isFinite(candidate.generatedAt.getTime()))
+      throw new ConflictException(
+        'Data de geração do candidato legacy de dieta inválida',
+      );
+    const parsed = this.parseResponse(candidate.storedResult.candidateOutput);
+    if (JSON.stringify(parsed) !== JSON.stringify(candidate.output))
+      throw new ConflictException(
+        'Conteúdo do candidato legacy de dieta divergiu do resultado validado',
+      );
+  }
+
+  private assertIdempotentDiet(
+    existing: Prisma.DietPlanGetPayload<{ include: typeof DIET_PLAN_INCLUDE }>,
+    candidate: LegacyDietCandidate,
+  ): void {
+    const existingShape = {
+      userId: existing.userId,
+      profileId: existing.profileId,
+      aiJobId: existing.aiJobId,
+      title: existing.title,
+      objective: existing.objective,
+      dailyCaloriesTarget: existing.dailyCaloriesTarget.toNumber(),
+      proteinTarget: existing.proteinTarget.toNumber(),
+      carbsTarget: existing.carbsTarget.toNumber(),
+      fatTarget: existing.fatTarget.toNumber(),
+      generatedAt: existing.generatedAt.toISOString(),
+      meals: existing.meals.map((meal) => ({
+        name: meal.name,
+        order: meal.order,
+        caloriesTarget: meal.caloriesTarget.toNumber(),
+        notes: meal.notes,
+        items: meal.items
+          .map((item) => ({
+            foodName: item.foodName,
+            quantity: item.quantity,
+            calories: item.calories.toNumber(),
+            protein: item.protein.toNumber(),
+            carbs: item.carbs.toNumber(),
+            fat: item.fat.toNumber(),
+            substitutionGroup: item.substitutionGroup,
+          }))
+          .sort((left, right) =>
+            JSON.stringify(left).localeCompare(JSON.stringify(right)),
+          ),
+      })),
+    };
+    const candidateShape = {
+      userId: candidate.userId,
+      profileId: candidate.profileId,
+      aiJobId: candidate.aiJobId,
+      title: candidate.output.title,
+      objective: candidate.objective,
+      dailyCaloriesTarget: candidate.output.dailyCaloriesTarget,
+      proteinTarget: candidate.output.proteinTarget,
+      carbsTarget: candidate.output.carbsTarget,
+      fatTarget: candidate.output.fatTarget,
+      generatedAt: candidate.generatedAt.toISOString(),
+      meals: candidate.output.meals.map((meal) => ({
+        name: meal.name,
+        order: meal.order,
+        caloriesTarget: meal.caloriesTarget,
+        notes: meal.notes,
+        items: [...meal.items].sort((left, right) =>
+          JSON.stringify(left).localeCompare(JSON.stringify(right)),
+        ),
+      })),
+    };
+    if (JSON.stringify(existingShape) !== JSON.stringify(candidateShape))
+      throw new ConflictException(
+        'Retry do candidato legacy de dieta divergiu do plano persistido',
+      );
+  }
+
+  private freezeGeneratedDiet(diet: GeneratedDietPlan): GeneratedDietPlan {
+    return Object.freeze({
+      title: diet.title,
+      dailyCaloriesTarget: diet.dailyCaloriesTarget,
+      proteinTarget: diet.proteinTarget,
+      carbsTarget: diet.carbsTarget,
+      fatTarget: diet.fatTarget,
+      meals: Object.freeze(
+        diet.meals.map((meal) =>
+          Object.freeze({
+            name: meal.name,
+            order: meal.order,
+            caloriesTarget: meal.caloriesTarget,
+            notes: meal.notes,
+            items: Object.freeze(meal.items.map((item) => Object.freeze(item))),
+          }),
+        ),
+      ),
+    });
   }
 
   private parseResponse(outputText: string): GeneratedDietPlan {

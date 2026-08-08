@@ -1,18 +1,18 @@
 export interface GeneratedWorkoutExercise {
-  exerciseName: string;
-  sets: number;
-  reps: string;
-  restSeconds: number;
-  notes: string | null;
+  readonly exerciseName: string;
+  readonly sets: number;
+  readonly reps: string;
+  readonly restSeconds: number;
+  readonly notes: string | null;
 }
 
 export interface GeneratedWorkoutDay {
-  dayNumber: number;
-  title: string;
-  exercises: GeneratedWorkoutExercise[];
+  readonly dayNumber: number;
+  readonly title: string;
+  readonly exercises: readonly GeneratedWorkoutExercise[];
 }
 
 export interface GeneratedWorkoutPlan {
-  title: string;
-  days: GeneratedWorkoutDay[];
+  readonly title: string;
+  readonly days: readonly GeneratedWorkoutDay[];
 }

@@ -287,6 +287,11 @@ enum NutritionPlanStatus {
   ARCHIVED
 }
 
+enum NutritionPlanImplementation {
+  LEGACY
+  V2
+}
+
 enum NutritionShadowRunStatus {
   PENDING
   RUNNING
@@ -876,6 +881,7 @@ model User {
   pilotChecksPerformed             PilotManualCheck[]                    @relation("PilotCheckOperator")
   coachProfileFieldValues          CoachProfileFieldValue[]
   profileAcquisitionCycles         CoachProfileAcquisitionCycle[]
+  nutritionPlanOwnership           NutritionPlanOwnership?
 
   @@index([isActive])
   @@map("users")
@@ -894,15 +900,16 @@ model FitnessProfile {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
-  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  foodRestrictions   FoodRestriction[]
-  injuryRestrictions InjuryRestriction[]
-  bodyMeasurements   BodyMeasurement[]
-  workoutPlans       WorkoutPlan[]
-  dietPlans          DietPlan[]
-  nutritionPlansV2   NutritionPlanV2[]
-  fitnessCheckIns    FitnessCheckIn[]
-  progressSnapshots  ProgressSnapshot[]
+  user                   User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  foodRestrictions       FoodRestriction[]
+  injuryRestrictions     InjuryRestriction[]
+  bodyMeasurements       BodyMeasurement[]
+  workoutPlans           WorkoutPlan[]
+  dietPlans              DietPlan[]
+  nutritionPlansV2       NutritionPlanV2[]
+  fitnessCheckIns        FitnessCheckIn[]
+  progressSnapshots      ProgressSnapshot[]
+  nutritionPlanOwnership NutritionPlanOwnership?
 
   @@map("fitness_profiles")
 }
@@ -1247,6 +1254,23 @@ model NutritionPlanV2 {
   @@index([userId, artifactType, generatedAt])
   @@index([replacesPlanReference])
   @@map("nutrition_plans_v2")
+}
+
+model NutritionPlanOwnership {
+  id             String                      @id @default(uuid())
+  userId         String                      @unique
+  profileId      String                      @unique
+  implementation NutritionPlanImplementation
+  planId         String
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
+
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile FitnessProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([implementation, planId])
+  @@index([implementation, updatedAt])
+  @@map("nutrition_plan_ownerships")
 }
 
 model NutritionConversationalArtifact {

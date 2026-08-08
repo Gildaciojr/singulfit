@@ -52,7 +52,7 @@ describe('ConversationExecutionBridgeService', () => {
     };
   }
 
-  it('realizes a generic response without AI or external execution', async () => {
+  it('realizes a conversational response without AI or external execution', async () => {
     const result = await service.execute(
       decision(
         understanding('COMMON_MESSAGE', 'ANSWER', 'GENERAL'),
@@ -63,7 +63,8 @@ describe('ConversationExecutionBridgeService', () => {
     expect(result).toEqual({
       status: 'COMPLETED',
       routeKind: 'ANSWER_MESSAGE',
-      content: 'Entendi. Pode contar comigo para seguir com você por aqui.',
+      content:
+        'Me conta um pouco mais do que aconteceu para eu te orientar de forma útil.',
     });
   });
 
@@ -154,11 +155,6 @@ describe('ConversationExecutionBridgeService', () => {
       'PROFILE_ACQUISITION',
     ],
     [
-      understanding('NUTRITION_QUESTION', 'PROVIDE_GUIDANCE', 'NUTRITION'),
-      goalDecision('GENERAL_GUIDANCE', 'NUTRITION_QUESTION'),
-      'NUTRITION_GUIDANCE',
-    ],
-    [
       understanding('DIET_PLAN_UPDATE_REQUEST', 'UPDATE_PLAN', 'NUTRITION', {
         references: [planReference('NUTRITION')],
       }),
@@ -197,11 +193,6 @@ describe('ConversationExecutionBridgeService', () => {
       'PLAN_STATUS',
     ],
     [
-      understanding('PROGRESS_REVIEW_REQUEST', 'REVIEW_PROGRESS', 'PROGRESS'),
-      goalDecision('REVIEW_PROGRESS', 'PROGRESS_REVIEW_REQUEST'),
-      'PROGRESS_REVIEW',
-    ],
-    [
       understanding('UNKNOWN', 'NONE', 'UNKNOWN'),
       goalDecision('UNKNOWN', 'UNKNOWN', { canExecute: false }),
       'LEGACY_FALLBACK',
@@ -213,6 +204,29 @@ describe('ConversationExecutionBridgeService', () => {
         service.execute(decision(understandingResult, goal)),
       ).resolves.toMatchObject({
         status: 'FALLBACK_REQUIRED',
+        routeKind: expectedKind,
+      });
+    },
+  );
+
+  it.each([
+    [
+      understanding('NUTRITION_QUESTION', 'PROVIDE_GUIDANCE', 'NUTRITION'),
+      goalDecision('GENERAL_GUIDANCE', 'NUTRITION_QUESTION'),
+      'NUTRITION_GUIDANCE',
+    ],
+    [
+      understanding('PROGRESS_REVIEW_REQUEST', 'REVIEW_PROGRESS', 'PROGRESS'),
+      goalDecision('REVIEW_PROGRESS', 'PROGRESS_REVIEW_REQUEST'),
+      'PROGRESS_REVIEW',
+    ],
+  ] as const)(
+    'realizes supported conversational route %s',
+    async (understandingResult, goal, expectedKind) => {
+      await expect(
+        service.execute(decision(understandingResult, goal)),
+      ).resolves.toMatchObject({
+        status: 'COMPLETED',
         routeKind: expectedKind,
       });
     },

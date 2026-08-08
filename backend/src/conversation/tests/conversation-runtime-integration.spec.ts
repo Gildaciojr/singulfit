@@ -89,27 +89,28 @@ describe('ConversationRuntimeIntegrationService', () => {
     return { service, config, runtime, bridge, comparator, audit };
   }
 
-  it('executes and selects a valid runtime response despite historical OFF metadata', async () => {
+  it('keeps Runtime OFF out of official execution', async () => {
     const subject = createSubject({ mode: 'OFF' });
 
     await expect(subject.service.select(request)).resolves.toEqual({
-      source: 'CONVERSATION_RUNTIME',
-      content: 'Resposta runtime',
-      reason: 'RUNTIME_SELECTED',
+      source: 'LEGACY',
+      content: 'Resposta legada',
+      reason: 'RUNTIME_DISABLED',
     });
-    expect(subject.runtime.evaluate).toHaveBeenCalledTimes(1);
-    expect(subject.audit.record).toHaveBeenCalledTimes(1);
+    expect(subject.runtime.evaluate).not.toHaveBeenCalled();
+    expect(subject.audit.record).not.toHaveBeenCalled();
   });
 
-  it('treats historical SHADOW mode only as metadata', async () => {
+  it('runs SHADOW for audit without making it official', async () => {
     const subject = createSubject({ mode: 'SHADOW' });
 
     await expect(subject.service.select(request)).resolves.toEqual({
-      source: 'CONVERSATION_RUNTIME',
-      content: 'Resposta runtime',
-      reason: 'RUNTIME_SELECTED',
+      source: 'LEGACY',
+      content: 'Resposta legada',
+      reason: 'SHADOW_ONLY',
     });
     expect(subject.runtime.evaluate).toHaveBeenCalledTimes(1);
+    expect(subject.audit.record).toHaveBeenCalledTimes(1);
   });
 
   it('selects a valid runtime response for an eligible internal user', async () => {
@@ -136,25 +137,24 @@ describe('ConversationRuntimeIntegrationService', () => {
     expect(subject.bridge.execute).toHaveBeenCalledTimes(1);
   });
 
-  it('returns an official pre-execution decision despite historical OFF metadata', async () => {
+  it('returns a legacy pre-execution decision when Runtime is OFF', async () => {
     const subject = createSubject({ mode: 'OFF' });
 
     await expect(subject.service.decide(decisionRequest)).resolves.toEqual({
-      source: 'CONVERSATION_RUNTIME',
-      content: 'Resposta runtime',
-      reason: 'RUNTIME_SELECTED',
+      source: 'LEGACY',
+      reason: 'RUNTIME_DISABLED',
     });
-    expect(subject.runtime.evaluate).toHaveBeenCalledTimes(1);
+    expect(subject.runtime.evaluate).not.toHaveBeenCalled();
   });
 
-  it('does not use canary eligibility as a production gate', async () => {
+  it('keeps an ineligible canary user on the legacy path', async () => {
     const subject = createSubject({ mode: 'CANARY', eligible: false });
 
     await expect(subject.service.select(request)).resolves.toMatchObject({
-      source: 'CONVERSATION_RUNTIME',
-      reason: 'RUNTIME_SELECTED',
+      source: 'LEGACY',
+      reason: 'USER_NOT_ELIGIBLE',
     });
-    expect(subject.runtime.evaluate).toHaveBeenCalledTimes(1);
+    expect(subject.runtime.evaluate).not.toHaveBeenCalled();
   });
 
   it('falls back on runtime failure', async () => {

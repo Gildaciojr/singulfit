@@ -21,6 +21,7 @@ export type CoachConversationTurnCue =
   | 'COMMON';
 
 export interface CoachConversationHumanContext {
+  readonly currentMessage: string;
   readonly turnCue: CoachConversationTurnCue;
   readonly preferredName: CoachConversationHumanFact<string> | null;
   readonly goal: CoachConversationHumanFact<string> | null;

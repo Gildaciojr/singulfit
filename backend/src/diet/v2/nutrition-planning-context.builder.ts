@@ -73,7 +73,10 @@ export class NutritionPlanningContextBuilder {
       preferences,
       nutritionEvidence,
       currentWorkoutAvailable: 'value' in input.snapshot.plans.currentWorkout,
-      currentDietAvailable: 'value' in input.snapshot.plans.currentDiet,
+      currentDietAvailable:
+        'value' in
+        (input.snapshot.plans.currentNutritionPlan ??
+          input.snapshot.plans.currentDiet),
       previousPlan: input.previousPlan
         ? Object.freeze({
             artifactType: input.previousPlan.artifactType,

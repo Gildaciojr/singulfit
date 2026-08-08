@@ -29,8 +29,6 @@ export class ConversationSelectionConfigService {
 
     return Object.freeze({
       configuredMode,
-      // Mantido apenas como metadado operacional. A validade do Candidate,
-      // e não o rollout histórico, governa a seleção oficial.
       effectiveMode: configuredMode,
       formatterVersion: this.resolveFormatterVersion(
         this.configService.get<string>(FORMATTER_VERSION_KEY),

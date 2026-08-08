@@ -6,8 +6,6 @@ const PILOT_USER_IDS_KEY = 'NUTRITION_V2_PILOT_USER_IDS';
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-export const NUTRITION_V2_PILOT_TIMEOUT_MS = 50_000;
-
 export type NutritionV2PilotAuthorization =
   | Readonly<{ status: 'AUTHORIZED' }>
   | Readonly<{
@@ -36,10 +34,6 @@ export class NutritionV2PilotConfigService {
         ? ('AUTHORIZED' as const)
         : ('NOT_AUTHORIZED' as const),
     });
-  }
-
-  timeoutMs(): number {
-    return NUTRITION_V2_PILOT_TIMEOUT_MS;
   }
 
   private parseAllowlist(

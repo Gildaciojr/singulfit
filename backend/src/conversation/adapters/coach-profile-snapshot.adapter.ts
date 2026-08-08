@@ -17,7 +17,9 @@ export class CoachProfileSnapshotConversationAdapter {
         ),
       ]),
       currentPlans: Object.freeze({
-        dietAvailable: 'value' in snapshot.plans.currentDiet,
+        dietAvailable:
+          'value' in
+          (snapshot.plans.currentNutritionPlan ?? snapshot.plans.currentDiet),
         workoutAvailable: 'value' in snapshot.plans.currentWorkout,
       }),
       progressContextAvailable:

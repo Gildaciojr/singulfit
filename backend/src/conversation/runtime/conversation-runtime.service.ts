@@ -24,6 +24,7 @@ export class ConversationRuntimeService {
   ): Promise<ConversationRuntimeEvaluation> {
     const startedAt = Date.now();
     const config = this.config.get();
+    const authorized = this.config.isOfficiallyEligible(input.userId, config);
     const operationKey = `conversation-runtime:v1:${createHash('sha256')
       .update(`${input.userId}:${input.messageId}`)
       .digest('hex')}`;
@@ -34,7 +35,7 @@ export class ConversationRuntimeService {
           mode: config.mode,
           operationKey,
           fallbackReason: 'INVALID_IDENTIFIERS',
-          authorized: true,
+          authorized,
           durationMs: Date.now() - startedAt,
         }),
         decision: null,
@@ -60,7 +61,7 @@ export class ConversationRuntimeService {
             confidence: understanding.confidence,
             ambiguityPresent: understanding.ambiguity.present,
             safetyRequired: understanding.safety.requiresSafeResponse,
-            authorized: true,
+            authorized,
             fallbackReason: understanding.failure ?? 'AMBIGUOUS',
             durationMs: Date.now() - startedAt,
           }),
@@ -84,7 +85,7 @@ export class ConversationRuntimeService {
           confidence: understanding.confidence,
           ambiguityPresent: false,
           safetyRequired: understanding.safety.requiresSafeResponse,
-          authorized: true,
+          authorized,
           durationMs: Date.now() - startedAt,
         }),
         decision,
@@ -97,7 +98,7 @@ export class ConversationRuntimeService {
           mode: config.mode,
           operationKey,
           fallbackReason: error instanceof Error ? error.name : 'UNKNOWN_ERROR',
-          authorized: true,
+          authorized,
           durationMs: Date.now() - startedAt,
         }),
         decision: null,

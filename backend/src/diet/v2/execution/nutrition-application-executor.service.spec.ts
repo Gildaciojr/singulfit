@@ -50,7 +50,9 @@ const conversationalDocument = Object.freeze({
 }) satisfies NutritionConversationalArtifactV1;
 
 function setup(generation: NutritionPlanningGenerationResult) {
-  const engine = { generate: jest.fn().mockResolvedValue(generation) };
+  const engine = {
+    generateCandidate: jest.fn().mockResolvedValue(generation),
+  };
   const plan = {
     persist: jest.fn().mockResolvedValue({
       persistence: 'CREATED',
@@ -192,7 +194,7 @@ describe('NutritionApplicationExecutorService', () => {
         artifactType: 'CURRENT_PLAN_PRESENTATION',
       },
     });
-    test.engine.generate.mockRejectedValue(error);
+    test.engine.generateCandidate.mockRejectedValue(error);
     await expect(test.service.execute(input)).rejects.toBe(error);
   });
   it('preserves persistence and AIJob errors unchanged', async () => {
@@ -223,6 +225,6 @@ describe('NutritionApplicationExecutorService', () => {
         ownership: { ...input.ownership, userId: 'other' },
       }),
     ).rejects.toBeInstanceOf(ConflictException);
-    expect(test.engine.generate).not.toHaveBeenCalled();
+    expect(test.engine.generateCandidate).not.toHaveBeenCalled();
   });
 });
