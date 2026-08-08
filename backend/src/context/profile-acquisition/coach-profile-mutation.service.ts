@@ -216,7 +216,11 @@ export class CoachProfileMutationService {
         const lockKey =
           'profile-acquisition:' + command.userId + ':' + command.field;
         await transaction.$queryRaw`
-          SELECT pg_advisory_xact_lock(hashtext(${lockKey}))
+          WITH advisory_lock AS (
+            SELECT pg_advisory_xact_lock(hashtext(${lockKey}))
+          )
+          SELECT true AS "locked"
+          FROM advisory_lock
         `;
         const duplicate = await transaction.coachProfileFieldValue.findUnique({
           where: { operationKey: command.operationKey },
@@ -621,7 +625,13 @@ export class CoachProfileMutationService {
           (options.length === 0 || options.includes(item)),
       )
     ) {
-      const normalized = [...new Set(value.map((item) => item.trim()))].sort();
+      const normalized = [
+        ...new Set(
+          value
+            .filter((item): item is string => typeof item === 'string')
+            .map((item) => item.trim()),
+        ),
+      ].sort();
       return this.serialized(null, null, null, normalized);
     }
     return null;

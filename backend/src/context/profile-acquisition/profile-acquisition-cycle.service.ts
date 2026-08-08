@@ -51,7 +51,11 @@ export class ProfileAcquisitionCycleService {
       return await this.prisma.$transaction(async (transaction) => {
         const lockKey = 'profile-acquisition-cycle:' + command.userId;
         await transaction.$queryRaw`
-          SELECT pg_advisory_xact_lock(hashtext(${lockKey}))
+          WITH advisory_lock AS (
+            SELECT pg_advisory_xact_lock(hashtext(${lockKey}))
+          )
+          SELECT true AS "locked"
+          FROM advisory_lock
         `;
         const duplicate =
           await transaction.coachProfileAcquisitionCycle.findUnique({
@@ -339,7 +343,11 @@ export class ProfileAcquisitionCycleService {
     return this.prisma.$transaction(async (transaction) => {
       const lockKey = 'profile-acquisition-cycle:' + command.userId;
       await transaction.$queryRaw`
-        SELECT pg_advisory_xact_lock(hashtext(${lockKey}))
+        WITH advisory_lock AS (
+          SELECT pg_advisory_xact_lock(hashtext(${lockKey}))
+        )
+        SELECT true AS "locked"
+        FROM advisory_lock
       `;
       const cycle = await transaction.coachProfileAcquisitionCycle.findUnique({
         where: { id: command.cycleId },
@@ -436,7 +444,11 @@ export class ProfileAcquisitionCycleService {
   ): Promise<unknown> {
     const lockKey = 'profile-acquisition-cycle:' + userId;
     return transaction.$queryRaw`
-      SELECT pg_advisory_xact_lock(hashtext(${lockKey}))
+      WITH advisory_lock AS (
+        SELECT pg_advisory_xact_lock(hashtext(${lockKey}))
+      )
+      SELECT true AS "locked"
+      FROM advisory_lock
     `;
   }
 
