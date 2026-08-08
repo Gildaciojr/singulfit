@@ -30,17 +30,42 @@ describe('nutrition ownership dry-run', () => {
   });
 
   it('lists dual-active and duplicate-active without timestamp heuristics', () => {
-    const result = analyzeNutritionOwnershipDryRun({
+    const dualActive = analyzeNutritionOwnershipDryRun({
       legacy: [plan('legacy-id', 'dual-user')],
       v2: [plan('v2-id', 'dual-user')],
       ownedUserIds: new Set(),
     });
-    expect(result.wouldBackfill).toEqual([]);
-    expect(result.conflicts).toEqual([
+    expect(dualActive.wouldBackfill).toEqual([]);
+    expect(dualActive.conflicts).toEqual([
       {
         userId: 'dual-user',
         legacyPlanIds: ['legacy-id'],
         v2PlanIds: ['v2-id'],
+      },
+    ]);
+
+    const duplicateActive = analyzeNutritionOwnershipDryRun({
+      legacy: [
+        plan('legacy-id-1', 'duplicate-legacy-user'),
+        plan('legacy-id-2', 'duplicate-legacy-user'),
+      ],
+      v2: [
+        plan('v2-id-1', 'duplicate-v2-user'),
+        plan('v2-id-2', 'duplicate-v2-user'),
+      ],
+      ownedUserIds: new Set(),
+    });
+    expect(duplicateActive.wouldBackfill).toEqual([]);
+    expect(duplicateActive.conflicts).toEqual([
+      {
+        userId: 'duplicate-legacy-user',
+        legacyPlanIds: ['legacy-id-1', 'legacy-id-2'],
+        v2PlanIds: [],
+      },
+      {
+        userId: 'duplicate-v2-user',
+        legacyPlanIds: [],
+        v2PlanIds: ['v2-id-1', 'v2-id-2'],
       },
     ]);
   });

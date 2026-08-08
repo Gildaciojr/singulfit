@@ -7,7 +7,7 @@ import {
 import {
   analyzeNutritionOwnershipDryRun,
   assertNutritionOwnershipDryRunArguments,
-} from '../src/diet/ownership/nutrition-ownership-dry-run';
+} from '../diet/ownership/nutrition-ownership-dry-run';
 
 const prisma = new PrismaClient();
 
