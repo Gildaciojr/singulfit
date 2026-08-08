@@ -102,7 +102,10 @@ export class CoachPlanningExecutionService {
         intent,
         runtime?.referenceDate ?? new Date(),
       );
-    } catch {
+    } catch (error: unknown) {
+      this.logger.warn(
+        `Planning V2 preparation unavailable: ${this.safeMessage(error)}`,
+      );
       // A infraestrutura V2 permanece estritamente não bloqueante nesta fase.
     }
 
