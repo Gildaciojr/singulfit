@@ -316,6 +316,23 @@ export class CoachPlanningExecutionService {
     const decision = this.planner.plan(
       this.plannerInput(snapshot, adaptation, adaptiveDecision),
     );
+    this.logger.debug(
+      `Planning V2 preparation completed: ${JSON.stringify({
+        legacyIntent: intent,
+        recognizedIntent: adaptation.recognizedIntent,
+        acquisitionIntent: adaptation.acquisitionIntent,
+        planTarget: adaptation.planTarget ?? null,
+        plannerGoal: decision.goal,
+        plannerReason: decision.reason,
+        canExecute: decision.canExecute,
+        profileCompletionState: decision.profileCompletionState,
+        selectedProfileField: decision.selectedProfileField,
+        collectorReason: adaptiveDecision.reason,
+        collectorShouldAsk: adaptiveDecision.shouldAsk,
+        collectorReadiness: adaptiveDecision.readiness,
+        snapshotCompletionOverall: snapshot.completion.overall,
+      })}`,
+    );
     const source = Object.freeze({
       userId,
       decision,
