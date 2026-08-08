@@ -389,6 +389,29 @@ describe('Nutrition Planning Engine V2', () => {
     );
   });
 
+  it('accepts confirmed empty allergies for diet generation without relaxing the safety gate', () => {
+    const service = new NutritionPlanningReadinessService();
+    const complete = snapshot();
+    const unconfirmed: CoachProfileSnapshot = Object.freeze({
+      ...complete,
+      restrictions: Object.freeze({
+        ...complete.restrictions,
+        allergies: Object.freeze({
+          status: 'REQUIRES_CONFIRMATION',
+          value: Object.freeze([]),
+          sources: Object.freeze([COACH_PROFILE_DATA_SOURCE.NUTRITION_PROFILE]),
+        }),
+      }),
+    });
+
+    const blocked = service.evaluate(unconfirmed, 'WEEKLY_PLAN', false);
+    const ready = service.evaluate(complete, 'WEEKLY_PLAN', false);
+    expect(blocked.status).toBe('REQUIRES_CONFIRMATION');
+    expect(blocked.confirmationRequiredFields).toContain('ALLERGIES');
+    expect(ready.status).toBe('READY');
+    expect(ready.confirmationRequiredFields).not.toContain('ALLERGIES');
+  });
+
   it('moves weekly nutrition readiness from blocked to ready with structured acquisition facts', () => {
     const service = new NutritionPlanningReadinessService();
     const complete = snapshot();

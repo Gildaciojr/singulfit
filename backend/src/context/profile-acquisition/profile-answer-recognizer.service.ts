@@ -170,6 +170,9 @@ export class ProfileAnswerRecognizerService {
         if (/lactose/.test(normalized)) return Object.freeze(['LACTOSE']);
         if (/gluten/.test(normalized)) return Object.freeze(['GLUTEN']);
         return this.textList(original);
+      case CoachProfileAcquisitionField.ALLERGIES:
+        if (this.explicitNone(normalized)) return Object.freeze([]);
+        return this.textList(original);
       case CoachProfileAcquisitionField.DECLARED_FOOD_PREFERENCES:
       case CoachProfileAcquisitionField.DECLARED_FOOD_REJECTIONS:
         return this.textList(original);
@@ -374,7 +377,9 @@ export class ProfileAnswerRecognizerService {
   }
 
   private explicitNone(value: string): boolean {
-    return /^(nao|nenhum|nenhuma|nao tenho|nao uso|nada)$/u.test(value);
+    return /^(?:nao|nada|nenhum(?:a)?(?: alergia(?: alimentar)?s?| intolerancia(?: alimentar)?s?)?|nao tenho(?: alergia(?: alimentar)?s?| intolerancia(?: alimentar)?s?)?|nao uso(?: suplementos?)?)$/u.test(
+      value,
+    );
   }
 
   private normalize(value: string): string {

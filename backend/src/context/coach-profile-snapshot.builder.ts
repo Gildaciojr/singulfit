@@ -354,13 +354,24 @@ export class CoachProfileSnapshotBuilder {
       profileFoodRestrictions,
       acquiredIntolerances,
     );
-    const allergies = this.constraintsDatum(
+    const profileAllergies = this.constraintsDatum(
       this.jsonConstraints(
         nutrition?.allergies,
         COACH_PROFILE_DATA_SOURCE.NUTRITION_PROFILE,
       ),
       false,
       nutrition ? [COACH_PROFILE_DATA_SOURCE.NUTRITION_PROFILE] : [],
+    );
+    const acquiredAllergies = this.acquiredConstraints(
+      this.acquisitionProjection.textList(
+        acquired,
+        CoachProfileAcquisitionField.ALLERGIES,
+      ),
+      'ALLERGY',
+    );
+    const allergies = this.mergeAllergyData(
+      profileAllergies,
+      acquiredAllergies,
     );
     const medicalConditions = this.constraintsDatum(
       this.jsonConstraints(
@@ -1055,6 +1066,36 @@ export class CoachProfileSnapshotBuilder {
       return this.inferredFromSources(value, sources);
     }
     return this.knownFromSources(value, sources);
+  }
+
+  private mergeAllergyData(
+    profile: CoachProfileDatum<readonly CoachProfileConstraint[]>,
+    acquired: CoachProfileDatum<readonly CoachProfileConstraint[]>,
+  ): CoachProfileDatum<readonly CoachProfileConstraint[]> {
+    if (
+      !('value' in acquired) ||
+      acquired.status !== COACH_PROFILE_KNOWLEDGE_STATUS.KNOWN
+    ) {
+      return this.mergeConstraintData(profile, acquired);
+    }
+    if (!('value' in profile)) return acquired;
+
+    const profileValue = this.mergeConstraints(profile.value);
+    const acquiredValue = this.mergeConstraints(acquired.value);
+    const value = this.mergeConstraints([...profileValue, ...acquiredValue]);
+    const sources = Object.freeze([
+      ...new Set([...profile.sources, ...acquired.sources]),
+    ]);
+
+    if (profileValue.length === 0) {
+      return this.knownFromSources(value, sources);
+    }
+    const sameConfirmedAllergies =
+      profileValue.length === acquiredValue.length &&
+      value.length === profileValue.length;
+    return sameConfirmedAllergies
+      ? this.knownFromSources(value, sources)
+      : this.confirmation(value, sources);
   }
 
   private eatingOutBoolean(

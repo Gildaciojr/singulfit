@@ -9,7 +9,6 @@ import type {
 } from '../coach-adaptive-profile-collector.contract';
 import {
   ProfileQuestionKind,
-  ProfileQuestionOption,
   ProfileQuestionReason,
   ProfileQuestionSpecification,
   ProfileResponseType,
@@ -39,6 +38,7 @@ const FIELD_BRIDGE: Readonly<
     CoachProfileAcquisitionField.TRAINING_FORMAT_PREFERENCE,
   MEAL_COUNT: CoachProfileAcquisitionField.DESIRED_MEAL_COUNT,
   FOOD_INTOLERANCES: CoachProfileAcquisitionField.FOOD_INTOLERANCES,
+  ALLERGIES: CoachProfileAcquisitionField.ALLERGIES,
   DECLARED_FOOD_PREFERENCES:
     CoachProfileAcquisitionField.DECLARED_FOOD_PREFERENCES,
   DECLARED_FOOD_REJECTIONS:
@@ -74,6 +74,7 @@ const REVERSE_FIELD_BRIDGE: Readonly<
   DESIRED_MEAL_COUNT: 'MEAL_COUNT',
   EATING_PATTERN: 'DIETARY_PATTERN',
   FOOD_INTOLERANCES: 'FOOD_INTOLERANCES',
+  ALLERGIES: 'ALLERGIES',
   DECLARED_FOOD_PREFERENCES: 'DECLARED_FOOD_PREFERENCES',
   DECLARED_FOOD_REJECTIONS: 'DECLARED_FOOD_REJECTIONS',
   FOOD_BUDGET_LEVEL: 'FOOD_BUDGET',
@@ -117,6 +118,8 @@ const TEMPLATE: Readonly<Record<CoachProfileAcquisitionField, string>> =
       'Seu padrão alimentar é onívoro, vegetariano, vegano, pescetariano, flexitariano ou outro?',
     FOOD_INTOLERANCES:
       'Existe alguma intolerância alimentar que você queira registrar? Se não houver, pode dizer que não.',
+    ALLERGIES:
+      'Você possui alguma alergia alimentar? Se não possuir, pode dizer que não.',
     DECLARED_FOOD_PREFERENCES:
       'Quais alimentos você gostaria que aparecessem com mais frequência no seu plano?',
     DECLARED_FOOD_REJECTIONS:

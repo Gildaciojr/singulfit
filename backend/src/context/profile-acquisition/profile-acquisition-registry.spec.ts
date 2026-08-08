@@ -45,6 +45,21 @@ describe('Structured profile acquisition registry and recognition', () => {
       inferencePolicy: 'PROHIBITED',
       sensitivity: 'SENSITIVE',
     });
+    expect(registry.get(CoachProfileAcquisitionField.ALLERGIES)).toMatchObject({
+      domain: 'NUTRITION',
+      valueType: CoachProfileValueType.TEXT_LIST,
+      priority: 'CRITICAL',
+      confirmationPolicy: 'ALWAYS_EXPLICIT',
+      inferencePolicy: 'PROHIBITED',
+      updatePolicy: 'EXPLICIT_ON_CONFLICT',
+      sensitivity: 'SENSITIVE',
+      consumers: [
+        'COACH_PROFILE_SNAPSHOT',
+        'ADAPTIVE_PROFILE_COLLECTOR',
+        'NUTRITION_PLANNING_V2',
+      ],
+      definitionVersion: 1,
+    });
   });
 
   it('creates one channel-independent question and realizes a versioned natural template', () => {
@@ -118,6 +133,7 @@ describe('Structured profile acquisition registry and recognition', () => {
       'intolerância à lactose',
       ['LACTOSE'],
     ],
+    [CoachProfileAcquisitionField.ALLERGIES, 'amendoim', ['amendoim']],
   ])('recognizes %s deterministically from %s', (field, answer, expected) => {
     const first = recognizer.recognize(specification(field), answer);
     const second = recognizer.recognize(specification(field), answer);
@@ -163,6 +179,30 @@ describe('Structured profile acquisition registry and recognition', () => {
       value: [],
       confirmationRequired: true,
     });
+  });
+
+  it.each(['nenhuma', 'não tenho alergias'])(
+    'recognizes explicit absence of allergies from %s without persisting a sentinel',
+    (answer) => {
+      const result = recognizer.recognize(
+        specification(CoachProfileAcquisitionField.ALLERGIES),
+        answer,
+      );
+      expect(result).toMatchObject({
+        disposition: 'RECOGNIZED',
+        value: [],
+        confirmationRequired: true,
+      });
+      expect(result.value).not.toContain('nenhuma');
+    },
+  );
+
+  it('bridges allergies to the collector and realizes its explicit template', () => {
+    const question = specification(CoachProfileAcquisitionField.ALLERGIES);
+    expect(questions.toCollectorField(question.field)).toBe('ALLERGIES');
+    expect(realizer.realize(question).text).toBe(
+      'Você possui alguma alergia alimentar? Se não possuir, pode dizer que não.',
+    );
   });
 
   it('keeps acquisition OFF by default and resolves configured modes deterministically', async () => {

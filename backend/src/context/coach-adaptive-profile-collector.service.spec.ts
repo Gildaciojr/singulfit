@@ -453,6 +453,26 @@ describe('CoachAdaptiveProfileCollectorService', () => {
     });
   });
 
+  it('stops blocking diet on confirmed empty allergies but preserves the unconfirmed gate', () => {
+    const pending = decide(
+      PROFILE_ACQUISITION_INTENT.DIET_PLAN_REQUEST,
+      completeProfile({ allergies: confirmation(Object.freeze([])) }),
+    );
+    const confirmed = decide(
+      PROFILE_ACQUISITION_INTENT.DIET_PLAN_REQUEST,
+      completeProfile({ allergies: known(Object.freeze([])) }),
+    );
+
+    expect(
+      pending.readiness.find((item) => item.plan === 'DIET')?.blockingFields,
+    ).toContain(PROFILE_ACQUISITION_FIELD.ALLERGIES);
+    expect(confirmed.readiness.find((item) => item.plan === 'DIET')).toEqual({
+      plan: 'DIET',
+      ready: true,
+      blockingFields: [],
+    });
+  });
+
   it('requires confirmation for an inferred conversational modality', () => {
     const result = decide(
       PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,

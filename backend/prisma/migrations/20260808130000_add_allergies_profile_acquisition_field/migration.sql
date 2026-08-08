@@ -1,0 +1,2 @@
+ALTER TYPE "CoachProfileAcquisitionField"
+ADD VALUE IF NOT EXISTS 'ALLERGIES';

@@ -444,6 +444,72 @@ describe('CoachProfileSnapshotBuilder', () => {
     );
   });
 
+  it('projects acquired allergy confirmation without fabricating legacy confirmation or hiding conflicts', async () => {
+    const record = userRecord();
+    const confirmedEmpty = await subject({
+      ...record,
+      nutritionProfile: { ...record.nutritionProfile, allergies: [] },
+      coachProfileFieldValues: [
+        acquired({
+          field: CoachProfileAcquisitionField.ALLERGIES,
+          valueType: CoachProfileValueType.TEXT_LIST,
+          textListValue: [],
+        }),
+      ],
+    });
+    const emptySnapshot = await confirmedEmpty.builder.build(
+      'user-id',
+      referenceDate,
+    );
+    expect(emptySnapshot.restrictions.allergies).toEqual({
+      status: COACH_PROFILE_KNOWLEDGE_STATUS.KNOWN,
+      value: [],
+      sources: [
+        COACH_PROFILE_DATA_SOURCE.NUTRITION_PROFILE,
+        COACH_PROFILE_DATA_SOURCE.PROFILE_ACQUISITION,
+      ],
+    });
+
+    const confirmedPositive = await subject({
+      ...record,
+      nutritionProfile: { ...record.nutritionProfile, allergies: [] },
+      coachProfileFieldValues: [
+        acquired({
+          field: CoachProfileAcquisitionField.ALLERGIES,
+          valueType: CoachProfileValueType.TEXT_LIST,
+          textListValue: ['Castanha'],
+        }),
+      ],
+    });
+    const positiveSnapshot = await confirmedPositive.builder.build(
+      'user-id',
+      referenceDate,
+    );
+    expect(positiveSnapshot.restrictions.allergies).toMatchObject({
+      status: COACH_PROFILE_KNOWLEDGE_STATUS.KNOWN,
+      value: [{ type: 'ALLERGY', description: 'Castanha' }],
+    });
+
+    const conflicting = await subject({
+      ...record,
+      coachProfileFieldValues: [
+        acquired({
+          field: CoachProfileAcquisitionField.ALLERGIES,
+          valueType: CoachProfileValueType.TEXT_LIST,
+          textListValue: [],
+        }),
+      ],
+    });
+    const conflictingSnapshot = await conflicting.builder.build(
+      'user-id',
+      referenceDate,
+    );
+    expect(conflictingSnapshot.restrictions.allergies).toMatchObject({
+      status: COACH_PROFILE_KNOWLEDGE_STATUS.REQUIRES_CONFIRMATION,
+      value: [{ type: 'ALLERGY', description: 'Amendoim' }],
+    });
+  });
+
   it('is deterministic, deeply frozen and JSON serializable without Prisma values', async () => {
     const test = await subject();
     const first = await test.builder.build('user-id', referenceDate);

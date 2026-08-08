@@ -203,6 +203,48 @@ describe('Structured profile acquisition persistence', () => {
     expect(test.tx.coachProfileFieldValue.create).not.toHaveBeenCalled();
   });
 
+  it('persists confirmed empty allergies with a real fingerprint and remains idempotent', async () => {
+    const test = await subject();
+    const command = {
+      action: 'SET' as const,
+      userId: 'user-id',
+      field: CoachProfileAcquisitionField.ALLERGIES,
+      value: Object.freeze([]),
+      source: CoachProfileValueSource.USER_CONFIRMED,
+      confirmation: CoachProfileConfirmationState.CONFIRMED,
+      status: CoachProfileValueStatus.CONFIRMED,
+      referenceDate,
+      operationKey: 'confirmed-empty-allergies',
+      reason: 'CONFIRMED_ABSENCE' as const,
+      definitionVersion: 1,
+    };
+
+    await expect(test.mutations.execute(command)).resolves.toMatchObject({
+      status: 'CREATED',
+      field: CoachProfileAcquisitionField.ALLERGIES,
+    });
+    const createInput = test.tx.coachProfileFieldValue.create.mock.calls[0][0];
+    expect(createInput.data).toMatchObject({
+      field: CoachProfileAcquisitionField.ALLERGIES,
+      valueType: CoachProfileValueType.TEXT_LIST,
+      textListValue: [],
+      status: CoachProfileValueStatus.CONFIRMED,
+      confirmationState: CoachProfileConfirmationState.CONFIRMED,
+      isActive: true,
+    });
+    expect(createInput.data.valueFingerprint).toMatch(/^[a-f0-9]{64}$/);
+
+    test.tx.coachProfileFieldValue.findUnique.mockResolvedValue({
+      id: 'value-id',
+      valueFingerprint: createInput.data.valueFingerprint,
+    });
+    await expect(test.mutations.execute(command)).resolves.toMatchObject({
+      status: 'DUPLICATE',
+      field: CoachProfileAcquisitionField.ALLERGIES,
+    });
+    expect(test.tx.coachProfileFieldValue.create).toHaveBeenCalledTimes(1);
+  });
+
   it('does not silently overwrite a conflicting confirmed value', async () => {
     const test = await subject();
     test.tx.coachProfileFieldValue.findFirst.mockResolvedValue({
