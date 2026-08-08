@@ -201,6 +201,25 @@ const COACH_PROFILE_SNAPSHOT_USER_SELECT = {
   },
 } satisfies Prisma.UserSelect;
 
+const EXPLICIT_NO_FOOD_RESTRICTION_DESCRIPTIONS = new Set([
+  'nenhuma restricao',
+  'nenhuma restricao alimentar',
+  'sem restricao',
+  'sem restricao alimentar',
+  'sem restricoes',
+  'sem restricoes alimentares',
+  'nao tenho restricao',
+  'nao tenho restricao alimentar',
+  'nao tenho restricoes',
+  'nao tenho restricoes alimentares',
+  'nao tenho nenhuma restricao',
+  'nao tenho nenhuma restricao alimentar',
+  'nao possuo restricao',
+  'nao possuo restricao alimentar',
+  'nao possuo restricoes',
+  'nao possuo restricoes alimentares',
+]);
+
 type CoachProfileSnapshotUser = Prisma.UserGetPayload<{
   select: typeof COACH_PROFILE_SNAPSHOT_USER_SELECT;
 }>;
@@ -320,6 +339,14 @@ export class CoachProfileSnapshotBuilder {
     );
     const ageYears = this.ageDatum(birthDate, referenceDate);
     const activationRestrictionsKnown = Array.isArray(activation?.restrictions);
+    const nutritionFoodRestrictions = this.jsonConstraints(
+      nutrition?.restrictions,
+      COACH_PROFILE_DATA_SOURCE.NUTRITION_PROFILE,
+    );
+    const nutritionRestrictionsExplicitlyAbsent =
+      nutritionFoodRestrictions.some((restriction) =>
+        this.isExplicitNoFoodRestriction(restriction.description),
+      );
     const profileFoodRestrictions = this.constraintsDatum(
       this.mergeConstraints([
         ...(fitness?.foodRestrictions.map((restriction) =>
@@ -329,12 +356,12 @@ export class CoachProfileSnapshotBuilder {
             restriction.type,
           ),
         ) ?? []),
-        ...this.jsonConstraints(
-          nutrition?.restrictions,
-          COACH_PROFILE_DATA_SOURCE.NUTRITION_PROFILE,
+        ...nutritionFoodRestrictions.filter(
+          (restriction) =>
+            !this.isExplicitNoFoodRestriction(restriction.description),
         ),
       ]),
-      activationRestrictionsKnown,
+      activationRestrictionsKnown || nutritionRestrictionsExplicitlyAbsent,
       [
         ...(fitness ? [COACH_PROFILE_DATA_SOURCE.FITNESS_PROFILE] : []),
         ...(nutrition ? [COACH_PROFILE_DATA_SOURCE.NUTRITION_PROFILE] : []),
@@ -1142,6 +1169,17 @@ export class CoachProfileSnapshotBuilder {
       }
     }
     return Object.freeze(constraints);
+  }
+
+  private isExplicitNoFoodRestriction(description: string): boolean {
+    const normalized = description
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim()
+      .replace(/[.,;:!?]+$/g, '')
+      .replace(/\s+/g, ' ');
+    return EXPLICIT_NO_FOOD_RESTRICTION_DESCRIPTIONS.has(normalized);
   }
 
   private mergeConstraints(

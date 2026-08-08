@@ -444,6 +444,76 @@ describe('CoachProfileSnapshotBuilder', () => {
     );
   });
 
+  it.each([
+    'Nenhuma restrição',
+    ' Sem restrições. ',
+    'Não tenho restrições alimentares',
+  ])(
+    'projects the legacy explicit absence "%s" as known empty food restrictions',
+    async (description) => {
+      const record = userRecord();
+      const test = await subject(
+        {
+          ...record,
+          fitnessProfile: {
+            ...record.fitnessProfile,
+            foodRestrictions: [],
+          },
+          nutritionProfile: {
+            ...record.nutritionProfile,
+            restrictions: [{ type: 'ONBOARDING', description }],
+          },
+        },
+        { desiredResultText: null },
+      );
+
+      const snapshot = await test.builder.build('user-id', referenceDate);
+
+      expect(snapshot.restrictions.foodRestrictions).toEqual({
+        status: COACH_PROFILE_KNOWLEDGE_STATUS.KNOWN,
+        value: [],
+        sources: [
+          COACH_PROFILE_DATA_SOURCE.FITNESS_PROFILE,
+          COACH_PROFILE_DATA_SOURCE.NUTRITION_PROFILE,
+        ],
+      });
+    },
+  );
+
+  it.each(['Evito alimentos muito picantes', 'Sem lactose', 'Sem glúten'])(
+    'preserves the real food restriction "%s"',
+    async (description) => {
+      const record = userRecord();
+      const test = await subject(
+        {
+          ...record,
+          fitnessProfile: {
+            ...record.fitnessProfile,
+            foodRestrictions: [],
+          },
+          nutritionProfile: {
+            ...record.nutritionProfile,
+            restrictions: [{ type: 'ONBOARDING', description }],
+          },
+        },
+        { desiredResultText: null },
+      );
+
+      const snapshot = await test.builder.build('user-id', referenceDate);
+
+      expect(snapshot.restrictions.foodRestrictions).toMatchObject({
+        status: COACH_PROFILE_KNOWLEDGE_STATUS.KNOWN,
+        value: [
+          {
+            type: 'ONBOARDING',
+            description,
+            source: COACH_PROFILE_DATA_SOURCE.NUTRITION_PROFILE,
+          },
+        ],
+      });
+    },
+  );
+
   it('projects acquired allergy confirmation without fabricating legacy confirmation or hiding conflicts', async () => {
     const record = userRecord();
     const confirmedEmpty = await subject({

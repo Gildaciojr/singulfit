@@ -64,6 +64,7 @@ describe('Nutrition Planning Engine V2', () => {
       readonly workout?: boolean;
       readonly rejectedFood?: string;
       readonly customRestriction?: string;
+      readonly withoutFoodRestrictions?: boolean;
     } = {},
   ): CoachProfileSnapshot {
     return Object.freeze({
@@ -119,13 +120,15 @@ describe('Nutrition Planning Engine V2', () => {
       }),
       restrictions: Object.freeze({
         foodRestrictions: known(
-          Object.freeze([
-            Object.freeze({
-              type: 'INTOLERANCE',
-              description: options.customRestriction ?? 'Sem lactose',
-              source: COACH_PROFILE_DATA_SOURCE.FITNESS_PROFILE,
-            }),
-          ]),
+          options.withoutFoodRestrictions
+            ? Object.freeze([])
+            : Object.freeze([
+                Object.freeze({
+                  type: 'INTOLERANCE',
+                  description: options.customRestriction ?? 'Sem lactose',
+                  source: COACH_PROFILE_DATA_SOURCE.FITNESS_PROFILE,
+                }),
+              ]),
         ),
         allergies: known(Object.freeze([])),
         medicalConditions: known(
@@ -410,6 +413,29 @@ describe('Nutrition Planning Engine V2', () => {
     expect(blocked.confirmationRequiredFields).toContain('ALLERGIES');
     expect(ready.status).toBe('READY');
     expect(ready.confirmationRequiredFields).not.toContain('ALLERGIES');
+  });
+
+  it('accepts known empty food restrictions without creating a constraint fact', () => {
+    const profile = snapshot({ withoutFoodRestrictions: true });
+    const readiness = new NutritionPlanningReadinessService().evaluate(
+      profile,
+      NUTRITION_ARTIFACT_TYPE.WEEKLY_PLAN,
+      false,
+    );
+    const context = buildContext(NUTRITION_ARTIFACT_TYPE.WEEKLY_PLAN, profile);
+
+    expect(readiness.status).toBe('READY');
+    expect(readiness.safetyFlags).not.toContain(
+      'CUSTOM_CONSTRAINT_REQUIRES_CONFIRMATION',
+    );
+    expect(readiness.confirmationRequiredFields).not.toContain(
+      'FOOD_RESTRICTIONS',
+    );
+    expect(
+      context.constraints.filter(
+        (constraint) => constraint.kind === 'RESTRICTION',
+      ),
+    ).toEqual([]);
   });
 
   it('moves weekly nutrition readiness from blocked to ready with structured acquisition facts', () => {
