@@ -48,4 +48,43 @@ describe('CoachProfileAcquisitionProjectionService', () => {
       sources: [COACH_PROFILE_DATA_SOURCE.PROFILE_ACQUISITION],
     });
   });
+
+  it('projects confirmed empty medical conditions as known empty constraints', () => {
+    const service = new CoachProfileAcquisitionProjectionService();
+    const record: CoachProfileFieldValue = {
+      id: 'medical-conditions-value-id',
+      userId: 'user-id',
+      field: CoachProfileAcquisitionField.MEDICAL_CONDITIONS,
+      valueType: CoachProfileValueType.TEXT_LIST,
+      textValue: null,
+      integerValue: null,
+      booleanValue: null,
+      textListValue: [],
+      valueFingerprint: 'fingerprint',
+      status: CoachProfileValueStatus.CONFIRMED,
+      source: CoachProfileValueSource.USER_CONFIRMED,
+      confirmationState: CoachProfileConfirmationState.CONFIRMED,
+      definitionVersion: 1,
+      referenceDate: new Date('2026-08-09T12:00:00.000Z'),
+      operationKey: 'medical-conditions-operation-key',
+      previousValueId: null,
+      isActive: true,
+      confirmedAt: new Date('2026-08-09T12:00:00.000Z'),
+      invalidatedAt: null,
+      createdAt: new Date('2026-08-09T12:00:00.000Z'),
+      updatedAt: new Date('2026-08-09T12:00:00.000Z'),
+    };
+
+    const projection = service.project([record]);
+    expect(
+      service.textList(
+        projection,
+        CoachProfileAcquisitionField.MEDICAL_CONDITIONS,
+      ),
+    ).toEqual({
+      status: COACH_PROFILE_KNOWLEDGE_STATUS.KNOWN,
+      value: [],
+      sources: [COACH_PROFILE_DATA_SOURCE.PROFILE_ACQUISITION],
+    });
+  });
 });

@@ -416,13 +416,24 @@ export class CoachProfileSnapshotBuilder {
       profileAllergies,
       acquiredAllergies,
     );
-    const medicalConditions = this.constraintsDatum(
+    const profileMedicalConditions = this.constraintsDatum(
       this.jsonConstraints(
         nutrition?.medicalConditions,
         COACH_PROFILE_DATA_SOURCE.NUTRITION_PROFILE,
       ),
       false,
       nutrition ? [COACH_PROFILE_DATA_SOURCE.NUTRITION_PROFILE] : [],
+    );
+    const acquiredMedicalConditions = this.acquiredConstraints(
+      this.acquisitionProjection.textList(
+        acquired,
+        CoachProfileAcquisitionField.MEDICAL_CONDITIONS,
+      ),
+      'MEDICAL_CONDITION',
+    );
+    const medicalConditions = this.mergeMedicalConditionData(
+      profileMedicalConditions,
+      acquiredMedicalConditions,
     );
     const physicalLimitations = this.constraintsDatum(
       this.mergeConstraints(
@@ -1139,6 +1150,70 @@ export class CoachProfileSnapshotBuilder {
     return sameConfirmedAllergies
       ? this.knownFromSources(value, sources)
       : this.confirmation(value, sources);
+  }
+
+  private mergeMedicalConditionData(
+    profile: CoachProfileDatum<readonly CoachProfileConstraint[]>,
+    acquired: CoachProfileDatum<readonly CoachProfileConstraint[]>,
+  ): CoachProfileDatum<readonly CoachProfileConstraint[]> {
+    if (
+      !('value' in acquired) ||
+      acquired.status !== COACH_PROFILE_KNOWLEDGE_STATUS.KNOWN
+    ) {
+      return this.mergeConstraintData(profile, acquired);
+    }
+    if (!('value' in profile)) return acquired;
+
+    const profileValue = this.mergeMedicalConditions(profile.value);
+    const acquiredValue = this.mergeMedicalConditions(acquired.value);
+    const value = this.mergeMedicalConditions([
+      ...profileValue,
+      ...acquiredValue,
+    ]);
+    const sources = Object.freeze([
+      ...new Set([...profile.sources, ...acquired.sources]),
+    ]);
+
+    if (profileValue.length === 0) {
+      return this.knownFromSources(value, sources);
+    }
+    const acquiredDescriptions = new Set(
+      acquiredValue.map((condition) =>
+        this.medicalConditionKey(condition.description),
+      ),
+    );
+    const sameConfirmedConditions =
+      profileValue.length === acquiredValue.length &&
+      profileValue.every((condition) =>
+        acquiredDescriptions.has(
+          this.medicalConditionKey(condition.description),
+        ),
+      );
+    return sameConfirmedConditions
+      ? this.knownFromSources(value, sources)
+      : this.confirmation(value, sources);
+  }
+
+  private mergeMedicalConditions(
+    conditions: readonly CoachProfileConstraint[],
+  ): readonly CoachProfileConstraint[] {
+    const seen = new Set<string>();
+    const merged: CoachProfileConstraint[] = [];
+    for (const condition of conditions) {
+      const key = this.medicalConditionKey(condition.description);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(condition);
+    }
+    return Object.freeze(merged);
+  }
+
+  private medicalConditionKey(description: string): string {
+    return description
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toLowerCase();
   }
 
   private eatingOutBoolean(

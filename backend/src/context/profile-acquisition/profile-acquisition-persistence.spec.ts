@@ -245,6 +245,38 @@ describe('Structured profile acquisition persistence', () => {
     expect(test.tx.coachProfileFieldValue.create).toHaveBeenCalledTimes(1);
   });
 
+  it('persists confirmed empty medical conditions as a typed text list', async () => {
+    const test = await subject();
+    const command = {
+      action: 'SET' as const,
+      userId: 'user-id',
+      field: CoachProfileAcquisitionField.MEDICAL_CONDITIONS,
+      value: Object.freeze([]),
+      source: CoachProfileValueSource.USER_CONFIRMED,
+      confirmation: CoachProfileConfirmationState.CONFIRMED,
+      status: CoachProfileValueStatus.CONFIRMED,
+      referenceDate,
+      operationKey: 'confirmed-empty-medical-conditions',
+      reason: 'CONFIRMED_ABSENCE' as const,
+      definitionVersion: 1,
+    };
+
+    await expect(test.mutations.execute(command)).resolves.toMatchObject({
+      status: 'CREATED',
+      field: CoachProfileAcquisitionField.MEDICAL_CONDITIONS,
+    });
+    expect(test.tx.coachProfileFieldValue.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        field: CoachProfileAcquisitionField.MEDICAL_CONDITIONS,
+        valueType: CoachProfileValueType.TEXT_LIST,
+        textListValue: [],
+        status: CoachProfileValueStatus.CONFIRMED,
+        confirmationState: CoachProfileConfirmationState.CONFIRMED,
+        isActive: true,
+      }),
+    });
+  });
+
   it('does not silently overwrite a conflicting confirmed value', async () => {
     const test = await subject();
     test.tx.coachProfileFieldValue.findFirst.mockResolvedValue({

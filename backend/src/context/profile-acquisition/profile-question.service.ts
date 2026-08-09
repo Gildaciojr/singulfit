@@ -39,6 +39,7 @@ const FIELD_BRIDGE: Readonly<
   MEAL_COUNT: CoachProfileAcquisitionField.DESIRED_MEAL_COUNT,
   FOOD_INTOLERANCES: CoachProfileAcquisitionField.FOOD_INTOLERANCES,
   ALLERGIES: CoachProfileAcquisitionField.ALLERGIES,
+  MEDICAL_CONDITIONS: CoachProfileAcquisitionField.MEDICAL_CONDITIONS,
   DECLARED_FOOD_PREFERENCES:
     CoachProfileAcquisitionField.DECLARED_FOOD_PREFERENCES,
   DECLARED_FOOD_REJECTIONS:
@@ -75,6 +76,7 @@ const REVERSE_FIELD_BRIDGE: Readonly<
   EATING_PATTERN: 'DIETARY_PATTERN',
   FOOD_INTOLERANCES: 'FOOD_INTOLERANCES',
   ALLERGIES: 'ALLERGIES',
+  MEDICAL_CONDITIONS: 'MEDICAL_CONDITIONS',
   DECLARED_FOOD_PREFERENCES: 'DECLARED_FOOD_PREFERENCES',
   DECLARED_FOOD_REJECTIONS: 'DECLARED_FOOD_REJECTIONS',
   FOOD_BUDGET_LEVEL: 'FOOD_BUDGET',
@@ -120,6 +122,8 @@ const TEMPLATE: Readonly<Record<CoachProfileAcquisitionField, string>> =
       'Existe alguma intolerância alimentar que você queira registrar? Se não houver, pode dizer que não.',
     ALLERGIES:
       'Você possui alguma alergia alimentar? Se não possuir, pode dizer que não.',
+    MEDICAL_CONDITIONS:
+      'Você possui alguma condição de saúde ou condição médica relevante que eu deva considerar? Se não possuir, pode dizer que não.',
     DECLARED_FOOD_PREFERENCES:
       'Quais alimentos você gostaria que aparecessem com mais frequência no seu plano?',
     DECLARED_FOOD_REJECTIONS:

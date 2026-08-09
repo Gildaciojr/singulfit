@@ -94,6 +94,7 @@ export interface CoachProfileFieldValueMap {
   readonly [CoachProfileAcquisitionField.EATING_PATTERN]: EatingPattern;
   readonly [CoachProfileAcquisitionField.FOOD_INTOLERANCES]: readonly string[];
   readonly [CoachProfileAcquisitionField.ALLERGIES]: readonly string[];
+  readonly [CoachProfileAcquisitionField.MEDICAL_CONDITIONS]: readonly string[];
   readonly [CoachProfileAcquisitionField.DECLARED_FOOD_PREFERENCES]: readonly string[];
   readonly [CoachProfileAcquisitionField.DECLARED_FOOD_REJECTIONS]: readonly string[];
   readonly [CoachProfileAcquisitionField.FOOD_BUDGET_LEVEL]: FoodBudgetLevel;

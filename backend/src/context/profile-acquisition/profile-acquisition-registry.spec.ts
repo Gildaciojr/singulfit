@@ -4,6 +4,7 @@ import {
 } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
+import type { ProfileAcquisitionDecision } from '../coach-adaptive-profile-collector.contract';
 import { CoachProfileFieldRegistryService } from './coach-profile-field-registry.service';
 import { ProfileAnswerRecognizerService } from './profile-answer-recognizer.service';
 import {
@@ -46,6 +47,23 @@ describe('Structured profile acquisition registry and recognition', () => {
       sensitivity: 'SENSITIVE',
     });
     expect(registry.get(CoachProfileAcquisitionField.ALLERGIES)).toMatchObject({
+      domain: 'NUTRITION',
+      valueType: CoachProfileValueType.TEXT_LIST,
+      priority: 'CRITICAL',
+      confirmationPolicy: 'ALWAYS_EXPLICIT',
+      inferencePolicy: 'PROHIBITED',
+      updatePolicy: 'EXPLICIT_ON_CONFLICT',
+      sensitivity: 'SENSITIVE',
+      consumers: [
+        'COACH_PROFILE_SNAPSHOT',
+        'ADAPTIVE_PROFILE_COLLECTOR',
+        'NUTRITION_PLANNING_V2',
+      ],
+      definitionVersion: 1,
+    });
+    expect(
+      registry.get(CoachProfileAcquisitionField.MEDICAL_CONDITIONS),
+    ).toMatchObject({
       domain: 'NUTRITION',
       valueType: CoachProfileValueType.TEXT_LIST,
       priority: 'CRITICAL',
@@ -134,6 +152,11 @@ describe('Structured profile acquisition registry and recognition', () => {
       ['LACTOSE'],
     ],
     [CoachProfileAcquisitionField.ALLERGIES, 'amendoim', ['amendoim']],
+    [
+      CoachProfileAcquisitionField.MEDICAL_CONDITIONS,
+      'Hipertensão',
+      ['Hipertensão'],
+    ],
   ])('recognizes %s deterministically from %s', (field, answer, expected) => {
     const first = recognizer.recognize(specification(field), answer);
     const second = recognizer.recognize(specification(field), answer);
@@ -203,6 +226,48 @@ describe('Structured profile acquisition registry and recognition', () => {
     expect(realizer.realize(question).text).toBe(
       'Você possui alguma alergia alimentar? Se não possuir, pode dizer que não.',
     );
+  });
+
+  it('bridges medical conditions and recognizes explicit absence without a sentinel', () => {
+    const decision: ProfileAcquisitionDecision = {
+      intent: 'DIET_PLAN_REQUEST',
+      shouldAsk: true,
+      selectedCandidate: {
+        field: 'MEDICAL_CONDITIONS',
+        domain: 'SAFETY',
+        importance: 'IMPORTANT',
+        state: 'READY_TO_ASK',
+        knowledgeStatus: 'REQUIRES_CONFIRMATION',
+        confirmationPolicy: 'EXPLICIT_CONFIRMATION_REQUIRED',
+        dependencies: [],
+        unmetDependencies: [],
+        blocksPlans: [],
+        reason: 'MISSING_CONTEXTUAL_FIELD',
+      },
+      orderedCandidates: [],
+      readiness: [],
+      reason: 'FIELD_SELECTED',
+    };
+    const bridgedQuestion = questions.fromDecision(decision);
+    const question = specification(
+      CoachProfileAcquisitionField.MEDICAL_CONDITIONS,
+    );
+    const result = recognizer.recognize(question, 'não');
+
+    expect(bridgedQuestion?.field).toBe(
+      CoachProfileAcquisitionField.MEDICAL_CONDITIONS,
+    );
+    expect(questions.toCollectorField(question.field)).toBe(
+      'MEDICAL_CONDITIONS',
+    );
+    expect(realizer.realize(question).text).toBe(
+      'Você possui alguma condição de saúde ou condição médica relevante que eu deva considerar? Se não possuir, pode dizer que não.',
+    );
+    expect(result).toMatchObject({
+      disposition: 'RECOGNIZED',
+      value: [],
+      confirmationRequired: true,
+    });
   });
 
   it('keeps acquisition OFF by default and resolves configured modes deterministically', async () => {

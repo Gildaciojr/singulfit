@@ -173,6 +173,9 @@ export class ProfileAnswerRecognizerService {
       case CoachProfileAcquisitionField.ALLERGIES:
         if (this.explicitNone(normalized)) return Object.freeze([]);
         return this.textList(original);
+      case CoachProfileAcquisitionField.MEDICAL_CONDITIONS:
+        if (this.explicitNone(normalized)) return Object.freeze([]);
+        return this.textList(original);
       case CoachProfileAcquisitionField.DECLARED_FOOD_PREFERENCES:
       case CoachProfileAcquisitionField.DECLARED_FOOD_REJECTIONS:
         return this.textList(original);

@@ -241,6 +241,17 @@ const FIELD_DEFINITIONS: CoachProfileFieldDefinitionMap = Object.freeze({
     sensitivity: 'SENSITIVE',
     consumers: [SNAPSHOT, COLLECTOR, NUTRITION],
   }),
+  [CoachProfileAcquisitionField.MEDICAL_CONDITIONS]: definition({
+    field: CoachProfileAcquisitionField.MEDICAL_CONDITIONS,
+    domain: 'NUTRITION',
+    valueType: CoachProfileValueType.TEXT_LIST,
+    priority: 'CRITICAL',
+    confirmationPolicy: 'ALWAYS_EXPLICIT',
+    inferencePolicy: 'PROHIBITED',
+    updatePolicy: 'EXPLICIT_ON_CONFLICT',
+    sensitivity: 'SENSITIVE',
+    consumers: [SNAPSHOT, COLLECTOR, NUTRITION],
+  }),
   [CoachProfileAcquisitionField.DECLARED_FOOD_PREFERENCES]: definition({
     field: CoachProfileAcquisitionField.DECLARED_FOOD_PREFERENCES,
     domain: 'NUTRITION',

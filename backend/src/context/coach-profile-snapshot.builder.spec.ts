@@ -660,6 +660,88 @@ describe('CoachProfileSnapshotBuilder', () => {
     });
   });
 
+  it.each([
+    {
+      case: 'A',
+      legacyConditions: [],
+      acquiredConditions: null,
+      expectedStatus: COACH_PROFILE_KNOWLEDGE_STATUS.REQUIRES_CONFIRMATION,
+      expectedDescriptions: [],
+    },
+    {
+      case: 'B',
+      legacyConditions: [],
+      acquiredConditions: [],
+      expectedStatus: COACH_PROFILE_KNOWLEDGE_STATUS.KNOWN,
+      expectedDescriptions: [],
+    },
+    {
+      case: 'C',
+      legacyConditions: [],
+      acquiredConditions: ['Hipertensão'],
+      expectedStatus: COACH_PROFILE_KNOWLEDGE_STATUS.KNOWN,
+      expectedDescriptions: ['Hipertensão'],
+    },
+    {
+      case: 'D',
+      legacyConditions: [{ description: 'Hipertensão' }],
+      acquiredConditions: [],
+      expectedStatus: COACH_PROFILE_KNOWLEDGE_STATUS.REQUIRES_CONFIRMATION,
+      expectedDescriptions: ['Hipertensão'],
+    },
+    {
+      case: 'E',
+      legacyConditions: [{ description: 'Hipertensão' }],
+      acquiredConditions: ['Hipertensão'],
+      expectedStatus: COACH_PROFILE_KNOWLEDGE_STATUS.KNOWN,
+      expectedDescriptions: ['Hipertensão'],
+    },
+    {
+      case: 'F',
+      legacyConditions: [{ description: 'Hipertensão' }],
+      acquiredConditions: ['Diabetes'],
+      expectedStatus: COACH_PROFILE_KNOWLEDGE_STATUS.REQUIRES_CONFIRMATION,
+      expectedDescriptions: ['Hipertensão', 'Diabetes'],
+    },
+  ])(
+    'merges legacy and acquired medical conditions conservatively ($case)',
+    async ({
+      legacyConditions,
+      acquiredConditions,
+      expectedStatus,
+      expectedDescriptions,
+    }) => {
+      const record = userRecord();
+      const test = await subject({
+        ...record,
+        nutritionProfile: {
+          ...record.nutritionProfile,
+          medicalConditions: legacyConditions,
+        },
+        coachProfileFieldValues:
+          acquiredConditions === null
+            ? []
+            : [
+                acquired({
+                  field: CoachProfileAcquisitionField.MEDICAL_CONDITIONS,
+                  valueType: CoachProfileValueType.TEXT_LIST,
+                  textListValue: acquiredConditions,
+                }),
+              ],
+      });
+
+      const snapshot = await test.builder.build('user-id', referenceDate);
+      const medicalConditions = snapshot.restrictions.medicalConditions;
+
+      expect(medicalConditions.status).toBe(expectedStatus);
+      expect(
+        'value' in medicalConditions
+          ? medicalConditions.value.map((condition) => condition.description)
+          : [],
+      ).toEqual(expectedDescriptions);
+    },
+  );
+
   it('is deterministic, deeply frozen and JSON serializable without Prisma values', async () => {
     const test = await subject();
     const first = await test.builder.build('user-id', referenceDate);

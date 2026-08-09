@@ -1,0 +1,2 @@
+ALTER TYPE "CoachProfileAcquisitionField"
+ADD VALUE IF NOT EXISTS 'MEDICAL_CONDITIONS';
