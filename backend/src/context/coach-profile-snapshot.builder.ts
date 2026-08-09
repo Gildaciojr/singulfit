@@ -339,29 +339,45 @@ export class CoachProfileSnapshotBuilder {
     );
     const ageYears = this.ageDatum(birthDate, referenceDate);
     const activationRestrictionsKnown = Array.isArray(activation?.restrictions);
+
+    const fitnessFoodRestrictions =
+      fitness?.foodRestrictions.map((restriction) =>
+        this.constraint(
+          restriction.description,
+          COACH_PROFILE_DATA_SOURCE.FITNESS_PROFILE,
+          restriction.type,
+        ),
+      ) ?? [];
+
+    const fitnessRestrictionsExplicitlyAbsent = fitnessFoodRestrictions.some(
+      (restriction) =>
+        this.isExplicitNoFoodRestriction(restriction.description),
+    );
+
     const nutritionFoodRestrictions = this.jsonConstraints(
       nutrition?.restrictions,
       COACH_PROFILE_DATA_SOURCE.NUTRITION_PROFILE,
     );
+
     const nutritionRestrictionsExplicitlyAbsent =
       nutritionFoodRestrictions.some((restriction) =>
         this.isExplicitNoFoodRestriction(restriction.description),
       );
+
     const profileFoodRestrictions = this.constraintsDatum(
       this.mergeConstraints([
-        ...(fitness?.foodRestrictions.map((restriction) =>
-          this.constraint(
-            restriction.description,
-            COACH_PROFILE_DATA_SOURCE.FITNESS_PROFILE,
-            restriction.type,
-          ),
-        ) ?? []),
+        ...fitnessFoodRestrictions.filter(
+          (restriction) =>
+            !this.isExplicitNoFoodRestriction(restriction.description),
+        ),
         ...nutritionFoodRestrictions.filter(
           (restriction) =>
             !this.isExplicitNoFoodRestriction(restriction.description),
         ),
       ]),
-      activationRestrictionsKnown || nutritionRestrictionsExplicitlyAbsent,
+      activationRestrictionsKnown ||
+        fitnessRestrictionsExplicitlyAbsent ||
+        nutritionRestrictionsExplicitlyAbsent,
       [
         ...(fitness ? [COACH_PROFILE_DATA_SOURCE.FITNESS_PROFILE] : []),
         ...(nutrition ? [COACH_PROFILE_DATA_SOURCE.NUTRITION_PROFILE] : []),
