@@ -14,6 +14,9 @@ import type { WorkoutKnowledgeResolverService } from '../workout-knowledge/worko
 import type { WorkoutReasoningEngineService } from '../workout-reasoning/workout-reasoning-engine.service';
 import type { NutritionV2PilotService } from './nutrition-v2-pilot.service';
 import type { PlanningExecutionRoutePolicyService } from './planning-execution-route-policy.service';
+import { FitnessGoal } from '@prisma/client';
+import type { PrismaService } from '../prisma/prisma.service';
+import { UserGoalEngineService } from './user-goal-engine.service';
 
 describe('CoachPlanningExecutionService', () => {
   it('builds the V2 input with the same snapshot and reference date without executing it', async () => {
@@ -386,5 +389,259 @@ describe('CoachPlanningExecutionService', () => {
     expect(result.content).toBe('somente V2');
     expect(result.selectedSource).toBe('NUTRITION_V2');
     expect(result.metadata.routeSelection).toBe(routeSelection);
+  });
+
+  it('persists a simple explicit goal only after route selection with operation fencing', async () => {
+    const unavailableDatum = Object.freeze({
+      status: 'UNKNOWN' as const,
+      sources: Object.freeze([]),
+    });
+    const snapshot = Object.freeze({
+      nutrition: Object.freeze({
+        primaryGoal: Object.freeze({
+          status: 'KNOWN' as const,
+          value: FitnessGoal.MAINTENANCE,
+          sources: Object.freeze([]),
+        }),
+        desiredOutcome: unavailableDatum,
+      }),
+      training: Object.freeze({
+        primaryGoal: Object.freeze({
+          status: 'KNOWN' as const,
+          value: FitnessGoal.MAINTENANCE,
+          sources: Object.freeze([]),
+        }),
+      }),
+      completion: Object.freeze({
+        overall: 'COMPLETE' as const,
+        sections: Object.freeze([]),
+      }),
+      longitudinal: Object.freeze({
+        latestProgressWeightKg: unavailableDatum,
+        goalProgression: unavailableDatum,
+        nutritionEvolution: unavailableDatum,
+      }),
+    }) as unknown as CoachProfileSnapshot;
+    const transaction = {
+      $queryRaw: jest.fn().mockResolvedValue([{ locked: true }]),
+      fitnessProfile: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      nutritionProfile: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      userGoalClassification: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        upsert: jest.fn().mockResolvedValue({ id: 'classification-id' }),
+      },
+    };
+    const prisma = {
+      $transaction: jest.fn(
+        async (callback: (client: typeof transaction) => Promise<unknown>) =>
+          callback(transaction),
+      ),
+    };
+    const snapshotBuilder = { build: jest.fn().mockResolvedValue(snapshot) };
+    const inputBuilder = { build: jest.fn().mockReturnValue(null) };
+    const decision = Object.freeze({
+      recognizedIntent: 'DIET_PLAN_REQUEST',
+      goal: 'GENERATE_DIET_PLAN',
+      reason: 'DIET_PROFILE_READY',
+      targetPlan: 'DIET',
+      profileCompletionState: 'COMPLETE',
+      canExecute: true,
+      confidence: 'HIGH',
+      selectedProfileField: null,
+      metPreconditions: Object.freeze([]),
+      missingPreconditions: Object.freeze([]),
+      pendingDependencies: Object.freeze([]),
+    }) satisfies ConversationGoalDecision;
+    const routeSelection = Object.freeze({
+      nutrition: 'LEGACY' as const,
+      workout: null,
+      reason: 'NUTRITION_PILOT_NOT_ELIGIBLE' as const,
+      nutritionPilotStatus: 'NOT_ALLOWLISTED' as const,
+      suppressNutritionShadow: false,
+    });
+    const routePolicy = { select: jest.fn().mockReturnValue(routeSelection) };
+    const dispatcher = {
+      dispatchStructured: jest.fn(
+        (input: { decision: ConversationGoalDecision | null }) =>
+          Promise.resolve(
+            input.decision?.goal === 'REQUEST_CONFIRMATION'
+              ? {
+                  content: 'confirme o objetivo',
+                  executor: 'UNKNOWN_LEGACY',
+                  generationCompleted: false,
+                  fallbackApplied: false,
+                }
+              : {
+                  content: 'ok',
+                  executor: 'DIET_LEGACY',
+                  generationCompleted: true,
+                  fallbackApplied: false,
+                },
+          ),
+      ),
+    };
+    const service = new CoachPlanningExecutionService(
+      dispatcher as unknown as CoachPlanningExecutionDispatcherService,
+      snapshotBuilder as unknown as CoachProfileSnapshotBuilder,
+      {
+        adapt: jest.fn().mockReturnValue({
+          recognizedIntent: 'DIET_PLAN_REQUEST',
+          planTarget: 'DIET',
+          acquisitionIntent: Object.freeze({}),
+        }),
+      } as unknown as LegacyCoachIntentAdapter,
+      {
+        decide: jest.fn().mockReturnValue(Object.freeze({})),
+      } as unknown as CoachAdaptiveProfileCollectorService,
+      {
+        plan: jest.fn().mockReturnValue(decision),
+      } as unknown as ConversationGoalPlannerService,
+      inputBuilder as unknown as GenerateNutritionPlanV2InputBuilder,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      routePolicy as unknown as PlanningExecutionRoutePolicyService,
+      new UserGoalEngineService(),
+      prisma as unknown as PrismaService,
+    );
+
+    await service.executeStructured('user-id', 'DIET', {
+      conversationId: 'conversation-id',
+      messageId: 'message-id',
+      correlationId: 'message-id',
+      currentMessage: 'Agora quero emagrecer. Monte uma dieta.',
+      referenceDate: new Date('2026-08-11T12:00:00.000Z'),
+    });
+
+    expect(transaction.fitnessProfile.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'user-id' },
+      data: { goal: FitnessGoal.WEIGHT_LOSS },
+    });
+    expect(transaction.nutritionProfile.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'user-id' },
+      data: { goal: FitnessGoal.WEIGHT_LOSS },
+    });
+    expect(transaction.userGoalClassification.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          evidence: expect.objectContaining({
+            operationKey: 'message-id',
+            primaryGoal: FitnessGoal.WEIGHT_LOSS,
+          }),
+        }),
+      }),
+    );
+    expect(snapshotBuilder.build.mock.invocationCallOrder[0]).toBeLessThan(
+      routePolicy.select.mock.invocationCallOrder[0],
+    );
+    expect(routePolicy.select.mock.invocationCallOrder[0]).toBeLessThan(
+      transaction.fitnessProfile.updateMany.mock.invocationCallOrder[0],
+    );
+    expect(inputBuilder.build).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshot: expect.objectContaining({
+          nutrition: expect.objectContaining({
+            desiredOutcome: expect.objectContaining({
+              value: 'emagrecimento',
+            }),
+            primaryGoal: expect.objectContaining({
+              value: FitnessGoal.WEIGHT_LOSS,
+            }),
+          }),
+        }),
+      }),
+    );
+
+    jest.clearAllMocks();
+    const ambiguous = await service.executeStructured('user-id', 'DIET', {
+      conversationId: 'conversation-id',
+      messageId: 'ambiguous-message-id',
+      correlationId: 'ambiguous-message-id',
+      currentMessage: 'Não sei se quero emagrecer ou ganhar massa.',
+      referenceDate: new Date('2026-08-11T13:00:00.000Z'),
+    });
+
+    expect(ambiguous.decision).toMatchObject({
+      goal: 'REQUEST_CONFIRMATION',
+      reason: 'CONFIRMATION_REQUIRED',
+      canExecute: false,
+    });
+    expect(ambiguous.dispatch.generationCompleted).toBe(false);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(transaction.fitnessProfile.updateMany).not.toHaveBeenCalled();
+    expect(transaction.nutritionProfile.updateMany).not.toHaveBeenCalled();
+
+    jest.clearAllMocks();
+    const composite = await service.executeStructured('user-id', 'DIET', {
+      conversationId: 'conversation-id',
+      messageId: 'composite-message-id',
+      correlationId: 'composite-message-id',
+      currentMessage: 'Quero perder gordura e ganhar massa muscular.',
+      referenceDate: new Date('2026-08-11T14:00:00.000Z'),
+    });
+
+    expect(composite.decision?.goal).toBe('REQUEST_CONFIRMATION');
+    expect(composite.dispatch.generationCompleted).toBe(false);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(inputBuilder.build).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshot: expect.objectContaining({
+          nutrition: expect.objectContaining({
+            primaryGoal: expect.objectContaining({
+              value: FitnessGoal.MAINTENANCE,
+            }),
+            desiredOutcome: expect.objectContaining({
+              status: 'REQUIRES_CONFIRMATION',
+              value: 'perder gordura e ganhar massa muscular',
+            }),
+          }),
+          training: expect.objectContaining({
+            primaryGoal: expect.objectContaining({
+              value: FitnessGoal.MAINTENANCE,
+            }),
+          }),
+        }),
+      }),
+    );
+
+    jest.clearAllMocks();
+    transaction.userGoalClassification.findUnique.mockResolvedValueOnce({
+      classifiedAt: new Date('2026-08-11T12:00:00.000Z'),
+      evidence: { operationKey: 'message-id' },
+    });
+    await service.executeStructured('user-id', 'DIET', {
+      conversationId: 'conversation-id',
+      messageId: 'message-id',
+      correlationId: 'message-id',
+      currentMessage: 'Agora quero emagrecer. Monte uma dieta.',
+      referenceDate: new Date('2026-08-11T12:00:00.000Z'),
+    });
+    expect(transaction.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(transaction.fitnessProfile.updateMany).not.toHaveBeenCalled();
+    expect(transaction.userGoalClassification.upsert).not.toHaveBeenCalled();
+
+    jest.clearAllMocks();
+    transaction.userGoalClassification.findUnique.mockResolvedValueOnce({
+      classifiedAt: new Date('2026-08-11T15:00:00.000Z'),
+      evidence: { operationKey: 'newer-message-id' },
+    });
+    const stale = await service.executeStructured('user-id', 'DIET', {
+      conversationId: 'conversation-id',
+      messageId: 'older-message-id',
+      correlationId: 'older-message-id',
+      currentMessage: 'Agora quero ganhar massa muscular. Monte uma dieta.',
+      referenceDate: new Date('2026-08-11T11:00:00.000Z'),
+    });
+    expect(stale.dispatch.generationCompleted).toBe(false);
+    expect(stale.content).toContain('atualização de objetivo mais recente');
+    expect(transaction.fitnessProfile.updateMany).not.toHaveBeenCalled();
+    expect(transaction.userGoalClassification.upsert).not.toHaveBeenCalled();
+    expect(dispatcher.dispatchStructured).not.toHaveBeenCalled();
   });
 });

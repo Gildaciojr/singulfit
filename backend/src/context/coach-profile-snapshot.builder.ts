@@ -39,6 +39,10 @@ import {
 import { CoachProfileAcquisitionProjectionService } from './profile-acquisition/coach-profile-acquisition-projection.service';
 import { CurrentNutritionPlanReaderService } from '../diet/current-nutrition-plan-reader.service';
 import type { CurrentNutritionPlan } from '../diet/current-nutrition-plan-reader.contract';
+import {
+  foodPreferenceEvidenceSource,
+  isSemanticFoodTerm,
+} from './food-preference-policy';
 
 const COACH_PROFILE_SNAPSHOT_USER_SELECT = {
   id: true,
@@ -133,6 +137,7 @@ const COACH_PROFILE_SNAPSHOT_USER_SELECT = {
       kind: true,
       confidence: true,
       occurrences: true,
+      evidence: true,
     },
     orderBy: [
       { observedAt: 'desc' as const },
@@ -955,14 +960,30 @@ export class CoachProfileSnapshotBuilder {
       return this.unknown();
     }
 
-    const preferences = user.foodPreferenceSnapshots.map((preference) =>
-      Object.freeze({
-        foodName: preference.foodName,
-        kind: preference.kind,
-        confidence: preference.confidence.toNumber(),
-        occurrences: preference.occurrences,
-      }),
-    );
+    const preferences = user.foodPreferenceSnapshots
+      .map((preference) => ({
+        preference,
+        evidenceSource: foodPreferenceEvidenceSource(preference.evidence),
+      }))
+      .filter(
+        ({ preference, evidenceSource }) =>
+          isSemanticFoodTerm(preference.foodName) &&
+          !(
+            preference.kind === 'ACCEPTED' &&
+            evidenceSource !== 'EXPLICIT_MESSAGE'
+          ),
+      )
+      .map(({ preference, evidenceSource }) =>
+        Object.freeze({
+          foodName: preference.foodName,
+          kind: preference.kind,
+          confidence: preference.confidence.toNumber(),
+          occurrences: preference.occurrences,
+          evidenceSource,
+        }),
+      );
+
+    if (preferences.length === 0) return this.unknown();
 
     return this.inferred(
       Object.freeze(preferences),

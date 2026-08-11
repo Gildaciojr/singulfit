@@ -13,6 +13,10 @@ import {
   type NutritionPlanningContextBuilderInput,
   type NutritionPlanningValue,
 } from './nutrition-planning-context.contract';
+import {
+  isSemanticFoodTerm,
+  normalizeFoodTerm,
+} from '../../context/food-preference-policy';
 
 @Injectable()
 export class NutritionPlanningContextBuilder {
@@ -46,6 +50,7 @@ export class NutritionPlanningContextBuilder {
         targetWeightKg: this.value(input.snapshot.physical.targetWeightKg),
         activityLevel: this.value(input.snapshot.physical.activityLevel),
         primaryGoal: this.value(input.snapshot.nutrition.primaryGoal),
+        desiredOutcome: this.value(input.snapshot.nutrition.desiredOutcome),
       }),
       routine: Object.freeze({
         desiredMealCount: this.value(input.snapshot.nutrition.desiredMealCount),
@@ -235,10 +240,18 @@ export class NutritionPlanningContextBuilder {
     input: NutritionPlanningContextBuilderInput,
   ): readonly NutritionFoodPreferenceFact[] {
     const datum = input.snapshot.preferences.foodPreferences;
-    const values: NutritionFoodPreferenceFact[] = [];
+    const inferred: NutritionFoodPreferenceFact[] = [];
     if ('value' in datum) {
-      values.push(
+      inferred.push(
         ...[...datum.value]
+          .filter(
+            (preference) =>
+              isSemanticFoodTerm(preference.foodName) &&
+              !(
+                preference.kind === FoodPreferenceKind.ACCEPTED &&
+                preference.evidenceSource !== 'EXPLICIT_MESSAGE'
+              ),
+          )
           .sort((left, right) => left.foodName.localeCompare(right.foodName))
           .map((preference) =>
             Object.freeze({
@@ -256,20 +269,36 @@ export class NutritionPlanningContextBuilder {
           ),
       );
     }
+    const unique = new Map<string, NutritionFoodPreferenceFact>();
+    for (const value of inferred) {
+      const key = normalizeFoodTerm(value.foodName);
+      const current = unique.get(key);
+      if (
+        !current ||
+        this.inferredPreferenceRank(value) >
+          this.inferredPreferenceRank(current)
+      ) {
+        unique.set(key, value);
+      }
+    }
     this.collectDeclaredPreferences(
-      values,
+      unique,
       input.snapshot.nutrition.declaredFoodPreferences,
       'PREFERRED',
     );
     this.collectDeclaredPreferences(
-      values,
+      unique,
       input.snapshot.nutrition.declaredFoodRejections,
       'REJECTED',
     );
-    const unique = new Map<string, NutritionFoodPreferenceFact>();
-    for (const value of values) {
-      unique.set(value.disposition + ':' + value.foodName.toLowerCase(), value);
-    }
+    this.collectSafetyPreferences(
+      unique,
+      input.snapshot.restrictions.foodRestrictions,
+    );
+    this.collectSafetyPreferences(
+      unique,
+      input.snapshot.restrictions.allergies,
+    );
     return Object.freeze(
       [...unique.values()].sort((left, right) =>
         left.foodName.localeCompare(right.foodName),
@@ -278,15 +307,16 @@ export class NutritionPlanningContextBuilder {
   }
 
   private collectDeclaredPreferences(
-    target: NutritionFoodPreferenceFact[],
+    target: Map<string, NutritionFoodPreferenceFact>,
     datum: CoachProfileDatum<readonly string[]> | undefined,
     disposition: NutritionFoodPreferenceFact['disposition'],
   ): void {
     if (!datum || !('value' in datum)) return;
     for (const foodName of datum.value) {
       const normalized = foodName.trim().slice(0, 120);
-      if (!normalized) continue;
-      target.push(
+      if (!isSemanticFoodTerm(normalized)) continue;
+      target.set(
+        normalizeFoodTerm(normalized),
         Object.freeze({
           foodName: normalized,
           disposition,
@@ -294,6 +324,32 @@ export class NutritionPlanningContextBuilder {
         }),
       );
     }
+  }
+
+  private collectSafetyPreferences(
+    target: Map<string, NutritionFoodPreferenceFact>,
+    datum: CoachProfileDatum<readonly CoachProfileConstraint[]>,
+  ): void {
+    if (!('value' in datum)) return;
+    for (const constraint of datum.value) {
+      const foodName = constraint.description.trim().slice(0, 120);
+      if (!isSemanticFoodTerm(foodName)) continue;
+      const key = normalizeFoodTerm(foodName);
+      target.set(
+        key,
+        Object.freeze({ foodName, disposition: 'AVOIDED', confidence: 1 }),
+      );
+    }
+  }
+
+  private inferredPreferenceRank(value: NutritionFoodPreferenceFact): number {
+    return value.disposition === 'AVOIDED'
+      ? 4
+      : value.disposition === 'REJECTED'
+        ? 3
+        : value.disposition === 'FREQUENT'
+          ? 2
+          : 1;
   }
 
   private factStatus(

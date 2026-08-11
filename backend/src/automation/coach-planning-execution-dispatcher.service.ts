@@ -77,12 +77,17 @@ export class CoachPlanningExecutionDispatcherService {
       case CONVERSATION_GOAL.UPDATE_DIET_PLAN:
       case CONVERSATION_GOAL.UPDATE_WORKOUT_PLAN:
       case CONVERSATION_GOAL.REVIEW_PROGRESS:
-      case CONVERSATION_GOAL.REQUEST_CONFIRMATION:
       case CONVERSATION_GOAL.SHOW_CURRENT_PLAN:
       case CONVERSATION_GOAL.SHOW_PLAN_STATUS:
       case CONVERSATION_GOAL.GENERAL_GUIDANCE:
       case CONVERSATION_GOAL.UNKNOWN:
         return this.executeLegacyIntent(input.userId, input.legacyIntent);
+      case CONVERSATION_GOAL.REQUEST_CONFIRMATION:
+        return this.result(
+          'Antes de gerar o plano, preciso confirmar seu objetivo atual. Você quer emagrecer, ganhar massa muscular ou manter seu estado atual?',
+          'UNKNOWN_LEGACY',
+          false,
+        );
     }
 
     return this.executeUnsupportedGoal(

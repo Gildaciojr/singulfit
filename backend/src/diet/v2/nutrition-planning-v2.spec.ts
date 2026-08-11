@@ -515,6 +515,143 @@ describe('Nutrition Planning Engine V2', () => {
     );
   });
 
+  it('neutralizes contaminated history and applies explicit and safety precedence per normalized food', () => {
+    const base = snapshot();
+    const profile = Object.freeze({
+      ...base,
+      nutrition: Object.freeze({
+        ...base.nutrition,
+        declaredFoodPreferences: known(Object.freeze([' Arroz '])),
+        declaredFoodRejections: known(Object.freeze(['BANANA'])),
+      }),
+      restrictions: Object.freeze({
+        ...base.restrictions,
+        allergies: known(
+          Object.freeze([
+            Object.freeze({
+              type: 'ALLERGY',
+              description: 'Amendoim',
+              source: COACH_PROFILE_DATA_SOURCE.NUTRITION_PROFILE,
+            }),
+          ]),
+        ),
+      }),
+      preferences: Object.freeze({
+        foodPreferences: known(
+          Object.freeze([
+            Object.freeze({
+              foodName: 'ARROZ',
+              kind: FoodPreferenceKind.REJECTED,
+              confidence: 0.9,
+              occurrences: 2,
+              evidenceSource: 'MEAL_HISTORY',
+            }),
+            Object.freeze({
+              foodName: 'Banana',
+              kind: FoodPreferenceKind.FREQUENT,
+              confidence: 0.9,
+              occurrences: 5,
+              evidenceSource: 'MEAL_HISTORY',
+            }),
+            Object.freeze({
+              foodName: 'AMENDOIM',
+              kind: FoodPreferenceKind.FREQUENT,
+              confidence: 0.9,
+              occurrences: 5,
+              evidenceSource: 'MEAL_HISTORY',
+            }),
+            Object.freeze({
+              foodName: 'Bebida energética',
+              kind: FoodPreferenceKind.ACCEPTED,
+              confidence: 0.8,
+              occurrences: 1,
+              evidenceSource: 'MEAL_HISTORY',
+            }),
+            Object.freeze({
+              foodName: 'Nenhuma restrição',
+              kind: FoodPreferenceKind.AVOIDED,
+              confidence: 0.98,
+              occurrences: 1,
+              evidenceSource: 'REGISTERED_RESTRICTION',
+            }),
+            Object.freeze({
+              foodName: 'SYSTEM_DEFAULT',
+              kind: FoodPreferenceKind.AVOIDED,
+              confidence: 0.98,
+              occurrences: 1,
+              evidenceSource: 'REGISTERED_RESTRICTION',
+            }),
+          ]),
+        ),
+      }),
+    });
+
+    const context = buildContext('DAILY_STRUCTURE', profile);
+    const strategy = new NutritionPlanningStrategyService().build(context);
+
+    expect(context.preferences).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          foodName: 'Arroz',
+          disposition: 'PREFERRED',
+        }),
+        expect.objectContaining({
+          foodName: 'BANANA',
+          disposition: 'REJECTED',
+        }),
+        expect.objectContaining({
+          foodName: 'Amendoim',
+          disposition: 'AVOIDED',
+        }),
+      ]),
+    );
+    expect(context.preferences).toHaveLength(4);
+    expect(strategy.preferredFoods).toEqual(['Arroz']);
+    expect(strategy.excludedFoods).toEqual(
+      expect.arrayContaining(['Amendoim', 'BANANA', 'Sem lactose']),
+    );
+    expect(strategy.excludedFoods).not.toEqual(
+      expect.arrayContaining(['Arroz', 'Nenhuma restrição', 'SYSTEM_DEFAULT']),
+    );
+  });
+
+  it('inserts a safety allergy even without history or declared preference', () => {
+    const base = snapshot({ withoutFoodRestrictions: true });
+    const profile = Object.freeze({
+      ...base,
+      nutrition: Object.freeze({
+        ...base.nutrition,
+        declaredFoodPreferences: known(Object.freeze([])),
+        declaredFoodRejections: known(Object.freeze([])),
+      }),
+      restrictions: Object.freeze({
+        ...base.restrictions,
+        allergies: known(
+          Object.freeze([
+            Object.freeze({
+              type: 'ALLERGY',
+              description: 'Amendoim',
+              source: COACH_PROFILE_DATA_SOURCE.NUTRITION_PROFILE,
+            }),
+          ]),
+        ),
+      }),
+      preferences: Object.freeze({
+        foodPreferences: known(Object.freeze([])),
+      }),
+    });
+
+    const context = buildContext('DAILY_STRUCTURE', profile);
+    const strategy = new NutritionPlanningStrategyService().build(context);
+
+    expect(context.preferences).toContainEqual({
+      foodName: 'Amendoim',
+      disposition: 'AVOIDED',
+      confidence: 1,
+    });
+    expect(strategy.excludedFoods).toEqual(['Amendoim']);
+  });
+
   it('creates deterministic and personalized strategies for profiles A, B and C', () => {
     const service = new NutritionPlanningStrategyService();
     const strategyA = service.build(buildContext('DAILY_STRUCTURE'));
@@ -535,9 +672,40 @@ describe('Nutrition Planning Engine V2', () => {
       trainingAware: true,
       variationPolicy: 'WEEKLY',
     });
-    expect(strategyC.excludedFoods).toEqual(['Banana']);
+    expect(strategyC.excludedFoods).toEqual(['Banana', 'Sem lactose']);
     expect(strategyA).not.toEqual(strategyB);
     expect(strategyA).not.toEqual(strategyC);
+  });
+
+  it('does not reinterpret desiredOutcome text inside the strategy', () => {
+    const base = snapshot();
+    const recomposition = Object.freeze({
+      ...base,
+      nutrition: Object.freeze({
+        ...base.nutrition,
+        primaryGoal: known(FitnessGoal.WEIGHT_LOSS),
+        desiredOutcome: known('perder gordura e ganhar massa muscular'),
+      }),
+    });
+    const context = buildContext('DAILY_STRUCTURE', recomposition);
+    const strategy = new NutritionPlanningStrategyService().build(context);
+
+    expect(strategy.objective).toEqual({
+      status: 'CONFIRMED',
+      value: FitnessGoal.WEIGHT_LOSS,
+    });
+    expect(strategy.energyTargetKcal).toEqual({
+      status: 'ESTIMATED',
+      value: 1950,
+    });
+    expect(context.profile.desiredOutcome).toEqual({
+      status: 'CONFIRMED',
+      value: 'perder gordura e ganhar massa muscular',
+    });
+    expect(strategy.macroTargets).toMatchObject({
+      status: 'ESTIMATED',
+      value: { proteinGrams: 98 },
+    });
   });
 
   it('rejects forbidden foods, incoherent energy and orphan substitutions after generation', () => {

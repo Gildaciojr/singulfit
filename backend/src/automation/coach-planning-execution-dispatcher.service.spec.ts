@@ -18,7 +18,6 @@ describe('CoachPlanningExecutionDispatcherService', () => {
     CONVERSATION_GOAL.UPDATE_DIET_PLAN,
     CONVERSATION_GOAL.UPDATE_WORKOUT_PLAN,
     CONVERSATION_GOAL.REVIEW_PROGRESS,
-    CONVERSATION_GOAL.REQUEST_CONFIRMATION,
     CONVERSATION_GOAL.SHOW_CURRENT_PLAN,
     CONVERSATION_GOAL.SHOW_PLAN_STATUS,
     CONVERSATION_GOAL.GENERAL_GUIDANCE,
@@ -203,6 +202,24 @@ describe('CoachPlanningExecutionDispatcherService', () => {
       expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
     },
   );
+
+  it('requests confirmation without invoking a goal-dependent generator', async () => {
+    const subject = createSubject();
+
+    const result = await subject.dispatcher.dispatchStructured({
+      userId: 'user-id',
+      legacyIntent: 'DIET',
+      decision: decision(CONVERSATION_GOAL.REQUEST_CONFIRMATION),
+    });
+
+    expect(result).toMatchObject({
+      executor: 'UNKNOWN_LEGACY',
+      generationCompleted: false,
+    });
+    expect(result.content).toContain('confirmar seu objetivo atual');
+    expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+  });
 
   it('falls back to the combined legacy execution when no planner decision is available', async () => {
     const subject = createSubject();

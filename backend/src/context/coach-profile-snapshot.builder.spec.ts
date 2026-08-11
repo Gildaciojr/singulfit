@@ -105,6 +105,7 @@ describe('CoachProfileSnapshotBuilder', () => {
           kind: FoodPreferenceKind.FREQUENT,
           confidence: new Prisma.Decimal('0.9100'),
           occurrences: 8,
+          evidence: { source: 'MEAL_HISTORY' },
         },
       ],
       nutritionEvolution: [
@@ -242,6 +243,47 @@ describe('CoachProfileSnapshotBuilder', () => {
     expect(snapshot.completion.overall).toBe(
       COACH_PROFILE_COMPLETION_STATE.PARTIAL,
     );
+  });
+
+  it('filters legacy isolated observations and structural values before exposing preferences', async () => {
+    const user = userRecord();
+    user.foodPreferenceSnapshots = [
+      {
+        foodName: 'Bebida energética',
+        kind: FoodPreferenceKind.ACCEPTED,
+        confidence: new Prisma.Decimal('0.8000'),
+        occurrences: 1,
+        evidence: { source: 'MEAL_HISTORY' },
+      },
+      {
+        foodName: 'Nenhuma restrição',
+        kind: FoodPreferenceKind.AVOIDED,
+        confidence: new Prisma.Decimal('0.9800'),
+        occurrences: 1,
+        evidence: { source: 'REGISTERED_RESTRICTION' },
+      },
+      {
+        foodName: 'Frango',
+        kind: FoodPreferenceKind.FREQUENT,
+        confidence: new Prisma.Decimal('0.9200'),
+        occurrences: 4,
+        evidence: { source: 'MEAL_HISTORY' },
+      },
+    ];
+    const test = await subject(user);
+
+    const snapshot = await test.builder.build('user-id', referenceDate);
+
+    expect(snapshot.preferences.foodPreferences).toMatchObject({
+      status: COACH_PROFILE_KNOWLEDGE_STATUS.INFERRED,
+      value: [
+        {
+          foodName: 'Frango',
+          kind: FoodPreferenceKind.FREQUENT,
+          evidenceSource: 'MEAL_HISTORY',
+        },
+      ],
+    });
   });
 
   it('keeps unavailable training fields explicitly unknown instead of inventing them', async () => {

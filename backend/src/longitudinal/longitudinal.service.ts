@@ -14,6 +14,11 @@ import {
 import { EventService } from '../observability/event.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  foodPreferenceEvidenceSource,
+  isSemanticFoodTerm,
+  normalizeFoodTerm,
+} from '../context/food-preference-policy';
+import {
   LongitudinalMealSignal,
   LongitudinalResponseContext,
 } from './interfaces/longitudinal.interface';
@@ -489,6 +494,14 @@ export class LongitudinalService {
     const latestPreferences = new Map<string, (typeof preferences)[number]>();
 
     for (const preference of preferences) {
+      if (
+        !isSemanticFoodTerm(preference.foodName) ||
+        (preference.kind === FoodPreferenceKind.ACCEPTED &&
+          foodPreferenceEvidenceSource(preference.evidence) !==
+            'EXPLICIT_MESSAGE')
+      ) {
+        continue;
+      }
       if (!latestPreferences.has(preference.normalizedFood)) {
         latestPreferences.set(preference.normalizedFood, preference);
       }
@@ -565,7 +578,8 @@ export class LongitudinalService {
 
     for (const meal of history) {
       for (const item of meal.mealAnalysis.items) {
-        const normalizedFood = this.normalize(item.foodName);
+        if (!isSemanticFoodTerm(item.foodName)) continue;
+        const normalizedFood = normalizeFoodTerm(item.foodName);
         const current = counts.get(normalizedFood);
         counts.set(normalizedFood, {
           foodName: current?.foodName ?? item.foodName.trim(),
@@ -582,29 +596,29 @@ export class LongitudinalService {
       confidence: number;
       occurrences: number;
       evidence: Prisma.InputJsonObject;
-    }> = [...counts.entries()].map(([normalizedFood, item]) => ({
-      foodName: item.foodName,
-      normalizedFood,
-      kind:
-        item.count >= 3
-          ? FoodPreferenceKind.FREQUENT
-          : FoodPreferenceKind.ACCEPTED,
-      confidence: Math.min(0.99, 0.55 + item.count / totalMeals),
-      occurrences: item.count,
-      evidence: {
-        source: 'MEAL_HISTORY',
-        historyMeals: history.length,
-      } as Prisma.InputJsonObject,
-    }));
+    }> = [...counts.entries()]
+      .filter(([, item]) => item.count >= 3)
+      .map(([normalizedFood, item]) => ({
+        foodName: item.foodName,
+        normalizedFood,
+        kind: FoodPreferenceKind.FREQUENT,
+        confidence: Math.min(0.99, 0.55 + item.count / totalMeals),
+        occurrences: item.count,
+        evidence: {
+          source: 'MEAL_HISTORY',
+          historyMeals: history.length,
+        } as Prisma.InputJsonObject,
+      }));
     const explicit = [
       ...this.preferenceTerms(restrictions),
       ...this.preferenceTerms(allergies),
     ];
 
     for (const term of explicit) {
+      if (!isSemanticFoodTerm(term)) continue;
       preferences.push({
         foodName: term,
-        normalizedFood: this.normalize(term),
+        normalizedFood: normalizeFoodTerm(term),
         kind: FoodPreferenceKind.AVOIDED,
         confidence: 0.98,
         occurrences: 1,
@@ -616,9 +630,10 @@ export class LongitudinalService {
 
     for (const message of messages) {
       for (const rejected of this.rejectedFoods(message.content)) {
+        if (!isSemanticFoodTerm(rejected)) continue;
         preferences.push({
           foodName: rejected,
-          normalizedFood: this.normalize(rejected),
+          normalizedFood: normalizeFoodTerm(rejected),
           kind: FoodPreferenceKind.REJECTED,
           confidence: 0.92,
           occurrences: 1,
@@ -633,10 +648,16 @@ export class LongitudinalService {
     const unique = new Map<string, (typeof preferences)[number]>();
 
     for (const preference of preferences) {
-      const key = `${preference.normalizedFood}:${preference.kind}`;
+      const key = preference.normalizedFood;
       const current = unique.get(key);
 
-      if (!current || current.confidence < preference.confidence) {
+      if (
+        !current ||
+        this.foodPreferencePriority(preference.kind) >
+          this.foodPreferencePriority(current.kind) ||
+        (preference.kind === current.kind &&
+          current.confidence < preference.confidence)
+      ) {
         unique.set(key, preference);
       }
     }
@@ -1052,7 +1073,7 @@ export class LongitudinalService {
         }
 
         if (this.isRecord(item)) {
-          return [item.description, item.type].filter(
+          return [item.description].filter(
             (entry): entry is string => typeof entry === 'string',
           );
         }
@@ -1074,6 +1095,16 @@ export class LongitudinalService {
     return matches
       .map((match) => match[1]?.trim())
       .filter((item): item is string => Boolean(item));
+  }
+
+  private foodPreferencePriority(kind: FoodPreferenceKind): number {
+    return kind === FoodPreferenceKind.AVOIDED
+      ? 4
+      : kind === FoodPreferenceKind.REJECTED
+        ? 3
+        : kind === FoodPreferenceKind.FREQUENT
+          ? 2
+          : 1;
   }
 
   private numericRecord(value: unknown): Record<string, number> {

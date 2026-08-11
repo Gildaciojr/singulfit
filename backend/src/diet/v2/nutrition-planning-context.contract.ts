@@ -94,6 +94,7 @@ export interface NutritionPlanningContext {
     readonly targetWeightKg: NutritionPlanningValue<number>;
     readonly activityLevel: NutritionPlanningValue<ActivityLevel>;
     readonly primaryGoal: NutritionPlanningValue<FitnessGoal>;
+    readonly desiredOutcome: NutritionPlanningValue<string>;
   };
   readonly routine: {
     readonly desiredMealCount: NutritionPlanningValue<number>;

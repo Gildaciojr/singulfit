@@ -76,6 +76,51 @@ describe('LongitudinalService', () => {
     );
   });
 
+  it('does not promote isolated consumption or structural absence labels to food preferences', () => {
+    const subject = service();
+    const history = [
+      {
+        calculatedAt: new Date('2026-06-10T12:00:00.000Z'),
+        score: 75,
+        goalAdherenceScore: 75,
+        proteinScore: 80,
+        sugarScore: 70,
+        ultraProcessedScore: 85,
+        mealAnalysis: {
+          hydrationMl: new Prisma.Decimal('300'),
+          vegetableGrams: new Prisma.Decimal('100'),
+          totalProtein: new Prisma.Decimal('30'),
+          totalSugar: new Prisma.Decimal('8'),
+          ultraProcessedRatio: new Prisma.Decimal('0.1'),
+          items: [
+            {
+              foodName: 'Bebida energética',
+              isUltraProcessed: true,
+              isVegetable: false,
+            },
+          ],
+        },
+      },
+    ];
+
+    const preferences = subject.foodPreferences(
+      history,
+      [],
+      [
+        { type: 'ONBOARDING', description: 'Nenhuma restrição' },
+        { type: 'ALLERGY', description: 'Amendoim' },
+      ],
+      [],
+    );
+
+    expect(preferences).toEqual([
+      expect.objectContaining({
+        normalizedFood: 'amendoim',
+        kind: FoodPreferenceKind.AVOIDED,
+      }),
+    ]);
+  });
+
   it('turns accepted, ignored and rejected recommendations into future modifiers', () => {
     const subject = service();
     const feedback = subject.recommendationFeedback([

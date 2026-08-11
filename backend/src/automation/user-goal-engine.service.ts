@@ -14,8 +14,101 @@ export interface UserGoalResult {
   evidence: Prisma.InputJsonObject;
 }
 
+export type CurrentGoalResolution =
+  | Readonly<{ status: 'NO_CHANGE'; reason: string }>
+  | Readonly<{
+      status: 'REQUIRES_CONFIRMATION';
+      reason: string;
+      composite: boolean;
+      declaredOutcome: string | null;
+    }>
+  | Readonly<{
+      status: 'RESOLVED';
+      reason: 'EXPLICIT_CURRENT_GOAL';
+      primaryGoal: FitnessGoal;
+      classificationGoal: UserGoalType;
+      confidence: number;
+      declaredOutcome: string;
+    }>;
+
 @Injectable()
 export class UserGoalEngineService {
+  resolveCurrentMessage(message: string | undefined): CurrentGoalResolution {
+    if (!message?.trim()) {
+      return Object.freeze({ status: 'NO_CHANGE', reason: 'NO_MESSAGE' });
+    }
+    const text = this.normalize(message);
+    if (this.isUncertain(text)) {
+      return Object.freeze({
+        status: 'REQUIRES_CONFIRMATION',
+        reason: 'AMBIGUOUS_CURRENT_GOAL',
+        composite: false,
+        declaredOutcome: null,
+      });
+    }
+    if (this.isThirdParty(text)) {
+      return Object.freeze({ status: 'NO_CHANGE', reason: 'THIRD_PARTY_GOAL' });
+    }
+    if (this.isHistorical(text)) {
+      return Object.freeze({ status: 'NO_CHANGE', reason: 'HISTORICAL_GOAL' });
+    }
+    if (this.isNegated(text)) {
+      return Object.freeze({
+        status: 'REQUIRES_CONFIRMATION',
+        reason: 'NEGATED_GOAL',
+        composite: false,
+        declaredOutcome: null,
+      });
+    }
+    if (!this.hasExplicitCurrentIntent(text)) {
+      return Object.freeze({ status: 'NO_CHANGE', reason: 'NOT_EXPLICIT' });
+    }
+
+    const weightLoss = this.hasWeightLossGoal(text);
+    const muscleGain = this.hasMuscleGainGoal(text);
+    const maintenance = this.hasMaintenanceGoal(text);
+    const signalCount =
+      Number(weightLoss) + Number(muscleGain) + Number(maintenance);
+    if (signalCount === 0) {
+      return Object.freeze({ status: 'NO_CHANGE', reason: 'NO_GOAL_SIGNAL' });
+    }
+    if (maintenance && signalCount > 1) {
+      return Object.freeze({
+        status: 'REQUIRES_CONFIRMATION',
+        reason: 'CONFLICTING_CURRENT_GOALS',
+        composite: false,
+        declaredOutcome: null,
+      });
+    }
+    if (weightLoss && muscleGain) {
+      return Object.freeze({
+        status: 'REQUIRES_CONFIRMATION',
+        reason: 'COMPOSITE_GOAL_UNSUPPORTED',
+        composite: true,
+        declaredOutcome: 'perder gordura e ganhar massa muscular',
+      });
+    }
+    if (weightLoss) {
+      return this.resolved(
+        FitnessGoal.WEIGHT_LOSS,
+        UserGoalType.WEIGHT_LOSS,
+        'emagrecimento',
+      );
+    }
+    if (muscleGain) {
+      return this.resolved(
+        FitnessGoal.MUSCLE_GAIN,
+        UserGoalType.HYPERTROPHY,
+        'ganho de massa muscular',
+      );
+    }
+    return this.resolved(
+      FitnessGoal.MAINTENANCE,
+      UserGoalType.MAINTENANCE,
+      'manutenção',
+    );
+  }
+
   classify(input: UserGoalInput): UserGoalResult {
     const profileGoals = [
       input.fitnessGoal,
@@ -122,6 +215,90 @@ export class UserGoalEngineService {
     return terms.reduce(
       (count, term) => count + (value.includes(term) ? 1 : 0),
       0,
+    );
+  }
+
+  private resolved(
+    primaryGoal: FitnessGoal,
+    classificationGoal: UserGoalType,
+    declaredOutcome: string,
+  ): CurrentGoalResolution {
+    return Object.freeze({
+      status: 'RESOLVED',
+      reason: 'EXPLICIT_CURRENT_GOAL',
+      primaryGoal,
+      classificationGoal,
+      confidence: 0.98,
+      declaredOutcome,
+    });
+  }
+
+  private normalize(value: string): string {
+    return value
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .toLocaleLowerCase('pt-BR')
+      .replace(/[^a-z0-9 ]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private hasExplicitCurrentIntent(value: string): boolean {
+    return /\b(?:agora\s+)?(?:eu\s+)?(?:quero|pretendo|busco|decidi|meu objetivo (?:e|mudou(?: agora)?(?: para)?))\b/u.test(
+      value,
+    );
+  }
+
+  private isUncertain(value: string): boolean {
+    return /\b(?:nao sei se|talvez|estou em duvida|tenho duvida|ainda nao decidi|ou talvez)\b/u.test(
+      value,
+    );
+  }
+
+  private isThirdParty(value: string): boolean {
+    const thirdParty =
+      /\b(?:minha|meu)\s+(?:esposa|marido|parceir[oa]|mae|pai|filh[oa]|irma[oa]|amig[oa])\b/u.test(
+        value,
+      );
+    const firstPerson =
+      /\b(?:eu|meu objetivo)\s+(?:quero|pretendo|busco|decidi|mudou)\b/u.test(
+        value,
+      );
+    return thirdParty && !firstPerson;
+  }
+
+  private isHistorical(value: string): boolean {
+    const past =
+      /\b(?:ano passado|antigamente|antes eu|eu estava|estava tentando|ja tentei)\b/u.test(
+        value,
+      );
+    const current = /\b(?:agora|atualmente|meu objetivo mudou|decidi)\b/u.test(
+      value,
+    );
+    return past && !current;
+  }
+
+  private isNegated(value: string): boolean {
+    return /\b(?:nao quero|nao pretendo|nao busco)\s+(?:emagrecer|perder|ganhar|aumentar|manter)\b/u.test(
+      value,
+    );
+  }
+
+  private hasWeightLossGoal(value: string): boolean {
+    return /\b(?:emagrecer|perder (?:peso|gordura)|reduzir (?:peso|gordura|percentual de gordura))\b/u.test(
+      value,
+    );
+  }
+
+  private hasMuscleGainGoal(value: string): boolean {
+    return /\b(?:(?:ganhar|aumentar) (?:massa muscular|musculos?)|ganho de massa muscular|hipertrofia)\b/u.test(
+      value,
+    );
+  }
+
+  private hasMaintenanceGoal(value: string): boolean {
+    return /\b(?:manutencao|manter (?:meu )?(?:peso|forma|estado atual))\b/u.test(
+      value,
     );
   }
 }

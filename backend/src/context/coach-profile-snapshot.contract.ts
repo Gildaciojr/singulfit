@@ -86,6 +86,7 @@ export interface CoachProfileFoodPreference {
   readonly kind: FoodPreferenceKind;
   readonly confidence: number;
   readonly occurrences: number;
+  readonly evidenceSource?: string | null;
 }
 
 export interface CoachProfileIdentity {
