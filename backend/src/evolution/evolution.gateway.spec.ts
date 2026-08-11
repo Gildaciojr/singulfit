@@ -1,6 +1,6 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { EvolutionGateway } from './evolution.gateway';
+import { EvolutionGateway, EvolutionSendError } from './evolution.gateway';
 
 describe('EvolutionGateway', () => {
   afterEach(() => {
@@ -108,4 +108,80 @@ describe('EvolutionGateway', () => {
       }),
     );
   });
+
+  it('classifies a structured nonexistent destination as permanent', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          response: {
+            message: [
+              {
+                number: '5511999999999',
+                exists: false,
+              },
+            ],
+          },
+        }),
+        {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+    const gateway = createGateway();
+
+    const send = gateway.sendText({
+      number: '+5511999999999',
+      text: 'Mensagem',
+    });
+
+    await expect(send).rejects.toMatchObject({
+      retryable: false,
+      providerStatus: 400,
+    });
+    await expect(send).rejects.toBeInstanceOf(EvolutionSendError);
+  });
+
+  it('classifies provider unavailability as retryable', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ message: 'temporarily unavailable' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    const gateway = createGateway();
+
+    await expect(
+      gateway.sendText({
+        number: '+5511999999999',
+        text: 'Mensagem',
+      }),
+    ).rejects.toMatchObject({
+      retryable: true,
+      providerStatus: 503,
+    });
+  });
+
+  it.each([401, 403])(
+    'classifies provider authentication status %s as retryable',
+    async (status) => {
+      jest.spyOn(global, 'fetch').mockResolvedValue(
+        new Response(JSON.stringify({ message: 'authentication failed' }), {
+          status,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+      const gateway = createGateway();
+
+      await expect(
+        gateway.sendText({
+          number: '+5511999999999',
+          text: 'Mensagem',
+        }),
+      ).rejects.toMatchObject({
+        retryable: true,
+        providerStatus: status,
+      });
+    },
+  );
 });

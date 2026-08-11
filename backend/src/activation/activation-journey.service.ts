@@ -6,13 +6,20 @@ import {
   Prisma,
   Severity,
   SubscriptionStatus,
+  UserRole,
 } from '@prisma/client';
-import { EvolutionGateway } from '../evolution/evolution.gateway';
+import {
+  EvolutionGateway,
+  isRetryableEvolutionSendError,
+} from '../evolution/evolution.gateway';
 import { EventService } from '../observability/event.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConversationsService } from '../whatsapp/conversations.service';
 import {
   ACTIVATION_FLOW_DAYS,
+  ACTIVATION_DELIVERY_MAX_ATTEMPTS,
+  ACTIVATION_DELIVERY_RETRY_BASE_MS,
+  ACTIVATION_DELIVERY_RETRY_MAX_MS,
   ACTIVATION_RECOVERY_HOURS,
   ACTIVATION_SOURCE,
   ACTIVATION_SYSTEM_EVENT,
@@ -44,6 +51,7 @@ export class ActivationJourneyService {
     const users = await this.prisma.user.findMany({
       where: {
         isActive: true,
+        role: UserRole.USER,
         OR: [
           { activation: null },
           {
@@ -196,7 +204,14 @@ export class ActivationJourneyService {
 
     const d0 = await this.prisma.activationEvent.findUnique({
       where: { idempotencyKey: `${activation.id}:flow:D0` },
-      select: { deliveryStatus: true, leaseExpiresAt: true },
+      select: {
+        deliveryStatus: true,
+        leaseExpiresAt: true,
+        attempts: true,
+        failedAt: true,
+        metadata: true,
+        updatedAt: true,
+      },
     });
 
     if (this.isDeliverableFlowEvent(d0, at)) {
@@ -217,7 +232,14 @@ export class ActivationJourneyService {
     for (const day of due) {
       const existing = await this.prisma.activationEvent.findUnique({
         where: { idempotencyKey: `${activation.id}:flow:D${day}` },
-        select: { deliveryStatus: true, leaseExpiresAt: true },
+        select: {
+          deliveryStatus: true,
+          leaseExpiresAt: true,
+          attempts: true,
+          failedAt: true,
+          metadata: true,
+          updatedAt: true,
+        },
       });
 
       if (this.isDeliverableFlowEvent(existing, at)) {
@@ -232,13 +254,20 @@ export class ActivationJourneyService {
     event: {
       deliveryStatus: ActivationDeliveryStatus | null;
       leaseExpiresAt: Date | null;
+      attempts: number;
+      failedAt: Date | null;
+      metadata: Prisma.JsonValue;
+      updatedAt: Date;
     } | null,
     at: Date,
   ): boolean {
     return (
       !event ||
-      event.deliveryStatus === ActivationDeliveryStatus.FAILED ||
-      event.deliveryStatus === ActivationDeliveryStatus.PENDING ||
+      (event.deliveryStatus === ActivationDeliveryStatus.FAILED &&
+        !this.isTerminalDeliveryEvent(event) &&
+        this.isRetryDue(event, at)) ||
+      (event.deliveryStatus === ActivationDeliveryStatus.PENDING &&
+        event.attempts < ACTIVATION_DELIVERY_MAX_ATTEMPTS) ||
       (event.deliveryStatus === ActivationDeliveryStatus.SENDING &&
         (!event.leaseExpiresAt || event.leaseExpiresAt <= at))
     );
@@ -265,13 +294,23 @@ export class ActivationJourneyService {
       const idempotencyKey = `${activation.id}:recovery:${activation.currentStage}:${activation.lastProgressAt.getTime()}:${hours}`;
       const existing = await this.prisma.activationEvent.findUnique({
         where: { idempotencyKey },
-        select: { deliveryStatus: true, leaseExpiresAt: true },
+        select: {
+          deliveryStatus: true,
+          leaseExpiresAt: true,
+          attempts: true,
+          failedAt: true,
+          metadata: true,
+          updatedAt: true,
+        },
       });
 
       if (
         !existing ||
-        existing.deliveryStatus === ActivationDeliveryStatus.FAILED ||
-        existing.deliveryStatus === ActivationDeliveryStatus.PENDING ||
+        (existing.deliveryStatus === ActivationDeliveryStatus.FAILED &&
+          !this.isTerminalDeliveryEvent(existing) &&
+          this.isRetryDue(existing, at)) ||
+        (existing.deliveryStatus === ActivationDeliveryStatus.PENDING &&
+          existing.attempts < ACTIVATION_DELIVERY_MAX_ATTEMPTS) ||
         (existing.deliveryStatus === ActivationDeliveryStatus.SENDING &&
           (!existing.leaseExpiresAt || existing.leaseExpiresAt <= at))
       ) {
@@ -340,6 +379,8 @@ export class ActivationJourneyService {
         where: {
           id: event.id,
           deliveryStatus: ActivationDeliveryStatus.SENDING,
+          attempts: claimed.attempts,
+          leaseExpiresAt: claimed.leaseExpiresAt,
         },
         data: deliveryData,
       });
@@ -368,18 +409,48 @@ export class ActivationJourneyService {
         });
       }
     } catch (error: unknown) {
-      await this.prisma.activationEvent.updateMany({
+      const retryable = isRetryableEvolutionSendError(error);
+      const exhausted = claimed.attempts >= ACTIVATION_DELIVERY_MAX_ATTEMPTS;
+      const terminal = !retryable || exhausted;
+      const failedAt = new Date();
+      const persisted = await this.prisma.activationEvent.updateMany({
         where: {
           id: event.id,
           deliveryStatus: ActivationDeliveryStatus.SENDING,
+          attempts: claimed.attempts,
+          leaseExpiresAt: claimed.leaseExpiresAt,
         },
         data: {
           deliveryStatus: ActivationDeliveryStatus.FAILED,
-          failedAt: new Date(),
+          failedAt,
           leaseExpiresAt: null,
           errorMessage: this.safeError(error),
+          ...(terminal
+            ? {
+                metadata: {
+                  ...message.metadata,
+                  deliveryFailure: {
+                    terminal: true,
+                    retryable,
+                    reason: retryable ? 'RETRY_EXHAUSTED' : 'PERMANENT_FAILURE',
+                  },
+                } satisfies Prisma.InputJsonObject,
+              }
+            : {}),
         },
       });
+
+      if (persisted.count === 1 && terminal) {
+        await this.recordTerminalDeliveryFailure({
+          userId,
+          activationId,
+          activationEventId: event.id,
+          eventCode,
+          attempts: claimed.attempts,
+          permanent: !retryable,
+          error: this.safeError(error),
+        });
+      }
       throw error;
     }
   }
@@ -397,9 +468,49 @@ export class ActivationJourneyService {
         where: { id: eventId },
       });
 
+      if (event && this.isExpiredExhaustedDelivery(event, at)) {
+        const persisted = await transaction.activationEvent.updateMany({
+          where: {
+            id: event.id,
+            deliveryStatus: ActivationDeliveryStatus.SENDING,
+            attempts: event.attempts,
+            leaseExpiresAt: event.leaseExpiresAt,
+          },
+          data: {
+            deliveryStatus: ActivationDeliveryStatus.FAILED,
+            failedAt: at,
+            leaseExpiresAt: null,
+            errorMessage: 'Lease de entrega expirou após esgotar as tentativas',
+            metadata: this.withTerminalDeliveryFailure(
+              event.metadata,
+              true,
+              'RETRY_EXHAUSTED',
+            ),
+          },
+        });
+
+        if (persisted.count === 1) {
+          await this.recordTerminalDeliveryFailureInTransaction(transaction, {
+            userId: event.userId,
+            activationId: event.activationId,
+            activationEventId: event.id,
+            eventCode: event.eventCode,
+            attempts: event.attempts,
+            permanent: false,
+            error: 'Lease de entrega expirou após esgotar as tentativas',
+          });
+        }
+
+        return false;
+      }
+
       if (
         !event ||
         event.deliveryStatus === ActivationDeliveryStatus.SENT ||
+        event.attempts >= ACTIVATION_DELIVERY_MAX_ATTEMPTS ||
+        (event.deliveryStatus === ActivationDeliveryStatus.FAILED &&
+          (this.isTerminalDeliveryEvent(event) ||
+            !this.isRetryDue(event, at))) ||
         (event.deliveryStatus === ActivationDeliveryStatus.SENDING &&
           event.leaseExpiresAt &&
           event.leaseExpiresAt > at)
@@ -407,18 +518,164 @@ export class ActivationJourneyService {
         return false;
       }
 
+      const leaseExpiresAt = new Date(at.getTime() + DELIVERY_LEASE_MS);
       await transaction.activationEvent.update({
         where: { id: eventId },
         data: {
           deliveryStatus: ActivationDeliveryStatus.SENDING,
           attempts: { increment: 1 },
-          leaseExpiresAt: new Date(at.getTime() + DELIVERY_LEASE_MS),
+          leaseExpiresAt,
           failedAt: null,
           errorMessage: null,
         },
       });
-      return true;
+      return {
+        attempts: event.attempts + 1,
+        leaseExpiresAt,
+      };
     });
+  }
+
+  private isRetryDue(
+    event: { attempts: number; failedAt: Date | null; updatedAt: Date },
+    at: Date,
+  ): boolean {
+    if (event.attempts >= ACTIVATION_DELIVERY_MAX_ATTEMPTS) {
+      return false;
+    }
+
+    const failedAt = event.failedAt ?? event.updatedAt;
+    return (
+      failedAt.getTime() + this.retryDelayMs(event.attempts) <= at.getTime()
+    );
+  }
+
+  private isExpiredExhaustedDelivery(
+    event: {
+      deliveryStatus: ActivationDeliveryStatus | null;
+      attempts: number;
+      leaseExpiresAt: Date | null;
+    },
+    at: Date,
+  ): boolean {
+    return (
+      event.deliveryStatus === ActivationDeliveryStatus.SENDING &&
+      event.attempts >= ACTIVATION_DELIVERY_MAX_ATTEMPTS &&
+      (!event.leaseExpiresAt || event.leaseExpiresAt <= at)
+    );
+  }
+
+  private retryDelayMs(attempts: number): number {
+    const exponent = Math.max(0, attempts - 1);
+    return Math.min(
+      ACTIVATION_DELIVERY_RETRY_BASE_MS * 2 ** exponent,
+      ACTIVATION_DELIVERY_RETRY_MAX_MS,
+    );
+  }
+
+  private isTerminalDeliveryEvent(event: {
+    metadata: Prisma.JsonValue;
+  }): boolean {
+    const metadata = event.metadata;
+
+    if (
+      typeof metadata !== 'object' ||
+      metadata === null ||
+      Array.isArray(metadata)
+    ) {
+      return false;
+    }
+
+    const failure = metadata.deliveryFailure;
+    return (
+      typeof failure === 'object' &&
+      failure !== null &&
+      !Array.isArray(failure) &&
+      failure.terminal === true
+    );
+  }
+
+  private withTerminalDeliveryFailure(
+    metadata: Prisma.JsonValue,
+    retryable: boolean,
+    reason: 'PERMANENT_FAILURE' | 'RETRY_EXHAUSTED',
+  ): Prisma.InputJsonObject {
+    const existing =
+      typeof metadata === 'object' &&
+      metadata !== null &&
+      !Array.isArray(metadata)
+        ? metadata
+        : {};
+
+    return {
+      ...existing,
+      deliveryFailure: {
+        terminal: true,
+        retryable,
+        reason,
+      },
+    } satisfies Prisma.InputJsonObject;
+  }
+
+  private recordTerminalDeliveryFailure(input: {
+    userId: string;
+    activationId: string;
+    activationEventId: string;
+    eventCode: string;
+    attempts: number;
+    permanent: boolean;
+    error: string;
+  }) {
+    return this.events.record({
+      ...this.terminalDeliveryFailureEvent(input),
+    });
+  }
+
+  private recordTerminalDeliveryFailureInTransaction(
+    transaction: Prisma.TransactionClient,
+    input: {
+      userId: string;
+      activationId: string;
+      activationEventId: string;
+      eventCode: string;
+      attempts: number;
+      permanent: boolean;
+      error: string;
+    },
+  ) {
+    return this.events.recordInTransaction(
+      transaction,
+      this.terminalDeliveryFailureEvent(input),
+    );
+  }
+
+  private terminalDeliveryFailureEvent(input: {
+    userId: string;
+    activationId: string;
+    activationEventId: string;
+    eventCode: string;
+    attempts: number;
+    permanent: boolean;
+    error: string;
+  }) {
+    return {
+      source: ACTIVATION_SOURCE,
+      severity: input.permanent ? Severity.WARNING : Severity.CRITICAL,
+      eventType: input.permanent
+        ? ACTIVATION_SYSTEM_EVENT.DELIVERY_PERMANENT_FAILURE
+        : ACTIVATION_SYSTEM_EVENT.DELIVERY_RETRY_EXHAUSTED,
+      message: input.permanent
+        ? 'Entrega da jornada falhou de forma permanente'
+        : 'Entrega da jornada esgotou as tentativas',
+      metadata: {
+        userId: input.userId,
+        activationId: input.activationId,
+        activationEventId: input.activationEventId,
+        eventCode: input.eventCode,
+        attempts: input.attempts,
+        error: input.error,
+      },
+    };
   }
 
   private async buildMessage(userId: string, eventCode: string) {

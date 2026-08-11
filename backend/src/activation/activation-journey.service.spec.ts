@@ -2,8 +2,12 @@ import {
   ActivationDeliveryStatus,
   ActivationRiskLevel,
   ActivationStage,
+  UserRole,
 } from '@prisma/client';
-import { EvolutionGateway } from '../evolution/evolution.gateway';
+import {
+  EvolutionGateway,
+  EvolutionSendError,
+} from '../evolution/evolution.gateway';
 import { EventService } from '../observability/event.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConversationsService } from '../whatsapp/conversations.service';
@@ -13,16 +17,37 @@ import { ActivationScoreService } from './activation-score.service';
 import { ActivationService } from './activation.service';
 
 describe('ActivationJourneyService', () => {
+  const delivery = (
+    deliveryStatus: ActivationDeliveryStatus,
+    overrides: Partial<{
+      attempts: number;
+      failedAt: Date | null;
+      leaseExpiresAt: Date | null;
+      metadata: object;
+      updatedAt: Date;
+    }> = {},
+  ) => ({
+    deliveryStatus,
+    attempts: 1,
+    failedAt: null,
+    leaseExpiresAt: null,
+    metadata: {},
+    updatedAt: new Date('2026-06-04T11:00:00.000Z'),
+    ...overrides,
+  });
+
   function subject() {
     const transaction = {
       $queryRaw: jest.fn().mockResolvedValue([{ locked: true }]),
       activationEvent: {
         findUnique: jest.fn(),
         update: jest.fn().mockResolvedValue({ id: 'event-id' }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
     };
     const prisma = {
       user: {
+        findMany: jest.fn().mockResolvedValue([]),
         findUniqueOrThrow: jest.fn(),
       },
       subscription: {
@@ -50,6 +75,9 @@ describe('ActivationJourneyService', () => {
     };
     const events = {
       record: jest.fn().mockResolvedValue({ id: 'system-event-id' }),
+      recordInTransaction: jest
+        .fn()
+        .mockResolvedValue({ id: 'system-event-id' }),
     };
     const onboarding = {
       start: jest.fn().mockResolvedValue({ id: 'onboarding-id' }),
@@ -77,7 +105,10 @@ describe('ActivationJourneyService', () => {
         },
         at: Date,
       ): Promise<number | null>;
-      claimDelivery(eventId: string, at: Date): Promise<boolean>;
+      claimDelivery(
+        eventId: string,
+        at: Date,
+      ): Promise<false | { attempts: number; leaseExpiresAt: Date }>;
       dueFlow(
         activation: { id: string; paidAt: Date | null },
         at: Date,
@@ -112,14 +143,10 @@ describe('ActivationJourneyService', () => {
       ({ where }: { where: { idempotencyKey: string } }) =>
         Promise.resolve(
           where.idempotencyKey.endsWith(':D3')
-            ? {
-                deliveryStatus: ActivationDeliveryStatus.SENDING,
+            ? delivery(ActivationDeliveryStatus.SENDING, {
                 leaseExpiresAt: new Date('2026-06-04T11:59:00.000Z'),
-              }
-            : {
-                deliveryStatus: ActivationDeliveryStatus.SENT,
-                leaseExpiresAt: null,
-              },
+              })
+            : delivery(ActivationDeliveryStatus.SENT),
         ),
     );
 
@@ -141,10 +168,7 @@ describe('ActivationJourneyService', () => {
         Promise.resolve(
           where.idempotencyKey.endsWith(':D0')
             ? null
-            : {
-                deliveryStatus: ActivationDeliveryStatus.SENT,
-                leaseExpiresAt: null,
-              },
+            : delivery(ActivationDeliveryStatus.SENT),
         ),
     );
 
@@ -161,10 +185,11 @@ describe('ActivationJourneyService', () => {
 
   it('does not select D0 or later flow messages while D0 has an active lease', async () => {
     const setup = subject();
-    setup.prisma.activationEvent.findUnique.mockResolvedValue({
-      deliveryStatus: ActivationDeliveryStatus.SENDING,
-      leaseExpiresAt: new Date('2026-06-04T12:01:00.000Z'),
-    });
+    setup.prisma.activationEvent.findUnique.mockResolvedValue(
+      delivery(ActivationDeliveryStatus.SENDING, {
+        leaseExpiresAt: new Date('2026-06-04T12:01:00.000Z'),
+      }),
+    );
 
     await expect(
       setup.testable.dueFlow(
@@ -175,6 +200,197 @@ describe('ActivationJourneyService', () => {
         new Date('2026-06-04T12:00:00.000Z'),
       ),
     ).resolves.toBeNull();
+  });
+
+  it('does not make a newly failed recovery eligible on the next poll', async () => {
+    const setup = subject();
+    const failedAt = new Date('2026-06-04T12:00:00.000Z');
+    setup.prisma.activationEvent.findUnique.mockResolvedValue(
+      delivery(ActivationDeliveryStatus.FAILED, {
+        failedAt,
+        updatedAt: failedAt,
+      }),
+    );
+
+    await expect(
+      setup.testable.dueRecovery(
+        {
+          id: 'activation-id',
+          currentStage: ActivationStage.REGISTERED,
+          lastProgressAt: new Date('2026-06-03T11:00:00.000Z'),
+        },
+        new Date('2026-06-04T12:00:01.000Z'),
+      ),
+    ).resolves.toBeNull();
+  });
+
+  it('retries a transient recovery only after the exponential backoff', async () => {
+    const setup = subject();
+    const failedAt = new Date('2026-06-04T12:00:00.000Z');
+    setup.prisma.activationEvent.findUnique.mockResolvedValue(
+      delivery(ActivationDeliveryStatus.FAILED, {
+        attempts: 2,
+        failedAt,
+        updatedAt: failedAt,
+      }),
+    );
+    const activation = {
+      id: 'activation-id',
+      currentStage: ActivationStage.REGISTERED,
+      lastProgressAt: new Date('2026-06-03T11:00:00.000Z'),
+    };
+
+    await expect(
+      setup.testable.dueRecovery(
+        activation,
+        new Date('2026-06-04T12:01:59.999Z'),
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      setup.testable.dueRecovery(
+        activation,
+        new Date('2026-06-04T12:02:00.000Z'),
+      ),
+    ).resolves.toBe(24);
+  });
+
+  it('does not retry a recovery that reached the attempts limit', async () => {
+    const setup = subject();
+    setup.prisma.activationEvent.findUnique.mockResolvedValue(
+      delivery(ActivationDeliveryStatus.FAILED, {
+        attempts: 10,
+        failedAt: new Date('2026-06-01T00:00:00.000Z'),
+      }),
+    );
+
+    await expect(
+      setup.testable.dueRecovery(
+        {
+          id: 'activation-id',
+          currentStage: ActivationStage.REGISTERED,
+          lastProgressAt: new Date('2026-06-03T11:00:00.000Z'),
+        },
+        new Date('2026-06-04T12:00:00.000Z'),
+      ),
+    ).resolves.toBeNull();
+    expect(setup.evolution.sendText).not.toHaveBeenCalled();
+  });
+
+  it('does not retry a recovery with a permanent structured failure', async () => {
+    const setup = subject();
+    setup.prisma.activationEvent.findUnique.mockResolvedValue(
+      delivery(ActivationDeliveryStatus.FAILED, {
+        attempts: 1,
+        failedAt: new Date('2026-06-01T00:00:00.000Z'),
+        metadata: {
+          deliveryFailure: {
+            terminal: true,
+            retryable: false,
+            reason: 'PERMANENT_FAILURE',
+          },
+        },
+      }),
+    );
+
+    await expect(
+      setup.testable.dueRecovery(
+        {
+          id: 'activation-id',
+          currentStage: ActivationStage.REGISTERED,
+          lastProgressAt: new Date('2026-06-03T11:00:00.000Z'),
+        },
+        new Date('2026-06-04T12:00:00.000Z'),
+      ),
+    ).resolves.toBeNull();
+  });
+
+  it('never selects an already sent recovery', async () => {
+    const setup = subject();
+    setup.prisma.activationEvent.findUnique.mockResolvedValue(
+      delivery(ActivationDeliveryStatus.SENT),
+    );
+
+    await expect(
+      setup.testable.dueRecovery(
+        {
+          id: 'activation-id',
+          currentStage: ActivationStage.REGISTERED,
+          lastProgressAt: new Date('2026-06-03T11:00:00.000Z'),
+        },
+        new Date('2026-06-04T12:00:00.000Z'),
+      ),
+    ).resolves.toBeNull();
+  });
+
+  it('recovers an expired sending lease while attempts remain', async () => {
+    const setup = subject();
+    setup.prisma.activationEvent.findUnique.mockResolvedValue(
+      delivery(ActivationDeliveryStatus.SENDING, {
+        attempts: 9,
+        leaseExpiresAt: new Date('2026-06-04T11:59:59.000Z'),
+      }),
+    );
+
+    await expect(
+      setup.testable.dueRecovery(
+        {
+          id: 'activation-id',
+          currentStage: ActivationStage.REGISTERED,
+          lastProgressAt: new Date('2026-06-03T11:00:00.000Z'),
+        },
+        new Date('2026-06-04T12:00:00.000Z'),
+      ),
+    ).resolves.toBe(24);
+  });
+
+  it('surfaces an expired exhausted lease for terminal reconciliation', async () => {
+    const setup = subject();
+    setup.prisma.activationEvent.findUnique.mockResolvedValue(
+      delivery(ActivationDeliveryStatus.SENDING, {
+        attempts: 10,
+        leaseExpiresAt: new Date('2026-06-04T11:59:59.000Z'),
+      }),
+    );
+
+    await expect(
+      setup.testable.dueRecovery(
+        {
+          id: 'activation-id',
+          currentStage: ActivationStage.REGISTERED,
+          lastProgressAt: new Date('2026-06-03T11:00:00.000Z'),
+        },
+        new Date('2026-06-04T12:00:00.000Z'),
+      ),
+    ).resolves.toBe(24);
+  });
+
+  it('claims an expired ninth attempt as the tenth and final send attempt', async () => {
+    const setup = subject();
+    const at = new Date('2026-06-14T12:00:00.000Z');
+    setup.transaction.activationEvent.findUnique.mockResolvedValue({
+      id: 'event-id',
+      deliveryStatus: ActivationDeliveryStatus.SENDING,
+      leaseExpiresAt: new Date('2026-06-14T11:59:00.000Z'),
+      attempts: 9,
+      failedAt: null,
+      metadata: {},
+      updatedAt: new Date('2026-06-14T11:00:00.000Z'),
+    });
+
+    await expect(setup.testable.claimDelivery('event-id', at)).resolves.toEqual(
+      {
+        attempts: 10,
+        leaseExpiresAt: new Date('2026-06-14T12:01:00.000Z'),
+      },
+    );
+    expect(setup.transaction.activationEvent.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          attempts: { increment: 1 },
+        }),
+      }),
+    );
+    expect(setup.transaction.activationEvent.updateMany).not.toHaveBeenCalled();
   });
   it('selects the highest due recovery milestone exactly once', async () => {
     const setup = subject();
@@ -195,7 +411,7 @@ describe('ActivationJourneyService', () => {
       ({ where }: { where: { idempotencyKey: string } }) =>
         Promise.resolve(
           where.idempotencyKey.endsWith(':168')
-            ? { id: 'existing-event' }
+            ? delivery(ActivationDeliveryStatus.SENT)
             : null,
         ),
     );
@@ -217,6 +433,9 @@ describe('ActivationJourneyService', () => {
       id: 'event-id',
       deliveryStatus: ActivationDeliveryStatus.SENDING,
       leaseExpiresAt: new Date('2026-06-14T12:01:00.000Z'),
+      attempts: 1,
+      failedAt: null,
+      updatedAt: new Date('2026-06-14T12:00:00.000Z'),
     });
 
     await expect(
@@ -227,6 +446,66 @@ describe('ActivationJourneyService', () => {
     ).resolves.toBe(false);
     expect(setup.transaction.$queryRaw).toHaveBeenCalled();
     expect(setup.transaction.activationEvent.update).not.toHaveBeenCalled();
+    expect(setup.transaction.activationEvent.updateMany).not.toHaveBeenCalled();
+    expect(setup.events.recordInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('allows only one of two concurrent processings to send', async () => {
+    const setup = subject();
+    const at = new Date('2026-06-14T12:00:00.000Z');
+    setup.prisma.user.findUniqueOrThrow.mockResolvedValue({
+      name: 'Ana Silva',
+      phone: '11999999999',
+      phoneE164: '+5511999999999',
+      activation: null,
+      behavioralProfile: null,
+      goalClassification: null,
+      contextSnapshots: [],
+      recommendations: [],
+      coachProfile: null,
+    });
+    setup.prisma.activationEvent.upsert.mockResolvedValue({ id: 'event-id' });
+    setup.transaction.activationEvent.findUnique
+      .mockResolvedValueOnce({
+        id: 'event-id',
+        deliveryStatus: ActivationDeliveryStatus.PENDING,
+        leaseExpiresAt: null,
+        attempts: 0,
+        failedAt: null,
+        updatedAt: at,
+      })
+      .mockResolvedValueOnce({
+        id: 'event-id',
+        deliveryStatus: ActivationDeliveryStatus.SENDING,
+        leaseExpiresAt: new Date(at.getTime() + 60_000),
+        attempts: 1,
+        failedAt: null,
+        updatedAt: at,
+      });
+
+    await Promise.all([
+      setup.testable.sendMessage(
+        'activation-id',
+        'user-id',
+        'RECOVERY_MESSAGE',
+        'RECOVERY_24H',
+        'activation-id:recovery:REGISTERED:1:24',
+        at,
+        at,
+      ),
+      setup.testable.sendMessage(
+        'activation-id',
+        'user-id',
+        'RECOVERY_MESSAGE',
+        'RECOVERY_24H',
+        'activation-id:recovery:REGISTERED:1:24',
+        at,
+        at,
+      ),
+    ]);
+
+    expect(setup.transaction.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(setup.evolution.sendText).toHaveBeenCalledTimes(1);
   });
 
   it('persists a personalized D0 delivery through Evolution', async () => {
@@ -272,6 +551,9 @@ describe('ActivationJourneyService', () => {
       id: 'event-id',
       deliveryStatus: ActivationDeliveryStatus.PENDING,
       leaseExpiresAt: null,
+      attempts: 0,
+      failedAt: null,
+      updatedAt: new Date('2026-06-14T12:00:00.000Z'),
     });
     setup.evolution.sendText.mockResolvedValue({
       externalMessageId: 'evolution-message-id',
@@ -304,6 +586,188 @@ describe('ActivationJourneyService', () => {
         }),
       }),
     );
+  });
+
+  it('turns a permanent destination failure into a terminal failed event', async () => {
+    const setup = subject();
+    const at = new Date('2026-06-14T12:00:00.000Z');
+    setup.prisma.user.findUniqueOrThrow.mockResolvedValue({
+      name: 'Ana Silva',
+      phone: 'invalid',
+      phoneE164: null,
+      activation: null,
+      behavioralProfile: null,
+      goalClassification: null,
+      contextSnapshots: [],
+      recommendations: [],
+      coachProfile: null,
+    });
+    setup.prisma.activationEvent.upsert.mockResolvedValue({ id: 'event-id' });
+    setup.transaction.activationEvent.findUnique.mockResolvedValue({
+      id: 'event-id',
+      deliveryStatus: ActivationDeliveryStatus.PENDING,
+      leaseExpiresAt: null,
+      attempts: 0,
+      failedAt: null,
+      updatedAt: at,
+    });
+    setup.evolution.sendText.mockRejectedValue(
+      new EvolutionSendError(
+        'Evolution API rejeitou o envio da mensagem (400)',
+        false,
+        400,
+      ),
+    );
+
+    await expect(
+      setup.testable.sendMessage(
+        'activation-id',
+        'user-id',
+        'RECOVERY_MESSAGE',
+        'RECOVERY_24H',
+        'activation-id:recovery:REGISTERED:1:24',
+        at,
+        at,
+      ),
+    ).rejects.toBeInstanceOf(EvolutionSendError);
+
+    expect(setup.evolution.sendText).toHaveBeenCalledTimes(1);
+    expect(setup.prisma.activationEvent.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          deliveryStatus: ActivationDeliveryStatus.FAILED,
+          metadata: expect.objectContaining({
+            deliveryFailure: {
+              terminal: true,
+              retryable: false,
+              reason: 'PERMANENT_FAILURE',
+            },
+          }),
+        }),
+      }),
+    );
+    expect(setup.events.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'USER_ACTIVATION_DELIVERY_PERMANENT_FAILURE',
+      }),
+    );
+  });
+
+  it('terminalizes an expired final lease without an eleventh send attempt', async () => {
+    const setup = subject();
+    const at = new Date('2026-06-14T12:00:00.000Z');
+    setup.prisma.user.findUniqueOrThrow.mockResolvedValue({
+      name: 'Ana Silva',
+      phone: '11999999999',
+      phoneE164: '+5511999999999',
+      activation: null,
+      behavioralProfile: null,
+      goalClassification: null,
+      contextSnapshots: [],
+      recommendations: [],
+      coachProfile: null,
+    });
+    setup.prisma.activationEvent.upsert.mockResolvedValue({ id: 'event-id' });
+    setup.transaction.activationEvent.findUnique.mockResolvedValue({
+      id: 'event-id',
+      activationId: 'activation-id',
+      userId: 'user-id',
+      eventCode: 'RECOVERY_24H',
+      deliveryStatus: ActivationDeliveryStatus.SENDING,
+      leaseExpiresAt: new Date('2026-06-14T11:59:00.000Z'),
+      attempts: 10,
+      failedAt: null,
+      metadata: { stage: 'REGISTERED' },
+      updatedAt: new Date('2026-06-14T11:59:00.000Z'),
+    });
+
+    await setup.testable.sendMessage(
+      'activation-id',
+      'user-id',
+      'RECOVERY_MESSAGE',
+      'RECOVERY_24H',
+      'activation-id:recovery:REGISTERED:1:24',
+      at,
+      at,
+    );
+
+    expect(setup.evolution.sendText).not.toHaveBeenCalled();
+    expect(setup.transaction.activationEvent.update).not.toHaveBeenCalled();
+    expect(setup.transaction.activationEvent.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'event-id',
+        deliveryStatus: ActivationDeliveryStatus.SENDING,
+        attempts: 10,
+        leaseExpiresAt: new Date('2026-06-14T11:59:00.000Z'),
+      },
+      data: expect.objectContaining({
+        deliveryStatus: ActivationDeliveryStatus.FAILED,
+        leaseExpiresAt: null,
+        metadata: {
+          stage: 'REGISTERED',
+          deliveryFailure: {
+            terminal: true,
+            retryable: true,
+            reason: 'RETRY_EXHAUSTED',
+          },
+        },
+      }),
+    });
+    const terminalData =
+      setup.transaction.activationEvent.updateMany.mock.calls[0][0].data;
+    expect(terminalData).not.toHaveProperty('attempts');
+    expect(setup.events.recordInTransaction).toHaveBeenCalledTimes(1);
+    expect(setup.events.recordInTransaction).toHaveBeenCalledWith(
+      setup.transaction,
+      expect.objectContaining({
+        eventType: 'USER_ACTIVATION_DELIVERY_RETRY_EXHAUSTED',
+      }),
+    );
+  });
+
+  it('terminalizes an expired final lease only once under concurrent processing', async () => {
+    const setup = subject();
+    const at = new Date('2026-06-14T12:00:00.000Z');
+    const exhausted = {
+      id: 'event-id',
+      activationId: 'activation-id',
+      userId: 'user-id',
+      eventCode: 'RECOVERY_24H',
+      deliveryStatus: ActivationDeliveryStatus.SENDING,
+      leaseExpiresAt: new Date('2026-06-14T11:59:00.000Z'),
+      attempts: 10,
+      failedAt: null,
+      metadata: {},
+      updatedAt: new Date('2026-06-14T11:59:00.000Z'),
+    };
+    setup.transaction.activationEvent.findUnique
+      .mockResolvedValueOnce(exhausted)
+      .mockResolvedValueOnce({
+        ...exhausted,
+        deliveryStatus: ActivationDeliveryStatus.FAILED,
+        leaseExpiresAt: null,
+        failedAt: at,
+        metadata: {
+          deliveryFailure: {
+            terminal: true,
+            retryable: true,
+            reason: 'RETRY_EXHAUSTED',
+          },
+        },
+      });
+
+    await Promise.all([
+      setup.testable.claimDelivery('event-id', at),
+      setup.testable.claimDelivery('event-id', at),
+    ]);
+
+    expect(setup.transaction.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(setup.transaction.activationEvent.updateMany).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(setup.events.recordInTransaction).toHaveBeenCalledTimes(1);
+    expect(setup.transaction.activationEvent.update).not.toHaveBeenCalled();
+    expect(setup.evolution.sendText).not.toHaveBeenCalled();
   });
 
   it('sends D0 after payment when an active conversation can be created and whatsappConnectedAt is still null', async () => {
@@ -345,6 +809,9 @@ describe('ActivationJourneyService', () => {
       id: 'event-id',
       deliveryStatus: ActivationDeliveryStatus.PENDING,
       leaseExpiresAt: null,
+      attempts: 0,
+      failedAt: null,
+      updatedAt: paidAt,
     });
     setup.prisma.user.findUniqueOrThrow.mockResolvedValue({
       name: 'Ana Silva',
@@ -409,6 +876,9 @@ describe('ActivationJourneyService', () => {
       id: 'event-id',
       deliveryStatus: ActivationDeliveryStatus.SENT,
       leaseExpiresAt: null,
+      attempts: 1,
+      failedAt: null,
+      updatedAt: new Date('2026-06-14T12:00:00.000Z'),
     });
 
     await setup.testable.sendMessage(
@@ -431,6 +901,82 @@ describe('ActivationJourneyService', () => {
     );
     expect(setup.evolution.sendText).not.toHaveBeenCalled();
     expect(setup.prisma.activationEvent.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('sends a due recovery to a legitimate active user', async () => {
+    const setup = subject();
+    const at = new Date('2026-06-14T12:00:00.000Z');
+    const registeredAt = new Date('2026-06-13T11:00:00.000Z');
+    const activation = {
+      id: 'activation-id',
+      userId: 'user-id',
+      currentStage: ActivationStage.REGISTERED,
+      score: 5,
+      riskLevel: ActivationRiskLevel.LOW,
+      registeredAt,
+      paidAt: null,
+      whatsappConnectedAt: null,
+      firstMessageSentAt: null,
+      firstMealReceivedAt: null,
+      firstAnalysisCompletedAt: null,
+      firstRecommendationDeliveredAt: null,
+      firstCoachInteractionAt: null,
+      firstValueAt: null,
+      activatedAt: null,
+      abandonedAt: null,
+      lastProgressAt: registeredAt,
+      createdAt: registeredAt,
+      updatedAt: registeredAt,
+    };
+    setup.activationService.reconcile.mockResolvedValue(activation);
+    setup.prisma.subscription.findFirst.mockResolvedValue(null);
+    setup.prisma.activationEvent.findUnique.mockResolvedValue(null);
+    setup.prisma.activationEvent.upsert.mockResolvedValue({ id: 'event-id' });
+    setup.transaction.activationEvent.findUnique.mockResolvedValue({
+      id: 'event-id',
+      deliveryStatus: ActivationDeliveryStatus.PENDING,
+      leaseExpiresAt: null,
+      attempts: 0,
+      failedAt: null,
+      updatedAt: at,
+    });
+    setup.prisma.user.findUniqueOrThrow.mockResolvedValue({
+      name: 'Ana Silva',
+      phone: '11999999999',
+      phoneE164: '+5511999999999',
+      activation: {
+        currentStage: ActivationStage.REGISTERED,
+        score: 5,
+        riskLevel: ActivationRiskLevel.LOW,
+      },
+      behavioralProfile: null,
+      goalClassification: null,
+      contextSnapshots: [],
+      recommendations: [],
+      coachProfile: null,
+    });
+
+    await setup.service.processUser('user-id', at);
+
+    expect(setup.evolution.sendText).toHaveBeenCalledWith({
+      number: '+5511999999999',
+      text: expect.stringContaining('faz um dia'),
+    });
+  });
+
+  it('selects only active customer accounts for activation processing', async () => {
+    const setup = subject();
+
+    await setup.service.processDue(new Date('2026-06-14T12:00:00.000Z'));
+
+    expect(setup.prisma.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          isActive: true,
+          role: UserRole.USER,
+        }),
+      }),
+    );
   });
 
   it('classifies a 14-day inactive journey as high risk', () => {

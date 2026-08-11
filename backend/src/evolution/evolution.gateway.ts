@@ -14,6 +14,24 @@ import {
   EvolutionSendTextResult,
 } from './interfaces/evolution-api.interface';
 
+export class EvolutionSendError extends BadGatewayException {
+  constructor(
+    message: string,
+    readonly retryable: boolean,
+    readonly providerStatus?: number,
+  ) {
+    super(message);
+  }
+}
+
+export function isRetryableEvolutionSendError(error: unknown): boolean {
+  if (error instanceof EvolutionSendError) {
+    return error.retryable;
+  }
+
+  return !(error instanceof BadRequestException);
+}
+
 @Injectable()
 export class EvolutionGateway {
   private readonly logger = new Logger(EvolutionGateway.name);
@@ -112,8 +130,9 @@ export class EvolutionGateway {
         signal: AbortSignal.timeout(20_000),
       });
     } catch {
-      throw new BadGatewayException(
+      throw new EvolutionSendError(
         'Não foi possível enviar a mensagem pela Evolution API',
+        true,
       );
     }
 
@@ -127,8 +146,10 @@ export class EvolutionGateway {
     );
 
     if (!response.ok) {
-      throw new BadGatewayException(
+      throw new EvolutionSendError(
         `Evolution API rejeitou o envio da mensagem (${response.status})`,
+        this.isRetryableSendFailure(response.status, payload),
+        response.status,
       );
     }
 
@@ -264,6 +285,40 @@ export class EvolutionGateway {
       externalMessageId,
       ...(remoteJid ? { remoteJid } : {}),
     };
+  }
+
+  private isRetryableSendFailure(status: number, payload: unknown): boolean {
+    if (this.containsNonexistentDestination(payload)) {
+      return false;
+    }
+
+    return (
+      status === 401 ||
+      status === 403 ||
+      status === 408 ||
+      status === 409 ||
+      status === 425 ||
+      status === 429 ||
+      status >= 500
+    );
+  }
+
+  private containsNonexistentDestination(value: unknown): boolean {
+    if (Array.isArray(value)) {
+      return value.some((entry) => this.containsNonexistentDestination(entry));
+    }
+
+    if (!this.isRecord(value)) {
+      return false;
+    }
+
+    if (value.exists === false) {
+      return true;
+    }
+
+    return Object.values(value).some((entry) =>
+      this.containsNonexistentDestination(entry),
+    );
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {
