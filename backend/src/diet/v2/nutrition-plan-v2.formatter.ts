@@ -1,28 +1,26 @@
 import { Injectable } from '@nestjs/common';
 import type { NutritionPlanV2 } from './nutrition-plan-v2.contract';
+import { NutritionWhatsAppPresenter } from './presentation/nutrition-whatsapp.presenter';
+import { PublicNutritionResponseBuilder } from './presentation/public-nutrition-response.builder';
+
+export interface NutritionPlanV2FormattingContext {
+  readonly userDisplayName?: string;
+}
 
 @Injectable()
 export class NutritionPlanV2Formatter {
-  format(plan: NutritionPlanV2): string {
-    const sections: string[] = [plan.title, plan.objectiveSummary];
-    if (plan.guidance.length > 0) sections.push(plan.guidance.join(' '));
-    for (const day of plan.days) {
-      const meals = day.meals.map((meal) => {
-        const items = meal.items
-          .map((item) => `${item.quantity} de ${item.foodName}`)
-          .join(', ');
-        const time = meal.suggestedTime ? ` (${meal.suggestedTime})` : '';
-        return `${meal.name}${time}: ${items}.`;
-      });
-      sections.push(`${day.label}\n${meals.join('\n')}`);
-    }
-    if (plan.hydrationGuidance.length > 0) {
-      sections.push(plan.hydrationGuidance.join(' '));
-    }
-    if (plan.safetyNotes.length > 0) sections.push(plan.safetyNotes.join(' '));
-    return sections
-      .filter((section) => section.trim())
-      .join('\n\n')
-      .trim();
+  private readonly builder = new PublicNutritionResponseBuilder();
+  private readonly presenter = new NutritionWhatsAppPresenter();
+
+  format(
+    plan: NutritionPlanV2,
+    context?: NutritionPlanV2FormattingContext,
+  ): string {
+    return this.presenter.present(
+      this.builder.build({
+        plan,
+        userDisplayName: context?.userDisplayName,
+      }),
+    );
   }
 }

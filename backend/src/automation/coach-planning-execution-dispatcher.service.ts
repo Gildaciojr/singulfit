@@ -213,7 +213,11 @@ export class CoachPlanningExecutionDispatcherService {
       continuationOperationKey: input.nutritionV2.continuationOperationKey,
     });
     return this.result(
-      this.nutritionV2Formatter.format(result),
+      this.nutritionV2Formatter.format(result, {
+        userDisplayName: this.displayName(
+          input.nutritionV2.generationInput.snapshot?.identity?.displayName,
+        ),
+      }),
       'DIET_V2',
       result.aiJobCompleted,
     );
@@ -301,6 +305,14 @@ export class CoachPlanningExecutionDispatcherService {
 
   private formatNumber(value: number): string {
     return Number(value.toFixed(2)).toString().replace('.', ',');
+  }
+
+  private displayName(
+    value:
+      | GenerateNutritionPlanV2Input['snapshot']['identity']['displayName']
+      | undefined,
+  ): string | undefined {
+    return value?.status === 'KNOWN' ? value.value : undefined;
   }
 
   private errorMessage(error: unknown): string {

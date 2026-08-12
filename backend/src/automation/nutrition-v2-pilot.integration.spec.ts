@@ -48,6 +48,7 @@ describe('Nutrition V2 internal pilot integration', () => {
       sources: Object.freeze([]),
     });
     const snapshot = Object.freeze({
+      identity: Object.freeze({ displayName: unknownDatum }),
       completion: Object.freeze({
         overall: 'COMPLETE' as const,
         sections: Object.freeze([]),
@@ -59,29 +60,78 @@ describe('Nutrition V2 internal pilot integration', () => {
       }),
     }) as unknown as CoachProfileSnapshot;
     const document = Object.freeze({
+      schemaVersion: 2,
       artifactType: 'DAILY_STRUCTURE',
+      lifecycleReason: 'CREATION',
+      replacesPlanReference: null,
       title: 'Plano diário V2',
       objectiveSummary: 'Estrutura diária personalizada.',
+      strategy: Object.freeze({
+        schemaVersion: 2,
+        artifactType: 'DAILY_STRUCTURE',
+        objective: Object.freeze({ status: 'NOT_SET' }),
+        dayCount: 1,
+        mealCountPerDay: Object.freeze({ status: 'NOT_SET' }),
+        mealSchedule: Object.freeze({ status: 'NOT_SET' }),
+        energyTargetKcal: Object.freeze({ status: 'NOT_SET' }),
+        energySource: 'NOT_AVAILABLE',
+        macroTargets: Object.freeze({ status: 'NOT_SET' }),
+        trainingAware: false,
+        appliedConstraintCodes: Object.freeze([]),
+        excludedFoods: Object.freeze([]),
+        preferredFoods: Object.freeze([]),
+        variationPolicy: 'DAILY',
+        detailLevel: 'STANDARD',
+        factors: Object.freeze([]),
+      }),
       guidance: Object.freeze(['Siga os horários combinados.']),
       days: Object.freeze([
         Object.freeze({
           label: 'Dia 1',
           meals: Object.freeze([
             Object.freeze({
+              mealKey: 'breakfast',
               name: 'Café da manhã',
+              period: 'BREAKFAST',
               suggestedTime: '08:00',
               items: Object.freeze([
                 Object.freeze({
+                  itemKey: 'oats',
                   quantity: '40 g',
                   foodName: 'Aveia',
+                  role: 'CARBOHYDRATE',
+                  caloriesKcal: 150,
+                  macros: Object.freeze({
+                    proteinGrams: 5,
+                    carbohydrateGrams: 25,
+                    fatGrams: 3,
+                  }),
+                  allergenTags: Object.freeze([]),
+                  dietaryTags: Object.freeze([]),
                 }),
               ]),
+              alternatives: Object.freeze([]),
             }),
           ]),
         }),
       ]),
+      substitutions: Object.freeze([]),
+      adaptationRules: Object.freeze([]),
       hydrationGuidance: Object.freeze(['Mantenha a hidratação.']),
       safetyNotes: Object.freeze([]),
+      generation: Object.freeze({
+        engineVersion: 2,
+        promptVersionId: 'prompt-id',
+        aiJobId: 'ai-job-id',
+        operationKey: 'operation-key',
+        model: 'model',
+        generatedAt: referenceDate.toISOString(),
+        reused: false,
+      }),
+      validation: Object.freeze({
+        status: 'VALID',
+        issues: Object.freeze([]),
+      }),
     }) as unknown as NutritionPlanV2;
     const generation = Object.freeze({
       status: 'PENDING_COMPLETION',
@@ -269,14 +319,14 @@ describe('Nutrition V2 internal pilot integration', () => {
     expect(test.prisma.coachMessage.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          content: expect.stringContaining('Plano diário V2'),
+          content: expect.stringContaining('🥗 *Seu plano alimentar*'),
         }),
       }),
     );
     expect(test.transaction.scheduledMessage.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({
-          content: expect.stringContaining('Plano diário V2'),
+          content: expect.stringContaining('🥗 *Seu plano alimentar*'),
         }),
       }),
     );

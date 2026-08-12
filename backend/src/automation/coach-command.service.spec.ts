@@ -475,6 +475,36 @@ describe('CoachCommandService', () => {
     );
   });
 
+  it('uses the deterministic Nutrition V2 response without language realization', async () => {
+    const subject = createSubject({
+      content: 'quero uma dieta',
+      planningConversationContent: 'Resposta de segunda geração',
+    });
+    jest
+      .spyOn(subject.planningExecution, 'executeStructured')
+      .mockResolvedValue({
+        content: '🥗 *Seu plano alimentar*\n\nResposta determinística',
+        responseRequired: true,
+        selectedSource: 'NUTRITION_V2',
+      } as unknown as Awaited<
+        ReturnType<CoachPlanningExecutionService['executeStructured']>
+      >);
+
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+
+    expect(subject.planningConversationResponse.select).not.toHaveBeenCalled();
+    expect(subject.prisma.coachMessage.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          content: '🥗 *Seu plano alimentar*\n\nResposta determinística',
+        }),
+      }),
+    );
+  });
+
   it('generates legacy content once after the runtime fails', async () => {
     const subject = createSubject({
       content: 'quero uma dieta',

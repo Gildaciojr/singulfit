@@ -1,0 +1,215 @@
+import { FitnessGoal } from '@prisma/client';
+import type { NutritionPlanV2 } from '../nutrition-plan-v2.contract';
+import { NutritionWhatsAppPresenter } from './nutrition-whatsapp.presenter';
+import { PublicNutritionResponseBuilder } from './public-nutrition-response.builder';
+
+describe('PublicNutritionResponseBuilder', () => {
+  function plan(): NutritionPlanV2 {
+    const item = (itemKey: string, foodName: string, quantity: string) =>
+      Object.freeze({
+        itemKey,
+        foodName,
+        quantity,
+        role: 'PROTEIN' as const,
+        caloriesKcal: 200,
+        macros: Object.freeze({
+          proteinGrams: 20,
+          carbohydrateGrams: 10,
+          fatGrams: 5,
+        }),
+        allergenTags: Object.freeze([]),
+        dietaryTags: Object.freeze([]),
+      });
+    return Object.freeze({
+      schemaVersion: 2,
+      artifactType: 'DAILY_STRUCTURE',
+      lifecycleReason: 'CREATION',
+      replacesPlanReference: null,
+      title: 'NUTRITION_V2 operationKey 8fe3f460-1c2d-4a5b-9c6d-0123456789ab',
+      objectiveSummary: 'correlationId não deve aparecer',
+      strategy: Object.freeze({
+        schemaVersion: 2,
+        artifactType: 'DAILY_STRUCTURE',
+        objective: Object.freeze({
+          status: 'CONFIRMED',
+          value: FitnessGoal.WEIGHT_LOSS,
+        }),
+        dayCount: 1,
+        mealCountPerDay: Object.freeze({ status: 'CONFIRMED', value: 1 }),
+        mealSchedule: Object.freeze({ status: 'CONFIRMED', value: ['08:00'] }),
+        energyTargetKcal: Object.freeze({ status: 'ESTIMATED', value: 2440 }),
+        energySource: 'MIFFLIN_ST_JEOR_ESTIMATE',
+        macroTargets: Object.freeze({
+          status: 'ESTIMATED',
+          value: Object.freeze({
+            proteinGrams: 118,
+            carbohydrateGrams: 339,
+            fatGrams: 68,
+          }),
+        }),
+        trainingAware: false,
+        appliedConstraintCodes: Object.freeze([]),
+        excludedFoods: Object.freeze([]),
+        preferredFoods: Object.freeze(['Arroz']),
+        variationPolicy: 'DAILY',
+        detailLevel: 'STANDARD',
+        factors: Object.freeze(['OBJECTIVE']),
+      }),
+      guidance: Object.freeze(['Faça as refeições com calma.']),
+      days: Object.freeze([
+        Object.freeze({
+          dayNumber: 1,
+          label: 'Dia 1',
+          trainingDay: false,
+          meals: Object.freeze([
+            Object.freeze({
+              mealKey: 'breakfast',
+              name: 'Café da manhã',
+              period: 'BREAKFAST',
+              suggestedTime: '08:00',
+              items: Object.freeze([
+                item('eggs', 'Ovos mexidos', '3 unidades'),
+              ]),
+              alternatives: Object.freeze([
+                item('chicken', 'Frango desfiado', '100 g'),
+              ]),
+            }),
+          ]),
+        }),
+      ]),
+      substitutions: Object.freeze([
+        Object.freeze({
+          substitutionKey: 'eggs-to-chicken',
+          sourceItemKey: 'eggs',
+          alternativeItemKey: 'chicken',
+          rationaleCode: 'EQUIVALENT_ROLE',
+        }),
+      ]),
+      adaptationRules: Object.freeze(['Ajuste o horário se necessário.']),
+      hydrationGuidance: Object.freeze(['Mantenha água por perto.']),
+      safetyNotes: Object.freeze([
+        'Este plano não configura tratamento clínico.',
+      ]),
+      generation: Object.freeze({
+        engineVersion: 2,
+        promptVersionId: 'prompt-id',
+        aiJobId: 'job-id',
+        operationKey: 'operation-key',
+        model: 'model-id',
+        generatedAt: '2026-08-12T12:00:00.000Z',
+        reused: false,
+      }),
+      validation: Object.freeze({ status: 'VALID', issues: Object.freeze([]) }),
+    });
+  }
+
+  it('projects only authorized fields and resolves substitutions by food name', () => {
+    const publicResponse = new PublicNutritionResponseBuilder().build({
+      plan: plan(),
+      userDisplayName: 'Ágata Souza',
+    });
+    const content = new NutritionWhatsAppPresenter().present(publicResponse);
+
+    expect(publicResponse.userFirstName).toBe('Ágata');
+    expect(publicResponse.substitutions).toEqual([
+      { source: 'Ovos mexidos', alternative: 'Frango desfiado' },
+    ]);
+    expect(content).toContain('Ovos mexidos ↔ Frango desfiado');
+    expect(content).toContain('condição clínica');
+    expect(content).not.toMatch(
+      /ONBOARDING|NUTRITION_V2|NUTRITION_V2_ELIGIBLE|DIET_V2|LEGACY|operationKey|correlationId|executor|pilotStatus|artifact|artefato/iu,
+    );
+    expect(content).not.toMatch(
+      /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/iu,
+    );
+  });
+
+  it('omits an invalid display name without inventing an identity', () => {
+    expect(
+      new PublicNutritionResponseBuilder().build({
+        plan: plan(),
+        userDisplayName: '12345',
+      }).userFirstName,
+    ).toBeUndefined();
+  });
+
+  it('replaces generic clinical boilerplate without losing allergy guidance', () => {
+    const source = plan();
+    const response = new PublicNutritionResponseBuilder().build({
+      plan: {
+        ...source,
+        safetyNotes: Object.freeze([
+          'Este plano não configura tratamento clínico.',
+          'Evite alimentos aos quais você é alérgico.',
+        ]),
+      },
+    });
+
+    expect(response.safetyGuidance).toEqual([
+      expect.stringContaining('condição clínica'),
+      'Evite alimentos aos quais você é alérgico.',
+    ]);
+  });
+
+  it('replaces a lone generic clinical disclaimer with public guidance', () => {
+    const response = new PublicNutritionResponseBuilder().build({
+      plan: plan(),
+    });
+
+    expect(response.safetyGuidance).toEqual([
+      expect.stringContaining('condição clínica'),
+    ]);
+    expect(response.safetyGuidance).not.toContain(
+      'Este plano não configura tratamento clínico.',
+    );
+  });
+
+  it('preserves ordinary public safety guidance', () => {
+    const source = plan();
+    const response = new PublicNutritionResponseBuilder().build({
+      plan: {
+        ...source,
+        safetyNotes: Object.freeze(['Respeite os sinais de saciedade.']),
+      },
+    });
+
+    expect(response.safetyGuidance).toEqual([
+      'Respeite os sinais de saciedade.',
+    ]);
+  });
+
+  it('preserves a mixed clinical note instead of dropping specific guidance', () => {
+    const source = plan();
+    const mixedNote =
+      'Este plano não configura tratamento clínico; se houver dor persistente, procure atendimento médico.';
+    const response = new PublicNutritionResponseBuilder().build({
+      plan: {
+        ...source,
+        safetyNotes: Object.freeze([mixedNote]),
+      },
+    });
+
+    expect(response.safetyGuidance).toEqual([mixedNote]);
+    expect(response.safetyGuidance.join(' ')).toContain('dor persistente');
+  });
+
+  it('keeps internal metadata and UUIDs out of projected safety notes', () => {
+    const source = plan();
+    const response = new PublicNutritionResponseBuilder().build({
+      plan: {
+        ...source,
+        safetyNotes: Object.freeze([
+          'operationKey 8fe3f460-1c2d-4a5b-9c6d-0123456789ab',
+          'Procure orientação profissional se necessário.',
+        ]),
+      },
+    });
+
+    expect(response.safetyGuidance).toEqual([
+      'Procure orientação profissional se necessário.',
+    ]);
+    expect(response.safetyGuidance.join(' ')).not.toMatch(
+      /operationKey|8fe3f460-1c2d-4a5b-9c6d-0123456789ab/iu,
+    );
+  });
+});

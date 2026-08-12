@@ -316,14 +316,16 @@ export class CoachCommandService {
     if (!execution.responseRequired) {
       return Object.freeze({ content: '', responseRequired: false });
     }
-    const content = this.planningConversationResponse
-      ? await this.planningConversationResponse.select({
-          userId: input.userId,
-          conversationId: input.conversationId,
-          messageId: input.messageId,
-          execution,
-        })
-      : execution.content;
+    const content =
+      execution.selectedSource !== 'NUTRITION_V2' &&
+      this.planningConversationResponse
+        ? await this.planningConversationResponse.select({
+            userId: input.userId,
+            conversationId: input.conversationId,
+            messageId: input.messageId,
+            execution,
+          })
+        : execution.content;
     return Object.freeze({
       content,
       responseRequired: true,

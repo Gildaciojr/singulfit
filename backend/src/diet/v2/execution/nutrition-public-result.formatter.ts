@@ -9,7 +9,10 @@ import type {
 export class NutritionPublicResultFormatter {
   constructor(private readonly planFormatter: NutritionPlanV2Formatter) {}
 
-  format(result: NutritionExecutionResultV2): string {
+  format(
+    result: NutritionExecutionResultV2,
+    context?: { readonly userDisplayName?: string },
+  ): string {
     if (!this.isFormattable(result)) {
       throw new BadRequestException(
         'Apresentação do plano nutricional V2 ainda não possui documento público',
@@ -18,7 +21,7 @@ export class NutritionPublicResultFormatter {
 
     const content =
       result.kind === 'PLAN'
-        ? this.planFormatter.format(result.document)
+        ? this.planFormatter.format(result.document, context)
         : this.formatConversational(result);
 
     if (!content.trim()) {

@@ -117,11 +117,13 @@ describe('NutritionPublicResultFormatter', () => {
     (artifactType) => {
       const content = formatter.format(planResult(plan(artifactType)));
 
-      expect(content).toContain(`Plano ${artifactType}`);
-      expect(content).toContain('40 g de Aveia');
-      expect(content).toContain(
-        `Dia ${artifactType === 'WEEKLY_PLAN' ? 7 : 1}`,
-      );
+      expect(content).toContain('🥗 *Seu plano alimentar*');
+      expect(content).toContain('• 40 g — Aveia');
+      if (artifactType === 'WEEKLY_PLAN') {
+        expect(content).toContain('*Dia 7*');
+      } else {
+        expect(content).not.toContain('*Dia 1*');
+      }
     },
   );
 

@@ -138,7 +138,14 @@ describe('CoachPlanningExecutionDispatcherService', () => {
           suppressNutritionShadow: true,
         },
         nutritionV2: {
-          generationInput: { userId: 'user-id' } as never,
+          generationInput: {
+            userId: 'user-id',
+            snapshot: {
+              identity: {
+                displayName: { status: 'KNOWN', value: 'Ana Souza' },
+              },
+            },
+          } as never,
           profileId: 'profile-id',
           correlationId: 'correlation-id',
         },
@@ -150,9 +157,54 @@ describe('CoachPlanningExecutionDispatcherService', () => {
     });
     expect(subject.nutritionV2Executor.execute).toHaveBeenCalledTimes(1);
     expect(subject.nutritionV2Formatter.format).toHaveBeenCalledTimes(1);
+    expect(subject.nutritionV2Formatter.format).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'PLAN' }),
+      { userDisplayName: 'Ana Souza' },
+    );
     expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
     expect(subject.dietGenerator.generateCandidate).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['INFERRED', { status: 'INFERRED', value: 'Nome inferido' }],
+    [
+      'REQUIRES_CONFIRMATION',
+      { status: 'REQUIRES_CONFIRMATION', value: 'Nome não confirmado' },
+    ],
+    ['UNKNOWN', { status: 'UNKNOWN' }],
+    ['NOT_APPLICABLE', { status: 'NOT_APPLICABLE' }],
+  ] as const)(
+    'does not trust a %s display name',
+    async (_status, displayName) => {
+      const subject = createSubject();
+
+      await subject.dispatcher.dispatchStructured({
+        userId: 'user-id',
+        legacyIntent: 'DIET',
+        decision: decision(CONVERSATION_GOAL.GENERATE_DIET_PLAN),
+        routeSelection: {
+          nutrition: 'V2',
+          workout: null,
+          reason: 'NUTRITION_V2_ELIGIBLE',
+          nutritionPilotStatus: 'ELIGIBLE',
+          suppressNutritionShadow: true,
+        },
+        nutritionV2: {
+          generationInput: {
+            userId: 'user-id',
+            snapshot: { identity: { displayName } },
+          } as never,
+          profileId: 'profile-id',
+          correlationId: 'correlation-id',
+        },
+      });
+
+      expect(subject.nutritionV2Formatter.format).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'PLAN' }),
+        { userDisplayName: undefined },
+      );
+    },
+  );
 
   it.each(['Operação V2 em andamento', 'Provider V2 indisponível'])(
     'never crosses to Legacy after the V2 route starts: %s',
