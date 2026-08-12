@@ -12,6 +12,7 @@ const INTERNAL_TERM =
   /\b(?:onboarding|nutrition[_\s-]?v2(?:[_\s-]?eligible)?|diet[_\s-]?v2|legacy|operationkey|correlationid|executor|pilotstatus|artefato|artifact)\b/iu;
 const UUID =
   /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/iu;
+const TECHNICAL_SENTINEL = /(?:\b(?:null|undefined|NaN)\b|\[object Object\])/iu;
 const GENERIC_CLINICAL_DISCLAIMER =
   /^(?:este|o) plano(?: alimentar)? (?:é estrutural e )?não (?:configura|constitui) (?:um )?tratamento cl[ií]nico[.!]?$/iu;
 const PUBLIC_CLINICAL_GUIDANCE =
@@ -214,7 +215,10 @@ export class PublicNutritionResponseBuilder {
 
   private publicText(value: string): string | undefined {
     const trimmed = value.trim();
-    return trimmed && !INTERNAL_TERM.test(trimmed) && !UUID.test(trimmed)
+    return trimmed &&
+      !INTERNAL_TERM.test(trimmed) &&
+      !UUID.test(trimmed) &&
+      !TECHNICAL_SENTINEL.test(trimmed)
       ? trimmed
       : undefined;
   }

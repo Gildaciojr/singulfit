@@ -288,4 +288,71 @@ describe('PublicNutritionResponseBuilder', () => {
       expect.stringContaining('condição de saúde'),
     );
   });
+
+  it('drops the exact production sentinel line without losing valid nutrition or safety content', () => {
+    const source = plan();
+    const sentinelLine =
+      'As calorias e macros individuais não foram estimadas item a item, portanto permanecem como null.';
+    const specificSafety =
+      'Se houver dor persistente, procure atendimento médico.';
+    const response = new PublicNutritionResponseBuilder().build({
+      plan: {
+        ...source,
+        safetyNotes: Object.freeze([sentinelLine, specificSafety]),
+      },
+    });
+    const content = new NutritionWhatsAppPresenter().present(response);
+
+    expect(response.safetyGuidance).toEqual([specificSafety]);
+    expect(content).not.toContain(sentinelLine);
+    expect(content).not.toMatch(/\bnull\b/u);
+    expect(content).toContain(specificSafety);
+    expect(content).toContain('≈ 2.440 kcal');
+    expect(content).toContain('• Proteínas: 118 g');
+    expect(content).toContain('• 3 unidades — Ovos mexidos');
+  });
+
+  it('enforces the complete technical sentinel invariant at the public boundary', () => {
+    const source = plan();
+    const response = new PublicNutritionResponseBuilder().build({
+      plan: {
+        ...source,
+        guidance: Object.freeze([
+          'Valor undefined.',
+          'Cálculo NaN.',
+          'Conteúdo [object Object].',
+          'ONBOARDING não deve aparecer.',
+          'Orientação pública preservada.',
+        ]),
+        adaptationRules: Object.freeze([
+          'executor interno.',
+          'pilotStatus interno.',
+          'NUTRITION_V2 não deve aparecer.',
+          'DIET_V2 não deve aparecer.',
+        ]),
+        hydrationGuidance: Object.freeze([
+          'correlationId interno.',
+          'Mantenha água por perto.',
+        ]),
+        safetyNotes: Object.freeze([
+          'operationKey interna.',
+          'artifact interno.',
+          'artefato interno.',
+          'Referência 8fe3f460-1c2d-4a5b-9c6d-0123456789ab.',
+          'Se houver dor persistente, procure atendimento médico.',
+        ]),
+      },
+    });
+    const content = new NutritionWhatsAppPresenter().present(response);
+
+    expect(content).not.toMatch(
+      /\b(?:null|undefined)\b|\bNaN\b|\[object Object\]|\b(?:operationKey|correlationId|executor|pilotStatus|NUTRITION_V2|DIET_V2|artifact|artefato|ONBOARDING)\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/iu,
+    );
+    expect(content).toContain('Orientação pública preservada.');
+    expect(content).toContain('Mantenha água por perto.');
+    expect(content).toContain(
+      'Se houver dor persistente, procure atendimento médico.',
+    );
+    expect(content).toContain('Ovos mexidos');
+  });
 });
