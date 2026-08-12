@@ -33,6 +33,7 @@ export interface CreateStandaloneAIJobInput {
   readonly type: AIJobType;
   readonly promptName: string;
   readonly operationKey?: string;
+  readonly recoverExpiredOperation?: boolean;
 }
 
 interface RunTextJobInput {
@@ -175,10 +176,29 @@ export class AIService {
         FROM advisory_lock
       `;
 
+      const recoverableJob =
+        input.operationKey && input.recoverExpiredOperation
+          ? await transaction.aIJob.findUnique({
+              where: { operationKey: input.operationKey },
+              include: { promptVersion: true },
+            })
+          : null;
+      if (
+        recoverableJob &&
+        (recoverableJob.userId !== input.userId ||
+          recoverableJob.type !== input.type ||
+          recoverableJob.promptVersionId !== promptVersion.id)
+      ) {
+        throw new ConflictException(
+          'Chave de operação de IA pertence a outro contexto',
+        );
+      }
+
       await transaction.aIJob.updateMany({
         where: {
           userId: input.userId,
           type: input.type,
+          ...(recoverableJob ? { id: { not: recoverableJob.id } } : {}),
           OR: [
             {
               status: AIJobStatus.PROCESSING,
@@ -201,6 +221,31 @@ export class AIService {
           error: 'Job expirado antes da conclusão',
         },
       });
+
+      if (recoverableJob) {
+        const abandonedProcessing =
+          recoverableJob.status === AIJobStatus.PROCESSING &&
+          (!recoverableJob.leaseExpiresAt ||
+            recoverableJob.leaseExpiresAt <= now);
+        if (
+          recoverableJob.status === AIJobStatus.FAILED ||
+          abandonedProcessing
+        ) {
+          return transaction.aIJob.update({
+            where: { id: recoverableJob.id },
+            data: {
+              status: AIJobStatus.PENDING,
+              startedAt: null,
+              leaseExpiresAt: null,
+              providerResponseId: null,
+              failedAt: null,
+              error: null,
+            },
+            include: { promptVersion: true },
+          });
+        }
+        return recoverableJob;
+      }
 
       if (input.operationKey) {
         const existingJob = await transaction.aIJob.findUnique({

@@ -291,7 +291,7 @@ export class UserGoalEngineService {
   }
 
   private hasMuscleGainGoal(value: string): boolean {
-    return /\b(?:(?:ganhar|aumentar) (?:massa muscular|musculos?)|ganho de massa muscular|hipertrofia)\b/u.test(
+    return /\b(?:(?:ganhar|aumentar) (?:massa(?: muscular)?|musculos?)|ganho de massa muscular|hipertrofia)\b/u.test(
       value,
     );
   }

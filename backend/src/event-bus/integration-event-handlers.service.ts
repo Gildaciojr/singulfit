@@ -100,6 +100,17 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     ) {
       return;
     }
+    if (
+      typeof this.coachCommandService.shouldHandleBeforeProfileAcquisition ===
+        'function' &&
+      (await this.coachCommandService.shouldHandleBeforeProfileAcquisition(
+        input,
+      ))
+    ) {
+      await this.coachCommandService.processTextMessage(input);
+      return;
+    }
+
     const acquisition =
       await this.profileAcquisitionRollout.captureActiveResponse(input);
 

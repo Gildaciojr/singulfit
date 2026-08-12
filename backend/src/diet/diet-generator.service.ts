@@ -51,12 +51,36 @@ export class DietGeneratorService {
     private readonly nutritionPlanOwnership: NutritionPlanOwnershipService,
   ) {}
 
-  async generate(userId: string) {
-    const candidate = await this.generateCandidate(userId);
+  async generate(userId: string, operationKey?: string) {
+    if (operationKey) {
+      const completed = await this.prisma.aIJob.findUnique({
+        where: { operationKey },
+        select: {
+          userId: true,
+          type: true,
+          status: true,
+          dietPlan: { include: DIET_PLAN_INCLUDE },
+        },
+      });
+      if (
+        completed?.userId === userId &&
+        completed.type === AIJobType.DIET &&
+        completed.status === AIJobStatus.COMPLETED &&
+        completed.dietPlan
+      ) {
+        return completed.dietPlan;
+      }
+    }
+    const candidate = operationKey
+      ? await this.generateCandidate(userId, operationKey)
+      : await this.generateCandidate(userId);
     return this.commitCandidate(candidate);
   }
 
-  async generateCandidate(userId: string): Promise<LegacyDietCandidate> {
+  async generateCandidate(
+    userId: string,
+    operationKey?: string,
+  ): Promise<LegacyDietCandidate> {
     await this.subscriptionsService.getProfileSubscription(userId);
     const [profile, nutritionHistory, progressHistory, currentWorkout] =
       await Promise.all([
@@ -154,6 +178,7 @@ export class DietGeneratorService {
       userId,
       type: AIJobType.DIET,
       promptName: DIET_PROMPT_BY_GOAL[profile.goal],
+      ...(operationKey ? { operationKey, recoverExpiredOperation: true } : {}),
     });
     if (job.status === AIJobStatus.PROCESSING)
       throw new ServiceUnavailableException(

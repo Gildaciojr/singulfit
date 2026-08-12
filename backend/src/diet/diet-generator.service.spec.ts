@@ -198,6 +198,7 @@ describe('DietGeneratorService', () => {
         findFirst: jest.fn().mockResolvedValue(currentWorkout),
       },
       aIJob: {
+        findUnique: jest.fn().mockResolvedValue(null),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       $transaction: jest.fn(
@@ -334,6 +335,22 @@ describe('DietGeneratorService', () => {
         }),
       }),
     );
+  });
+
+  it('reuses a completed continuation by operation key without another provider call', async () => {
+    const subject = createSubject();
+    subject.prisma.aIJob.findUnique.mockResolvedValue({
+      userId: 'user-id',
+      type: AIJobType.DIET,
+      status: AIJobStatus.COMPLETED,
+      dietPlan: subject.persistedPlan,
+    });
+
+    await expect(
+      subject.service.generate('user-id', 'pending-continuation-key'),
+    ).resolves.toBe(subject.persistedPlan);
+    expect(subject.aiService.createStandaloneJob).not.toHaveBeenCalled();
+    expect(subject.aiService.runTextJob).not.toHaveBeenCalled();
   });
 
   it('archives the previous diet and persists meals, items and AI usage atomically', async () => {
@@ -495,6 +512,22 @@ describe('DietGeneratorService', () => {
     expect(subject.transaction.dietPlan.create).not.toHaveBeenCalled();
     expect(subject.aiService.completeJobInTransaction).not.toHaveBeenCalled();
     expect(subject.auditService.recordInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('opts continuation jobs into bounded abandoned-operation recovery', async () => {
+    const subject = createSubject();
+    const operationKey =
+      'pending-goal-continuation:action-id:message-id:nutrition';
+
+    await subject.service.generateCandidate('user-id', operationKey);
+
+    expect(subject.aiService.createStandaloneJob).toHaveBeenCalledWith({
+      userId: 'user-id',
+      type: AIJobType.DIET,
+      promptName: DIET_PROMPT_BY_GOAL[FitnessGoal.WEIGHT_LOSS],
+      operationKey,
+      recoverExpiredOperation: true,
+    });
   });
 
   it('does not call or fail the provider when the diet AIJob is PROCESSING', async () => {

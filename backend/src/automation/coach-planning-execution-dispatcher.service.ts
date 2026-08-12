@@ -31,11 +31,13 @@ export interface CoachPlanningExecutionDispatchInput {
   readonly legacyIntent: CoachCommandIntent;
   readonly decision: ConversationGoalDecision | null;
   readonly routeSelection?: PlanningExecutionRouteSelection;
+  readonly continuationOperationKey?: string;
   readonly nutritionV2?: {
     readonly generationInput: GenerateNutritionPlanV2Input;
     readonly profileId: string;
     readonly correlationId: string;
     readonly traceId?: string;
+    readonly continuationOperationKey?: string;
   };
 }
 
@@ -59,14 +61,18 @@ export class CoachPlanningExecutionDispatcherService {
     input: CoachPlanningExecutionDispatchInput,
   ): Promise<CoachPlanningDispatchResult> {
     if (!input.decision) {
-      return this.executeLegacyIntent(input.userId, input.legacyIntent);
+      return this.executeLegacyIntent(
+        input.userId,
+        input.legacyIntent,
+        input.continuationOperationKey,
+      );
     }
 
     switch (input.decision.goal) {
       case CONVERSATION_GOAL.GENERATE_DIET_PLAN:
         return input.routeSelection?.nutrition === 'V2'
           ? this.generateDietV2(input)
-          : this.generateDiet(input.userId);
+          : this.generateDiet(input.userId, input.continuationOperationKey);
       case CONVERSATION_GOAL.GENERATE_WORKOUT_PLAN:
         return this.generateWorkout(input.userId);
       case CONVERSATION_GOAL.GENERATE_COMBINED_PLANS:
@@ -81,7 +87,11 @@ export class CoachPlanningExecutionDispatcherService {
       case CONVERSATION_GOAL.SHOW_PLAN_STATUS:
       case CONVERSATION_GOAL.GENERAL_GUIDANCE:
       case CONVERSATION_GOAL.UNKNOWN:
-        return this.executeLegacyIntent(input.userId, input.legacyIntent);
+        return this.executeLegacyIntent(
+          input.userId,
+          input.legacyIntent,
+          input.continuationOperationKey,
+        );
       case CONVERSATION_GOAL.REQUEST_CONFIRMATION:
         return this.result(
           'Antes de gerar o plano, preciso confirmar seu objetivo atual. Você quer emagrecer, ganhar massa muscular ou manter seu estado atual?',
@@ -150,10 +160,11 @@ export class CoachPlanningExecutionDispatcherService {
   private async executeLegacyIntent(
     userId: string,
     intent: CoachCommandIntent,
+    continuationOperationKey?: string,
   ): Promise<CoachPlanningDispatchResult> {
     switch (intent) {
       case 'DIET':
-        return this.generateDiet(userId);
+        return this.generateDiet(userId, continuationOperationKey);
       case 'WORKOUT':
         return this.generateWorkout(userId);
       case 'BOTH':
@@ -171,12 +182,12 @@ export class CoachPlanningExecutionDispatcherService {
 
   private async generateDiet(
     userId: string,
+    operationKey?: string,
   ): Promise<CoachPlanningDispatchResult> {
-    return this.result(
-      this.formatDiet(await this.dietGenerator.generate(userId)),
-      'DIET_LEGACY',
-      true,
-    );
+    const plan = operationKey
+      ? await this.dietGenerator.generate(userId, operationKey)
+      : await this.dietGenerator.generate(userId);
+    return this.result(this.formatDiet(plan), 'DIET_LEGACY', true);
   }
 
   private async generateDietV2(
@@ -199,6 +210,7 @@ export class CoachPlanningExecutionDispatcherService {
       },
       correlationId: input.nutritionV2.correlationId,
       traceId: input.nutritionV2.traceId,
+      continuationOperationKey: input.nutritionV2.continuationOperationKey,
     });
     return this.result(
       this.nutritionV2Formatter.format(result),

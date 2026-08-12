@@ -8,6 +8,11 @@ import { AUTOMATION_RULE_CODES } from './automation.constants';
 import { ConversationGoalShadowPipelineService } from './conversation-goal-shadow-pipeline.service';
 import { ConversationRuntimeIntegrationService } from '../conversation/runtime/conversation-runtime-integration.service';
 import { CoachPlanningConversationResponseService } from './coach-planning-conversation-response.service';
+import { PendingConversationActionService } from './pending-conversation-action.service';
+import type {
+  PendingGoalConfirmationContext,
+  PendingInboundResolution,
+} from './pending-conversation-action.contract';
 
 export type CoachCommandIntent = 'DIET' | 'WORKOUT' | 'BOTH' | 'UNKNOWN';
 
@@ -34,7 +39,40 @@ export class CoachCommandService {
     private readonly conversationRuntime?: ConversationRuntimeIntegrationService,
     @Optional()
     private readonly planningConversationResponse?: CoachPlanningConversationResponseService,
+    @Optional()
+    private readonly pendingActions?: PendingConversationActionService,
   ) {}
+
+  async shouldHandleBeforeProfileAcquisition(
+    input: ProcessCoachCommandInput,
+  ): Promise<boolean> {
+    if (!this.pendingActions) return false;
+    const message = await this.prisma.message.findFirst({
+      where: {
+        id: input.messageId,
+        conversation: { userId: input.userId },
+      },
+      select: {
+        id: true,
+        content: true,
+        timestamp: true,
+        conversationId: true,
+      },
+    });
+    if (!message) return false;
+    const pending = await this.pendingActions.findPendingForInbound({
+      userId: input.userId,
+      conversationId: message.conversationId,
+      messageId: message.id,
+      text: message.content,
+      receivedAt: message.timestamp,
+    });
+    return (
+      pending.status === 'ACTIONABLE' ||
+      pending.status === 'ALREADY_CONSUMED' ||
+      pending.status === 'COMPLETED'
+    );
+  }
 
   async processTextMessage(
     input: ProcessCoachCommandInput,
@@ -86,7 +124,21 @@ export class CoachCommandService {
       };
     }
 
-    const intent = this.classify(message.content);
+    const pending = await this.resolvePending({
+      userId: input.userId,
+      conversationId: message.conversation.id,
+      messageId: message.id,
+      text: message.content,
+      receivedAt: message.timestamp,
+    });
+    const intent =
+      pending.status === 'ACTIONABLE'
+        ? pending.context.originalIntent
+        : pending.status === 'COMPLETED'
+          ? pending.intent
+          : pending.status === 'ALREADY_CONSUMED'
+            ? pending.intent
+            : this.classify(message.content);
     const idempotencyKey = this.idempotencyKey(input.userId, message.id);
     const existing = await this.prisma.coachMessage.findUnique({
       where: {
@@ -102,6 +154,11 @@ export class CoachCommandService {
         scheduledFor: this.scheduledFor(message.timestamp, message.id),
         intent,
       });
+      await this.activatePendingPrompt(
+        input.userId,
+        message,
+        message.timestamp,
+      );
 
       return {
         handled: true,
@@ -110,26 +167,82 @@ export class CoachCommandService {
       };
     }
 
-    const runtimeDecision = await this.decideOfficialExecution({
-      userId: input.userId,
-      conversationId: message.conversation.id,
-      messageId: message.id,
-      text: message.content,
-      receivedAt: message.timestamp.toISOString(),
-      legacyIntent: intent,
-    });
-    const content =
-      runtimeDecision.source === 'CONVERSATION_RUNTIME'
-        ? runtimeDecision.content
-        : await this.executePlanning({
-            userId: input.userId,
-            intent,
-            conversationId: message.conversation.id,
-            messageId: message.id,
-            text: message.content,
-            referenceDate: message.timestamp,
-            profileId: message.conversation.user.fitnessProfile?.id,
-          });
+    if (pending.status === 'ALREADY_CONSUMED') {
+      return {
+        handled: true,
+        duplicated: true,
+        intent,
+        reason: 'PENDING_ACTION_ALREADY_CONSUMED',
+      };
+    }
+
+    const bypassRuntime =
+      pending.status === 'ACTIONABLE' ||
+      pending.status === 'EXPIRED' ||
+      pending.status === 'COMPLETED';
+    const runtimeDecision = bypassRuntime
+      ? { source: 'LEGACY' as const, reason: 'PENDING_ACTION' as const }
+      : await this.decideOfficialExecution({
+          userId: input.userId,
+          conversationId: message.conversation.id,
+          messageId: message.id,
+          text: message.content,
+          receivedAt: message.timestamp.toISOString(),
+          legacyIntent: intent,
+        });
+    const planningResult =
+      pending.status === 'COMPLETED'
+        ? { content: pending.content, responseRequired: true }
+        : runtimeDecision.source === 'CONVERSATION_RUNTIME'
+          ? { content: runtimeDecision.content, responseRequired: true }
+          : await this.executePlanning({
+              userId: input.userId,
+              intent,
+              conversationId: message.conversation.id,
+              messageId: message.id,
+              text: message.content,
+              referenceDate: message.timestamp,
+              profileId: message.conversation.user.fitnessProfile?.id,
+              pendingGoalConfirmation:
+                pending.status === 'ACTIONABLE' ? pending.context : undefined,
+              suppressCurrentGoalResolution: pending.status === 'EXPIRED',
+            });
+    if (!planningResult.responseRequired) {
+      return {
+        handled: true,
+        duplicated: true,
+        intent,
+        reason: 'PENDING_ACTION_FENCED',
+      };
+    }
+    let content = planningResult.content;
+    if (
+      pending.status === 'ACTIONABLE' &&
+      pending.context.resolution.status === 'RESOLVED' &&
+      this.pendingActions
+    ) {
+      if (!planningResult.pendingExecutionClaimToken) {
+        throw new Error('PENDING_GOAL_CONFIRMATION_CLAIM_TOKEN_MISSING');
+      }
+      const completed = await this.pendingActions.completeGoalConfirmation({
+        userId: input.userId,
+        conversationId: message.conversation.id,
+        actionId: pending.context.actionId,
+        consumerMessageId: message.id,
+        content,
+        completedAt: new Date(),
+        claimToken: planningResult.pendingExecutionClaimToken,
+      });
+      if (completed.status === 'FENCED') {
+        return {
+          handled: true,
+          duplicated: true,
+          intent,
+          reason: 'PENDING_ACTION_FENCED',
+        };
+      }
+      content = completed.content;
+    }
     await this.prisma.coachMessage.create({
       data: {
         userId: input.userId,
@@ -152,6 +265,7 @@ export class CoachCommandService {
       scheduledFor: this.scheduledFor(message.timestamp, message.id),
       intent,
     });
+    await this.activatePendingPrompt(input.userId, message, message.timestamp);
     this.conversationGoalShadow.execute({
       userId: input.userId,
       messageId: message.id,
@@ -176,32 +290,75 @@ export class CoachCommandService {
     readonly text: string;
     readonly referenceDate: Date;
     readonly profileId?: string;
-  }): Promise<string> {
+    readonly pendingGoalConfirmation?: PendingGoalConfirmationContext;
+    readonly suppressCurrentGoalResolution: boolean;
+  }): Promise<{
+    readonly content: string;
+    readonly responseRequired: boolean;
+    readonly pendingExecutionClaimToken?: string;
+  }> {
     const runtime = {
       conversationId: input.conversationId,
       messageId: input.messageId,
       correlationId: input.messageId,
       referenceDate: input.referenceDate,
       profileId: input.profileId,
-      currentMessage: input.text,
+      currentMessage:
+        input.pendingGoalConfirmation?.payload.originalMessage ?? input.text,
+      pendingGoalConfirmation: input.pendingGoalConfirmation,
+      suppressCurrentGoalResolution: input.suppressCurrentGoalResolution,
     };
-    if (!this.planningConversationResponse) {
-      return this.planningExecution.execute(
-        input.userId,
-        input.intent,
-        runtime,
-      );
-    }
     const execution = await this.planningExecution.executeStructured(
       input.userId,
       input.intent,
       runtime,
     );
-    return this.planningConversationResponse.select({
-      userId: input.userId,
-      conversationId: input.conversationId,
-      messageId: input.messageId,
-      execution,
+    if (!execution.responseRequired) {
+      return Object.freeze({ content: '', responseRequired: false });
+    }
+    const content = this.planningConversationResponse
+      ? await this.planningConversationResponse.select({
+          userId: input.userId,
+          conversationId: input.conversationId,
+          messageId: input.messageId,
+          execution,
+        })
+      : execution.content;
+    return Object.freeze({
+      content,
+      responseRequired: true,
+      pendingExecutionClaimToken: execution.pendingExecutionClaimToken,
+    });
+  }
+
+  private async resolvePending(input: {
+    readonly userId: string;
+    readonly conversationId: string;
+    readonly messageId: string;
+    readonly text: string;
+    readonly receivedAt: Date;
+  }): Promise<PendingInboundResolution> {
+    if (!this.pendingActions) {
+      return Object.freeze({ status: 'NONE' as const });
+    }
+    return this.pendingActions.findPendingForInbound(input);
+  }
+
+  private async activatePendingPrompt(
+    userId: string,
+    message: {
+      readonly id: string;
+      readonly timestamp: Date;
+      readonly conversation: { readonly id: string };
+    },
+    activatedAt: Date,
+  ): Promise<void> {
+    if (!this.pendingActions) return;
+    await this.pendingActions.activateGoalConfirmationForSource({
+      userId,
+      conversationId: message.conversation.id,
+      sourceMessageId: message.id,
+      activatedAt,
     });
   }
 

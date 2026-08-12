@@ -11,6 +11,7 @@ export interface NutritionApplicationExecutionInputV2 {
   readonly ownership: { readonly userId: string; readonly profileId: string };
   readonly correlationId: string;
   readonly traceId?: string;
+  readonly continuationOperationKey?: string;
 }
 
 interface NutritionExecutionResultBaseV2 {

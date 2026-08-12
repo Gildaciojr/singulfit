@@ -39,6 +39,8 @@ import { ConversationRuntimeModule } from '../conversation/runtime/conversation-
 import { CoachPlanningConversationResponseService } from './coach-planning-conversation-response.service';
 import { PlanningExecutionRoutePolicyService } from './planning-execution-route-policy.service';
 import { CoachPlanningBothApplicationExecutorService } from './coach-planning-both-application-executor.service';
+import { CurrentGoalCommitService } from './current-goal-commit.service';
+import { PendingConversationActionService } from './pending-conversation-action.service';
 
 @Module({
   imports: [
@@ -83,6 +85,8 @@ import { CoachPlanningBothApplicationExecutorService } from './coach-planning-bo
     NutritionV2PilotService,
     PlanningExecutionRoutePolicyService,
     CoachPlanningBothApplicationExecutorService,
+    CurrentGoalCommitService,
+    PendingConversationActionService,
   ],
   exports: [
     AutomationService,

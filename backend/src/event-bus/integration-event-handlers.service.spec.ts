@@ -336,6 +336,49 @@ describe('IntegrationEventHandlersService', () => {
     expect(coachCommand.processTextMessage).not.toHaveBeenCalled();
   });
 
+  it('gives an actionable goal confirmation precedence over profile acquisition', async () => {
+    const registry = new EventHandlerRegistry();
+    const acquisition = acquisitionRollout();
+    const activationOnboarding = { processTextMessage: jest.fn() };
+    const coachCommand = {
+      shouldHandleBeforeProfileAcquisition: jest.fn().mockResolvedValue(true),
+      processTextMessage: jest.fn().mockResolvedValue({
+        handled: true,
+        duplicated: false,
+        intent: 'DIET',
+      }),
+    };
+    const handlers = new IntegrationEventHandlersService(
+      registry,
+      {} as PagBankWebhookService,
+      {} as EvolutionWebhookService,
+      {} as NutritionService,
+      {} as NutritionVisionService,
+      {} as ResponseBuilderService,
+      {} as EvolutionSendService,
+      coachCommand as unknown as CoachCommandService,
+      {} as AutomationService,
+      {} as ActivationJourneyService,
+      activationOnboarding as unknown as ActivationOnboardingService,
+      acquisition as unknown as ProfileAcquisitionInternalRolloutService,
+      subscriptionLifecycle() as unknown as SubscriptionLifecycleService,
+    );
+    handlers.onModuleInit();
+    const handler = registry.get(INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED);
+    if (!handler) throw new Error('Handler de texto não registrado');
+
+    await handler(
+      outboxEvent(INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED, {
+        userId: 'user-id',
+        messageId: 'goal-answer-message-id',
+      }),
+    );
+
+    expect(coachCommand.processTextMessage).toHaveBeenCalledTimes(1);
+    expect(acquisition.captureActiveResponse).not.toHaveBeenCalled();
+    expect(activationOnboarding.processTextMessage).not.toHaveBeenCalled();
+  });
+
   it('runs acquisition only after the official outbound completes sending', async () => {
     const registry = new EventHandlerRegistry();
     const evolutionSend = {

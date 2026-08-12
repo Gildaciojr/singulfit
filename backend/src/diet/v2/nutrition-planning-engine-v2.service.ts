@@ -29,6 +29,10 @@ export class NutritionPlanningEngineV2Service {
 
   async generateCandidate(
     input: GenerateNutritionPlanV2Input,
+    identity?: {
+      readonly operationKeyOverride?: string;
+      readonly recoverExpiredOperation?: boolean;
+    },
   ): Promise<NutritionPlanningGenerationResult> {
     const prepared = this.runner.prepare(input);
     if (prepared.resolution.artifactType === 'CURRENT_PLAN_PRESENTATION')
@@ -40,12 +44,17 @@ export class NutritionPlanningEngineV2Service {
         }),
       });
 
-    const descriptor = this.runner.describe(input, prepared);
+    const descriptor = this.runner.describe(
+      input,
+      prepared,
+      identity?.operationKeyOverride,
+    );
     const job = await this.aiService.createStandaloneJob({
       userId: input.userId,
       type: AIJobType.DIET,
       promptName: descriptor.promptName,
       operationKey: descriptor.operationKey,
+      recoverExpiredOperation: identity?.recoverExpiredOperation,
     });
 
     if (job.status === AIJobStatus.COMPLETED) {

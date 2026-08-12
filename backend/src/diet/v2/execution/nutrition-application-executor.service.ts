@@ -27,9 +27,12 @@ export class NutritionApplicationExecutorService {
       throw new ConflictException(
         'Ownership da execução nutricional V2 inconsistente',
       );
-    const generation = await this.engine.generateCandidate(
-      input.generationInput,
-    );
+    const generation = input.continuationOperationKey
+      ? await this.engine.generateCandidate(input.generationInput, {
+          operationKeyOverride: input.continuationOperationKey,
+          recoverExpiredOperation: true,
+        })
+      : await this.engine.generateCandidate(input.generationInput);
     if (generation.status === 'NO_GENERATION') {
       return Object.freeze({
         kind: 'CURRENT_PLAN_PRESENTATION',

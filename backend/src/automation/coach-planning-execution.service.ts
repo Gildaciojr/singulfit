@@ -1,5 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
-import { Prisma, type NutritionArtifactType } from '@prisma/client';
+import { type NutritionArtifactType } from '@prisma/client';
 import { performance } from 'node:perf_hooks';
 import type {
   CoachAdaptiveProfileCollectorInput,
@@ -50,6 +50,14 @@ import {
   type CurrentGoalResolution,
   UserGoalEngineService,
 } from './user-goal-engine.service';
+import {
+  CurrentGoalCommitService,
+  CurrentGoalPersistenceError,
+  type CurrentGoalCommitResult,
+} from './current-goal-commit.service';
+import type { PendingGoalConfirmationContext } from './pending-conversation-action.contract';
+import type { PendingGoalConsumptionResult } from './pending-conversation-action.contract';
+import { PendingConversationActionService } from './pending-conversation-action.service';
 
 export interface CoachPlanningRuntimeContext {
   readonly conversationId: string;
@@ -59,6 +67,8 @@ export interface CoachPlanningRuntimeContext {
   readonly referenceDate: Date;
   readonly profileId?: string;
   readonly currentMessage?: string;
+  readonly pendingGoalConfirmation?: PendingGoalConfirmationContext;
+  readonly suppressCurrentGoalResolution?: boolean;
 }
 
 interface PreparedV2PlanningContext {
@@ -70,20 +80,10 @@ interface PreparedV2PlanningContext {
   readonly goalResolution: CurrentGoalResolution | undefined;
 }
 
-type CurrentGoalCommitResult =
-  | 'NOT_APPLICABLE'
-  | 'APPLIED'
-  | 'REPLAY'
-  | 'STALE';
-
-class CurrentGoalPersistenceError extends Error {
-  constructor(cause: unknown) {
-    super(
-      cause instanceof Error && cause.message.trim()
-        ? `Falha ao persistir objetivo atual: ${cause.message.trim()}`
-        : 'Falha ao persistir objetivo atual',
-    );
-    this.name = CurrentGoalPersistenceError.name;
+export class PendingGoalContinuationInProgressError extends Error {
+  constructor() {
+    super('PENDING_GOAL_CONTINUATION_IN_PROGRESS');
+    this.name = PendingGoalContinuationInProgressError.name;
   }
 }
 
@@ -108,6 +108,9 @@ export class CoachPlanningExecutionService {
     private readonly routePolicy?: PlanningExecutionRoutePolicyService,
     @Optional() private readonly goalEngine?: UserGoalEngineService,
     @Optional() private readonly prisma?: PrismaService,
+    @Optional() private readonly currentGoalCommit?: CurrentGoalCommitService,
+    @Optional()
+    private readonly pendingActions?: PendingConversationActionService,
   ) {}
 
   async execute(
@@ -124,6 +127,7 @@ export class CoachPlanningExecutionService {
     runtime?: CoachPlanningRuntimeContext,
   ): Promise<CoachPlanningExecutionResult> {
     let preparation: PreparedV2PlanningContext | null = null;
+    let pendingExecutionClaimToken: string | undefined;
 
     try {
       preparation = await this.prepareV2Decision(userId, intent, runtime);
@@ -148,24 +152,64 @@ export class CoachPlanningExecutionService {
 
     const routeSelection = this.selectRoute(userId, runtime, preparation);
     this.observeRouteSelection(routeSelection, runtime?.correlationId);
+    await this.createPendingGoalConfirmation(
+      userId,
+      intent,
+      preparation,
+      runtime,
+    );
     const goalCommit = await this.commitResolvedGoal(
       userId,
       preparation?.goalResolution,
       runtime,
+      routeSelection,
     );
+    if (
+      runtime?.pendingGoalConfirmation?.resolution.status === 'RESOLVED' &&
+      goalCommit !== 'APPLIED' &&
+      goalCommit !== 'CONTINUE'
+    ) {
+      return this.suppressedPendingResult(preparation, routeSelection, runtime);
+    }
     if (goalCommit === 'STALE') {
       return this.staleGoalResult(preparation, routeSelection, runtime);
+    }
+    if (
+      runtime?.pendingGoalConfirmation?.resolution.status === 'RESOLVED' &&
+      this.pendingActions
+    ) {
+      const executionClaim =
+        await this.pendingActions.claimGoalContinuationExecution({
+          userId,
+          conversationId: runtime.conversationId,
+          actionId: runtime.pendingGoalConfirmation.actionId,
+          consumerMessageId: runtime.messageId,
+          claimedAt: new Date(),
+        });
+      if (executionClaim.status === 'IN_PROGRESS') {
+        throw new PendingGoalContinuationInProgressError();
+      }
+      if (executionClaim.status === 'COMPLETED') {
+        return this.suppressedPendingResult(
+          preparation,
+          routeSelection,
+          runtime,
+        );
+      }
+      pendingExecutionClaimToken = executionClaim.claimToken;
     }
 
     const legacyStartedAt = performance.now();
     let legacySucceeded = true;
     let dispatch: CoachPlanningDispatchResult;
+    const continuationOperationKey = this.continuationOperationKey(runtime);
     try {
       dispatch = await this.dispatcher.dispatchStructured({
         userId,
         legacyIntent: intent,
         decision: preparation?.decision ?? null,
         routeSelection,
+        continuationOperationKey,
         nutritionV2:
           routeSelection.nutrition === 'V2' &&
           preparation?.generationInput &&
@@ -175,9 +219,13 @@ export class CoachPlanningExecutionService {
                 profileId: runtime.profileId,
                 correlationId: runtime.correlationId,
                 traceId: runtime.traceId,
+                continuationOperationKey,
               }
             : undefined,
       });
+      if (pendingExecutionClaimToken && !dispatch.generationCompleted) {
+        throw new Error('PENDING_GOAL_CONTINUATION_GENERATION_INCOMPLETE');
+      }
     } catch (error: unknown) {
       legacySucceeded = false;
       this.logger.warn(
@@ -190,6 +238,14 @@ export class CoachPlanningExecutionService {
           failure: this.safeMessage(error),
         })}`,
       );
+      if (pendingExecutionClaimToken && runtime?.pendingGoalConfirmation) {
+        await this.releasePendingExecution(
+          userId,
+          runtime,
+          pendingExecutionClaimToken,
+        );
+        throw error;
+      }
       dispatch = Object.freeze({
         content: this.failureMessage(error),
         executor: 'FAILURE_FALLBACK' as const,
@@ -263,6 +319,8 @@ export class CoachPlanningExecutionService {
 
     return Object.freeze({
       content: selectedContent,
+      responseRequired: true,
+      pendingExecutionClaimToken,
       selectedSource,
       decision: preparation?.decision ?? null,
       nutritionReasoning: nutrition.result,
@@ -291,11 +349,45 @@ export class CoachPlanningExecutionService {
     });
   }
 
+  private continuationOperationKey(
+    runtime: CoachPlanningRuntimeContext | undefined,
+  ): string | undefined {
+    const pending = runtime?.pendingGoalConfirmation;
+    if (!pending || !runtime) return undefined;
+    return `pending-goal-continuation:${pending.actionId}:${runtime.messageId}:nutrition`;
+  }
+
+  private async releasePendingExecution(
+    userId: string,
+    runtime: CoachPlanningRuntimeContext,
+    claimToken: string,
+  ): Promise<void> {
+    const pending = runtime.pendingGoalConfirmation;
+    if (!pending || !this.pendingActions) return;
+    try {
+      await this.pendingActions.releaseGoalContinuationExecution({
+        userId,
+        conversationId: runtime.conversationId,
+        actionId: pending.actionId,
+        consumerMessageId: runtime.messageId,
+        claimToken,
+      });
+    } catch (error: unknown) {
+      this.logger.warn(
+        `Pending continuation release failed: ${this.safeMessage(error)}`,
+      );
+    }
+  }
+
   private selectRoute(
     userId: string,
     runtime: CoachPlanningRuntimeContext | undefined,
     preparation: PreparedV2PlanningContext | null,
   ): PlanningExecutionRouteSelection {
+    const storedRoute = runtime?.pendingGoalConfirmation?.payload.selectedRoute;
+    if (runtime?.pendingGoalConfirmation?.continuation && storedRoute) {
+      return storedRoute;
+    }
     if (this.routePolicy) {
       return this.routePolicy.select({
         userId,
@@ -343,16 +435,18 @@ export class CoachPlanningExecutionService {
     }
 
     const referenceDate = runtime?.referenceDate ?? new Date();
-    const goalResolution = this.goalEngine?.resolveCurrentMessage(
-      runtime?.currentMessage,
-    );
+    const goalResolution = runtime?.pendingGoalConfirmation
+      ? runtime.pendingGoalConfirmation.resolution
+      : runtime?.suppressCurrentGoalResolution
+        ? undefined
+        : this.goalEngine?.resolveCurrentMessage(runtime?.currentMessage);
     const canonicalSnapshot = await this.snapshotBuilder.build(
       userId,
       referenceDate,
     );
-    const snapshot = this.withCurrentDesiredOutcome(
-      canonicalSnapshot,
-      goalResolution,
+    const snapshot = this.withPendingRequestContext(
+      this.withCurrentDesiredOutcome(canonicalSnapshot, goalResolution),
+      runtime?.pendingGoalConfirmation,
     );
     const adaptation = this.intentAdapter.adapt(intent);
     const adaptiveDecision = this.collector.decide(
@@ -400,81 +494,32 @@ export class CoachPlanningExecutionService {
     userId: string,
     resolution: CurrentGoalResolution | undefined,
     runtime: CoachPlanningRuntimeContext | undefined,
-  ): Promise<CurrentGoalCommitResult> {
-    if (resolution?.status !== 'RESOLVED' || !this.prisma || !runtime) {
+    routeSelection: PlanningExecutionRouteSelection,
+  ): Promise<CurrentGoalCommitResult | PendingGoalConsumptionResult> {
+    if (resolution?.status !== 'RESOLVED' || !runtime) {
       return 'NOT_APPLICABLE';
     }
-    try {
-      return await this.prisma.$transaction(async (transaction) => {
-        await transaction.$queryRaw`
-          WITH advisory_lock AS (
-            SELECT pg_advisory_xact_lock(hashtext(${`current-goal:${userId}`}))
-          )
-          SELECT true AS "locked"
-          FROM advisory_lock
-        `;
-        const current = await transaction.userGoalClassification.findUnique({
-          where: { userId },
-          select: { classifiedAt: true, evidence: true },
-        });
-        if (
-          current &&
-          this.goalOperationKey(current.evidence) === runtime.messageId
-        ) {
-          return 'REPLAY' as const;
-        }
-        if (current && current.classifiedAt >= runtime.referenceDate) {
-          return 'STALE' as const;
-        }
-        await transaction.fitnessProfile.updateMany({
-          where: { userId },
-          data: { goal: resolution.primaryGoal },
-        });
-        await transaction.nutritionProfile.updateMany({
-          where: { userId },
-          data: { goal: resolution.primaryGoal },
-        });
-        await transaction.userGoalClassification.upsert({
-          where: { userId },
-          update: {
-            goal: resolution.classificationGoal,
-            confidence: new Prisma.Decimal(resolution.confidence),
-            evidence: this.currentGoalEvidence(resolution, runtime.messageId),
-            classifiedAt: runtime.referenceDate,
-          },
-          create: {
-            userId,
-            goal: resolution.classificationGoal,
-            confidence: new Prisma.Decimal(resolution.confidence),
-            evidence: this.currentGoalEvidence(resolution, runtime.messageId),
-            classifiedAt: runtime.referenceDate,
-          },
-        });
-        return 'APPLIED' as const;
+    if (runtime.pendingGoalConfirmation && this.pendingActions) {
+      return this.pendingActions.consumeGoalConfirmation({
+        userId,
+        conversationId: runtime.conversationId,
+        consumerMessageId: runtime.messageId,
+        referenceDate: runtime.referenceDate,
+        context: runtime.pendingGoalConfirmation,
+        routeSelection,
       });
-    } catch (error: unknown) {
-      throw new CurrentGoalPersistenceError(error);
     }
-  }
-
-  private currentGoalEvidence(
-    resolution: Extract<CurrentGoalResolution, { status: 'RESOLVED' }>,
-    operationKey: string,
-  ): Prisma.InputJsonObject {
-    return {
-      source: 'EXPLICIT_CURRENT_MESSAGE',
-      operationKey,
-      primaryGoal: resolution.primaryGoal,
-      declaredOutcome: resolution.declaredOutcome,
-    };
-  }
-
-  private goalOperationKey(evidence: Prisma.JsonValue): string | null {
-    if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
-      return null;
-    }
-    const operationKey = Reflect.get(evidence, 'operationKey');
-    return typeof operationKey === 'string' ? operationKey : null;
+    const goalCommit =
+      this.currentGoalCommit ??
+      (this.prisma ? new CurrentGoalCommitService(this.prisma) : undefined);
+    return goalCommit
+      ? goalCommit.commit({
+          userId,
+          operationKey: runtime.messageId,
+          referenceDate: runtime.referenceDate,
+          resolution,
+        })
+      : 'NOT_APPLICABLE';
   }
 
   private goalDecision(
@@ -510,6 +555,7 @@ export class CoachPlanningExecutionService {
     ).state;
     return Object.freeze({
       content: dispatch.content,
+      responseRequired: true,
       selectedSource: 'LEGACY' as const,
       decision: preparation?.decision ?? null,
       nutritionReasoning: null,
@@ -534,6 +580,93 @@ export class CoachPlanningExecutionService {
         fallbackApplied: false,
         generationCompleted: false,
         routeSelection,
+      }),
+    });
+  }
+
+  private async createPendingGoalConfirmation(
+    userId: string,
+    intent: CoachCommandIntent,
+    preparation: PreparedV2PlanningContext | null,
+    runtime: CoachPlanningRuntimeContext | undefined,
+  ): Promise<void> {
+    if (
+      !this.pendingActions ||
+      !runtime ||
+      runtime.pendingGoalConfirmation ||
+      preparation?.decision.goal !== CONVERSATION_GOAL.REQUEST_CONFIRMATION ||
+      preparation.goalResolution?.status !== 'REQUIRES_CONFIRMATION'
+    ) {
+      return;
+    }
+    await this.pendingActions.createGoalConfirmation({
+      userId,
+      conversationId: runtime.conversationId,
+      sourceMessageId: runtime.messageId,
+      originalIntent: intent,
+      originalMessage: runtime.currentMessage ?? '',
+      referenceDate: runtime.referenceDate,
+      declaredOutcome: preparation.goalResolution.declaredOutcome,
+    });
+  }
+
+  private suppressedPendingResult(
+    preparation: PreparedV2PlanningContext | null,
+    routeSelection: PlanningExecutionRouteSelection,
+    runtime: CoachPlanningRuntimeContext,
+  ): CoachPlanningExecutionResult {
+    const dispatch = Object.freeze({
+      content: '',
+      executor: 'UNKNOWN_LEGACY' as const,
+      generationCompleted: false,
+      fallbackApplied: false,
+    });
+    const unavailable = this.unavailableReasoning(
+      'CANONICAL_INPUT_UNAVAILABLE',
+    ).state;
+    return Object.freeze({
+      content: '',
+      responseRequired: false,
+      selectedSource: 'LEGACY' as const,
+      decision: preparation?.decision ?? null,
+      nutritionReasoning: null,
+      workoutReasoning: null,
+      longitudinalDecision: null,
+      humanContext: null,
+      reasoning: Object.freeze({
+        nutrition: unavailable,
+        workout: unavailable,
+        longitudinal: unavailable,
+      }),
+      dispatch,
+      metadata: Object.freeze({
+        correlationId: runtime.correlationId,
+        operationKey: runtime.messageId,
+        executor: dispatch.executor,
+        fallbackApplied: false,
+        generationCompleted: false,
+        routeSelection,
+      }),
+    });
+  }
+
+  private withPendingRequestContext(
+    snapshot: CoachProfileSnapshot,
+    pending: PendingGoalConfirmationContext | undefined,
+  ): CoachProfileSnapshot {
+    const desiredMealCount = pending?.payload.desiredMealCount;
+    if (desiredMealCount === null || desiredMealCount === undefined) {
+      return snapshot;
+    }
+    return Object.freeze({
+      ...snapshot,
+      nutrition: Object.freeze({
+        ...snapshot.nutrition,
+        desiredMealCount: Object.freeze({
+          status: 'KNOWN' as const,
+          value: desiredMealCount,
+          sources: Object.freeze(['USER' as const]),
+        }),
       }),
     });
   }

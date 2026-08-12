@@ -107,6 +107,32 @@ describe('NutritionApplicationExecutorService', () => {
       },
     });
     expect(test.conversational.persist).not.toHaveBeenCalled();
+    expect(test.engine.generateCandidate).toHaveBeenCalledWith(
+      input.generationInput,
+    );
+  });
+  it('propagates the immutable continuation identity only for continuation execution', async () => {
+    const generation = {
+      ...base,
+      output: {
+        kind: 'PLAN',
+        artifactType: 'WEEKLY_PLAN',
+        plan: planDocument,
+      },
+    } as unknown as NutritionPlanningGenerationResult;
+    const test = setup(generation);
+    const continuationOperationKey =
+      'pending-goal-continuation:action-id:message-id:nutrition';
+
+    await test.service.execute({ ...input, continuationOperationKey });
+
+    expect(test.engine.generateCandidate).toHaveBeenCalledWith(
+      input.generationInput,
+      {
+        operationKeyOverride: continuationOperationKey,
+        recoverExpiredOperation: true,
+      },
+    );
   });
   it('delegates an already-completed retry to persistence for idempotent reuse', async () => {
     const generation = {

@@ -1039,6 +1039,100 @@ describe('Nutrition Planning Engine V2', () => {
     expect(aiService.failJob).not.toHaveBeenCalled();
   });
 
+  it('keeps a continuation operation key stable when the current-plan snapshot changes', async () => {
+    const continuationKey =
+      'pending-goal-continuation:action-id:consumer-id:nutrition';
+    const response = {
+      responseId: 'response-id',
+      model: 'text-model',
+      outputText: JSON.stringify(validDailyCandidate()),
+      promptTokens: 100,
+      completionTokens: 80,
+      totalTokens: 180,
+    };
+    const storedResult = {
+      candidateOutput: response.outputText,
+      model: response.model,
+    };
+    const aiService = {
+      createStandaloneJob: jest
+        .fn()
+        .mockResolvedValueOnce({
+          id: 'job-id',
+          status: AIJobStatus.PENDING,
+          promptVersionId: 'prompt-version-id',
+          result: null,
+        })
+        .mockResolvedValueOnce({
+          id: 'job-id',
+          status: AIJobStatus.COMPLETED,
+          promptVersionId: 'prompt-version-id',
+          result: storedResult,
+        }),
+      runTextJob: jest.fn().mockResolvedValue(response),
+      completeJobInTransaction: jest.fn(),
+      failJob: jest.fn(),
+    };
+    const engine = await engineWith(aiService);
+    const initialSnapshot = snapshot();
+    const changedSnapshot: CoachProfileSnapshot = Object.freeze({
+      ...initialSnapshot,
+      plans: Object.freeze({
+        ...initialSnapshot.plans,
+        currentDiet: known(
+          Object.freeze({
+            id: 'persisted-plan-id',
+            title: 'Plano persistido',
+            objective: FitnessGoal.WEIGHT_LOSS,
+            status: DietPlanStatus.ACTIVE,
+            generatedAt: referenceDate.toISOString(),
+          }),
+        ),
+      }),
+    });
+    const identity = Object.freeze({
+      operationKeyOverride: continuationKey,
+      recoverExpiredOperation: true,
+    });
+
+    const first = await engine.generateCandidate(
+      {
+        userId: 'user-id',
+        decision: decision(),
+        snapshot: initialSnapshot,
+        referenceDate,
+        explicitArtifactType: 'DAILY_STRUCTURE',
+      },
+      identity,
+    );
+    const replay = await engine.generateCandidate(
+      {
+        userId: 'user-id',
+        decision: decision(),
+        snapshot: changedSnapshot,
+        referenceDate,
+        explicitArtifactType: 'DAILY_STRUCTURE',
+      },
+      identity,
+    );
+
+    expect(first.operationKey).toBe(continuationKey);
+    expect(replay).toMatchObject({
+      status: 'ALREADY_COMPLETED',
+      aiJobId: 'job-id',
+      operationKey: continuationKey,
+      reused: true,
+    });
+    expect(aiService.createStandaloneJob).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        operationKey: continuationKey,
+        recoverExpiredOperation: true,
+      }),
+    );
+    expect(aiService.runTextJob).toHaveBeenCalledTimes(1);
+  });
+
   it('does not reclaim or fail an idempotent Nutrition job already processing', async () => {
     const aiService = {
       createStandaloneJob: jest.fn().mockResolvedValue({

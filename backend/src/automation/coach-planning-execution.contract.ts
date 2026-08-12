@@ -48,6 +48,8 @@ export interface CoachPlanningExecutionMetadata {
 
 export interface CoachPlanningExecutionResult {
   readonly content: string;
+  readonly responseRequired: boolean;
+  readonly pendingExecutionClaimToken?: string;
   readonly selectedSource: CoachPlanningSelectedSource;
   readonly decision: ConversationGoalDecision | null;
   readonly nutritionReasoning: NutritionReasoningResult | null;

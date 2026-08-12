@@ -87,4 +87,13 @@ describe('UserGoalEngineService', () => {
       expect(service.resolveCurrentMessage(message).status).toBe(status);
     },
   );
+
+  it.each(['Quero manter 4 refeições.', 'Quero manter essa dieta.'])(
+    'does not treat contextual use of manter as a canonical goal in %s',
+    (message) => {
+      expect(service.resolveCurrentMessage(message)).toMatchObject({
+        status: 'NO_CHANGE',
+      });
+    },
+  );
 });

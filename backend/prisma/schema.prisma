@@ -507,6 +507,27 @@ enum UserGoalType {
   HEALTH
 }
 
+enum PendingConversationActionType {
+  GOAL_CONFIRMATION
+}
+
+enum PendingConversationActionStatus {
+  AWAITING_PROMPT
+  PENDING
+  CONSUMED_PENDING_EXECUTION
+  EXECUTING
+  COMPLETED
+  EXPIRED
+  CANCELLED
+}
+
+enum PendingConversationOriginalIntent {
+  DIET
+  WORKOUT
+  BOTH
+  UNKNOWN
+}
+
 enum ChurnRiskLevel {
   LOW
   MEDIUM
@@ -884,6 +905,7 @@ model User {
   coachProfileFieldValues          CoachProfileFieldValue[]
   profileAcquisitionCycles         CoachProfileAcquisitionCycle[]
   nutritionPlanOwnership           NutritionPlanOwnership?
+  pendingConversationActions       PendingConversationAction[]
 
   @@index([isActive])
   @@map("users")
@@ -1751,13 +1773,14 @@ model Conversation {
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
 
-  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  subscription     Subscription?     @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
-  messages         Message[]
-  aiJobs           AIJob[]
-  mediaFiles       MediaFile[]
-  meals            Meal[]
-  outboundMessages OutboundMessage[]
+  user                       User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscription               Subscription?               @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  messages                   Message[]
+  aiJobs                     AIJob[]
+  mediaFiles                 MediaFile[]
+  meals                      Meal[]
+  outboundMessages           OutboundMessage[]
+  pendingConversationActions PendingConversationAction[]
 
   @@index([userId, status])
   @@index([subscriptionId])
@@ -1784,12 +1807,14 @@ model Message {
   readAt            DateTime?
   createdAt         DateTime         @default(now())
 
-  conversation          Conversation           @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  aiJobs                AIJob[]
-  mediaFile             MediaFile?
-  meal                  Meal?
-  outboundResponses     OutboundMessage[]
-  aiResponseEvaluations AIResponseEvaluation[]
+  conversation             Conversation                @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  aiJobs                   AIJob[]
+  mediaFile                MediaFile?
+  meal                     Meal?
+  outboundResponses        OutboundMessage[]
+  aiResponseEvaluations    AIResponseEvaluation[]
+  pendingActionsOriginated PendingConversationAction[] @relation("PendingActionSourceMessage")
+  pendingActionsConsumed   PendingConversationAction[] @relation("PendingActionConsumerMessage")
 
   @@unique([instanceName, externalMessageId])
   @@index([conversationId, createdAt])
@@ -2711,6 +2736,39 @@ model UserGoalClassification {
 
   @@index([goal, classifiedAt])
   @@map("user_goal_classifications")
+}
+
+model PendingConversationAction {
+  id                String                            @id @default(uuid())
+  userId            String
+  conversationId    String
+  type              PendingConversationActionType
+  status            PendingConversationActionStatus   @default(AWAITING_PROMPT)
+  sourceMessageId   String
+  consumerMessageId String?                           @unique
+  originalIntent    PendingConversationOriginalIntent
+  payload           Json
+  operationKey      String                            @unique
+  createdAt         DateTime                          @default(now())
+  updatedAt         DateTime                          @updatedAt
+  expiresAt         DateTime
+  consumedAt        DateTime?
+  promptActivatedAt DateTime?
+  completedAt       DateTime?
+  resultContent     String?
+  executionLeaseExpiresAt DateTime?
+  executionClaimToken     String?
+
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sourceMessage   Message      @relation("PendingActionSourceMessage", fields: [sourceMessageId], references: [id], onDelete: Cascade)
+  consumerMessage Message?     @relation("PendingActionConsumerMessage", fields: [consumerMessageId], references: [id], onDelete: SetNull)
+
+  @@unique([sourceMessageId, type])
+  @@index([userId, conversationId, type, status])
+  @@index([status, expiresAt])
+  @@index([conversationId, createdAt])
+  @@map("pending_conversation_actions")
 }
 
 model HabitSnapshot {

@@ -96,6 +96,7 @@ export class NutritionGenerationRunnerV2Service {
   describe(
     input: GenerateNutritionPlanV2Input,
     prepared: PreparedNutritionPlanningV2,
+    operationKeyOverride?: string,
   ): NutritionGenerationDescriptorV2 {
     this.assertGeneratable(input, prepared);
     const artifactType = prepared.resolution.artifactType;
@@ -125,12 +126,14 @@ export class NutritionGenerationRunnerV2Service {
       promptVersion: prompt.version,
       schema: prompt.schema,
       canonicalPayload,
-      operationKey: this.operationKey(
-        input.userId,
-        prompt.name,
-        prompt.version,
-        canonicalPayload,
-      ),
+      operationKey: operationKeyOverride
+        ? this.requireOperationKey(operationKeyOverride)
+        : this.operationKey(
+            input.userId,
+            prompt.name,
+            prompt.version,
+            canonicalPayload,
+          ),
     });
   }
 
@@ -420,6 +423,16 @@ export class NutritionGenerationRunnerV2Service {
       .update(`${userId}:${promptName}:${promptVersion}:${canonicalPayload}`)
       .digest('hex');
     return `nutrition-planning-v2:${digest}`;
+  }
+
+  private requireOperationKey(value: string): string {
+    const normalized = value.trim();
+    if (!normalized || normalized.length > 255) {
+      throw new BadRequestException(
+        'Chave de operação da geração nutricional V2 inválida',
+      );
+    }
+    return normalized;
   }
 
   private previousPlanReference(
