@@ -35,6 +35,7 @@ export interface PublicNutritionResponse {
   readonly days: readonly PublicNutritionDay[];
   readonly substitutions: readonly PublicNutritionSubstitution[];
   readonly hydrationGuidance: readonly string[];
+  readonly generalGuidance: readonly string[];
   readonly adaptationGuidance: readonly string[];
   readonly safetyGuidance: readonly string[];
 }

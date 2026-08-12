@@ -28,6 +28,11 @@ export class NutritionWhatsAppPresenter {
     this.optionalList(sections, '💧 *Hidratação*', response.hydrationGuidance);
     this.optionalList(
       sections,
+      '💡 *Orientações para o dia a dia*',
+      response.generalGuidance,
+    );
+    this.optionalList(
+      sections,
       '📌 *Ajustes importantes*',
       response.adaptationGuidance,
     );

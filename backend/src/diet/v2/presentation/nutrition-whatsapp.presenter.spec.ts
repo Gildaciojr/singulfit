@@ -64,6 +64,7 @@ describe('NutritionWhatsAppPresenter', () => {
         }),
       ]),
       hydrationGuidance: Object.freeze(['Beba água ao longo do dia.']),
+      generalGuidance: Object.freeze(['Faça as refeições com calma.']),
       adaptationGuidance: Object.freeze(['Ajuste os horários à sua rotina.']),
       safetyGuidance: Object.freeze([
         'Respeite suas restrições e orientações profissionais.',
@@ -116,6 +117,7 @@ describe('NutritionWhatsAppPresenter', () => {
       macroTargets: undefined,
       substitutions: Object.freeze([]),
       hydrationGuidance: Object.freeze([]),
+      generalGuidance: Object.freeze([]),
       adaptationGuidance: Object.freeze([]),
       safetyGuidance: Object.freeze([]),
     });

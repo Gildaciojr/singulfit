@@ -115,7 +115,7 @@ describe('PublicNutritionResponseBuilder', () => {
       { source: 'Ovos mexidos', alternative: 'Frango desfiado' },
     ]);
     expect(content).toContain('Ovos mexidos ↔ Frango desfiado');
-    expect(content).toContain('condição clínica');
+    expect(content).toContain('condição de saúde');
     expect(content).not.toMatch(
       /ONBOARDING|NUTRITION_V2|NUTRITION_V2_ELIGIBLE|DIET_V2|LEGACY|operationKey|correlationId|executor|pilotStatus|artifact|artefato/iu,
     );
@@ -146,7 +146,7 @@ describe('PublicNutritionResponseBuilder', () => {
     });
 
     expect(response.safetyGuidance).toEqual([
-      expect.stringContaining('condição clínica'),
+      expect.stringContaining('condição de saúde'),
       'Evite alimentos aos quais você é alérgico.',
     ]);
   });
@@ -157,7 +157,7 @@ describe('PublicNutritionResponseBuilder', () => {
     });
 
     expect(response.safetyGuidance).toEqual([
-      expect.stringContaining('condição clínica'),
+      expect.stringContaining('condição de saúde'),
     ]);
     expect(response.safetyGuidance).not.toContain(
       'Este plano não configura tratamento clínico.',
@@ -210,6 +210,82 @@ describe('PublicNutritionResponseBuilder', () => {
     ]);
     expect(response.safetyGuidance.join(' ')).not.toMatch(
       /operationKey|8fe3f460-1c2d-4a5b-9c6d-0123456789ab/iu,
+    );
+  });
+
+  it('humanizes the exact production canary safety boilerplate', () => {
+    const source = plan();
+    const response = new PublicNutritionResponseBuilder().build({
+      plan: {
+        ...source,
+        safetyNotes: Object.freeze([
+          'Plano estrutural sem caráter clínico.',
+          'Não inclui prescrição de suplementos, medicamentos ou tratamento.',
+          'Não foram inferidas alergias ou condições de saúde além dos dados fornecidos.',
+        ]),
+      },
+    });
+    const content = new NutritionWhatsAppPresenter().present(response);
+
+    expect(content).toContain('condição de saúde');
+    expect(content).toContain('suplementos ou medicamentos por conta própria');
+    expect(content).toContain('alguma alergia');
+    expect(content).not.toMatch(
+      /estrutural|caráter clínico|não foram inferidas|prescrição de suplementos/iu,
+    );
+  });
+
+  it('separates general guidance from adaptations and removes only normalized exact duplicates', () => {
+    const source = plan();
+    const response = new PublicNutritionResponseBuilder().build({
+      plan: {
+        ...source,
+        guidance: Object.freeze([
+          'Faça as refeições com calma.',
+          '  FAÇA   AS REFEIÇÕES COM CALMA.  ',
+          'Distribua as refeições ao longo do dia.',
+        ]),
+        adaptationRules: Object.freeze([
+          'Faça as refeições com calma.',
+          'Distribua as refeições conforme sua rotina.',
+          'Ajuste os horários conforme sua rotina.',
+          'Ajuste os horários conforme sua rotina.',
+        ]),
+      },
+    });
+    const content = new NutritionWhatsAppPresenter().present(response);
+
+    expect(response.generalGuidance).toEqual([
+      'Faça as refeições com calma.',
+      'Distribua as refeições ao longo do dia.',
+    ]);
+    expect(response.adaptationGuidance).toEqual([
+      'Distribua as refeições conforme sua rotina.',
+      'Ajuste os horários conforme sua rotina.',
+    ]);
+    expect(content).toContain('💡 *Orientações para o dia a dia*');
+    expect(content).toContain('📌 *Ajustes importantes*');
+    expect(content.match(/Faça as refeições com calma\./gu)).toHaveLength(1);
+    expect(content).toContain('Distribua as refeições ao longo do dia.');
+    expect(content).toContain('Distribua as refeições conforme sua rotina.');
+  });
+
+  it('preserves specific safety alongside canary boilerplate projection', () => {
+    const source = plan();
+    const specific = 'Se houver dor persistente, procure atendimento médico.';
+    const response = new PublicNutritionResponseBuilder().build({
+      plan: {
+        ...source,
+        safetyNotes: Object.freeze([
+          'Plano estrutural sem caráter clínico.',
+          specific,
+        ]),
+      },
+    });
+
+    expect(response.safetyGuidance).toContain(specific);
+    expect(response.safetyGuidance).toContainEqual(
+      expect.stringContaining('condição de saúde'),
     );
   });
 });

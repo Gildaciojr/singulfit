@@ -15,7 +15,17 @@ const UUID =
 const GENERIC_CLINICAL_DISCLAIMER =
   /^(?:este|o) plano(?: alimentar)? (?:é estrutural e )?não (?:configura|constitui) (?:um )?tratamento cl[ií]nico[.!]?$/iu;
 const PUBLIC_CLINICAL_GUIDANCE =
-  'Se você tiver uma condição clínica ou orientação médica específica, alinhe o plano com um nutricionista ou médico.';
+  'Se você tiver alguma condição de saúde ou orientação médica específica, me avise e alinhe o plano com um nutricionista ou médico.';
+const GENERIC_NON_CLINICAL_DISCLAIMER =
+  /^plano estrutural sem car[aá]ter cl[ií]nico[.!]?$/iu;
+const GENERIC_PRESCRIPTION_DISCLAIMER =
+  /^não inclui prescri[cç][aã]o de suplementos, medicamentos ou tratamento[.!]?$/iu;
+const PUBLIC_PRESCRIPTION_GUIDANCE =
+  'Não inicie suplementos ou medicamentos por conta própria; siga a orientação de um profissional de saúde.';
+const GENERIC_UNKNOWN_HEALTH_DISCLAIMER =
+  /^não foram inferidas alergias ou condi[cç][oõ]es de sa[uú]de al[eé]m dos dados fornecidos[.!]?$/iu;
+const PUBLIC_UNKNOWN_HEALTH_GUIDANCE =
+  'Se existir alguma alergia ou condição de saúde que ainda não tenha sido informada, me avise antes de ajustar o plano.';
 
 export interface BuildPublicNutritionResponseInput {
   readonly plan: NutritionPlanV2;
@@ -42,6 +52,11 @@ export class PublicNutritionResponseBuilder {
         : [];
     });
     const safetyGuidance = this.publicSafety(plan.safetyNotes);
+    const generalGuidance = this.distinctPublicLines(plan.guidance);
+    const adaptationGuidance = this.distinctPublicLines(
+      plan.adaptationRules,
+      new Set(generalGuidance.map((value) => this.lineKey(value))),
+    );
 
     return Object.freeze({
       userFirstName: this.firstName(input.userDisplayName),
@@ -79,10 +94,8 @@ export class PublicNutritionResponseBuilder {
       ),
       substitutions: Object.freeze(substitutions),
       hydrationGuidance: this.publicLines(plan.hydrationGuidance),
-      adaptationGuidance: this.publicLines([
-        ...plan.guidance,
-        ...plan.adaptationRules,
-      ]),
+      generalGuidance,
+      adaptationGuidance,
       safetyGuidance,
     });
   }
@@ -139,12 +152,51 @@ export class PublicNutritionResponseBuilder {
     for (const value of values) {
       const safe = this.publicText(value);
       if (!safe) continue;
-      const projection = GENERIC_CLINICAL_DISCLAIMER.test(safe)
-        ? PUBLIC_CLINICAL_GUIDANCE
-        : safe;
+      const projection = this.safetyProjection(safe);
       if (!projected.includes(projection)) projected.push(projection);
     }
     return Object.freeze(projected);
+  }
+
+  private safetyProjection(value: string): string {
+    if (
+      GENERIC_CLINICAL_DISCLAIMER.test(value) ||
+      GENERIC_NON_CLINICAL_DISCLAIMER.test(value)
+    ) {
+      return PUBLIC_CLINICAL_GUIDANCE;
+    }
+    if (GENERIC_PRESCRIPTION_DISCLAIMER.test(value)) {
+      return PUBLIC_PRESCRIPTION_GUIDANCE;
+    }
+    if (GENERIC_UNKNOWN_HEALTH_DISCLAIMER.test(value)) {
+      return PUBLIC_UNKNOWN_HEALTH_GUIDANCE;
+    }
+    return value;
+  }
+
+  private distinctPublicLines(
+    values: readonly string[],
+    excludedKeys: ReadonlySet<string> = new Set<string>(),
+  ): readonly string[] {
+    const seen = new Set(excludedKeys);
+    const distinct: string[] = [];
+    for (const value of values) {
+      const safe = this.publicText(value);
+      if (!safe) continue;
+      const key = this.lineKey(safe);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      distinct.push(safe);
+    }
+    return Object.freeze(distinct);
+  }
+
+  private lineKey(value: string): string {
+    return value
+      .normalize('NFC')
+      .replace(/\s+/gu, ' ')
+      .trim()
+      .toLocaleLowerCase('pt-BR');
   }
 
   private publicLines(values: readonly string[]): readonly string[] {
