@@ -96,4 +96,14 @@ describe('UserGoalEngineService', () => {
       });
     },
   );
+
+  it.each(['Emagrecer', 'Perder peso', 'Ganhar massa muscular', 'Hipertrofia'])(
+    'keeps the global policy unchanged for the isolated phrase "%s"',
+    (message) => {
+      expect(service.resolveCurrentMessage(message)).toMatchObject({
+        status: 'NO_CHANGE',
+        reason: 'NOT_EXPLICIT',
+      });
+    },
+  );
 });

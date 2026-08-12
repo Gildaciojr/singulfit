@@ -210,8 +210,16 @@ describe('PendingConversationActionService', () => {
   });
 
   it.each([
+    ['Emagrecer', FitnessGoal.WEIGHT_LOSS],
     ['Quero emagrecer', FitnessGoal.WEIGHT_LOSS],
+    ['Perder peso', FitnessGoal.WEIGHT_LOSS],
+    ['Quero perder peso', FitnessGoal.WEIGHT_LOSS],
+    ['Ganhar massa', FitnessGoal.MUSCLE_GAIN],
+    ['Ganhar massa muscular', FitnessGoal.MUSCLE_GAIN],
     ['Quero ganhar massa', FitnessGoal.MUSCLE_GAIN],
+    ['Quero ganhar massa muscular', FitnessGoal.MUSCLE_GAIN],
+    ['Hipertrofia', FitnessGoal.MUSCLE_GAIN],
+    ['Manter', FitnessGoal.MAINTENANCE],
     ['Quero manter', FitnessGoal.MAINTENANCE],
   ] as const)('maps "%s" to %s', async (text, goal) => {
     const test = setup();
@@ -227,6 +235,57 @@ describe('PendingConversationActionService', () => {
       context: { resolution: { primaryGoal: goal } },
     });
   });
+
+  it.each([
+    ['Minha esposa quer emagrecer', 'UNRELATED'],
+    ['Antes eu queria emagrecer', 'UNRELATED'],
+    ['Emagrecer e ganhar massa', 'UNRELATED'],
+    ['beleza', 'UNRELATED'],
+  ] as const)(
+    'does not contextually resolve unsafe wording "%s"',
+    async (text, status) => {
+      const test = setup();
+
+      await expect(
+        test.service.findPendingForInbound({
+          userId: 'user-id',
+          conversationId: 'conversation-id',
+          messageId: 'consumer-message-id',
+          text,
+          receivedAt: consumerAt,
+        }),
+      ).resolves.toEqual({ status });
+      expect(test.action().status).toBe(
+        PendingConversationActionStatus.PENDING,
+      );
+      expect(
+        test.transaction.userGoalClassification.upsert,
+      ).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['Não quero emagrecer', 'Talvez emagrecer'])(
+    'preserves the global confirmation guard for "%s"',
+    async (text) => {
+      const test = setup();
+
+      await expect(
+        test.service.findPendingForInbound({
+          userId: 'user-id',
+          conversationId: 'conversation-id',
+          messageId: 'consumer-message-id',
+          text,
+          receivedAt: consumerAt,
+        }),
+      ).resolves.toMatchObject({
+        status: 'ACTIONABLE',
+        context: { resolution: { status: 'REQUIRES_CONFIRMATION' } },
+      });
+      expect(test.action().status).toBe(
+        PendingConversationActionStatus.PENDING,
+      );
+    },
+  );
 
   it('keeps an ambiguous action pending without committing a goal', async () => {
     const test = setup();

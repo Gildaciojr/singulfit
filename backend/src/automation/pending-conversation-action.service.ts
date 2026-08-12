@@ -645,21 +645,55 @@ export class PendingConversationActionService {
   ) {
     const resolution = this.goalEngine.resolveCurrentMessage(text);
     if (resolution.status !== 'NO_CHANGE') return resolution;
-    const normalized = this.normalize(text);
-    if (
-      (normalized === 'quero manter' || normalized === 'manter') &&
-      payload.allowedGoals.includes(FitnessGoal.MAINTENANCE)
-    ) {
+    const contextualGoal = this.contextualGoalConfirmation(text);
+    if (!contextualGoal || !payload.allowedGoals.includes(contextualGoal)) {
+      return resolution;
+    }
+    if (contextualGoal === FitnessGoal.WEIGHT_LOSS) {
       return Object.freeze({
         status: 'RESOLVED' as const,
         reason: 'EXPLICIT_CURRENT_GOAL' as const,
-        primaryGoal: FitnessGoal.MAINTENANCE,
-        classificationGoal: UserGoalType.MAINTENANCE,
+        primaryGoal: contextualGoal,
+        classificationGoal: UserGoalType.WEIGHT_LOSS,
         confidence: 0.98,
-        declaredOutcome: 'manutenção',
+        declaredOutcome: 'emagrecimento',
       });
     }
-    return resolution;
+    if (contextualGoal === FitnessGoal.MUSCLE_GAIN) {
+      return Object.freeze({
+        status: 'RESOLVED' as const,
+        reason: 'EXPLICIT_CURRENT_GOAL' as const,
+        primaryGoal: contextualGoal,
+        classificationGoal: UserGoalType.HYPERTROPHY,
+        confidence: 0.98,
+        declaredOutcome: 'ganho de massa muscular',
+      });
+    }
+    return Object.freeze({
+      status: 'RESOLVED' as const,
+      reason: 'EXPLICIT_CURRENT_GOAL' as const,
+      primaryGoal: contextualGoal,
+      classificationGoal: UserGoalType.MAINTENANCE,
+      confidence: 0.98,
+      declaredOutcome: 'manutenção',
+    });
+  }
+
+  private contextualGoalConfirmation(text: string): FitnessGoal | null {
+    switch (this.normalize(text)) {
+      case 'emagrecer':
+      case 'perder peso':
+        return FitnessGoal.WEIGHT_LOSS;
+      case 'ganhar massa':
+      case 'ganhar massa muscular':
+      case 'hipertrofia':
+        return FitnessGoal.MUSCLE_GAIN;
+      case 'manter':
+      case 'quero manter':
+        return FitnessGoal.MAINTENANCE;
+      default:
+        return null;
+    }
   }
 
   private isFitnessGoalOrNull(value: unknown): value is FitnessGoal | null {
