@@ -137,11 +137,7 @@ export class ConversationLanguageUnitValidationPolicy {
   private hasLinkedMemoryFact(
     facts: readonly SanitizedConversationFact[],
   ): boolean {
-    return facts.some(
-      (fact) =>
-        fact.key === 'userContext.memory' ||
-        fact.key.startsWith('episodicMemory.'),
-    );
+    return facts.some((fact) => fact.source === 'MEMORY');
   }
 
   private normalize(value: string): string {

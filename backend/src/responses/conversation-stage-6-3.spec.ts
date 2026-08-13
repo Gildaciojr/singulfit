@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { AuthorizedFactSource } from './conversation-authorized-facts.contract';
 import type { ConversationLanguageUnit } from './conversation-language-unit.contract';
 import { ConversationLanguageUnitValidationPolicy } from './conversation-language-unit-validation.policy';
 import type { SanitizedConversationPayload } from './sanitized-conversation-payload.contract';
@@ -125,6 +126,55 @@ function unit(
   };
 }
 
+function payloadWithLinkedFact(
+  key: string,
+  source: AuthorizedFactSource,
+): SanitizedConversationPayload {
+  const current = payload();
+  return {
+    ...current,
+    facts: {
+      ...current.facts,
+      allowed: [
+        ...current.facts.allowed,
+        { key, source, value: true, estimated: false },
+      ],
+    },
+    structure: {
+      ...current.structure,
+      blocks: [
+        ...current.structure.blocks,
+        {
+          key: 'block-linked-fact',
+          type: 'RELATIONAL_MEMORY',
+          decisions: ['USE_MEMORY'],
+          facts: [key],
+          order: 3,
+          paragraph: 2,
+          presentation: 'PROSE',
+          required: false,
+          maximumLength: 100,
+        },
+      ],
+    },
+  };
+}
+
+function linkedMemoryUnit(key: string): ConversationLanguageUnit {
+  return unit({
+    blockKey: 'block-linked-fact',
+    unitType: 'RELATIONAL',
+    decisionCodes: ['USE_MEMORY'],
+    factKeys: [key],
+    claims: {
+      numbers: [],
+      foods: [],
+      usesMemory: true,
+      usesRecommendation: false,
+    },
+  });
+}
+
 function assertDeepFrozen(value: unknown): void {
   if (typeof value !== 'object' || value === null) return;
   expect(Object.isFrozen(value)).toBe(true);
@@ -226,6 +276,43 @@ describe('Conversation Layer stage 6.3', () => {
     });
 
     expect(policy.validate(payload(), [memory]).valid).toBe(true);
+    expect(
+      policy.validate(payload(), [
+        unit({ claims: { ...unit().claims, usesMemory: true } }),
+      ]).violations,
+    ).toContain('MEMORY_NOT_AUTHORIZED');
+  });
+
+  it.each([
+    ['dialogue.previousCommitmentAvailable', 'MEMORY'],
+    ['episodicMemory.SUCCESS', 'MEMORY'],
+  ] as const)('authorizes linked canonical MEMORY source %s', (key, source) => {
+    expect(
+      policy.validate(payloadWithLinkedFact(key, source), [
+        linkedMemoryUnit(key),
+      ]),
+    ).toEqual(expect.objectContaining({ valid: true, violations: [] }));
+  });
+
+  it.each(['LONGITUDINAL', 'USER_CONTEXT'] as const)(
+    'does not treat linked %s as MEMORY',
+    (source) => {
+      const key = `linked.${source.toLowerCase()}`;
+      expect(
+        policy.validate(payloadWithLinkedFact(key, source), [
+          linkedMemoryUnit(key),
+        ]).violations,
+      ).toContain('MEMORY_NOT_AUTHORIZED');
+    },
+  );
+
+  it('does not require memory authorization when the unit does not claim memory', () => {
+    expect(policy.validate(payload(), [unit()]).violations).not.toContain(
+      'MEMORY_NOT_AUTHORIZED',
+    );
+  });
+
+  it('does not authorize a unit from an unrelated global MEMORY fact', () => {
     expect(
       policy.validate(payload(), [
         unit({ claims: { ...unit().claims, usesMemory: true } }),

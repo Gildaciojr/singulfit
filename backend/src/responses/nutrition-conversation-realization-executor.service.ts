@@ -120,7 +120,7 @@ export class NutritionConversationRealizationExecutorService {
       const metadata = this.requireOperationalMetadata(realization);
       await this.failJob(
         prepared.job.id,
-        JOB_FAILURE_CODE,
+        this.failureCode(realization),
         metadata.providerResponseId,
       );
       return this.withFinalMetadata(realization, {
@@ -290,7 +290,7 @@ export class NutritionConversationRealizationExecutorService {
               providerResponseId: metadata.providerResponseId,
               failedAt: completedAt,
               leaseExpiresAt: null,
-              error: JOB_FAILURE_CODE,
+              error: this.failureCode(realization),
             },
       });
       if (changed.count !== 1) {
@@ -524,6 +524,10 @@ export class NutritionConversationRealizationExecutorService {
         executionStatus,
       }),
     });
+  }
+
+  private failureCode(realization: LanguageRealizationResult): string {
+    return realization.failureCode ?? JOB_FAILURE_CODE;
   }
 
   private requireOperationalMetadata(

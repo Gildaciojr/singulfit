@@ -158,7 +158,7 @@ function subject() {
   const promptVersion = {
     id: 'prompt-version-id',
     name: NUTRITION_CONVERSATION_REALIZATION_PROMPT.name,
-    version: 1,
+    version: 2,
     prompt: NUTRITION_CONVERSATION_REALIZATION_PROMPT.instructions,
     capability: NUTRITION_CONVERSATION_REALIZATION_PROMPT.capability,
     model: NUTRITION_CONVERSATION_REALIZATION_PROMPT.model,
@@ -567,10 +567,72 @@ describe('NutritionConversationRealizationExecutorService', () => {
     expect(target.recordInTransaction).toHaveBeenCalledTimes(1);
     expect(target.transactionUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ status: AIJobStatus.FAILED }),
+        data: expect.objectContaining({
+          status: AIJobStatus.FAILED,
+          error: 'INVALID_LANGUAGE_UNIT_SCHEMA',
+        }),
       }),
     );
     expect(result.operationalMetadata?.executionStatus).toBe('FAILED');
+  });
+
+  it('persists the specific terminal realization failure code', async () => {
+    const target = subject();
+    target.realize.mockImplementation(
+      (
+        _payload: SanitizedConversationPayload,
+        execution: NutritionConversationLanguageRealizerExecution,
+      ) =>
+        Promise.resolve(
+          realization(execution, {
+            status: 'INVALID_STRUCTURE',
+            candidateText: null,
+            fallbackReason: 'INVALID_STRUCTURE',
+            failureCode: 'UNIT_VALIDATION:MEMORY_NOT_AUTHORIZED',
+          } as Partial<LanguageRealizationResult>),
+        ),
+    );
+
+    await target.service.execute(input);
+
+    expect(target.transactionUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: AIJobStatus.FAILED,
+          error: 'UNIT_VALIDATION:MEMORY_NOT_AUTHORIZED',
+        }),
+      }),
+    );
+    expect(target.realize).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the generic job failure when a terminal outcome has no failure code', async () => {
+    const target = subject();
+    target.realize.mockImplementation(
+      (
+        _payload: SanitizedConversationPayload,
+        execution: NutritionConversationLanguageRealizerExecution,
+      ) =>
+        Promise.resolve(
+          realization(execution, {
+            status: 'INVALID_STRUCTURE',
+            candidateText: null,
+            fallbackReason: 'INVALID_STRUCTURE',
+            failureCode: undefined,
+          } as Partial<LanguageRealizationResult>),
+        ),
+    );
+
+    await target.service.execute(input);
+
+    expect(target.transactionUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: AIJobStatus.FAILED,
+          error: 'CONVERSATION_REALIZATION_FAILED',
+        }),
+      }),
+    );
   });
 
   it('isolates realizer and accounting failures and terminally fails the job', async () => {
