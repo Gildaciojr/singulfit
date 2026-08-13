@@ -18,6 +18,7 @@ import { SanitizedConversationPayloadBuilder } from './sanitized-conversation-pa
 import { ConversationSelectionConfigService } from './conversation-selection-config.service';
 import { NutritionConversationCandidateSelectorService } from './nutrition-conversation-candidate-selector.service';
 import { NutritionConversationCandidateSelectionAuditService } from './nutrition-conversation-candidate-selection-audit.service';
+import { NutritionConversationInternalEligibilityService } from './nutrition-conversation-internal-eligibility.service';
 import type { ConversationReasoningBridgeInput } from './reasoning-bridge/conversation-reasoning-bridge.contract';
 import { ConversationReasoningBridgeService } from './reasoning-bridge/conversation-reasoning-bridge.service';
 import {
@@ -64,6 +65,7 @@ export class NutritionConversationShadowPipelineService implements OnApplication
     private readonly adapter: NutritionConversationLegacyCandidateAdapter,
     private readonly comparator: NutritionConversationComparator,
     private readonly selectionConfig: ConversationSelectionConfigService,
+    private readonly internalEligibility: NutritionConversationInternalEligibilityService,
     private readonly candidateSelector: NutritionConversationCandidateSelectorService,
     private readonly selectionAudit: NutritionConversationCandidateSelectionAuditService,
     private readonly diagnostics: ConversationShadowDiagnosticsService,
@@ -120,7 +122,7 @@ export class NutritionConversationShadowPipelineService implements OnApplication
   async selectOfficial(
     input: ExecuteNutritionConversationShadowInput,
   ): Promise<NutritionConversationOfficialSelectionResult> {
-    if (!this.isOfficialSelectionEnabled()) {
+    if (!this.isOfficialSelectionEnabled(input.operation.userId)) {
       return Object.freeze({
         content: input.legacyText,
         selectedSource: CONVERSATION_SELECTED_SOURCE.FORMATTER,
@@ -145,15 +147,24 @@ export class NutritionConversationShadowPipelineService implements OnApplication
     }
   }
 
-  isOfficialSelectionEnabled(): boolean {
+  isOfficialSelectionEnabled(userId: string): boolean {
     const layer = this.operationalConfig.get();
     const selection = this.selectionConfig.get();
-    return !(
+    if (
       this.shuttingDown ||
       layer.effectiveMode === CONVERSATION_LAYER_MODE.OFF ||
       layer.effectiveMode === CONVERSATION_LAYER_MODE.SHADOW ||
       selection.effectiveMode === CONVERSATION_SELECTION_ROLLOUT_MODE.OFF
-    );
+    ) {
+      return false;
+    }
+    if (
+      layer.effectiveMode === CONVERSATION_LAYER_MODE.INTERNAL ||
+      selection.effectiveMode === CONVERSATION_SELECTION_ROLLOUT_MODE.INTERNAL
+    ) {
+      return this.internalEligibility.isEligible(userId);
+    }
+    return true;
   }
 
   onApplicationShutdown(): void {

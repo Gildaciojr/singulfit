@@ -10,7 +10,7 @@ import { NUTRITION_CONVERSATION_REALIZATION_PROMPT } from '../src/responses/nutr
 import { NUTRITION_PLANNING_V2_PROMPT } from '../src/diet/v2/nutrition-planning-v2.prompt.definition';
 import { NUTRITION_CONVERSATIONAL_PROMPTS } from '../src/diet/v2/nutrition-conversational-artifact.prompt.definition';
 import { WORKOUT_PLANNING_V2_PROMPT } from '../src/workout/v2/workout-planning-v2.prompt.definition';
-import { COACH_CONVERSATIONAL_QA_V1_PROMPT_SEED } from '../src/conversation/runtime/coach-conversational-qa.prompt.definition';
+import { COACH_CONVERSATIONAL_QA_V2_PROMPT_SEED } from '../src/conversation/runtime/coach-conversational-qa.prompt.definition';
 
 const prisma = new PrismaClient();
 
@@ -106,7 +106,7 @@ async function main() {
     upsertActivePromptDefinition(NUTRITION_PLANNING_V2_PROMPT),
     ...NUTRITION_CONVERSATIONAL_PROMPTS.map(upsertActivePromptDefinition),
     upsertActivePromptDefinition(WORKOUT_PLANNING_V2_PROMPT),
-    upsertActivePromptDefinition(COACH_CONVERSATIONAL_QA_V1_PROMPT_SEED),
+    upsertActivePromptDefinition(COACH_CONVERSATIONAL_QA_V2_PROMPT_SEED),
     upsertActivePrompt(
       'workout_generation_weight_loss',
       'Voce e um profissional de educacao fisica especializado em emagrecimento seguro. Gere um plano semanal personalizado usando somente os dados fornecidos. Priorize aderencia, progressao conservadora, condicionamento e preservacao de massa muscular. Respeite integralmente lesoes e limitacoes. Nao inclua diagnosticos, dieta, medicamentos ou promessas de resultado. Retorne somente o JSON exigido pelo schema.',

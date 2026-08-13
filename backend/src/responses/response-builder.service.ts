@@ -131,7 +131,9 @@ export class ResponseBuilderService {
       evaluationContext,
     );
     const officialSelectionEnabled =
-      this.nutritionConversationShadowPipeline.isOfficialSelectionEnabled();
+      this.nutritionConversationShadowPipeline.isOfficialSelectionEnabled(
+        analysis.meal.userId,
+      );
     const episodicMemory = officialSelectionEnabled
       ? await this.episodicMemoryIntegration
           .loadForContext(conversationInput)

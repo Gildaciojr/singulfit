@@ -18,6 +18,7 @@ import type { SanitizedConversationPayloadBuilder } from './sanitized-conversati
 import type { ConversationSelectionConfigService } from './conversation-selection-config.service';
 import type { NutritionConversationCandidateSelectorService } from './nutrition-conversation-candidate-selector.service';
 import type { NutritionConversationCandidateSelectionAuditService } from './nutrition-conversation-candidate-selection-audit.service';
+import type { NutritionConversationInternalEligibilityService } from './nutrition-conversation-internal-eligibility.service';
 
 function subject(mode: 'OFF' | 'SHADOW' = 'SHADOW') {
   const context = Object.freeze({ context: true });
@@ -72,6 +73,7 @@ function subject(mode: 'OFF' | 'SHADOW' = 'SHADOW') {
       formatterVersion: 'nutrition-response-formatter:v1',
     }),
   };
+  const internalEligibility = { isEligible: jest.fn().mockReturnValue(true) };
   const selectionDecision = Object.freeze({
     selectedSource: 'FORMATTER',
     reason: 'ROLLOUT_MODE_OFF',
@@ -103,6 +105,7 @@ function subject(mode: 'OFF' | 'SHADOW' = 'SHADOW') {
     adapter as unknown as NutritionConversationLegacyCandidateAdapter,
     comparator as unknown as NutritionConversationComparator,
     selectionConfig as unknown as ConversationSelectionConfigService,
+    internalEligibility as unknown as NutritionConversationInternalEligibilityService,
     candidateSelector as unknown as NutritionConversationCandidateSelectorService,
     selectionAudit as unknown as NutritionConversationCandidateSelectionAuditService,
     diagnostics as unknown as ConversationShadowDiagnosticsService,
@@ -121,6 +124,7 @@ function subject(mode: 'OFF' | 'SHADOW' = 'SHADOW') {
     adapter,
     comparator,
     selectionConfig,
+    internalEligibility,
     candidateSelector,
     selectionAudit,
     selectionDecision,
@@ -280,6 +284,84 @@ describe('NutritionConversationShadowPipelineService', () => {
     expect(target.selectionAudit.record).toHaveBeenCalledTimes(1);
   });
 
+  it('fails closed before realization and selection for a non-allowlisted INTERNAL user', async () => {
+    const target = subject();
+    target.operationalConfig.get.mockReturnValue({ effectiveMode: 'INTERNAL' });
+    target.selectionConfig.get.mockReturnValue({
+      effectiveMode: 'INTERNAL',
+      formatterVersion: 'nutrition-response-formatter:v1',
+    });
+    target.internalEligibility.isEligible.mockReturnValue(false);
+
+    await expect(target.service.selectOfficial(input)).resolves.toEqual({
+      content: 'legacy',
+      selectedSource: 'FORMATTER',
+      candidateExecutionAttempted: false,
+    });
+    expect(target.internalEligibility.isEligible).toHaveBeenCalledWith(
+      'user-id',
+    );
+    expect(target.realizationExecutor.execute).not.toHaveBeenCalled();
+    expect(target.candidateSelector.select).not.toHaveBeenCalled();
+  });
+
+  it('allows an allowlisted INTERNAL user to reach the normal selection flow', async () => {
+    const target = subject();
+    target.operationalConfig.get.mockReturnValue({ effectiveMode: 'INTERNAL' });
+    target.selectionConfig.get.mockReturnValue({
+      effectiveMode: 'INTERNAL',
+      formatterVersion: 'nutrition-response-formatter:v1',
+    });
+
+    await expect(target.service.selectOfficial(input)).resolves.toMatchObject({
+      candidateExecutionAttempted: true,
+    });
+    expect(target.realizationExecutor.execute).toHaveBeenCalledTimes(1);
+    expect(target.candidateSelector.select).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports INTERNAL official selection eligibility per user', () => {
+    const target = subject();
+    target.operationalConfig.get.mockReturnValue({ effectiveMode: 'INTERNAL' });
+    target.selectionConfig.get.mockReturnValue({
+      effectiveMode: 'INTERNAL',
+      formatterVersion: 'nutrition-response-formatter:v1',
+    });
+    target.internalEligibility.isEligible.mockImplementation(
+      (userId: string) => userId === 'allowed-user',
+    );
+
+    expect(target.service.isOfficialSelectionEnabled('blocked-user')).toBe(
+      false,
+    );
+    expect(target.service.isOfficialSelectionEnabled('allowed-user')).toBe(
+      true,
+    );
+  });
+
+  it.each([
+    ['INTERNAL', 'CANARY'],
+    ['CANARY', 'INTERNAL'],
+  ] as const)(
+    'requires allowlist eligibility when layer=%s and selection=%s',
+    (layerMode, selectionMode) => {
+      const target = subject();
+      target.operationalConfig.get.mockReturnValue({
+        effectiveMode: layerMode,
+      });
+      target.selectionConfig.get.mockReturnValue({
+        effectiveMode: selectionMode,
+        formatterVersion: 'nutrition-response-formatter:v1',
+      });
+      target.internalEligibility.isEligible.mockReturnValue(false);
+
+      expect(target.service.isOfficialSelectionEnabled('user-id')).toBe(false);
+      expect(target.internalEligibility.isEligible).toHaveBeenCalledWith(
+        'user-id',
+      );
+    },
+  );
+
   it('returns Formatter without retry after an official Realizer failure', async () => {
     const target = subject();
     target.operationalConfig.get.mockReturnValue({ effectiveMode: 'INTERNAL' });
@@ -316,6 +398,28 @@ describe('NutritionConversationShadowPipelineService', () => {
       expect(target.realizationExecutor.execute).not.toHaveBeenCalled();
     },
   );
+
+  it.each(['OFF', 'SHADOW'] as const)(
+    'keeps isOfficialSelectionEnabled false in %s regardless of allowlist',
+    (mode) => {
+      const target = subject(mode);
+      target.selectionConfig.get.mockReturnValue({
+        effectiveMode: 'INTERNAL',
+        formatterVersion: 'nutrition-response-formatter:v1',
+      });
+
+      expect(target.service.isOfficialSelectionEnabled('user-id')).toBe(false);
+      expect(target.internalEligibility.isEligible).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps selection OFF disabled regardless of allowlist', () => {
+    const target = subject();
+    target.operationalConfig.get.mockReturnValue({ effectiveMode: 'CANARY' });
+
+    expect(target.service.isOfficialSelectionEnabled('user-id')).toBe(false);
+    expect(target.internalEligibility.isEligible).not.toHaveBeenCalled();
+  });
 
   it.each(['OFF', 'INTERNAL', 'CANARY', 'ROLLOUT', 'PRIMARY'] as const)(
     'does nothing in %s mode',

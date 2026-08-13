@@ -1,17 +1,25 @@
-import { AIJobStatus } from '@prisma/client';
+import { AIJobStatus, AIJobType } from '@prisma/client';
 import { ConflictException } from '@nestjs/common';
 import { ConversationPublicAnswerBoundaryService } from '../runtime/conversation-public-answer-boundary.service';
 import { ConversationQAExecutorService } from '../runtime/conversation-qa-executor.service';
 import type { CoachConversationHumanContext } from '../../context/coach-conversation-human-context.contract';
 import type { PublicNutritionResponse } from '../../diet/v2/presentation/public-nutrition-response.contract';
 import type { ConversationExecutionRoute } from '../contracts/conversation-execution-route.contract';
-import { COACH_CONVERSATIONAL_QA_V1_PROMPT_SEED } from '../runtime/coach-conversational-qa.prompt.definition';
+import {
+  COACH_CONVERSATIONAL_QA_V1_PROMPT,
+  COACH_CONVERSATIONAL_QA_V2_PROMPT_SEED,
+} from '../runtime/coach-conversational-qa.prompt.definition';
 
 describe('ConversationQAExecutorService', () => {
-  it('stores the full OpenAI JSON Schema wrapper in the prompt seed', () => {
-    expect(COACH_CONVERSATIONAL_QA_V1_PROMPT_SEED.schema).toMatchObject({
+  it('prepares prompt version 2 with the compatible name and full schema wrapper', () => {
+    expect(COACH_CONVERSATIONAL_QA_V1_PROMPT.version).toBe(1);
+    expect(COACH_CONVERSATIONAL_QA_V2_PROMPT_SEED).toMatchObject({
       name: 'coach_conversational_qa_v1',
-      schema: expect.objectContaining({ type: 'object' }),
+      version: 2,
+      schema: {
+        name: 'coach_conversational_qa_v1',
+        schema: expect.objectContaining({ type: 'object' }),
+      },
     });
   });
 
@@ -280,6 +288,194 @@ describe('ConversationQAExecutorService', () => {
       expect(providerInput).not.toMatch(/user-id|conversation-id|message-id/u);
     },
   );
+
+  it('keeps a short hydration answer public while retaining internal grounding', async () => {
+    const answer =
+      'A necessidade varia com seu corpo, clima e atividade. Sede e cor da urina ajudam como referências gerais.';
+    const subject = createSubject({
+      disposition: 'ANSWER',
+      domain: 'NUTRITION',
+      answer,
+      followUpQuestion: null,
+      grounding: 'MIXED',
+      confidence: 'HIGH',
+    });
+
+    await expect(
+      subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+        route: route('NUTRITION_GUIDANCE'),
+        humanContext: human('Quantos litros de água por dia?'),
+      }),
+    ).resolves.toMatchObject({
+      status: 'COMPLETED',
+      content: answer,
+      observability: { grounding: 'MIXED' },
+    });
+    expect(answer.length).toBeLessThanOrEqual(350);
+    expect(answer).not.toMatch(/can[oô]nic|\*\*|runtime|pipeline/iu);
+  });
+
+  it('preserves the requested rice quantity without repeating unrelated foods', async () => {
+    const answer =
+      '🍚 No almoço, seu plano tem *arroz branco cozido: 3 xícaras cozidas*.';
+    const subject = createSubject({
+      disposition: 'ANSWER',
+      domain: 'NUTRITION',
+      answer,
+      followUpQuestion: 'Quer que eu converta isso para gramas?',
+      grounding: 'CURRENT_PLAN',
+      confidence: 'HIGH',
+    });
+    subject.currentNutrition.read.mockResolvedValueOnce({
+      status: 'AVAILABLE',
+      plan: {
+        ...publicPlan,
+        days: Object.freeze([
+          Object.freeze({
+            meals: Object.freeze([
+              Object.freeze({
+                name: 'Almoço',
+                items: Object.freeze([
+                  Object.freeze({
+                    name: 'Arroz branco cozido',
+                    quantity: '3 xícaras cozidas',
+                  }),
+                ]),
+              }),
+            ]),
+          }),
+        ]),
+      },
+    });
+
+    const result = await subject.service.execute({
+      userId: 'user-id',
+      conversationId: 'conversation-id',
+      messageId: 'message-id',
+      route: route('NUTRITION_GUIDANCE'),
+      humanContext: human('Quanto de arroz eu tenho no almoço?'),
+    });
+
+    expect(result).toMatchObject({
+      status: 'COMPLETED',
+      content: `${answer}\n\nQuer que eu converta isso para gramas?`,
+    });
+    expect(result.status === 'COMPLETED' && result.content).toContain(
+      '3 xícaras cozidas',
+    );
+    const providerInput = subject.ai.runTextJob.mock.calls[0][1].input;
+    expect(providerInput).toContain('3 xícaras cozidas');
+    expect(result.status === 'COMPLETED' && result.content).not.toContain(
+      'Feijão',
+    );
+  });
+
+  it('uses a previous coach follow-up for one read-only provider continuation', async () => {
+    const subject = createSubject({
+      disposition: 'ANSWER',
+      domain: 'NUTRITION',
+      answer: 'As 3 xícaras equivalem aproximadamente a 480 g de arroz cozido.',
+      followUpQuestion: null,
+      grounding: 'RECENT_CONTEXT',
+      confidence: 'HIGH',
+    });
+
+    await expect(
+      subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+        route: route('ANSWER_MESSAGE'),
+        humanContext: human(
+          'Sim',
+          Object.freeze([
+            {
+              direction: 'COACH',
+              text: 'Quer que eu converta isso para gramas?',
+            },
+          ]),
+        ),
+        previousAnswer:
+          '🍚 No almoço, seu plano tem *arroz branco cozido: 3 xícaras cozidas*.',
+        previousFollowUpQuestion: 'Quer que eu converta isso para gramas?',
+      }),
+    ).resolves.toMatchObject({
+      status: 'COMPLETED',
+      content:
+        'As 3 xícaras equivalem aproximadamente a 480 g de arroz cozido.',
+    });
+    expect(subject.ai.createJob).toHaveBeenCalledWith(
+      expect.objectContaining({ type: AIJobType.TEXT }),
+    );
+    expect(subject.ai.createJob).toHaveBeenCalledTimes(1);
+    expect(subject.ai.runTextJob).toHaveBeenCalledTimes(1);
+    const providerInput = subject.ai.runTextJob.mock.calls[0][1].input;
+    expect(providerInput).toContain(
+      '"previousFollowUpQuestion":"Quer que eu converta isso para gramas?"',
+    );
+    expect(providerInput).toContain(
+      '"previousAnswer":"🍚 No almoço, seu plano tem *arroz branco cozido: 3 xícaras cozidas*."',
+    );
+    expect(providerInput).toContain('"request":"Sim"');
+  });
+
+  it('answers only the requested approximate referent', async () => {
+    const answer =
+      'As 3 xícaras de arroz cozido equivalem aproximadamente a 480 g.';
+    const subject = createSubject({
+      disposition: 'ANSWER',
+      domain: 'NUTRITION',
+      answer,
+      followUpQuestion: null,
+      grounding: 'RECENT_CONTEXT',
+      confidence: 'HIGH',
+    });
+
+    await expect(
+      subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+        route: route('NUTRITION_GUIDANCE'),
+        humanContext: human('E em gramas, aproximadamente quanto seria isso?'),
+      }),
+    ).resolves.toMatchObject({ status: 'COMPLETED', content: answer });
+    expect(answer).not.toMatch(/feij[aã]o|frango/iu);
+  });
+
+  it('keeps a lighter-lunch suggestion concise, read-only and bounded to three bullets', async () => {
+    const answer =
+      'Para deixar o almoço mais leve hoje:\n- reduza um pouco o arroz;\n- mantenha a proteína;\n- aumente salada ou legumes.';
+    const subject = createSubject({
+      disposition: 'ANSWER',
+      domain: 'NUTRITION',
+      answer,
+      followUpQuestion: null,
+      grounding: 'MIXED',
+      confidence: 'HIGH',
+    });
+
+    await expect(
+      subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+        route: route('NUTRITION_GUIDANCE'),
+        humanContext: human(
+          'O que posso ajustar no almoço hoje para ficar mais leve?',
+        ),
+      }),
+    ).resolves.toMatchObject({ status: 'COMPLETED', content: answer });
+    expect(answer.length).toBeLessThanOrEqual(650);
+    expect(answer.match(/^[-•]\s+/gmu)).toHaveLength(3);
+    expect(subject.ai.createJob).toHaveBeenCalledWith(
+      expect.objectContaining({ type: AIJobType.TEXT }),
+    );
+    expect(subject.ai.runTextJob).toHaveBeenCalledTimes(1);
+  });
 
   it('reuses a completed answer without another provider execution', async () => {
     const candidate = {

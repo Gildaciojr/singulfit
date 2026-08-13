@@ -7,7 +7,7 @@ import type { CoachConversationHumanContext } from '../../context/coach-conversa
 import { PrismaService } from '../../prisma/prisma.service';
 import type { PublicNutritionResponse } from '../../diet/v2/presentation/public-nutrition-response.contract';
 import type { ConversationExecutionRoute } from '../contracts/conversation-execution-route.contract';
-import { COACH_CONVERSATIONAL_QA_V1_PROMPT } from './coach-conversational-qa.prompt.definition';
+import { COACH_CONVERSATIONAL_QA_V2_PROMPT } from './coach-conversational-qa.prompt.definition';
 import { ConversationCurrentNutritionContextService } from './conversation-current-nutrition-context.service';
 import { ConversationPublicAnswerBoundaryService } from './conversation-public-answer-boundary.service';
 import type {
@@ -24,6 +24,8 @@ export interface ConversationQAExecutionInput {
   readonly messageId: string;
   readonly route: ConversationExecutionRoute;
   readonly humanContext: CoachConversationHumanContext;
+  readonly previousAnswer?: string | null;
+  readonly previousFollowUpQuestion?: string | null;
   readonly deadlineAtMs?: number;
 }
 
@@ -94,7 +96,7 @@ export class ConversationQAExecutorService {
         conversationId: input.conversationId,
         messageId: input.messageId,
         type: AIJobType.TEXT,
-        promptName: COACH_CONVERSATIONAL_QA_V1_PROMPT.name,
+        promptName: COACH_CONVERSATIONAL_QA_V2_PROMPT.name,
       });
     } catch {
       return this.failed('AI_JOB_PREPARATION_FAILED');
@@ -127,9 +129,15 @@ export class ConversationQAExecutorService {
     try {
       response = await this.ai.runTextJob(job.id, {
         input: JSON.stringify(
-          this.payload(input.route, input.humanContext, currentNutrition),
+          this.payload(
+            input.route,
+            input.humanContext,
+            currentNutrition,
+            input.previousAnswer ?? null,
+            input.previousFollowUpQuestion ?? null,
+          ),
         ),
-        jsonSchema: COACH_CONVERSATIONAL_QA_V1_PROMPT.schema,
+        jsonSchema: COACH_CONVERSATIONAL_QA_V2_PROMPT.schema,
         timeoutMs: providerBudgetMs,
       });
     } catch (error: unknown) {
@@ -240,10 +248,14 @@ export class ConversationQAExecutorService {
     currentNutrition: Awaited<
       ReturnType<ConversationCurrentNutritionContextService['read']>
     >,
+    previousAnswer: string | null = null,
+    previousFollowUpQuestion: string | null = null,
   ): ConversationAIValue {
     return Object.freeze({
       request: context.currentMessage,
       route: route.kind,
+      previousAnswer,
+      previousFollowUpQuestion,
       trustedContext: Object.freeze({
         preferredName: context.preferredName?.value ?? null,
         goal: context.goal?.value ?? null,

@@ -486,6 +486,9 @@ describe('ResponseBuilderService', () => {
     await subject.service.buildNutritionResponse('analysis-id');
 
     expect(
+      subject.nutritionConversationShadowPipeline.isOfficialSelectionEnabled,
+    ).toHaveBeenCalledWith('user-id');
+    expect(
       subject.nutritionConversationShadowPipeline.selectOfficial,
     ).toHaveBeenCalledTimes(1);
     expect(subject.transaction.outboundMessage.upsert).toHaveBeenCalledWith(

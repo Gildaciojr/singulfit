@@ -9,10 +9,12 @@ import { NutritionConversationLanguageRealizer } from './nutrition-conversation-
 import { NutritionConversationLegacyCandidateAdapter } from './nutrition-conversation-legacy-candidate.adapter';
 import { NutritionConversationRealizationExecutorService } from './nutrition-conversation-realization-executor.service';
 import { ConversationReasoningBridgeService } from './reasoning-bridge/conversation-reasoning-bridge.service';
+import { NutritionConversationInternalEligibilityService } from './nutrition-conversation-internal-eligibility.service';
 
 const PROVIDERS = [
   ConversationLayerOperationalConfigService,
   ConversationSelectionConfigService,
+  NutritionConversationInternalEligibilityService,
   NutritionConversationLanguageRealizer,
   NutritionConversationRealizationExecutorService,
   NutritionConversationLegacyCandidateAdapter,

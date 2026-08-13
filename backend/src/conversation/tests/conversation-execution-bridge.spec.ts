@@ -27,6 +27,9 @@ describe('ConversationExecutionBridgeService', () => {
   function human(
     message: string,
     cue: CoachConversationHumanContext['turnCue'] = 'COMMON',
+    recentConversation: CoachConversationHumanContext['recentConversation'] = Object.freeze(
+      [],
+    ),
   ): CoachConversationHumanContext {
     return {
       currentMessage: message,
@@ -56,6 +59,7 @@ describe('ConversationExecutionBridgeService', () => {
         journeyStage: null,
       },
       memory: Object.freeze([]),
+      recentConversation,
       continuity: null,
       progress: null,
       currentPlans: { diet: null, workout: null },
@@ -161,6 +165,7 @@ describe('ConversationExecutionBridgeService', () => {
   it.each([
     ['Obrigado!', 'THANKS'],
     ['Bom dia', 'GREETING'],
+    ['Sim', 'AFFIRMATION'],
   ] as const)(
     'keeps %s deterministic without a Q&A call',
     async (message, cue) => {
@@ -190,6 +195,78 @@ describe('ConversationExecutionBridgeService', () => {
       expect(qa.execute).not.toHaveBeenCalled();
     },
   );
+
+  it('continues Q&A when a standalone affirmation answers the latest coach follow-up', async () => {
+    const qa = {
+      execute: jest.fn().mockResolvedValue({
+        status: 'COMPLETED',
+        content: 'Isso equivale aproximadamente a 480 g de arroz cozido.',
+        observability: {
+          answerSource: 'AI',
+          disposition: 'ANSWER',
+          domain: 'NUTRITION',
+          grounding: 'RECENT_CONTEXT',
+          providerDurationMs: 10,
+          promptTokens: 5,
+          completionTokens: 5,
+          totalTokens: 10,
+          fallbackReason: null,
+        },
+      }),
+    };
+    const qaFollowUp = {
+      findPending: jest.fn().mockResolvedValue({
+        sourceMessageId: 'previous-message-id',
+        previousAnswer:
+          '🍚 No almoço, seu plano tem *arroz branco cozido: 3 xícaras cozidas*.',
+        previousFollowUpQuestion: 'Quer que eu converta isso para gramas?',
+      }),
+    };
+    const subject = new ConversationExecutionBridgeService(
+      new ConversationResponsePayloadBuilder(),
+      new ConversationLanguageRealizerService(),
+      new ConversationResponseFormatterService(),
+      new ConversationResponseValidatorService(),
+      qa as never,
+      qaFollowUp as never,
+    );
+
+    await expect(
+      subject.execute(
+        decision(
+          understanding('COMMON_MESSAGE', 'ANSWER', 'GENERAL'),
+          goalDecision('ANSWER_MESSAGE', 'COMMON_MESSAGE'),
+        ),
+        human(
+          'Sim',
+          'AFFIRMATION',
+          Object.freeze([
+            {
+              direction: 'USER',
+              text: 'Quanto de arroz eu tenho no almoço?',
+            },
+          ]),
+        ),
+        {
+          userId: 'user-id',
+          conversationId: 'conversation-id',
+          messageId: 'message-id',
+        },
+      ),
+    ).resolves.toMatchObject({
+      status: 'COMPLETED',
+      content: 'Isso equivale aproximadamente a 480 g de arroz cozido.',
+    });
+    expect(qaFollowUp.findPending).toHaveBeenCalledTimes(1);
+    expect(qa.execute).toHaveBeenCalledTimes(1);
+    expect(qa.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        previousFollowUpQuestion: 'Quer que eu converta isso para gramas?',
+        previousAnswer:
+          '🍚 No almoço, seu plano tem *arroz branco cozido: 3 xícaras cozidas*.',
+      }),
+    );
+  });
 
   it.each([
     ['Bom dia, o que tenho para comer hoje?', 'GREETING'],
@@ -252,7 +329,17 @@ describe('ConversationExecutionBridgeService', () => {
   );
 
   it('realizes an explicit confirmation request', async () => {
-    const result = await service.execute(
+    const qa = { execute: jest.fn() };
+    const qaFollowUp = { findPending: jest.fn() };
+    const subject = new ConversationExecutionBridgeService(
+      new ConversationResponsePayloadBuilder(),
+      new ConversationLanguageRealizerService(),
+      new ConversationResponseFormatterService(),
+      new ConversationResponseValidatorService(),
+      qa as never,
+      qaFollowUp as never,
+    );
+    const result = await subject.execute(
       decision(
         understanding(
           'CONFIRMATION_REQUIRED',
@@ -269,6 +356,8 @@ describe('ConversationExecutionBridgeService', () => {
     expect(result.status === 'COMPLETED' && result.content).toContain(
       'plano alimentar',
     );
+    expect(qa.execute).not.toHaveBeenCalled();
+    expect(qaFollowUp.findPending).not.toHaveBeenCalled();
   });
 
   it('gives safety precedence with no plan execution', async () => {

@@ -208,6 +208,7 @@ describe('ConversationUnderstandingService', () => {
   });
 
   it.each([
+    'Ajuste meu almoço.',
     'Ajuste meu almoço no meu plano daqui para frente.',
     'Altere permanentemente meu jantar.',
     'Ajuste meu almoço.',

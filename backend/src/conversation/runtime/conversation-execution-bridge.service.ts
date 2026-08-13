@@ -7,6 +7,8 @@ import { ConversationResponseFormatterService } from './conversation-response-fo
 import { ConversationResponsePayloadBuilder } from './conversation-response-payload.builder';
 import { ConversationResponseValidatorService } from './conversation-response-validator.service';
 import { ConversationQAExecutorService } from './conversation-qa-executor.service';
+import { ConversationQAFollowUpContextService } from './conversation-qa-follow-up-context.service';
+import type { ConversationQAFollowUpContext } from './conversation-qa-follow-up-context.service';
 
 export interface ConversationBridgeExecutionContext {
   readonly userId: string;
@@ -23,9 +25,10 @@ export class ConversationExecutionBridgeService {
     private readonly formatter: ConversationResponseFormatterService,
     private readonly validator: ConversationResponseValidatorService,
     private readonly qa?: ConversationQAExecutorService,
+    private readonly qaFollowUp?: ConversationQAFollowUpContextService,
   ) {}
 
-  execute(
+  async execute(
     decision: ConversationRoutingDecision,
     humanContext: CoachConversationHumanContext | null = null,
     executionContext?: ConversationBridgeExecutionContext,
@@ -33,53 +36,58 @@ export class ConversationExecutionBridgeService {
     const route = decision.executionRoute;
     const payload = this.payloadBuilder.build(route, humanContext);
     if (!payload) {
-      return Promise.resolve(
-        Object.freeze({
-          status: 'FALLBACK_REQUIRED' as const,
-          content: null,
-          routeKind: route.kind,
-          reason: this.unsupportedReason(route.kind),
-        }),
-      );
+      return Object.freeze({
+        status: 'FALLBACK_REQUIRED' as const,
+        content: null,
+        routeKind: route.kind,
+        reason: this.unsupportedReason(route.kind),
+      });
     }
     if (
       payload.kind === 'CONTEXTUAL_RESPONSE' &&
-      this.qaEligible(payload.cue, payload.currentMessage) &&
       humanContext &&
       executionContext &&
       this.qa
     ) {
-      return this.executeQA(decision, humanContext, executionContext);
+      const directlyEligible = this.qaEligible(
+        payload.cue,
+        payload.currentMessage,
+      );
+      const previousFollowUp = directlyEligible
+        ? null
+        : await this.previousFollowUpQuestion(payload.cue, executionContext);
+      if (directlyEligible || previousFollowUp) {
+        return this.executeQA(
+          decision,
+          humanContext,
+          executionContext,
+          previousFollowUp,
+        );
+      }
     }
     try {
       const realized = this.realizer.realize(payload);
       if (!this.validator.isValid(realized)) {
-        return Promise.resolve(
-          Object.freeze({
-            status: 'FAILED' as const,
-            content: null,
-            routeKind: route.kind,
-            reason: 'INVALID_RESPONSE_CONTENT',
-          }),
-        );
-      }
-      const content = this.formatter.format(realized);
-      return Promise.resolve(
-        Object.freeze({
-          status: 'COMPLETED' as const,
-          content,
-          routeKind: route.kind,
-        }),
-      );
-    } catch {
-      return Promise.resolve(
-        Object.freeze({
+        return Object.freeze({
           status: 'FAILED' as const,
           content: null,
           routeKind: route.kind,
-          reason: 'RESPONSE_PIPELINE_FAILED',
-        }),
-      );
+          reason: 'INVALID_RESPONSE_CONTENT',
+        });
+      }
+      const content = this.formatter.format(realized);
+      return Object.freeze({
+        status: 'COMPLETED' as const,
+        content,
+        routeKind: route.kind,
+      });
+    } catch {
+      return Object.freeze({
+        status: 'FAILED' as const,
+        content: null,
+        routeKind: route.kind,
+        reason: 'RESPONSE_PIPELINE_FAILED',
+      });
     }
   }
 
@@ -87,6 +95,7 @@ export class ConversationExecutionBridgeService {
     decision: ConversationRoutingDecision,
     humanContext: CoachConversationHumanContext,
     executionContext: ConversationBridgeExecutionContext,
+    previousFollowUp: ConversationQAFollowUpContext | null = null,
   ): Promise<ConversationBridgeResult> {
     let result: Awaited<ReturnType<ConversationQAExecutorService['execute']>>;
     try {
@@ -94,6 +103,9 @@ export class ConversationExecutionBridgeService {
         ...executionContext,
         route: decision.executionRoute,
         humanContext,
+        previousAnswer: previousFollowUp?.previousAnswer ?? null,
+        previousFollowUpQuestion:
+          previousFollowUp?.previousFollowUpQuestion ?? null,
       });
     } catch {
       return Object.freeze({
@@ -138,6 +150,20 @@ export class ConversationExecutionBridgeService {
       routeKind: decision.executionRoute.kind,
       observability: result.observability,
     });
+  }
+
+  private async previousFollowUpQuestion(
+    cue: CoachConversationHumanContext['turnCue'],
+    executionContext: ConversationBridgeExecutionContext,
+  ): Promise<ConversationQAFollowUpContext | null> {
+    if (cue !== 'AFFIRMATION' || !this.qaFollowUp) return null;
+    try {
+      return await this.qaFollowUp.findPending({
+        ...executionContext,
+      });
+    } catch {
+      return null;
+    }
   }
 
   private qaEligible(

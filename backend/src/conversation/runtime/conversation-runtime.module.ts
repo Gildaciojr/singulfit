@@ -20,6 +20,7 @@ import { DietModule } from '../../diet/diet.module';
 import { ConversationCurrentNutritionContextService } from './conversation-current-nutrition-context.service';
 import { ConversationPublicAnswerBoundaryService } from './conversation-public-answer-boundary.service';
 import { ConversationQAExecutorService } from './conversation-qa-executor.service';
+import { ConversationQAFollowUpContextService } from './conversation-qa-follow-up-context.service';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { ConversationQAExecutorService } from './conversation-qa-executor.servic
     ConversationCurrentNutritionContextService,
     ConversationPublicAnswerBoundaryService,
     ConversationQAExecutorService,
+    ConversationQAFollowUpContextService,
   ],
   exports: [
     ConversationRuntimeOperationalConfigService,
