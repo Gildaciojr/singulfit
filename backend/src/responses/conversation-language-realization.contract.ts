@@ -2,6 +2,7 @@ import type { AuthorizedFactId } from './conversation-authorized-facts.contract'
 import type {
   ConversationLanguageUnit,
   ConversationLanguageUnitOmissionReason,
+  ConversationLanguageUnitViolationDetail,
   OmittedConversationLanguageUnit,
 } from './conversation-language-unit.contract';
 import type { SanitizedConversationDecision } from './sanitized-conversation-payload.contract';
@@ -75,6 +76,7 @@ interface LanguageRealizationAudit {
   readonly producedLength: number;
   readonly producedQuestionCount: number;
   readonly warningCodes: readonly string[];
+  readonly violationDetails?: readonly ConversationLanguageUnitViolationDetail[];
   readonly operationalMetadata?: LanguageRealizationOperationalMetadata;
 }
 

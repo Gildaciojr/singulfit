@@ -25,6 +25,7 @@ import type {
 import { SanitizedConversationPayloadReferenceBuilder } from './sanitized-conversation-payload-reference.builder';
 import { NutritionConversationCoachStyleEngine } from './nutrition-conversation-coach-style.engine';
 import { NUTRITION_CONVERSATION_REALIZATION_PROMPT } from './nutrition-conversation-realization-prompt.definition';
+import { ProviderRealizationViewBuilder } from './provider-realization-view.builder';
 import type { ConversationReasoningEvidence } from './reasoning-bridge/conversation-reasoning-bridge.contract';
 
 export interface NutritionConversationLanguageRealizerExecution {
@@ -101,6 +102,7 @@ export class NutritionConversationLanguageRealizer {
     new SanitizedConversationPayloadReferenceBuilder();
   private readonly coachStyleEngine =
     new NutritionConversationCoachStyleEngine();
+  private readonly providerViewBuilder = new ProviderRealizationViewBuilder();
 
   constructor(private readonly conversationAI: ConversationAIService) {}
 
@@ -142,6 +144,7 @@ export class NutritionConversationLanguageRealizer {
         this.invalid(
           reference,
           `UNIT_VALIDATION:${validated.violations.join(',')}`,
+          validated.violationDetails,
         ),
       );
     }
@@ -245,7 +248,9 @@ export class NutritionConversationLanguageRealizer {
     payload: SanitizedConversationPayload,
     reasoning: ConversationReasoningEvidence | null,
   ): ConversationAIValue {
-    const conversation = this.toConversationAIValue(payload);
+    const conversation = this.toConversationAIValue(
+      this.providerViewBuilder.build(payload),
+    );
     if (!reasoning) return conversation;
     if (!this.isRecord(conversation)) {
       throw new Error('Payload conversacional possui estrutura inválida');
@@ -794,12 +799,17 @@ export class NutritionConversationLanguageRealizer {
     );
   }
 
-  private invalid(reference: string, code: string): LanguageRealizationResult {
+  private invalid(
+    reference: string,
+    code: string,
+    violationDetails?: LanguageRealizationResult['violationDetails'],
+  ): LanguageRealizationResult {
     return this.failure(
       reference,
       'INVALID_STRUCTURE',
       code,
       'INVALID_STRUCTURE',
+      violationDetails,
     );
   }
 
@@ -817,6 +827,7 @@ export class NutritionConversationLanguageRealizer {
     status: FailureStatus,
     failureCode: string,
     fallbackReason?: LanguageRealizationFallbackReason,
+    violationDetails?: LanguageRealizationResult['violationDetails'],
   ): LanguageRealizationResult {
     const base = {
       id: `language-realization:${reference.slice('sanitized-payload:'.length)}`,
@@ -835,6 +846,7 @@ export class NutritionConversationLanguageRealizer {
       producedLength: 0,
       producedQuestionCount: 0,
       warningCodes: Object.freeze([]),
+      ...(violationDetails ? { violationDetails } : {}),
       failureCode,
     };
     if (status === 'INVALID_STRUCTURE')

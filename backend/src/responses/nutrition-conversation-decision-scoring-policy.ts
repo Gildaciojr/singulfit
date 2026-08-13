@@ -224,6 +224,13 @@ export class NutritionConversationDecisionScoringPolicy {
       selectedCandidates,
       suppressions,
     );
+    this.applyFactBudget(
+      profileSelection.profile,
+      selectedIds,
+      selectedCandidates,
+      suppressions,
+    );
+    this.alignEstimateQualificationFacts(context, selectedCandidates);
 
     for (const candidate of candidates) {
       if (!selectedIds.has(candidate.id) && !suppressions.has(candidate.id)) {
@@ -353,6 +360,96 @@ export class NutritionConversationDecisionScoringPolicy {
         `DIALOGUE_PROFILE_BUDGET_${profile}`,
       ]);
     }
+  }
+
+  private applyFactBudget(
+    profile: Parameters<
+      NutritionConversationDialogueProfilePolicy['definition']
+    >[0],
+    selectedIds: Set<ConversationDecisionId>,
+    selectedCandidates: DecisionCandidate[],
+    suppressions: Map<ConversationDecisionId, SuppressionRecord>,
+  ): void {
+    const maximumFactCount =
+      this.dialogueProfilePolicy.definition(profile).budgets.maximumFactCount;
+    const selectedById = new Map(
+      selectedCandidates.map((candidate) => [candidate.id, candidate]),
+    );
+    const protectedIds = new Set<ConversationDecisionId>();
+    const protect = (candidate: DecisionCandidate): void => {
+      if (protectedIds.has(candidate.id)) return;
+      protectedIds.add(candidate.id);
+      for (const dependencyId of candidate.dependencyIds) {
+        const dependency = selectedById.get(dependencyId);
+        if (dependency) protect(dependency);
+      }
+    };
+    selectedCandidates
+      .filter((candidate) => candidate.required)
+      .forEach(protect);
+
+    const protectedFacts = new Set(
+      selectedCandidates
+        .filter((candidate) => protectedIds.has(candidate.id))
+        .flatMap((candidate) => candidate.factIds),
+    );
+    if (protectedFacts.size > maximumFactCount) {
+      throw new Error('Decisões obrigatórias excedem orçamento de fatos');
+    }
+
+    const admittedFacts = new Set(protectedFacts);
+    for (const candidate of [...selectedCandidates]) {
+      if (protectedIds.has(candidate.id)) continue;
+      const dependencyMissing = candidate.dependencyIds.some(
+        (dependencyId) => !selectedIds.has(dependencyId),
+      );
+      const candidateFacts = new Set([...admittedFacts, ...candidate.factIds]);
+      if (!dependencyMissing && candidateFacts.size <= maximumFactCount) {
+        candidate.factIds.forEach((factId) => admittedFacts.add(factId));
+        continue;
+      }
+
+      this.removeSelected(candidate, selectedIds, selectedCandidates);
+      suppressions.delete(candidate.id);
+      this.suppress(
+        suppressions,
+        candidate,
+        dependencyMissing ? 'MISSING_DEPENDENCY' : 'PROFILE_BUDGET',
+        [
+          dependencyMissing
+            ? 'DEPENDENCY_REMOVED_BY_FACT_BUDGET'
+            : `DIALOGUE_PROFILE_FACT_BUDGET_${profile}`,
+        ],
+      );
+    }
+  }
+
+  private alignEstimateQualificationFacts(
+    context: NutritionConversationContext,
+    selectedCandidates: DecisionCandidate[],
+  ): void {
+    const qualificationIndex = selectedCandidates.findIndex(
+      (candidate) => candidate.id === 'nutrition.qualify-estimates',
+    );
+    if (qualificationIndex === -1) return;
+
+    const estimatedFacts = new Set([
+      'facts.foods',
+      ...(context.facts.totalCalories !== null ? ['facts.totalCalories'] : []),
+      ...(context.facts.totalProtein !== null ? ['facts.totalProtein'] : []),
+      ...(context.facts.totalCarbs !== null ? ['facts.totalCarbs'] : []),
+      ...(context.facts.totalFat !== null ? ['facts.totalFat'] : []),
+    ]);
+    const selectedFacts = new Set(
+      selectedCandidates.flatMap((candidate) => candidate.factIds),
+    );
+    const qualification = selectedCandidates[qualificationIndex];
+    selectedCandidates[qualificationIndex] = Object.freeze({
+      ...qualification,
+      factIds: Object.freeze(
+        [...estimatedFacts].filter((factId) => selectedFacts.has(factId)),
+      ),
+    });
   }
 
   private replaceConversationalEnding(

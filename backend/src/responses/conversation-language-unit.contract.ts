@@ -51,8 +51,21 @@ export type ConversationLanguageUnitViolationCode =
   | 'RECOMMENDATION_NOT_AUTHORIZED'
   | 'DUPLICATE_BLOCK_UNIT';
 
+export interface ConversationLanguageUnitViolationDetail {
+  readonly code:
+    | 'DECISION_NOT_AUTHORIZED'
+    | 'FACT_NOT_AUTHORIZED'
+    | 'FACT_NOT_LINKED_TO_BLOCK';
+  readonly blockKey: string;
+  readonly factKey?: AuthorizedFactId;
+  readonly factReference?: string;
+  readonly decisionCode?: SanitizedConversationDecision;
+  readonly decisionReference?: string;
+}
+
 export interface ConversationLanguageUnitValidationResult {
   readonly valid: boolean;
   readonly units: readonly ConversationLanguageUnit[];
   readonly violations: readonly ConversationLanguageUnitViolationCode[];
+  readonly violationDetails: readonly ConversationLanguageUnitViolationDetail[];
 }

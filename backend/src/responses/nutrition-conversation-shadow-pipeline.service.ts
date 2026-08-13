@@ -272,6 +272,9 @@ export class NutritionConversationShadowPipelineService implements OnApplication
         realizerStatus: realization.status,
         candidateEligible: comparison.candidateEligible,
         rejectionCode: comparison.ineligibilityCode,
+        ...(realization.violationDetails
+          ? { violationDetails: realization.violationDetails }
+          : {}),
         latencyMs: comparison.metrics.incrementalLatencyMs,
         legacyCharacters: comparison.metrics.legacyCharacters,
         candidateCharacters: comparison.metrics.candidateCharacters,

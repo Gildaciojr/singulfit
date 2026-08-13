@@ -520,6 +520,34 @@ describe('NutritionConversationDecisionScoringPolicy', () => {
     );
   });
 
+  it('suppresses an optional decision whose facts exceed the selected profile budget', () => {
+    const plan = policy.select(context(), [
+      candidate('nutrition.respond-to-meal', {
+        required: true,
+        category: 'INTENT',
+        intrinsicPriority: 'P1',
+        factIds: [
+          'facts.mealCategory',
+          'facts.foods',
+          'facts.totalCalories',
+          'facts.totalProtein',
+          'facts.totalCarbs',
+          'facts.qualityScore',
+          'facts.confidence',
+        ],
+      }),
+      candidate('nutrition.show-fat', {
+        factIds: ['facts.totalFat'],
+      }),
+    ]);
+
+    expect(plan.dialogueProfile).toBe('ACKNOWLEDGE_AND_ADJUST');
+    expect(selectedIds(plan)).toEqual(['nutrition.respond-to-meal']);
+    expect(suppression(plan, 'nutrition.show-fat')).toEqual(
+      expect.objectContaining({ reason: 'PROFILE_BUDGET' }),
+    );
+  });
+
   it('handles a safe minimal context without optional signals', () => {
     const base = context();
     const minimal: NutritionConversationContext = {

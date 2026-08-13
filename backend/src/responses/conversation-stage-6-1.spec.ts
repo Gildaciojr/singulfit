@@ -145,11 +145,7 @@ describe('Conversation Layer stage 6.1', () => {
     );
 
     expect(qualification?.required).toBe(true);
-    expect(qualification?.factIds).toEqual([
-      'facts.foods',
-      'facts.totalCalories',
-      'facts.totalCarbs',
-    ]);
+    expect(qualification?.factIds).toEqual(['facts.foods']);
     expect(() =>
       new NutritionConversationDecisionScoringPolicy().select(
         source,
@@ -219,6 +215,18 @@ describe('Conversation Layer stage 6.1', () => {
     expect(second).toEqual(first);
     expect(first.selectedDecisions).toContain('RESPOND_TO_MEAL');
     expect(first.structure.blocks.length).toBeGreaterThan(0);
+    const disclaimerBlock = first.structure.blocks.find((block) =>
+      block.decisions.includes('QUALIFY_ESTIMATES'),
+    );
+    expect(disclaimerBlock).toBeDefined();
+    expect(disclaimerBlock?.facts).toEqual(
+      expect.arrayContaining([...first.facts.disclaimerRequired]),
+    );
+    expect(
+      first.facts.disclaimerRequired.every((fact) =>
+        first.structure.blocks.some((block) => block.facts.includes(fact)),
+      ),
+    ).toBe(true);
     expect(first.style.coach.identity).toBe('SINGULFIT_COACH_V1');
     expect(first.style.coach.role).toBe('SPORTS_NUTRITION_COACH');
     expect(first.style.coach.lexicalVariant).toMatch(/^[A-D]$/u);

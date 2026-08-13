@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import type { ConversationLanguageUnitViolationDetail } from './conversation-language-unit.contract';
 
 export type ConversationShadowDiagnosticEvent =
   | 'STARTED'
@@ -13,6 +14,7 @@ export interface ConversationShadowDiagnostic {
   readonly realizerStatus?: string;
   readonly candidateEligible?: boolean;
   readonly rejectionCode?: string;
+  readonly violationDetails?: readonly ConversationLanguageUnitViolationDetail[];
   readonly latencyMs?: number;
   readonly legacyCharacters?: number;
   readonly candidateCharacters?: number;

@@ -9,6 +9,7 @@ import { NutritionConversationLanguageRealizer } from './nutrition-conversation-
 import type { SanitizedConversationPayload } from './sanitized-conversation-payload.contract';
 import { DEFAULT_NUTRITION_CONVERSATION_COACH_STYLE } from './nutrition-conversation-coach-style.engine';
 import { NUTRITION_CONVERSATION_REALIZATION_PROMPT } from './nutrition-conversation-realization-prompt.definition';
+import { ProviderRealizationViewBuilder } from './provider-realization-view.builder';
 import type { ConversationReasoningEvidence } from './reasoning-bridge/conversation-reasoning-bridge.contract';
 
 function payload(): SanitizedConversationPayload {
@@ -264,11 +265,13 @@ describe('NutritionConversationLanguageRealizer', () => {
 
   it('sends only instructions, schema and the sanitized payload through ConversationAIService', async () => {
     const source = payload();
+    const providerView = new ProviderRealizationViewBuilder().build(source);
     const target = realizer(success(completeOutput()));
     await target.service.realize(source);
     const request = target.execute.mock.calls[0][0];
 
-    expect(request.payload).toEqual(source);
+    expect(request.payload).toEqual(providerView);
+    expect(request.payload).not.toHaveProperty('facts.allowed');
     expect(request.instructions).toContain('somente unidades estruturadas');
     expect(request.instructions).toContain(
       'descreva o fato observado, nunca atribua emoção ao usuário',
@@ -279,8 +282,54 @@ describe('NutritionConversationLanguageRealizer', () => {
     );
   });
 
+  it('gives every provider block only its canonical local facts', () => {
+    const source = payload();
+    const view = new ProviderRealizationViewBuilder().build(source);
+
+    expect(view).not.toHaveProperty('facts.allowed');
+    expect(
+      view.structure.blocks.map((block) => block.facts.map((fact) => fact.key)),
+    ).toEqual(source.structure.blocks.map((block) => block.facts));
+  });
+
+  it('does not expose a sensitive fact outside its authorized block', () => {
+    const source = payload();
+    const sensitiveKey = 'userContext.memory';
+    const scoped: SanitizedConversationPayload = {
+      ...source,
+      facts: {
+        ...source.facts,
+        sensitive: [
+          {
+            key: sensitiveKey,
+            source: 'MEMORY',
+            value: { summary: 'Preferência autorizada' },
+            estimated: false,
+          },
+        ],
+      },
+      structure: {
+        ...source.structure,
+        blocks: source.structure.blocks.map((block, index) => ({
+          ...block,
+          facts: index === 2 ? [...block.facts, sensitiveKey] : block.facts,
+        })),
+      },
+    };
+
+    const view = new ProviderRealizationViewBuilder().build(scoped);
+
+    expect(view.structure.blocks[0].facts).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ key: sensitiveKey })]),
+    );
+    expect(view.structure.blocks[2].facts).toEqual(
+      expect.arrayContaining([expect.objectContaining({ key: sensitiveKey })]),
+    );
+  });
+
   it('receives semantic reasoning without exposing internal reasoning identifiers', async () => {
     const source = payload();
+    const providerView = new ProviderRealizationViewBuilder().build(source);
     const evidence = reasoningEvidence();
     const target = realizer(success(completeOutput()));
 
@@ -292,7 +341,7 @@ describe('NutritionConversationLanguageRealizer', () => {
     const request = target.execute.mock.calls[0][0];
 
     expect(request.payload).toEqual({
-      ...source,
+      ...providerView,
       reasoning: evidence,
     });
     expect(JSON.stringify(request.payload)).not.toMatch(
@@ -302,6 +351,7 @@ describe('NutritionConversationLanguageRealizer', () => {
 
   it('uses the official execution definition and returns provider metadata outside the payload', async () => {
     const source = payload();
+    const providerView = new ProviderRealizationViewBuilder().build(source);
     const target = realizer(success(completeOutput()));
     const result = await target.service.realize(source, {
       prompt: NUTRITION_CONVERSATION_REALIZATION_PROMPT,
@@ -316,7 +366,7 @@ describe('NutritionConversationLanguageRealizer', () => {
         model: 'TEXT',
         instructions: NUTRITION_CONVERSATION_REALIZATION_PROMPT.instructions,
         schema: NUTRITION_CONVERSATION_REALIZATION_PROMPT.schema,
-        payload: source,
+        payload: providerView,
       }),
     );
     expect(result.operationalMetadata).toEqual({
@@ -359,6 +409,47 @@ describe('NutritionConversationLanguageRealizer', () => {
     expect(result.omittedDecisions).toEqual([
       { decision: 'ASK_QUESTION', reason: 'COMMUNICATIVE_BUDGET' },
     ]);
+  });
+
+  it('rejects a cross-block fact and returns only sanitized relationship details', async () => {
+    const source = payload();
+    const scoped: SanitizedConversationPayload = {
+      ...source,
+      facts: {
+        ...source.facts,
+        allowed: [
+          ...source.facts.allowed,
+          {
+            key: 'facts.totalFat',
+            source: 'MEAL_ANALYSIS',
+            value: 10,
+            estimated: true,
+          },
+        ],
+      },
+      structure: {
+        ...source.structure,
+        blocks: source.structure.blocks.map((block, index) => ({
+          ...block,
+          facts: index === 1 ? [...block.facts, 'facts.totalFat'] : block.facts,
+        })),
+      },
+    };
+    const output = completeOutput();
+    output.units[0].factKeys = ['facts.totalFat'];
+
+    const result = await realizer(success(output)).service.realize(scoped);
+
+    expect(result.status).toBe('INVALID_STRUCTURE');
+    expect(result.failureCode).toBe('UNIT_VALIDATION:FACT_NOT_LINKED_TO_BLOCK');
+    expect(result.violationDetails).toEqual([
+      {
+        code: 'FACT_NOT_LINKED_TO_BLOCK',
+        blockKey: 'block-1-uncertainty-qualification',
+        factKey: 'facts.totalFat',
+      },
+    ]);
+    expect(result.candidateText).toBeNull();
   });
 
   it.each([

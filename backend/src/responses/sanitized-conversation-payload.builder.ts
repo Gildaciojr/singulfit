@@ -112,6 +112,7 @@ export class SanitizedConversationPayloadBuilder {
         }) satisfies SanitizedConversationBlock;
       }),
     );
+    const composedFacts = new Set(blocks.flatMap((block) => block.facts));
 
     return Object.freeze({
       facts: Object.freeze({
@@ -123,7 +124,11 @@ export class SanitizedConversationPayloadBuilder {
             this.sanitizedFact(fact),
           ),
         ),
-        disclaimerRequired: input.authorizedFacts.disclaimerRequired,
+        disclaimerRequired: Object.freeze(
+          input.authorizedFacts.disclaimerRequired.filter((fact) =>
+            composedFacts.has(fact),
+          ),
+        ),
       }),
       selectedDecisions,
       structure: Object.freeze({

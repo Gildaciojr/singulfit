@@ -158,7 +158,7 @@ function subject() {
   const promptVersion = {
     id: 'prompt-version-id',
     name: NUTRITION_CONVERSATION_REALIZATION_PROMPT.name,
-    version: 2,
+    version: 3,
     prompt: NUTRITION_CONVERSATION_REALIZATION_PROMPT.instructions,
     capability: NUTRITION_CONVERSATION_REALIZATION_PROMPT.capability,
     model: NUTRITION_CONVERSATION_REALIZATION_PROMPT.model,

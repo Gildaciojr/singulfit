@@ -503,6 +503,42 @@ describe('NutritionConversationShadowPipelineService', () => {
     );
   });
 
+  it('records sanitized block-scope violation details', async () => {
+    const target = subject();
+    target.realizationExecutor.execute.mockResolvedValueOnce({
+      status: 'INVALID_STRUCTURE',
+      candidateText: null,
+      sanitizedPayloadReference: 'payload-reference',
+      violationDetails: [
+        {
+          code: 'FACT_NOT_LINKED_TO_BLOCK',
+          blockKey: 'block-1-primary-observation',
+          factKey: 'facts.totalFat',
+        },
+      ],
+      operationalMetadata: {
+        aiJobId: 'candidate-job-id',
+        promptVersionId: 'prompt-version-id',
+      },
+    });
+
+    target.service.execute(input);
+    await flush();
+
+    expect(target.diagnostics.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'COMPLETED',
+        violationDetails: [
+          {
+            code: 'FACT_NOT_LINKED_TO_BLOCK',
+            blockKey: 'block-1-primary-observation',
+            factKey: 'facts.totalFat',
+          },
+        ],
+      }),
+    );
+  });
+
   it('skips deterministically when the process concurrency limit is reached', async () => {
     const target = subject();
     target.realizationExecutor.execute.mockReturnValue(

@@ -2,8 +2,10 @@ import type { AuthorizedFactValue } from './conversation-authorized-facts.contra
 import type {
   ConversationLanguageUnit,
   ConversationLanguageUnitValidationResult,
+  ConversationLanguageUnitViolationDetail,
   ConversationLanguageUnitViolationCode,
 } from './conversation-language-unit.contract';
+import { createHash } from 'node:crypto';
 import type {
   SanitizedConversationFact,
   SanitizedConversationPayload,
@@ -25,6 +27,7 @@ export class ConversationLanguageUnitValidationPolicy {
     );
     const seenBlocks = new Set<string>();
     const violations: ConversationLanguageUnitViolationCode[] = [];
+    const violationDetails: ConversationLanguageUnitViolationDetail[] = [];
 
     for (const unit of units) {
       const block = blocks.get(unit.blockKey);
@@ -37,18 +40,38 @@ export class ConversationLanguageUnitValidationPolicy {
       }
       seenBlocks.add(unit.blockKey);
 
-      if (
-        unit.decisionCodes.some(
-          (decision) => !block.decisions.includes(decision),
-        )
-      ) {
+      const invalidDecision = unit.decisionCodes.find(
+        (decision) => !block.decisions.includes(decision),
+      );
+      if (invalidDecision) {
         violations.push('DECISION_NOT_AUTHORIZED');
+        violationDetails.push({
+          code: 'DECISION_NOT_AUTHORIZED',
+          blockKey: block.key,
+          ...(payload.selectedDecisions.includes(invalidDecision)
+            ? { decisionCode: invalidDecision }
+            : { decisionReference: this.reference(invalidDecision) }),
+        });
       }
-      if (unit.factKeys.some((fact) => !facts.has(fact))) {
+      const unauthorizedFact = unit.factKeys.find((fact) => !facts.has(fact));
+      if (unauthorizedFact) {
         violations.push('FACT_NOT_AUTHORIZED');
+        violationDetails.push({
+          code: 'FACT_NOT_AUTHORIZED',
+          blockKey: block.key,
+          factReference: this.reference(unauthorizedFact),
+        });
       }
-      if (unit.factKeys.some((fact) => !block.facts.includes(fact))) {
+      const unlinkedFact = unit.factKeys.find(
+        (fact) => facts.has(fact) && !block.facts.includes(fact),
+      );
+      if (unlinkedFact) {
         violations.push('FACT_NOT_LINKED_TO_BLOCK');
+        violationDetails.push({
+          code: 'FACT_NOT_LINKED_TO_BLOCK',
+          blockKey: block.key,
+          factKey: unlinkedFact,
+        });
       }
       if (unit.unitType === 'FACTUAL' && unit.factKeys.length === 0) {
         violations.push('FACTUAL_UNIT_WITHOUT_FACTS');
@@ -100,12 +123,20 @@ export class ConversationLanguageUnitValidationPolicy {
       ),
     );
     const uniqueViolations = Object.freeze([...new Set(violations)]);
+    const boundedViolationDetails = Object.freeze(
+      violationDetails.slice(0, 20).map((detail) => Object.freeze(detail)),
+    );
 
     return Object.freeze({
       valid: uniqueViolations.length === 0,
       units: frozenUnits,
       violations: uniqueViolations,
+      violationDetails: boundedViolationDetails,
     });
+  }
+
+  private reference(value: string): string {
+    return createHash('sha256').update(value).digest('hex').slice(0, 16);
   }
 
   private numbers(value: AuthorizedFactValue): number[] {

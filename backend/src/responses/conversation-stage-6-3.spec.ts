@@ -242,6 +242,39 @@ describe('Conversation Layer stage 6.3', () => {
     );
   });
 
+  it('reports bounded block-scope details without raw unauthorized identifiers', () => {
+    const wrongBlock = policy.validate(payload(), [
+      unit({ factKeys: ['direction.authorizedRecommendation'] }),
+    ]);
+    const wrongDecision = policy.validate(payload(), [
+      unit({ decisionCodes: ['PROVIDE_RECOMMENDATION'] }),
+    ]);
+    const unknownFact = policy.validate(payload(), [
+      unit({ factKeys: ['private user value'] }),
+    ]);
+
+    expect(wrongBlock.violationDetails).toContainEqual({
+      code: 'FACT_NOT_LINKED_TO_BLOCK',
+      blockKey: 'block-1-primary-observation',
+      factKey: 'direction.authorizedRecommendation',
+    });
+    expect(wrongDecision.violationDetails).toContainEqual({
+      code: 'DECISION_NOT_AUTHORIZED',
+      blockKey: 'block-1-primary-observation',
+      decisionCode: 'PROVIDE_RECOMMENDATION',
+    });
+    expect(unknownFact.violationDetails).toEqual([
+      expect.objectContaining({
+        code: 'FACT_NOT_AUTHORIZED',
+        blockKey: 'block-1-primary-observation',
+        factReference: expect.stringMatching(/^[a-f0-9]{16}$/u),
+      }),
+    ]);
+    expect(JSON.stringify(unknownFact.violationDetails)).not.toContain(
+      'private user value',
+    );
+  });
+
   it('accepts only numbers declared by linked facts', () => {
     expect(policy.validate(payload(), [unit()]).valid).toBe(true);
     expect(

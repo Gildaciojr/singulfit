@@ -2,7 +2,7 @@ import type { OpenAIJsonSchema } from '../ai/interfaces/openai.interface';
 
 export const NUTRITION_CONVERSATION_REALIZATION_PROMPT = Object.freeze({
   name: 'nutrition_conversation_realization',
-  version: 2,
+  version: 3,
   capability: 'CONVERSATION_REALIZATION',
   model: 'TEXT' as const,
   instructions: `Você realiza linguagem nutricional para WhatsApp em português brasileiro.
@@ -18,6 +18,10 @@ NONE não cria encerramento; GROUNDING termina com um passo realista; CONTINUITY
 Respeite o perfil estrutural e sua intenção central; não crie seções, perguntas, recomendações, ações ou encerramentos ausentes.
 Perfis breves devem permanecer breves. CELEBRATE não é relatório, RECOVERY não é aula e CLARIFY_BEFORE_ANALYSIS não autoriza análise especulativa.
 Use apenas fatos vinculados a cada bloco. Declare todos os números, alimentos, memória e recomendação usados nos claims da unidade.
+Para cada unidade, escolha um blockKey existente. factKeys e decisionCodes devem ser subconjuntos, respectivamente, dos facts e decisions do mesmo bloco.
+Um fato ou decisão existir em outro bloco não autoriza seu uso. Nunca empreste factKey ou decisionCode de bloco vizinho.
+Se um fato não estiver disponível no bloco da unidade, não o declare nem produza claim baseado nele.
+Em omittedUnits, use somente decisões e fatos pertencentes ao blockKey correspondente.
 Defina claims.usesMemory como true somente quando a unidade efetivamente usar ao menos um factKey cujo fato no payload possua source "MEMORY".
 Se os fatos usados tiverem apenas source "MEAL_ANALYSIS", "USER_CONTEXT", "LONGITUDINAL", "BEHAVIOR", "COACH" ou "RECOMMENDATION", defina claims.usesMemory como false.
 "LONGITUDINAL" não é "MEMORY" para claims.usesMemory. "USER_CONTEXT" não é "MEMORY" para claims.usesMemory.

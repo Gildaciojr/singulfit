@@ -106,17 +106,7 @@ export class NutritionConversationDecisionEngine {
           origin: ORIGIN.POLICY,
           category: 'SAFETY',
           intrinsicPriority: 'P0',
-          factIds: [
-            'facts.foods',
-            ...(context.facts.totalCalories !== null
-              ? ['facts.totalCalories']
-              : []),
-            ...(context.facts.totalProtein !== null
-              ? ['facts.totalProtein']
-              : []),
-            ...(context.facts.totalCarbs !== null ? ['facts.totalCarbs'] : []),
-            ...(context.facts.totalFat !== null ? ['facts.totalFat'] : []),
-          ],
+          factIds: ['facts.foods'],
           dependencyIds: [DECISION_ID.RESPOND_TO_MEAL],
           rationale: 'ESTIMATED_NUTRITION_DATA_REQUIRES_QUALIFICATION',
           required: true,

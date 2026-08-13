@@ -241,7 +241,7 @@ export class NutritionConversationComposer {
         left.rank - right.rank ||
         this.compare(left.key, right.key),
     );
-    const blocks = this.limitFacts(
+    const blocks = this.enforceFactLimit(
       ordered.map((definition, order) =>
         this.block(definition, order, decisionPlan, maximumLength, flow),
       ),
@@ -543,25 +543,15 @@ export class NutritionConversationComposer {
     });
   }
 
-  private limitFacts(
+  private enforceFactLimit(
     blocks: readonly ConversationBlock[],
     maximumFactCount: number,
   ): readonly ConversationBlock[] {
-    const admitted = new Set<string>();
-    return Object.freeze(
-      blocks.map((block) => {
-        const factIds = block.factIds.filter((factId) => {
-          if (admitted.has(factId)) return true;
-          if (admitted.size >= maximumFactCount) return false;
-          admitted.add(factId);
-          return true;
-        });
-        return Object.freeze({
-          ...block,
-          factIds: Object.freeze(factIds),
-        });
-      }),
-    );
+    const factCount = new Set(blocks.flatMap((block) => block.factIds)).size;
+    if (factCount > maximumFactCount) {
+      throw new Error('DecisionPlan excede orçamento de fatos da composição');
+    }
+    return Object.freeze([...blocks]);
   }
 
   private maximumLength(

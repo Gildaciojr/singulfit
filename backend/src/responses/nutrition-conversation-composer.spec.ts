@@ -108,6 +108,26 @@ function plan(
 describe('NutritionConversationComposer', () => {
   const composer = new NutritionConversationComposer();
 
+  function planWithFactCount(factCount: number): DecisionPlan {
+    const source = plan(
+      ['nutrition.respond-to-meal'],
+      ['nutrition.respond-to-meal'],
+      'ACKNOWLEDGE_ONLY',
+    );
+    return {
+      ...source,
+      selectedDecisions: [
+        {
+          ...source.selectedDecisions[0],
+          factIds: Array.from(
+            { length: factCount },
+            (_, index) => `facts.budget${index + 1}`,
+          ),
+        },
+      ],
+    };
+  }
+
   it('orders and groups compatible decisions without empty blocks', () => {
     const result = composer.compose(
       context(),
@@ -132,6 +152,24 @@ describe('NutritionConversationComposer', () => {
     ]);
     expect(result.blocks.every((block) => block.decisionIds.length > 0)).toBe(
       true,
+    );
+  });
+
+  it.each([
+    ['below', 4],
+    ['equal', 5],
+  ] as const)(
+    'preserves every decision fact %s the profile budget',
+    (_label, count) => {
+      const result = composer.compose(context(), planWithFactCount(count));
+
+      expect(result.blocks[0].factIds).toHaveLength(count);
+    },
+  );
+
+  it('fails closed instead of silently pruning a decision fact above budget', () => {
+    expect(() => composer.compose(context(), planWithFactCount(6))).toThrow(
+      'DecisionPlan excede orçamento de fatos da composição',
     );
   });
 
