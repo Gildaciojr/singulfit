@@ -9,6 +9,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { COACH_CONVERSATIONAL_QA_V2_PROMPT } from './coach-conversational-qa.prompt.definition';
 import { ConversationPublicAnswerBoundaryService } from './conversation-public-answer-boundary.service';
+import { normalizeConversationQACandidate } from './conversation-qa-candidate-normalizer';
 
 export interface ConversationQAFollowUpLookupInput {
   readonly userId: string;
@@ -136,13 +137,23 @@ export class ConversationQAFollowUpContextService {
     if (!this.record(value)) return null;
     const answer = value.answer;
     const question = value.followUpQuestion;
-    return typeof answer === 'string' &&
-      answer.trim().length <= 4_000 &&
-      typeof question === 'string' &&
-      question.trim().length <= 500
+    if (
+      typeof answer !== 'string' ||
+      answer.trim().length > 4_000 ||
+      (question !== null && typeof question !== 'string')
+    ) {
+      return null;
+    }
+    const normalized = normalizeConversationQACandidate({
+      answer,
+      followUpQuestion: question,
+    });
+    return normalized.answer &&
+      normalized.followUpQuestion &&
+      normalized.followUpQuestion.trim().length <= 500
       ? Object.freeze({
-          answer: answer.trim(),
-          followUpQuestion: question.trim(),
+          answer: normalized.answer.trim(),
+          followUpQuestion: normalized.followUpQuestion.trim(),
         })
       : null;
   }

@@ -192,6 +192,25 @@ describe('ConversationQAFollowUpContextService', () => {
     },
   );
 
+  it('recovers a structured follow-up from a legacy production candidate', async () => {
+    const answer = 'No almoço, você tem *3 xícaras de arroz branco cozido* 🍚';
+    const followUpQuestion =
+      'Se quiser, eu também posso te passar isso em gramas aproximadas.';
+    const target = subject({
+      jobResult: {
+        answer: `${answer}\n\n${followUpQuestion}`,
+        followUpQuestion: null,
+      },
+      coachContent: `${answer}\n\n${followUpQuestion}`,
+    });
+
+    await expect(target.service.findPending(input)).resolves.toEqual({
+      sourceMessageId: 'previous-message-id',
+      previousAnswer: answer,
+      previousFollowUpQuestion: followUpQuestion,
+    });
+  });
+
   it.each([
     [
       'unsafe answer',

@@ -373,6 +373,41 @@ describe('ConversationQAExecutorService', () => {
     );
   });
 
+  it('persists the production candidate with its trailing offer structured and unchanged publicly', async () => {
+    const publicContent =
+      'No almoço, você tem *3 xícaras de arroz branco cozido* 🍚\n\nSe quiser, eu também posso te passar isso em gramas aproximadas.';
+    const subject = createSubject({
+      disposition: 'ANSWER',
+      domain: 'NUTRITION',
+      answer: publicContent,
+      followUpQuestion: null,
+      grounding: 'CURRENT_PLAN',
+      confidence: 'HIGH',
+    });
+
+    await expect(
+      subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+        route: route('NUTRITION_GUIDANCE'),
+        humanContext: human('Quanto arroz eu tenho no almoço?'),
+      }),
+    ).resolves.toMatchObject({ status: 'COMPLETED', content: publicContent });
+
+    expect(subject.ai.runTextJob).toHaveBeenCalledTimes(1);
+    expect(subject.ai.completeJobInTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        result: expect.objectContaining({
+          answer: 'No almoço, você tem *3 xícaras de arroz branco cozido* 🍚',
+          followUpQuestion:
+            'Se quiser, eu também posso te passar isso em gramas aproximadas.',
+        }),
+      }),
+    );
+  });
+
   it('uses a previous coach follow-up for one read-only provider continuation', async () => {
     const subject = createSubject({
       disposition: 'ANSWER',
@@ -499,6 +534,37 @@ describe('ConversationQAExecutorService', () => {
     ).resolves.toMatchObject({
       status: 'COMPLETED',
       content: 'Resposta persistida.',
+      observability: { answerSource: 'AI_REUSED' },
+    });
+    expect(subject.ai.runTextJob).not.toHaveBeenCalled();
+  });
+
+  it('normalizes a legacy completed candidate without another provider execution', async () => {
+    const publicContent =
+      'Resposta persistida.\n\nQuer que eu converta isso para gramas?';
+    const subject = createSubject(
+      {
+        disposition: 'ANSWER',
+        domain: 'GENERAL',
+        answer: publicContent,
+        followUpQuestion: null,
+        grounding: 'GENERAL_KNOWLEDGE',
+        confidence: 'HIGH',
+      },
+      AIJobStatus.COMPLETED,
+    );
+
+    await expect(
+      subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+        route: route('ANSWER_MESSAGE'),
+        humanContext: human('Pergunta repetida?'),
+      }),
+    ).resolves.toMatchObject({
+      status: 'COMPLETED',
+      content: publicContent,
       observability: { answerSource: 'AI_REUSED' },
     });
     expect(subject.ai.runTextJob).not.toHaveBeenCalled();

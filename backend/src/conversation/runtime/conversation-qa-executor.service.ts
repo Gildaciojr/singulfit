@@ -10,6 +10,7 @@ import type { ConversationExecutionRoute } from '../contracts/conversation-execu
 import { COACH_CONVERSATIONAL_QA_V2_PROMPT } from './coach-conversational-qa.prompt.definition';
 import { ConversationCurrentNutritionContextService } from './conversation-current-nutrition-context.service';
 import { ConversationPublicAnswerBoundaryService } from './conversation-public-answer-boundary.service';
+import { normalizeConversationQACandidate } from './conversation-qa-candidate-normalizer';
 import type {
   ConversationAnswerCandidate,
   ConversationAnswerDisposition,
@@ -393,14 +394,16 @@ export class ConversationQAExecutorService {
     ) {
       return null;
     }
-    return Object.freeze({
-      disposition: value.disposition,
-      domain: value.domain,
-      answer: value.answer,
-      followUpQuestion: value.followUpQuestion,
-      grounding: value.grounding,
-      confidence: value.confidence,
-    });
+    return normalizeConversationQACandidate(
+      Object.freeze({
+        disposition: value.disposition,
+        domain: value.domain,
+        answer: value.answer,
+        followUpQuestion: value.followUpQuestion,
+        grounding: value.grounding,
+        confidence: value.confidence,
+      }),
+    );
   }
 
   private failed(
