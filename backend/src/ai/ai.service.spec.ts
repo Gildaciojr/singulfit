@@ -135,6 +135,23 @@ describe('AIService', () => {
     });
   });
 
+  it('fails only pending text jobs through the read-only Q&A helper', async () => {
+    const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    const service = createService({ prisma: { aIJob: { updateMany } } });
+
+    await service.failPendingJob('text-job-id', new Error('deadline'));
+
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'text-job-id',
+          type: AIJobType.TEXT,
+          status: AIJobStatus.PENDING,
+        },
+      }),
+    );
+  });
+
   it('claims, executes, accounts and completes a text job', async () => {
     const job = {
       id: 'job-id',

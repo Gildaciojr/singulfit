@@ -39,6 +39,7 @@ export interface CreateStandaloneAIJobInput {
 interface RunTextJobInput {
   input: string;
   jsonSchema?: OpenAIJsonSchema;
+  timeoutMs?: number;
 }
 
 interface RunVisionJobInput extends RunTextJobInput {
@@ -314,6 +315,7 @@ export class AIService {
       input: request.input,
       requestId: job.id,
       jsonSchema: request.jsonSchema,
+      timeoutMs: request.timeoutMs,
     });
   }
 
@@ -436,6 +438,22 @@ export class AIService {
         },
       });
       await this.usageService.reverseInTransaction(transaction, job.id);
+    });
+  }
+
+  async failPendingJob(aiJobId: string, error: unknown): Promise<void> {
+    await this.prisma.aIJob.updateMany({
+      where: {
+        id: aiJobId,
+        type: AIJobType.TEXT,
+        status: AIJobStatus.PENDING,
+      },
+      data: {
+        status: AIJobStatus.FAILED,
+        failedAt: new Date(),
+        leaseExpiresAt: null,
+        error: this.getSafeError(error),
+      },
     });
   }
 

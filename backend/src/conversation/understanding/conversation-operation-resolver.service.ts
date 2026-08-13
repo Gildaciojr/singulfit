@@ -30,12 +30,16 @@ export class ConversationOperationResolverService {
       add(CONVERSATION_OPERATION.PRESENT_CURRENT_PLAN);
     }
     if (/\b(tro(?:c|qu)\w*|substitu\w*)\b/u.test(text)) {
+      const persistentMutation = this.explicitPersistentMutation(message);
       add(
-        /\b(alimento|comida|refeicao|exercicio|whey|frango|arroz|banana|creatina)\b/u.test(
-          text,
-        )
+        persistentMutation &&
+          /\b(alimento|comida|refeicao|exercicio|whey|frango|arroz|banana|creatina)\b/u.test(
+            text,
+          )
           ? CONVERSATION_OPERATION.SUBSTITUTE_ITEM
-          : CONVERSATION_OPERATION.UPDATE_PLAN,
+          : persistentMutation
+            ? CONVERSATION_OPERATION.UPDATE_PLAN
+            : CONVERSATION_OPERATION.PROVIDE_GUIDANCE,
       );
     }
     if (
@@ -43,7 +47,11 @@ export class ConversationOperationResolverService {
         text,
       )
     ) {
-      add(CONVERSATION_OPERATION.UPDATE_PLAN);
+      add(
+        this.explicitPersistentMutation(message)
+          ? CONVERSATION_OPERATION.UPDATE_PLAN
+          : CONVERSATION_OPERATION.PROVIDE_GUIDANCE,
+      );
     }
     if (/\b(revis\w*|progresso|evolucao|comparar|compare)\b/u.test(text)) {
       add(CONVERSATION_OPERATION.REVIEW_PROGRESS);
@@ -89,5 +97,19 @@ export class ConversationOperationResolverService {
           candidates[0] === CONVERSATION_OPERATION.ANSWER
         ),
     });
+  }
+
+  private explicitPersistentMutation(
+    message: NormalizedConversationMessage,
+  ): boolean {
+    if (message.question) return false;
+    return (
+      /^(?:(?:eu\s+)?quero\s+que\s+voce\s+)?(?:tro(?:ca|que)|substitu(?:a|e)|atualize|ajuste|altere|mude|melhore|fa(?:ca|z)\s+outro)\b/u.test(
+        message.folded,
+      ) ||
+      /\b(?:no meu plano|na minha dieta|daqui para frente|permanentemente|definitivamente)\b/u.test(
+        message.folded,
+      )
+    );
   }
 }

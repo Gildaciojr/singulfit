@@ -31,6 +31,18 @@ describe('ConversationUnderstandingService', () => {
       'NUTRITION',
     ],
     [
+      'Posso trocar arroz por macarrão?',
+      'NUTRITION_QUESTION',
+      'PROVIDE_GUIDANCE',
+      'NUTRITION',
+    ],
+    [
+      'Não gostei do atum. Posso trocar por quê?',
+      'GENERAL_GUIDANCE_REQUEST',
+      'PROVIDE_GUIDANCE',
+      'GENERAL',
+    ],
+    [
       'Monte um plano alimentar semanal',
       'DIET_PLAN_REQUEST',
       'GENERATE_PLAN',
@@ -119,6 +131,99 @@ describe('ConversationUnderstandingService', () => {
       ambiguity: { present: false },
     });
   });
+
+  it.each([
+    'Quanto é a medida de uma colher de sopa?',
+    'Qual o volume aproximado de uma colher grande de cozinha?',
+    'Quantos litros de água preciso tomar por dia?',
+    'Qual seria uma referência diária de hidratação?',
+  ])('routes open-ended question as read-only guidance: %s', async (text) => {
+    await expect(
+      service.understand(understandingInput(text)),
+    ).resolves.toMatchObject({
+      status: 'UNDERSTOOD',
+      operation: 'PROVIDE_GUIDANCE',
+    });
+  });
+
+  it('keeps an imperative persistent substitution on the update operation', async () => {
+    await expect(
+      service.understand(
+        understandingInput(
+          'Troque meu almoço com meu jantar no meu plano daqui para frente.',
+          { dietAvailable: true },
+        ),
+      ),
+    ).resolves.toMatchObject({
+      operation: 'UPDATE_PLAN',
+      intent: 'DIET_PLAN_UPDATE_REQUEST',
+      domain: 'NUTRITION',
+    });
+  });
+
+  it.each([
+    'É tranquilo trocar arroz por macarrão?',
+    'Seria uma boa trocar o arroz pelo macarrão?',
+    'Eu conseguiria usar macarrão no lugar do arroz?',
+  ])(
+    'keeps advisory substitution semantic equivalents read-only: %s',
+    async (text) => {
+      await expect(
+        service.understand(understandingInput(text)),
+      ).resolves.toMatchObject({
+        status: 'UNDERSTOOD',
+        operation: 'PROVIDE_GUIDANCE',
+      });
+    },
+  );
+
+  it('keeps an explicit persistent request on the official update path', async () => {
+    await expect(
+      service.understand(
+        understandingInput(
+          'Quero que você troque arroz por macarrão no meu plano daqui para frente.',
+          { dietAvailable: true },
+        ),
+      ),
+    ).resolves.toMatchObject({
+      status: 'UNDERSTOOD',
+      operation: 'SUBSTITUTE_ITEM',
+      intent: 'DIET_PLAN_UPDATE_REQUEST',
+      domain: 'NUTRITION',
+    });
+  });
+
+  it.each([
+    'Como posso ajustar meu almoço hoje?',
+    'O que posso melhorar no jantar?',
+    'Seria melhor mudar alguma coisa no café da manhã?',
+    'Preciso melhorar meu jantar.',
+  ])('keeps advisory update wording read-only: %s', async (text) => {
+    await expect(
+      service.understand(understandingInput(text, { dietAvailable: true })),
+    ).resolves.toMatchObject({
+      status: 'UNDERSTOOD',
+      operation: 'PROVIDE_GUIDANCE',
+    });
+  });
+
+  it.each([
+    'Ajuste meu almoço no meu plano daqui para frente.',
+    'Altere permanentemente meu jantar.',
+    'Ajuste meu almoço.',
+  ])(
+    'keeps explicit persistent update wording on the update path: %s',
+    async (text) => {
+      await expect(
+        service.understand(understandingInput(text, { dietAvailable: true })),
+      ).resolves.toMatchObject({
+        status: 'UNDERSTOOD',
+        operation: 'UPDATE_PLAN',
+        intent: 'DIET_PLAN_UPDATE_REQUEST',
+        domain: 'NUTRITION',
+      });
+    },
+  );
 
   it.each(['sim', 'não', 'continue', 'cancela'])(
     'recognizes confirmation continuity for %s',

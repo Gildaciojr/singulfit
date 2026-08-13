@@ -5,6 +5,7 @@ export interface OpenAITextRequest {
   input: string;
   requestId: string;
   jsonSchema?: OpenAIJsonSchema;
+  timeoutMs?: number;
 }
 
 export interface OpenAIJsonSchema {

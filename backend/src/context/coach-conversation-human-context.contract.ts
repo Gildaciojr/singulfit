@@ -10,6 +10,11 @@ export interface CoachConversationHumanMemory {
   readonly relation: 'RECENT_CONVERSATION' | 'PROFILE_MEMORY';
 }
 
+export interface CoachConversationRecentTurn {
+  readonly direction: 'USER' | 'COACH';
+  readonly text: string;
+}
+
 export type CoachConversationTurnCue =
   | 'GREETING'
   | 'THANKS'
@@ -55,6 +60,7 @@ export interface CoachConversationHumanContext {
     readonly journeyStage: CoachConversationHumanFact<string> | null;
   };
   readonly memory: readonly CoachConversationHumanMemory[];
+  readonly recentConversation?: readonly CoachConversationRecentTurn[];
   readonly continuity: CoachConversationHumanFact<string> | null;
   readonly progress: CoachConversationHumanFact<string> | null;
   readonly currentPlans: {

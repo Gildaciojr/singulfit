@@ -103,6 +103,33 @@ describe('OpenAIGateway', () => {
     );
   });
 
+  it('uses a per-request deadline and aborts the in-flight provider request', async () => {
+    const controller = new AbortController();
+    const timeout = jest
+      .spyOn(AbortSignal, 'timeout')
+      .mockReturnValue(controller.signal);
+    jest.spyOn(global, 'fetch').mockImplementation((_url, init) => {
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () =>
+          reject(new Error('aborted')),
+        );
+      });
+    });
+    const gateway = createGateway();
+    const operation = gateway.createTextResponse({
+      instructions: 'Prompt',
+      input: 'Pergunta',
+      requestId: 'qa-job-id',
+      timeoutMs: 1_500,
+    });
+
+    expect(timeout).toHaveBeenCalledWith(1_500);
+    controller.abort();
+    await expect(operation).rejects.toThrow(
+      'Não foi possível comunicar com a OpenAI',
+    );
+  });
+
   it('sends a strict JSON schema for structured text responses', async () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
       new Response(

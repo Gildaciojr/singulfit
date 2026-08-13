@@ -53,7 +53,12 @@ export class ConversationAmbiguityResolverService {
     ) {
       codes.add('CONFLICTING_GOALS');
     }
-    if (vagueMutation && intent.intent === 'UNKNOWN') {
+    if (
+      vagueMutation &&
+      (intent.intent === 'UNKNOWN' ||
+        domain.domain === 'GENERAL' ||
+        domain.domain === 'UNKNOWN')
+    ) {
       codes.add('INSUFFICIENT_CONTEXT');
     }
 

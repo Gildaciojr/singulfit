@@ -91,10 +91,103 @@ describe('ConversationTurnContextBuilderService', () => {
       workoutAvailable: false,
     });
     expect(result.humanContext.turnCue).toBe('COMMON');
+    expect(result.humanContext.recentConversation).toEqual([
+      { direction: 'USER', text: 'Mensagem anterior' },
+      { direction: 'COACH', text: 'Resposta anterior' },
+    ]);
     expect(
       subject.prisma.conversation.findFirst.mock.calls[0][0].select.messages
         .select,
     ).toEqual({ direction: true, content: true, timestamp: true });
+  });
+
+  it.each([
+    ['Bom dia', 'GREETING'],
+    ['Obrigado!', 'THANKS'],
+    ['Bom dia, o que tenho para comer hoje?', 'COMMON'],
+    ['Obrigado, e quanto de água devo tomar?', 'COMMON'],
+    ['Sim, mas quantos gramas seriam?', 'COMMON'],
+    ['Não, eu queria saber quanto tem nessa porção.', 'COMMON'],
+    ['Por que você colocou isso?', 'CONTINUITY'],
+  ] as const)(
+    'classifies standalone versus substantive cue: %s',
+    async (text, cue) => {
+      const subject = createSubject({ messages: [] });
+
+      const result = await subject.service.build({ ...input, text });
+
+      expect(result.humanContext.turnCue).toBe(cue);
+    },
+  );
+
+  it('bounds and sanitizes recent conversation without operational fields', async () => {
+    const messages = Array.from({ length: 8 }, (_, index) => ({
+      direction:
+        index % 2 === 0 ? MessageDirection.INBOUND : MessageDirection.OUTBOUND,
+      content:
+        index === 0
+          ? 'operationKey não pode entrar no contexto'
+          : `Turno público ${index} ${'x'.repeat(600)}`,
+      timestamp: new Date(
+        `2026-08-01T11:${String(index).padStart(2, '0')}:00.000Z`,
+      ),
+    }));
+    const subject = createSubject({ messages });
+
+    const result = await subject.service.build(input);
+
+    expect(result.humanContext.recentConversation).toHaveLength(6);
+    expect(
+      result.humanContext.recentConversation?.every(
+        (turn) => turn.text.length <= 500,
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(result.humanContext.recentConversation)).not.toMatch(
+      /operationKey|user-id|conversation-id|message-id/u,
+    );
+  });
+
+  it('rejects each completely contaminated recent turn at the public boundary', async () => {
+    const sentinels = [
+      'null',
+      'undefined',
+      'NaN',
+      '[object Object]',
+      'NUTRITION_V2',
+      'DIET_V2',
+      'operationKey',
+      'correlationId',
+      'executor',
+      'pilotStatus',
+      'aiJobId',
+      'providerId',
+      'promptVersionId',
+      'prismaId',
+      'artifact',
+      'artefato',
+      'ONBOARDING',
+      'UUID',
+      '123e4567-e89b-42d3-a456-426614174000',
+    ];
+    const messages = [
+      ...sentinels.map((sentinel, index) => ({
+        direction: MessageDirection.OUTBOUND,
+        content: `Turno contaminado ${sentinel} deve desaparecer por inteiro`,
+        timestamp: new Date(2026, 7, 1, 10, index),
+      })),
+      {
+        direction: MessageDirection.INBOUND,
+        content: 'Turno público preservado',
+        timestamp: new Date(2026, 7, 1, 11, 0),
+      },
+    ];
+    const subject = createSubject({ messages });
+
+    const result = await subject.service.build(input);
+
+    expect(result.humanContext.recentConversation).toEqual([
+      { direction: 'USER', text: 'Turno público preservado' },
+    ]);
   });
 
   it('rejects a missing or foreign conversation', async () => {

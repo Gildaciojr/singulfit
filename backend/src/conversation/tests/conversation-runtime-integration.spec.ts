@@ -115,6 +115,7 @@ describe('ConversationRuntimeIntegrationService', () => {
 
   it('selects a valid runtime response for an eligible internal user', async () => {
     const subject = createSubject({ mode: 'INTERNAL' });
+    const startedAt = Date.now();
 
     await expect(subject.service.select(request)).resolves.toEqual({
       source: 'CONVERSATION_RUNTIME',
@@ -122,6 +123,21 @@ describe('ConversationRuntimeIntegrationService', () => {
       reason: 'RUNTIME_SELECTED',
     });
     expect(subject.bridge.execute).toHaveBeenCalledTimes(1);
+    expect(subject.bridge.execute).toHaveBeenCalledWith(
+      expect.objectContaining({}),
+      undefined,
+      expect.objectContaining({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+      }),
+    );
+    const executionContext = subject.bridge.execute.mock.calls[0][2] as {
+      deadlineAtMs: number;
+    };
+    expect(executionContext.deadlineAtMs).toBeGreaterThanOrEqual(
+      startedAt + 24_000,
+    );
     expect(subject.audit.record).toHaveBeenCalledTimes(1);
   });
 

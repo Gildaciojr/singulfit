@@ -22,8 +22,12 @@ import type {
 const MAX_LIST_ITEMS = 5;
 const MAX_MEMORIES = 2;
 const MAX_MEMORY_LENGTH = 280;
+const MAX_RECENT_TURNS = 6;
+const MAX_RECENT_TURN_LENGTH = 500;
 const TECHNICAL_MEMORY =
   /(?:\bscore\b|\bíndice\b|\bconfidence\b|\bmomentum\b|\bretention\b|\brisk\b|\bevidência\b|\bclassificação\b|\d+\s*\/\s*100)/iu;
+const TECHNICAL_RECENT =
+  /(?:\b(?:null|undefined|NaN|NUTRITION_V2|DIET_V2|operationKey|correlationId|executor|pilotStatus|aiJobId|providerId|promptVersionId|prismaId|artifact|artefato|ONBOARDING|UUID)\b|\[object Object\]|\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b)/iu;
 const CONTINUITY_CUE =
   /\b(?:continu|retom|volt|de novo|outra vez|da última vez|como falamos|isso|aquilo|anterior)\b/iu;
 
@@ -101,6 +105,7 @@ export class CoachConversationHumanContextBuilder {
         ),
       }),
       memory: this.memories(snapshot, input),
+      recentConversation: this.recentConversation(input),
       continuity: this.continuity(input),
       progress: this.progress(snapshot),
       currentPlans: Object.freeze({
@@ -240,6 +245,31 @@ export class CoachConversationHumanContextBuilder {
       summary: previous.text.trim().slice(0, MAX_MEMORY_LENGTH),
       relation: 'RECENT_CONVERSATION',
     });
+  }
+
+  private recentConversation(
+    input: CoachConversationHumanContextBuildInput,
+  ): CoachConversationHumanContext['recentConversation'] {
+    return Object.freeze(
+      (input.recentHistory ?? [])
+        .flatMap((entry) => {
+          const text = entry.text.trim().slice(0, MAX_RECENT_TURN_LENGTH);
+          return text &&
+            !TECHNICAL_MEMORY.test(text) &&
+            !TECHNICAL_RECENT.test(text)
+            ? [
+                Object.freeze({
+                  direction:
+                    entry.direction === 'INBOUND'
+                      ? ('USER' as const)
+                      : ('COACH' as const),
+                  text,
+                }),
+              ]
+            : [];
+        })
+        .slice(-MAX_RECENT_TURNS),
+    );
   }
 
   private continuity(
@@ -383,13 +413,19 @@ export class CoachConversationHumanContextBuilder {
       .replace(/\p{Diacritic}/gu, '')
       .toLocaleLowerCase('pt-BR')
       .trim();
-    if (/^(?:oi|ola|bom dia|boa tarde|boa noite|e ai|opa)\b/u.test(value))
+    if (/^(?:oi|ola|bom dia|boa tarde|boa noite|e ai|opa)[!,.?]*$/u.test(value))
       return 'GREETING';
-    if (/\b(?:obrigad|valeu|agradeco|gratid)\b/u.test(value)) return 'THANKS';
-    if (/^(?:sim|certo|isso|exato|confirmo|pode ser|perfeito)\b/u.test(value))
+    if (/^(?:obrigad[oa]?|valeu|agradeco|gratidao)[!,.?]*$/u.test(value))
+      return 'THANKS';
+    if (
+      /^(?:sim|certo|isso|exato|confirmo|pode ser|perfeito)[!,.?]*$/u.test(
+        value,
+      )
+    )
       return 'AFFIRMATION';
-    if (/^(?:nao|negativo|cancela|deixa)\b/u.test(value)) return 'NEGATION';
-    if (/\b(?:tchau|ate mais|ate logo|boa noite|falou)\b/u.test(value))
+    if (/^(?:nao|negativo|cancela|deixa)[!,.?]*$/u.test(value))
+      return 'NEGATION';
+    if (/^(?:tchau|ate mais|ate logo|boa noite|falou)[!,.?]*$/u.test(value))
       return 'FAREWELL';
     if (
       /\b(?:me ajuda|preciso de ajuda|o que voce faz|como pode ajudar)\b/u.test(

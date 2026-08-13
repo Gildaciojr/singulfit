@@ -26,6 +26,7 @@ export class OpenAIGateway {
       instructions: this.requireText(request.instructions, 'Instruções'),
       input: this.requireText(request.input, 'Entrada'),
       requestId: request.requestId,
+      timeoutMs: this.requestTimeout(request.timeoutMs),
       text: request.jsonSchema
         ? {
             format: this.createJsonSchemaFormat(request.jsonSchema),
@@ -57,6 +58,7 @@ export class OpenAIGateway {
         },
       ],
       requestId: request.requestId,
+      timeoutMs: this.requestTimeout(request.timeoutMs),
       text: request.jsonSchema
         ? {
             format: this.createJsonSchemaFormat(request.jsonSchema),
@@ -71,6 +73,7 @@ export class OpenAIGateway {
       instructions: string;
       input: string | Array<Record<string, unknown>>;
       requestId: string;
+      timeoutMs: number;
       text?: {
         format: {
           type: 'json_schema';
@@ -105,7 +108,7 @@ export class OpenAIGateway {
             ai_job_id: request.requestId,
           },
         }),
-        signal: AbortSignal.timeout(30_000),
+        signal: AbortSignal.timeout(request.timeoutMs),
       });
     } catch {
       throw new BadGatewayException('Não foi possível comunicar com a OpenAI');
@@ -253,6 +256,14 @@ export class OpenAIGateway {
     }
 
     return normalized;
+  }
+
+  private requestTimeout(value: number | undefined): number {
+    if (value === undefined) return 30_000;
+    if (!Number.isInteger(value) || value < 100 || value > 30_000) {
+      throw new BadRequestException('Timeout da OpenAI inválido');
+    }
+    return value;
   }
 
   private getRequiredConfig(key: string): string {

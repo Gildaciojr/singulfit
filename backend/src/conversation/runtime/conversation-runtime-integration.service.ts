@@ -63,8 +63,9 @@ export class ConversationRuntimeIntegrationService {
       return this.legacyDecision('USER_NOT_ELIGIBLE');
     }
     try {
+      const deadlineAtMs = Date.now() + config.timeoutMs;
       return await this.withTimeout(
-        this.run(input, config, eligible),
+        this.run(input, config, eligible, deadlineAtMs),
         config.timeoutMs,
       );
     } catch (error) {
@@ -80,10 +81,20 @@ export class ConversationRuntimeIntegrationService {
     input: ConversationRuntimeDecisionInput,
     config: ReturnType<ConversationRuntimeOperationalConfigService['get']>,
     eligible: boolean,
+    deadlineAtMs: number,
   ): Promise<ConversationRuntimePreExecutionDecision> {
     const evaluation = await this.runtime.evaluate(input);
     const bridge: ConversationBridgeResult = evaluation.decision
-      ? await this.bridge.execute(evaluation.decision, evaluation.humanContext)
+      ? await this.bridge.execute(
+          evaluation.decision,
+          evaluation.humanContext,
+          {
+            userId: input.userId,
+            conversationId: input.conversationId,
+            messageId: input.messageId,
+            deadlineAtMs,
+          },
+        )
       : Object.freeze({
           status: 'FALLBACK_REQUIRED',
           content: null,

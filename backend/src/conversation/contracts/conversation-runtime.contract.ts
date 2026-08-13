@@ -1,5 +1,6 @@
 import type { ConversationRoutingDecision } from './conversation-execution-route.contract';
 import type { CoachConversationHumanContext } from '../../context/coach-conversation-human-context.contract';
+import type { ConversationQAObservability } from '../runtime/conversation-qa.contract';
 
 export const CONVERSATION_RUNTIME_MODE = {
   OFF: 'OFF',
@@ -73,12 +74,14 @@ export type ConversationBridgeResult =
       status: 'COMPLETED';
       content: string;
       routeKind: string;
+      observability?: ConversationQAObservability;
     }>
   | Readonly<{
       status: 'FALLBACK_REQUIRED' | 'FAILED';
       content: null;
       routeKind: string | null;
       reason: string;
+      observability?: ConversationQAObservability;
     }>;
 
 export type ConversationOfficialSource = 'LEGACY' | 'CONVERSATION_RUNTIME';

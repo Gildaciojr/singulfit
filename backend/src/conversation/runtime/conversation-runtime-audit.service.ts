@@ -50,6 +50,20 @@ export class ConversationRuntimeAuditService {
           understandingVersion: input.evaluation.summary.versions.understanding,
           routingVersion: input.evaluation.summary.versions.routing,
           durationMs: input.evaluation.summary.durationMs,
+          answerSource:
+            input.bridge.observability?.answerSource ?? 'DETERMINISTIC',
+          answerDisposition:
+            input.bridge.observability?.disposition ?? 'NOT_APPLICABLE',
+          answerDomain: input.bridge.observability?.domain ?? 'NOT_APPLICABLE',
+          answerGrounding:
+            input.bridge.observability?.grounding ?? 'NOT_APPLICABLE',
+          providerDurationMs:
+            input.bridge.observability?.providerDurationMs ?? 0,
+          promptTokens: input.bridge.observability?.promptTokens ?? 0,
+          completionTokens: input.bridge.observability?.completionTokens ?? 0,
+          totalTokens: input.bridge.observability?.totalTokens ?? 0,
+          answerFallbackReason:
+            input.bridge.observability?.fallbackReason ?? 'NONE',
         },
       });
     } catch (error) {

@@ -6,6 +6,14 @@ import { ConversationLanguageRealizerService } from './conversation-language-rea
 import { ConversationResponseFormatterService } from './conversation-response-formatter.service';
 import { ConversationResponsePayloadBuilder } from './conversation-response-payload.builder';
 import { ConversationResponseValidatorService } from './conversation-response-validator.service';
+import { ConversationQAExecutorService } from './conversation-qa-executor.service';
+
+export interface ConversationBridgeExecutionContext {
+  readonly userId: string;
+  readonly conversationId: string;
+  readonly messageId: string;
+  readonly deadlineAtMs?: number;
+}
 
 @Injectable()
 export class ConversationExecutionBridgeService {
@@ -14,11 +22,13 @@ export class ConversationExecutionBridgeService {
     private readonly realizer: ConversationLanguageRealizerService,
     private readonly formatter: ConversationResponseFormatterService,
     private readonly validator: ConversationResponseValidatorService,
+    private readonly qa?: ConversationQAExecutorService,
   ) {}
 
   execute(
     decision: ConversationRoutingDecision,
     humanContext: CoachConversationHumanContext | null = null,
+    executionContext?: ConversationBridgeExecutionContext,
   ): Promise<ConversationBridgeResult> {
     const route = decision.executionRoute;
     const payload = this.payloadBuilder.build(route, humanContext);
@@ -31,6 +41,15 @@ export class ConversationExecutionBridgeService {
           reason: this.unsupportedReason(route.kind),
         }),
       );
+    }
+    if (
+      payload.kind === 'CONTEXTUAL_RESPONSE' &&
+      this.qaEligible(payload.cue, payload.currentMessage) &&
+      humanContext &&
+      executionContext &&
+      this.qa
+    ) {
+      return this.executeQA(decision, humanContext, executionContext);
     }
     try {
       const realized = this.realizer.realize(payload);
@@ -62,6 +81,83 @@ export class ConversationExecutionBridgeService {
         }),
       );
     }
+  }
+
+  private async executeQA(
+    decision: ConversationRoutingDecision,
+    humanContext: CoachConversationHumanContext,
+    executionContext: ConversationBridgeExecutionContext,
+  ): Promise<ConversationBridgeResult> {
+    let result: Awaited<ReturnType<ConversationQAExecutorService['execute']>>;
+    try {
+      result = await this.qa!.execute({
+        ...executionContext,
+        route: decision.executionRoute,
+        humanContext,
+      });
+    } catch {
+      return Object.freeze({
+        status: 'COMPLETED',
+        content:
+          'Não consegui responder isso com segurança agora. Pode tentar novamente em instantes?',
+        routeKind: decision.executionRoute.kind,
+        observability: Object.freeze({
+          answerSource: 'DETERMINISTIC_FALLBACK',
+          disposition: null,
+          domain: null,
+          grounding: null,
+          providerDurationMs: 0,
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          fallbackReason: 'QA_EXECUTOR_UNEXPECTED_EXCEPTION',
+        }),
+      });
+    }
+    if (result.status === 'COMPLETED') {
+      return Object.freeze({
+        status: 'COMPLETED',
+        content: result.content,
+        routeKind: decision.executionRoute.kind,
+        observability: result.observability,
+      });
+    }
+    if (result.status === 'DEFERRED') {
+      return Object.freeze({
+        status: 'COMPLETED',
+        content:
+          'Você quer apenas uma orientação ou quer que eu altere isso de forma permanente no seu plano?',
+        routeKind: decision.executionRoute.kind,
+        observability: result.observability,
+      });
+    }
+    return Object.freeze({
+      status: 'COMPLETED',
+      content:
+        'Não consegui responder isso com segurança agora. Pode tentar novamente em instantes?',
+      routeKind: decision.executionRoute.kind,
+      observability: result.observability,
+    });
+  }
+
+  private qaEligible(
+    cue: CoachConversationHumanContext['turnCue'],
+    message: string,
+  ): boolean {
+    const trivialCues = new Set<CoachConversationHumanContext['turnCue']>([
+      'GREETING',
+      'THANKS',
+      'AFFIRMATION',
+      'NEGATION',
+      'FAREWELL',
+    ]);
+    if (!trivialCues.has(cue)) return true;
+    const lexicalParts = message
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .split(/[^a-zA-Z0-9]+/u)
+      .filter(Boolean);
+    return lexicalParts.length > 3;
   }
 
   private unsupportedReason(

@@ -15,6 +15,11 @@ import { ConversationRuntimeOperationalConfigService } from './conversation-runt
 import { ConversationRuntimeService } from './conversation-runtime.service';
 import { ConversationShadowComparatorService } from './conversation-shadow-comparator.service';
 import { ConversationTurnContextBuilderService } from './conversation-turn-context-builder.service';
+import { AIModule } from '../../ai/ai.module';
+import { DietModule } from '../../diet/diet.module';
+import { ConversationCurrentNutritionContextService } from './conversation-current-nutrition-context.service';
+import { ConversationPublicAnswerBoundaryService } from './conversation-public-answer-boundary.service';
+import { ConversationQAExecutorService } from './conversation-qa-executor.service';
 
 @Module({
   imports: [
@@ -22,6 +27,8 @@ import { ConversationTurnContextBuilderService } from './conversation-turn-conte
     ObservabilityModule,
     ContextModule,
     ConversationModule,
+    AIModule,
+    DietModule,
   ],
   providers: [
     ConversationRuntimeOperationalConfigService,
@@ -36,6 +43,9 @@ import { ConversationTurnContextBuilderService } from './conversation-turn-conte
     ConversationShadowComparatorService,
     ConversationRuntimeAuditService,
     ConversationRuntimeIntegrationService,
+    ConversationCurrentNutritionContextService,
+    ConversationPublicAnswerBoundaryService,
+    ConversationQAExecutorService,
   ],
   exports: [
     ConversationRuntimeOperationalConfigService,
