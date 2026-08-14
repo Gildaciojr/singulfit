@@ -55,12 +55,16 @@ export interface ConversationLanguageUnitViolationDetail {
   readonly code:
     | 'DECISION_NOT_AUTHORIZED'
     | 'FACT_NOT_AUTHORIZED'
-    | 'FACT_NOT_LINKED_TO_BLOCK';
+    | 'FACT_NOT_LINKED_TO_BLOCK'
+    | 'TEXT_NUMBER_NOT_DECLARED'
+    | 'DECLARED_NUMBER_NOT_REALIZED'
+    | 'DECLARED_FOOD_NOT_REALIZED';
   readonly blockKey: string;
   readonly factKey?: AuthorizedFactId;
   readonly factReference?: string;
   readonly decisionCode?: SanitizedConversationDecision;
   readonly decisionReference?: string;
+  readonly claimReference?: string;
 }
 
 export interface ConversationLanguageUnitValidationResult {

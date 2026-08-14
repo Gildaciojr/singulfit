@@ -587,15 +587,113 @@ describe('NutritionConversationLanguageRealizer', () => {
     expect(result.failureCode).toBe('INVALID_UNIT_ROLE:QUESTION_AUTHORIZATION');
   });
 
-  it('rejects an undeclared number present in unit text', async () => {
+  it('reports an undeclared number present in unit text without exposing its raw value', async () => {
     const output = completeOutput();
     output.units[1] = {
       ...output.units[1],
       text: 'O frango oferece 31 g de proteína.',
       claims: { ...output.units[1].claims, numbers: [] },
     };
+
     const result = await realizer(success(output)).service.realize(payload());
+
     expect(result.status).toBe('INVALID_STRUCTURE');
+    expect(result.failureCode).toBe('UNDECLARED_TEXT_CLAIM');
+    expect(result.violationDetails).toEqual([
+      {
+        code: 'TEXT_NUMBER_NOT_DECLARED',
+        blockKey: 'block-2-primary-observation',
+        claimReference: expect.stringMatching(/^[a-f0-9]{16}$/),
+      },
+    ]);
+    expect(result.violationDetails?.[0]).not.toHaveProperty('number');
+    expect(result.violationDetails?.[0]).not.toHaveProperty('value');
+    expect(result.violationDetails?.[0]).not.toHaveProperty('text');
+  });
+
+  it('reports a declared number that was not realized in unit text', async () => {
+    const output = completeOutput();
+    output.units[1] = {
+      ...output.units[1],
+      text: 'O frango oferece proteína.',
+      claims: { ...output.units[1].claims, numbers: [30] },
+    };
+
+    const result = await realizer(success(output)).service.realize(payload());
+
+    expect(result.status).toBe('INVALID_STRUCTURE');
+    expect(result.failureCode).toBe('UNDECLARED_TEXT_CLAIM');
+    expect(result.violationDetails).toEqual([
+      {
+        code: 'DECLARED_NUMBER_NOT_REALIZED',
+        blockKey: 'block-2-primary-observation',
+        claimReference: expect.stringMatching(/^[a-f0-9]{16}$/),
+      },
+    ]);
+    expect(result.violationDetails?.[0]).not.toHaveProperty('number');
+    expect(result.violationDetails?.[0]).not.toHaveProperty('value');
+  });
+
+  it('reports an authorized food claim that was not realized in unit text', async () => {
+    const output = completeOutput();
+    output.units[1] = {
+      ...output.units[1],
+      text: 'A refeição oferece cerca de 30 g de proteína.',
+    };
+
+    const result = await realizer(success(output)).service.realize(payload());
+
+    expect(result.status).toBe('INVALID_STRUCTURE');
+    expect(result.failureCode).toBe('UNDECLARED_TEXT_CLAIM');
+    expect(result.violationDetails).toEqual([
+      {
+        code: 'DECLARED_FOOD_NOT_REALIZED',
+        blockKey: 'block-2-primary-observation',
+        claimReference: expect.stringMatching(/^[a-f0-9]{16}$/),
+      },
+    ]);
+    expect(JSON.stringify(result.violationDetails).toLowerCase()).not.toContain(
+      'frango',
+    );
+  });
+
+  it('bounds text claim violation details to twenty sanitized entries', async () => {
+    const output = completeOutput();
+    output.units[1] = {
+      ...output.units[1],
+      text: Array.from({ length: 25 }, (_, index) => String(index + 101)).join(
+        ' ',
+      ),
+      claims: {
+        ...output.units[1].claims,
+        numbers: [],
+        foods: [],
+      },
+    };
+
+    const result = await realizer(success(output)).service.realize(payload());
+
+    expect(result.status).toBe('INVALID_STRUCTURE');
+    expect(result.failureCode).toBe('UNDECLARED_TEXT_CLAIM');
+    expect(result.violationDetails).toHaveLength(20);
+    expect(
+      result.violationDetails?.every(
+        (detail) =>
+          detail.code === 'TEXT_NUMBER_NOT_DECLARED' &&
+          detail.blockKey === 'block-2-primary-observation' &&
+          typeof detail.claimReference === 'string' &&
+          /^[a-f0-9]{16}$/.test(detail.claimReference),
+      ),
+    ).toBe(true);
+    expect(
+      result.violationDetails?.every(
+        (detail) =>
+          !('number' in detail) &&
+          !('value' in detail) &&
+          !('text' in detail) &&
+          !('food' in detail),
+      ),
+    ).toBe(true);
   });
 
   it('realizes an emotional adaptation only with authorized evidence', async () => {

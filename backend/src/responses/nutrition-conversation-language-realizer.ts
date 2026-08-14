@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import type {
   ConversationAIResponse,
   ConversationAIValue,
@@ -9,6 +10,7 @@ import type {
   ConversationLanguageUnit,
   ConversationLanguageUnitClaims,
   ConversationLanguageUnitOmissionReason,
+  ConversationLanguageUnitViolationDetail,
   OmittedConversationLanguageUnit,
 } from './conversation-language-unit.contract';
 import { ConversationLanguageUnitRolePolicy } from './conversation-language-unit-role.policy';
@@ -194,8 +196,15 @@ export class NutritionConversationLanguageRealizer {
     ) {
       return finalize(this.invalid(reference, 'REQUIRED_BLOCK_OMITTED'));
     }
-    if (!this.validateTextClaims(validated.units)) {
-      return finalize(this.invalid(reference, 'UNDECLARED_TEXT_CLAIM'));
+    const textClaimValidation = this.validateTextClaims(validated.units);
+    if (!textClaimValidation.valid) {
+      return finalize(
+        this.invalid(
+          reference,
+          'UNDECLARED_TEXT_CLAIM',
+          textClaimValidation.violationDetails,
+        ),
+      );
     }
     if (!this.validateRecognition(validated.units)) {
       return finalize(this.invalid(reference, 'INVALID_RECOGNITION'));
@@ -537,20 +546,54 @@ export class NutritionConversationLanguageRealizer {
     return null;
   }
 
-  private validateTextClaims(
-    units: readonly ConversationLanguageUnit[],
-  ): boolean {
-    return units.every((unit) => {
+  private validateTextClaims(units: readonly ConversationLanguageUnit[]): {
+    readonly valid: boolean;
+    readonly violationDetails: readonly ConversationLanguageUnitViolationDetail[];
+  } {
+    const violationDetails: ConversationLanguageUnitViolationDetail[] = [];
+
+    for (const unit of units) {
       const textNumbers = this.textNumbers(unit.text);
       const declaredNumbers = unit.claims.numbers;
-      if (
-        textNumbers.some((number) => !declaredNumbers.includes(number)) ||
-        declaredNumbers.some((number) => !textNumbers.includes(number))
-      )
-        return false;
-      return unit.claims.foods.every((food) =>
-        this.normalize(unit.text).includes(this.normalize(food)),
-      );
+
+      for (const number of textNumbers) {
+        if (declaredNumbers.includes(number)) continue;
+        violationDetails.push({
+          code: 'TEXT_NUMBER_NOT_DECLARED',
+          blockKey: unit.blockKey,
+          claimReference: this.claimReference('TEXT_NUMBER', number),
+        });
+      }
+
+      for (const number of declaredNumbers) {
+        if (textNumbers.includes(number)) continue;
+        violationDetails.push({
+          code: 'DECLARED_NUMBER_NOT_REALIZED',
+          blockKey: unit.blockKey,
+          claimReference: this.claimReference('DECLARED_NUMBER', number),
+        });
+      }
+
+      for (const food of unit.claims.foods) {
+        if (this.normalize(unit.text).includes(this.normalize(food))) continue;
+        violationDetails.push({
+          code: 'DECLARED_FOOD_NOT_REALIZED',
+          blockKey: unit.blockKey,
+          claimReference: this.claimReference(
+            'DECLARED_FOOD',
+            this.normalize(food),
+          ),
+        });
+      }
+    }
+
+    const boundedViolationDetails = Object.freeze(
+      violationDetails.slice(0, 20).map((detail) => Object.freeze(detail)),
+    );
+
+    return Object.freeze({
+      valid: boundedViolationDetails.length === 0,
+      violationDetails: boundedViolationDetails,
     });
   }
 
@@ -931,6 +974,16 @@ export class NutritionConversationLanguageRealizer {
     return [...value.matchAll(/(?<![\p{L}\d])\d+(?:[.,]\d+)?/gu)].map((match) =>
       Number(match[0].replace(',', '.')),
     );
+  }
+
+  private claimReference(
+    kind: 'TEXT_NUMBER' | 'DECLARED_NUMBER' | 'DECLARED_FOOD',
+    value: string | number,
+  ): string {
+    return createHash('sha256')
+      .update(`${kind}:${String(value)}`)
+      .digest('hex')
+      .slice(0, 16);
   }
 
   private emojiCount(value: string): number {
