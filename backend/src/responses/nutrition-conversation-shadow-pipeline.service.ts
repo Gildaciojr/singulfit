@@ -270,6 +270,9 @@ export class NutritionConversationShadowPipelineService implements OnApplication
       this.safeDiagnostic({
         event: 'COMPLETED',
         realizerStatus: realization.status,
+        ...(realization.failureCode
+          ? { realizerFailureCode: realization.failureCode }
+          : {}),
         candidateEligible: comparison.candidateEligible,
         rejectionCode: comparison.ineligibilityCode,
         ...(realization.violationDetails

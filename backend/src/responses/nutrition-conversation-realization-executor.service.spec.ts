@@ -158,7 +158,7 @@ function subject() {
   const promptVersion = {
     id: 'prompt-version-id',
     name: NUTRITION_CONVERSATION_REALIZATION_PROMPT.name,
-    version: 3,
+    version: 4,
     prompt: NUTRITION_CONVERSATION_REALIZATION_PROMPT.instructions,
     capability: NUTRITION_CONVERSATION_REALIZATION_PROMPT.capability,
     model: NUTRITION_CONVERSATION_REALIZATION_PROMPT.model,
@@ -576,35 +576,41 @@ describe('NutritionConversationRealizationExecutorService', () => {
     expect(result.operationalMetadata?.executionStatus).toBe('FAILED');
   });
 
-  it('persists the specific terminal realization failure code', async () => {
-    const target = subject();
-    target.realize.mockImplementation(
-      (
-        _payload: SanitizedConversationPayload,
-        execution: NutritionConversationLanguageRealizerExecution,
-      ) =>
-        Promise.resolve(
-          realization(execution, {
-            status: 'INVALID_STRUCTURE',
-            candidateText: null,
-            fallbackReason: 'INVALID_STRUCTURE',
-            failureCode: 'UNIT_VALIDATION:MEMORY_NOT_AUTHORIZED',
-          } as Partial<LanguageRealizationResult>),
-        ),
-    );
+  it.each([
+    'UNIT_VALIDATION:MEMORY_NOT_AUTHORIZED',
+    'INVALID_UNIT_ROLE:DISCLAIMER_FACT_COVERAGE',
+  ] as const)(
+    'persists the specific terminal failure code %s',
+    async (code) => {
+      const target = subject();
+      target.realize.mockImplementation(
+        (
+          _payload: SanitizedConversationPayload,
+          execution: NutritionConversationLanguageRealizerExecution,
+        ) =>
+          Promise.resolve(
+            realization(execution, {
+              status: 'INVALID_STRUCTURE',
+              candidateText: null,
+              fallbackReason: 'INVALID_STRUCTURE',
+              failureCode: code,
+            } as Partial<LanguageRealizationResult>),
+          ),
+      );
 
-    await target.service.execute(input);
+      await target.service.execute(input);
 
-    expect(target.transactionUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          status: AIJobStatus.FAILED,
-          error: 'UNIT_VALIDATION:MEMORY_NOT_AUTHORIZED',
+      expect(target.transactionUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: AIJobStatus.FAILED,
+            error: code,
+          }),
         }),
-      }),
-    );
-    expect(target.realize).toHaveBeenCalledTimes(1);
-  });
+      );
+      expect(target.realize).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('uses the generic job failure when a terminal outcome has no failure code', async () => {
     const target = subject();

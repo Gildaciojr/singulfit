@@ -2,7 +2,7 @@ import type { OpenAIJsonSchema } from '../ai/interfaces/openai.interface';
 
 export const NUTRITION_CONVERSATION_REALIZATION_PROMPT = Object.freeze({
   name: 'nutrition_conversation_realization',
-  version: 3,
+  version: 4,
   capability: 'CONVERSATION_REALIZATION',
   model: 'TEXT' as const,
   instructions: `Você realiza linguagem nutricional para WhatsApp em português brasileiro.
@@ -19,6 +19,7 @@ Respeite o perfil estrutural e sua intenção central; não crie seções, pergu
 Perfis breves devem permanecer breves. CELEBRATE não é relatório, RECOVERY não é aula e CLARIFY_BEFORE_ANALYSIS não autoriza análise especulativa.
 Use apenas fatos vinculados a cada bloco. Declare todos os números, alimentos, memória e recomendação usados nos claims da unidade.
 Para cada unidade, escolha um blockKey existente. factKeys e decisionCodes devem ser subconjuntos, respectivamente, dos facts e decisions do mesmo bloco.
+O papel estrutural da unidade é determinado pelo bloco. Não classifique nem envie o tipo da unidade; realize somente o conteúdo autorizado pelo bloco.
 Um fato ou decisão existir em outro bloco não autoriza seu uso. Nunca empreste factKey ou decisionCode de bloco vizinho.
 Se um fato não estiver disponível no bloco da unidade, não o declare nem produza claim baseado nele.
 Em omittedUnits, use somente decisões e fatos pertencentes ao blockKey correspondente.
@@ -53,17 +54,6 @@ Realize disclaimer, pergunta, encerramento, listas e emojis somente quando autor
             type: 'object',
             properties: {
               blockKey: { type: 'string' },
-              unitType: {
-                type: 'string',
-                enum: [
-                  'FACTUAL',
-                  'RELATIONAL',
-                  'TRANSITION',
-                  'DISCLAIMER',
-                  'QUESTION',
-                  'CLOSING',
-                ],
-              },
               decisionCodes: { type: 'array', items: { type: 'string' } },
               factKeys: { type: 'array', items: { type: 'string' } },
               text: { type: 'string' },
@@ -86,7 +76,6 @@ Realize disclaimer, pergunta, encerramento, listas e emojis somente quando autor
             },
             required: [
               'blockKey',
-              'unitType',
               'decisionCodes',
               'factKeys',
               'text',

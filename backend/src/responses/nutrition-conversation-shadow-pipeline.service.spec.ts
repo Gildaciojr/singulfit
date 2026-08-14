@@ -509,6 +509,7 @@ describe('NutritionConversationShadowPipelineService', () => {
       status: 'INVALID_STRUCTURE',
       candidateText: null,
       sanitizedPayloadReference: 'payload-reference',
+      failureCode: 'INVALID_UNIT_ROLE:DISCLAIMER_FACT_COVERAGE',
       violationDetails: [
         {
           code: 'FACT_NOT_LINKED_TO_BLOCK',
@@ -528,6 +529,7 @@ describe('NutritionConversationShadowPipelineService', () => {
     expect(target.diagnostics.record).toHaveBeenCalledWith(
       expect.objectContaining({
         event: 'COMPLETED',
+        realizerFailureCode: 'INVALID_UNIT_ROLE:DISCLAIMER_FACT_COVERAGE',
         violationDetails: [
           {
             code: 'FACT_NOT_LINKED_TO_BLOCK',

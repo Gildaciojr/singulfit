@@ -9,9 +9,9 @@ import type {
   ConversationLanguageUnit,
   ConversationLanguageUnitClaims,
   ConversationLanguageUnitOmissionReason,
-  ConversationLanguageUnitType,
   OmittedConversationLanguageUnit,
 } from './conversation-language-unit.contract';
+import { ConversationLanguageUnitRolePolicy } from './conversation-language-unit-role.policy';
 import { ConversationLanguageUnitValidationPolicy } from './conversation-language-unit-validation.policy';
 import type {
   LanguageRealizationFallbackReason,
@@ -45,15 +45,16 @@ type FailureStatus = Exclude<
   'COMPLETED' | 'PARTIALLY_COMPLETED'
 >;
 
+type UnitRoleViolation =
+  | 'QUESTION_CARDINALITY'
+  | 'QUESTION_AUTHORIZATION'
+  | 'CLOSING_CARDINALITY'
+  | 'CLOSING_AUTHORIZATION'
+  | 'DISCLAIMER_CARDINALITY'
+  | 'DISCLAIMER_MISSING'
+  | 'DISCLAIMER_FACT_COVERAGE';
+
 const REALIZER_TIMEOUT_MS = 20_000;
-const UNIT_TYPES = new Set<ConversationLanguageUnitType>([
-  'FACTUAL',
-  'RELATIONAL',
-  'TRANSITION',
-  'DISCLAIMER',
-  'QUESTION',
-  'CLOSING',
-]);
 const OMISSION_REASONS = new Set<ConversationLanguageUnitOmissionReason>([
   'COMMUNICATIVE_BUDGET',
   'FACT_UNAVAILABLE',
@@ -103,6 +104,7 @@ export class NutritionConversationLanguageRealizer {
   private readonly coachStyleEngine =
     new NutritionConversationCoachStyleEngine();
   private readonly providerViewBuilder = new ProviderRealizationViewBuilder();
+  private readonly unitRolePolicy = new ConversationLanguageUnitRolePolicy();
 
   constructor(private readonly conversationAI: ConversationAIService) {}
 
@@ -134,7 +136,20 @@ export class NutritionConversationLanguageRealizer {
     const finalize = (result: LanguageRealizationResult) =>
       this.withOperationalMetadata(result, response, execution.operation);
 
-    const parsed = this.parseOutput(response.structuredOutput);
+    let parsed: ReturnType<
+      NutritionConversationLanguageRealizer['parseOutput']
+    >;
+    try {
+      parsed = this.parseOutput(payload, response.structuredOutput);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === 'UNSUPPORTED_CONVERSATION_BLOCK_TYPE'
+      ) {
+        return finalize(this.invalid(reference, error.message));
+      }
+      throw error;
+    }
     if (!parsed) {
       return finalize(this.invalid(reference, 'INVALID_LANGUAGE_UNIT_SCHEMA'));
     }
@@ -160,6 +175,16 @@ export class NutritionConversationLanguageRealizer {
     ) {
       return finalize(this.invalid(reference, 'INCOMPLETE_BLOCK_COVERAGE'));
     }
+    const unitRoleViolation = this.validateUnitRoles(
+      payload,
+      validated.units,
+      parsed.omittedUnits,
+    );
+    if (unitRoleViolation) {
+      return finalize(
+        this.invalid(reference, `INVALID_UNIT_ROLE:${unitRoleViolation}`),
+      );
+    }
     if (
       parsed.omittedUnits.some((omitted) =>
         payload.structure.blocks.find(
@@ -168,11 +193,6 @@ export class NutritionConversationLanguageRealizer {
       )
     ) {
       return finalize(this.invalid(reference, 'REQUIRED_BLOCK_OMITTED'));
-    }
-    if (
-      !this.validateUnitRoles(payload, validated.units, parsed.omittedUnits)
-    ) {
-      return finalize(this.invalid(reference, 'INVALID_UNIT_ROLE'));
     }
     if (!this.validateTextClaims(validated.units)) {
       return finalize(this.invalid(reference, 'UNDECLARED_TEXT_CLAIM'));
@@ -320,7 +340,10 @@ export class NutritionConversationLanguageRealizer {
     });
   }
 
-  private parseOutput(value: unknown): {
+  private parseOutput(
+    payload: SanitizedConversationPayload,
+    value: unknown,
+  ): {
     readonly units: readonly ConversationLanguageUnit[];
     readonly omittedUnits: readonly OmittedConversationLanguageUnit[];
   } | null {
@@ -330,7 +353,10 @@ export class NutritionConversationLanguageRealizer {
       !Array.isArray(value.omittedUnits)
     )
       return null;
-    const units = value.units.map((item) => this.parseUnit(item));
+    const blocks = new Map(
+      payload.structure.blocks.map((block) => [block.key, block]),
+    );
+    const units = value.units.map((item) => this.parseUnit(blocks, item));
     const omittedUnits = value.omittedUnits.map((item) =>
       this.parseOmission(item),
     );
@@ -345,22 +371,30 @@ export class NutritionConversationLanguageRealizer {
     };
   }
 
-  private parseUnit(value: unknown): ConversationLanguageUnit | null {
+  private parseUnit(
+    blocks: ReadonlyMap<
+      string,
+      SanitizedConversationPayload['structure']['blocks'][number]
+    >,
+    value: unknown,
+  ): ConversationLanguageUnit | null {
     if (
       !this.isRecord(value) ||
       typeof value.blockKey !== 'string' ||
-      !UNIT_TYPES.has(value.unitType as ConversationLanguageUnitType) ||
+      'unitType' in value ||
       typeof value.text !== 'string' ||
       !value.text.trim()
     )
       return null;
+    const block = blocks.get(value.blockKey);
+    if (!block) return null;
     const decisionCodes = this.stringArray(value.decisionCodes);
     const factKeys = this.stringArray(value.factKeys);
     const claims = this.parseClaims(value.claims);
     if (!decisionCodes || !factKeys || !claims) return null;
     return Object.freeze({
       blockKey: value.blockKey,
-      unitType: value.unitType as ConversationLanguageUnitType,
+      unitType: this.unitRolePolicy.role(block.type),
       decisionCodes: Object.freeze(
         decisionCodes as SanitizedConversationDecision[],
       ),
@@ -453,7 +487,7 @@ export class NutritionConversationLanguageRealizer {
     payload: SanitizedConversationPayload,
     units: readonly ConversationLanguageUnit[],
     omissions: readonly OmittedConversationLanguageUnit[],
-  ): boolean {
+  ): UnitRoleViolation | null {
     const questionAuthorized =
       payload.selectedDecisions.includes('ASK_QUESTION');
     const closingAuthorized = payload.selectedDecisions.includes(
@@ -465,27 +499,42 @@ export class NutritionConversationLanguageRealizer {
     const disclaimerUnits = units.filter(
       (unit) => unit.unitType === 'DISCLAIMER',
     );
-    const questionOmitted = omissions.some((unit) =>
+    const questionOmissionCount = omissions.filter((unit) =>
       unit.decisionCodes.includes('ASK_QUESTION'),
-    );
-    const closingOmitted = omissions.some((unit) =>
+    ).length;
+    const closingOmissionCount = omissions.filter((unit) =>
       unit.decisionCodes.includes('CLOSE_WITHOUT_QUESTION'),
-    );
-    return (
-      questionUnits.length <= 1 &&
-      closingUnits.length <= 1 &&
-      (questionAuthorized
-        ? questionUnits.length === 1 || questionOmitted
-        : questionUnits.length === 0 && !questionOmitted) &&
-      (closingAuthorized
-        ? closingUnits.length === 1 || closingOmitted
-        : closingUnits.length === 0 && !closingOmitted) &&
-      (!disclaimerRequired ||
-        (disclaimerUnits.length === 1 &&
-          payload.facts.disclaimerRequired.every((fact) =>
-            disclaimerUnits[0].factKeys.includes(fact),
-          )))
-    );
+    ).length;
+
+    if (questionUnits.length + questionOmissionCount > 1) {
+      return 'QUESTION_CARDINALITY';
+    }
+    if (
+      questionAuthorized !==
+      (questionUnits.length + questionOmissionCount === 1)
+    ) {
+      return 'QUESTION_AUTHORIZATION';
+    }
+    if (closingUnits.length + closingOmissionCount > 1) {
+      return 'CLOSING_CARDINALITY';
+    }
+    if (
+      closingAuthorized !==
+      (closingUnits.length + closingOmissionCount === 1)
+    ) {
+      return 'CLOSING_AUTHORIZATION';
+    }
+    if (!disclaimerRequired) return null;
+    if (disclaimerUnits.length === 0) return 'DISCLAIMER_MISSING';
+    if (disclaimerUnits.length > 1) return 'DISCLAIMER_CARDINALITY';
+    if (
+      payload.facts.disclaimerRequired.some(
+        (fact) => !disclaimerUnits[0].factKeys.includes(fact),
+      )
+    ) {
+      return 'DISCLAIMER_FACT_COVERAGE';
+    }
+    return null;
   }
 
   private validateTextClaims(

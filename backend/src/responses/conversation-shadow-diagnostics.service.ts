@@ -12,6 +12,7 @@ export interface ConversationShadowDiagnostic {
   readonly event: ConversationShadowDiagnosticEvent;
   readonly component?: string;
   readonly realizerStatus?: string;
+  readonly realizerFailureCode?: string;
   readonly candidateEligible?: boolean;
   readonly rejectionCode?: string;
   readonly violationDetails?: readonly ConversationLanguageUnitViolationDetail[];

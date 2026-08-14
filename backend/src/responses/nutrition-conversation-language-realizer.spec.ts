@@ -112,7 +112,6 @@ function completeOutput() {
     units: [
       {
         blockKey: 'block-1-uncertainty-qualification',
-        unitType: 'DISCLAIMER',
         decisionCodes: ['QUALIFY_ESTIMATES'],
         factKeys: ['facts.foods', 'facts.totalProtein'],
         text: 'Os valores são estimativas visuais.',
@@ -125,7 +124,6 @@ function completeOutput() {
       },
       {
         blockKey: 'block-2-primary-observation',
-        unitType: 'FACTUAL',
         decisionCodes: ['RESPOND_TO_MEAL', 'SHOW_PROTEIN'],
         factKeys: ['facts.foods', 'facts.totalProtein'],
         text: 'O frango oferece cerca de 30 g de proteína.',
@@ -138,7 +136,6 @@ function completeOutput() {
       },
       {
         blockKey: 'block-3-clarifying-question',
-        unitType: 'QUESTION',
         decisionCodes: ['ASK_QUESTION'],
         factKeys: [],
         text: 'Quer ajustar essa refeição?',
@@ -244,6 +241,11 @@ describe('NutritionConversationLanguageRealizer', () => {
     expect(result.candidateTextSource).toBe('VALIDATED_UNITS');
     expect(result.disclaimerRealized).toBe(true);
     expect(result.questionRealized).toBe(true);
+    expect(result.realizedUnits.map((unit) => unit.unitType)).toEqual([
+      'DISCLAIMER',
+      'FACTUAL',
+      'QUESTION',
+    ]);
     expect(result.producedQuestionCount).toBe(1);
     expect(result.sanitizedPayloadReference).toMatch(
       /^sanitized-payload:[a-f0-9]{64}$/,
@@ -277,6 +279,10 @@ describe('NutritionConversationLanguageRealizer', () => {
       'descreva o fato observado, nunca atribua emoção ao usuário',
     );
     expect(request.schema.name).toBe('nutrition_conversation_language_units');
+    expect(
+      request.schema.schema.properties.units.items.properties,
+    ).not.toHaveProperty('unitType');
+    expect(JSON.stringify(request.payload)).not.toContain('unitType');
     expect(JSON.stringify(request)).not.toMatch(
       /mealAnalysisId|conversationId|messageId|userId|compositionPlanId/,
     );
@@ -411,6 +417,22 @@ describe('NutritionConversationLanguageRealizer', () => {
     ]);
   });
 
+  it('rejects provider-owned unit role metadata instead of correcting it', async () => {
+    const output = completeOutput();
+    const result = await realizer(
+      success({
+        ...output,
+        units: output.units.map((unit) => ({
+          ...unit,
+          unitType: 'FACTUAL',
+        })),
+      }),
+    ).service.realize(payload());
+
+    expect(result.status).toBe('INVALID_STRUCTURE');
+    expect(result.failureCode).toBe('INVALID_LANGUAGE_UNIT_SCHEMA');
+  });
+
   it('rejects a cross-block fact and returns only sanitized relationship details', async () => {
     const source = payload();
     const scoped: SanitizedConversationPayload = {
@@ -515,6 +537,54 @@ describe('NutritionConversationLanguageRealizer', () => {
     const result = await realizer(success(output)).service.realize(payload());
     expect(result.status).toBe('INVALID_STRUCTURE');
     expect(result.candidateText).toBeNull();
+  });
+
+  it('reports the exact canonical role invariant that failed', async () => {
+    const output = completeOutput();
+    output.units[0].factKeys = ['facts.foods'];
+
+    const result = await realizer(success(output)).service.realize(payload());
+
+    expect(result.status).toBe('INVALID_STRUCTURE');
+    expect(result.failureCode).toBe(
+      'INVALID_UNIT_ROLE:DISCLAIMER_FACT_COVERAGE',
+    );
+    expect(result.candidateText).toBeNull();
+  });
+
+  it('reports a missing required disclaimer with a bounded structural code', async () => {
+    const output = completeOutput();
+    output.units = output.units.slice(1);
+    output.omittedUnits = [
+      {
+        blockKey: 'block-1-uncertainty-qualification',
+        decisionCodes: ['QUALIFY_ESTIMATES'],
+        factKeys: ['facts.foods', 'facts.totalProtein'],
+        reason: 'REALIZATION_FAILURE',
+      },
+    ];
+
+    const result = await realizer(success(output)).service.realize(payload());
+
+    expect(result.status).toBe('INVALID_STRUCTURE');
+    expect(result.failureCode).toBe('INVALID_UNIT_ROLE:DISCLAIMER_MISSING');
+  });
+
+  it('fails closed when a question block exists without question authorization', async () => {
+    const source = payload();
+    const unauthorized: SanitizedConversationPayload = {
+      ...source,
+      selectedDecisions: source.selectedDecisions.filter(
+        (decision) => decision !== 'ASK_QUESTION',
+      ),
+    };
+
+    const result = await realizer(success(completeOutput())).service.realize(
+      unauthorized,
+    );
+
+    expect(result.status).toBe('INVALID_STRUCTURE');
+    expect(result.failureCode).toBe('INVALID_UNIT_ROLE:QUESTION_AUTHORIZATION');
   });
 
   it('rejects an undeclared number present in unit text', async () => {
@@ -886,7 +956,6 @@ describe('NutritionConversationLanguageRealizer', () => {
     output.units[2] = {
       ...output.units[2],
       blockKey: 'block-3-minimal-closure',
-      unitType: 'CLOSING',
       decisionCodes: ['CLOSE_WITHOUT_QUESTION'],
       text: 'Seguimos juntos.',
     };
