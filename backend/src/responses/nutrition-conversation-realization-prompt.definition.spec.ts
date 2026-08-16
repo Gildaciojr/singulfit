@@ -3,10 +3,10 @@ import { join } from 'node:path';
 import { NUTRITION_CONVERSATION_REALIZATION_PROMPT } from './nutrition-conversation-realization-prompt.definition';
 
 describe('NUTRITION_CONVERSATION_REALIZATION_PROMPT', () => {
-  it('defines the compatible realization prompt version 4', () => {
+  it('defines the compatible realization prompt version 5', () => {
     expect(NUTRITION_CONVERSATION_REALIZATION_PROMPT).toMatchObject({
       name: 'nutrition_conversation_realization',
-      version: 4,
+      version: 5,
       capability: 'CONVERSATION_REALIZATION',
       model: 'TEXT',
       schema: {
@@ -24,6 +24,36 @@ describe('NUTRITION_CONVERSATION_REALIZATION_PROMPT', () => {
     expect(instructions).toMatch(/"USER_CONTEXT" não é "MEMORY"/u);
     expect(instructions).toMatch(
       /claims\.usesRecommendation[\s\S]+direction\.authorizedRecommendation/u,
+    );
+    expect(instructions).toContain(
+      'claims descreve somente o conteúdo efetivamente realizado em text, não todo o conteúdo disponível nos factKeys.',
+    );
+    expect(instructions).toContain(
+      'Em claims.numbers, declare todos e somente os valores numéricos efetivamente escritos em text.',
+    );
+    expect(instructions).toContain(
+      'Se text não contiver nenhum número, claims.numbers deve ser [].',
+    );
+    expect(instructions).toContain(
+      'Não inclua números apenas por estarem autorizados ou disponíveis nos factKeys.',
+    );
+    expect(instructions).toContain(
+      'No text, não use separador de milhar; use vírgula apenas como separador decimal.',
+    );
+    expect(instructions).toContain(
+      'Em claims.foods, declare somente alimentos autorizados que sejam explicitamente mencionados em text, usando o nome canônico autorizado de forma lexicalmente reconhecível.',
+    );
+    expect(instructions).toContain(
+      'Se text não mencionar alimento, claims.foods deve ser [].',
+    );
+    expect(instructions).toContain(
+      'Todo alimento autorizado explicitamente mencionado em text deve constar em claims.foods.',
+    );
+    expect(instructions).toContain(
+      'Nunca declare em claims.numbers ou claims.foods conteúdo omitido de text.',
+    );
+    expect(instructions).toContain(
+      'Não use claims como inventário de tudo que o bloco autoriza.',
     );
     expect(instructions).not.toMatch(/arroz|feij[aã]o|can[aá]rio/iu);
   });

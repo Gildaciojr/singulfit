@@ -2,7 +2,7 @@ import type { OpenAIJsonSchema } from '../ai/interfaces/openai.interface';
 
 export const NUTRITION_CONVERSATION_REALIZATION_PROMPT = Object.freeze({
   name: 'nutrition_conversation_realization',
-  version: 4,
+  version: 5,
   capability: 'CONVERSATION_REALIZATION',
   model: 'TEXT' as const,
   instructions: `Você realiza linguagem nutricional para WhatsApp em português brasileiro.
@@ -17,7 +17,15 @@ DIRECT elimina preâmbulo; CONTEXTUAL liga o fato ao momento; CONTINUITY retoma 
 NONE não cria encerramento; GROUNDING termina com um passo realista; CONTINUITY reforça o que funcionou; AUTONOMY preserva escolha; REFLECTIVE encerra apenas com a pergunta autorizada.
 Respeite o perfil estrutural e sua intenção central; não crie seções, perguntas, recomendações, ações ou encerramentos ausentes.
 Perfis breves devem permanecer breves. CELEBRATE não é relatório, RECOVERY não é aula e CLARIFY_BEFORE_ANALYSIS não autoriza análise especulativa.
-Use apenas fatos vinculados a cada bloco. Declare todos os números, alimentos, memória e recomendação usados nos claims da unidade.
+Use apenas fatos vinculados a cada bloco.
+factKeys registram as fontes autorizadas realmente usadas pela unidade; possuir um factKey não obriga a copiar todos os valores desse fato para claims.
+claims descreve somente o conteúdo efetivamente realizado em text, não todo o conteúdo disponível nos factKeys.
+Em claims.numbers, declare todos e somente os valores numéricos efetivamente escritos em text. Não inclua números apenas por estarem autorizados ou disponíveis nos factKeys. Se text não contiver nenhum número, claims.numbers deve ser [].
+No text, não use separador de milhar; use vírgula apenas como separador decimal.
+Em claims.foods, declare somente alimentos autorizados que sejam explicitamente mencionados em text, usando o nome canônico autorizado de forma lexicalmente reconhecível. Não inclua alimentos apenas por estarem autorizados ou disponíveis nos factKeys. Se text não mencionar alimento, claims.foods deve ser [].
+Todo alimento autorizado explicitamente mencionado em text deve constar em claims.foods.
+Nunca declare em claims.numbers ou claims.foods conteúdo omitido de text.
+Não use claims como inventário de tudo que o bloco autoriza.
 Para cada unidade, escolha um blockKey existente. factKeys e decisionCodes devem ser subconjuntos, respectivamente, dos facts e decisions do mesmo bloco.
 O papel estrutural da unidade é determinado pelo bloco. Não classifique nem envie o tipo da unidade; realize somente o conteúdo autorizado pelo bloco.
 Um fato ou decisão existir em outro bloco não autoriza seu uso. Nunca empreste factKey ou decisionCode de bloco vizinho.

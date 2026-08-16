@@ -99,7 +99,7 @@ describe('PromptService', () => {
     expect(prisma.promptVersion.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         name: NUTRITION_CONVERSATION_REALIZATION_PROMPT.name,
-        version: 4,
+        version: NUTRITION_CONVERSATION_REALIZATION_PROMPT.version,
         capability: 'CONVERSATION_REALIZATION',
         model: 'TEXT',
         jsonSchema: NUTRITION_CONVERSATION_REALIZATION_PROMPT.schema,
