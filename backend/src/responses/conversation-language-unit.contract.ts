@@ -58,13 +58,20 @@ export interface ConversationLanguageUnitViolationDetail {
     | 'FACT_NOT_LINKED_TO_BLOCK'
     | 'TEXT_NUMBER_NOT_DECLARED'
     | 'DECLARED_NUMBER_NOT_REALIZED'
-    | 'DECLARED_FOOD_NOT_REALIZED';
+    | 'DECLARED_FOOD_NOT_REALIZED'
+    | 'UNIT_TEXT_LENGTH_EXCEEDED'
+    | 'UNIT_QUESTION_COUNT_MISMATCH';
   readonly blockKey: string;
   readonly factKey?: AuthorizedFactId;
   readonly factReference?: string;
   readonly decisionCode?: SanitizedConversationDecision;
   readonly decisionReference?: string;
   readonly claimReference?: string;
+  readonly unitType?: ConversationLanguageUnitType;
+  readonly unitLength?: number;
+  readonly maximumLength?: number;
+  readonly questionCount?: number;
+  readonly expectedQuestionCount?: number;
 }
 
 export interface ConversationLanguageUnitValidationResult {

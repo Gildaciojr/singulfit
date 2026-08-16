@@ -696,6 +696,62 @@ describe('NutritionConversationLanguageRealizer', () => {
     ).toBe(true);
   });
 
+  it('reports a per-unit length overflow without exposing unit text', async () => {
+    const output = completeOutput();
+    const longText =
+      'O frango oferece cerca de 30 g de proteína, com uma observação nutricional deliberadamente longa para ultrapassar o limite estrutural máximo permitido para esta unidade sem adicionar novos fatos.';
+
+    output.units[1] = {
+      ...output.units[1],
+      text: longText,
+    };
+
+    const unitLength = Array.from(longText).length;
+    expect(unitLength).toBeGreaterThan(130);
+
+    const result = await realizer(success(output)).service.realize(payload());
+
+    expect(result.status).toBe('INVALID_STRUCTURE');
+    expect(result.failureCode).toBe('UNIT_LIMIT_EXCEEDED');
+    expect(result.violationDetails).toEqual([
+      {
+        code: 'UNIT_TEXT_LENGTH_EXCEEDED',
+        blockKey: 'block-2-primary-observation',
+        unitType: 'FACTUAL',
+        unitLength,
+        maximumLength: 130,
+      },
+    ]);
+    expect(JSON.stringify(result.violationDetails)).not.toContain(longText);
+    expect(result.violationDetails?.[0]).not.toHaveProperty('text');
+  });
+
+  it('reports question-mark cardinality without exposing unit text', async () => {
+    const output = completeOutput();
+    const questionText = 'Quer ajustar essa refeição';
+
+    output.units[2] = {
+      ...output.units[2],
+      text: questionText,
+    };
+
+    const result = await realizer(success(output)).service.realize(payload());
+
+    expect(result.status).toBe('INVALID_STRUCTURE');
+    expect(result.failureCode).toBe('UNIT_LIMIT_EXCEEDED');
+    expect(result.violationDetails).toEqual([
+      {
+        code: 'UNIT_QUESTION_COUNT_MISMATCH',
+        blockKey: 'block-3-clarifying-question',
+        unitType: 'QUESTION',
+        questionCount: 0,
+        expectedQuestionCount: 1,
+      },
+    ]);
+    expect(JSON.stringify(result.violationDetails)).not.toContain(questionText);
+    expect(result.violationDetails?.[0]).not.toHaveProperty('text');
+  });
+
   it('realizes an emotional adaptation only with authorized evidence', async () => {
     const base = payload();
     const emotionalPayload: SanitizedConversationPayload = {

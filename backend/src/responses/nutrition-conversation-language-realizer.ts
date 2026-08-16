@@ -220,8 +220,18 @@ export class NutritionConversationLanguageRealizer {
     if (!this.validateDialogueProfile(payload, validated.units)) {
       return finalize(this.invalid(reference, 'DIALOGUE_PROFILE_VIOLATION'));
     }
-    if (!this.validateUnitLimits(payload, validated.units)) {
-      return finalize(this.invalid(reference, 'UNIT_LIMIT_EXCEEDED'));
+    const unitLimitValidation = this.validateUnitLimits(
+      payload,
+      validated.units,
+    );
+    if (!unitLimitValidation.valid) {
+      return finalize(
+        this.invalid(
+          reference,
+          'UNIT_LIMIT_EXCEEDED',
+          unitLimitValidation.violationDetails,
+        ),
+      );
     }
 
     const orderedUnits = this.orderUnits(payload, validated.units);
@@ -600,18 +610,56 @@ export class NutritionConversationLanguageRealizer {
   private validateUnitLimits(
     payload: SanitizedConversationPayload,
     units: readonly ConversationLanguageUnit[],
-  ): boolean {
+  ): {
+    readonly valid: boolean;
+    readonly violationDetails: readonly ConversationLanguageUnitViolationDetail[];
+  } {
     const blocks = new Map(
       payload.structure.blocks.map((block) => [block.key, block]),
     );
-    return units.every((unit) => {
+    const violationDetails: ConversationLanguageUnitViolationDetail[] = [];
+
+    for (const unit of units) {
       const block = blocks.get(unit.blockKey);
-      if (!block || Array.from(unit.text).length > block.maximumLength) {
-        return false;
+      if (!block) {
+        return Object.freeze({
+          valid: false,
+          violationDetails: Object.freeze([]),
+        });
       }
+
+      const unitLength = Array.from(unit.text).length;
+      if (unitLength > block.maximumLength) {
+        violationDetails.push({
+          code: 'UNIT_TEXT_LENGTH_EXCEEDED',
+          blockKey: unit.blockKey,
+          unitType: unit.unitType,
+          unitLength,
+          maximumLength: block.maximumLength,
+        });
+      }
+
       const questionCount = this.count(unit.text, '?');
-      if (unit.unitType === 'QUESTION') return questionCount === 1;
-      return questionCount === 0;
+      const expectedQuestionCount = unit.unitType === 'QUESTION' ? 1 : 0;
+
+      if (questionCount !== expectedQuestionCount) {
+        violationDetails.push({
+          code: 'UNIT_QUESTION_COUNT_MISMATCH',
+          blockKey: unit.blockKey,
+          unitType: unit.unitType,
+          questionCount,
+          expectedQuestionCount,
+        });
+      }
+    }
+
+    const boundedViolationDetails = Object.freeze(
+      violationDetails.slice(0, 20).map((detail) => Object.freeze(detail)),
+    );
+
+    return Object.freeze({
+      valid: boundedViolationDetails.length === 0,
+      violationDetails: boundedViolationDetails,
     });
   }
 
