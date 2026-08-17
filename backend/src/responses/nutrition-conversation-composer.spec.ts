@@ -293,6 +293,65 @@ describe('NutritionConversationComposer', () => {
     ).toBe(expected);
   });
 
+  it('allocates more length to denser blocks without increasing the global budget', () => {
+    const base = context();
+    const source: NutritionConversationContext = {
+      ...base,
+      policies: { requiresEstimateQualification: true },
+      communication: {
+        ...base.communication,
+        preferredMessageLength: 424,
+      },
+    };
+
+    const result = composer.compose(
+      source,
+      plan(
+        [
+          'nutrition.respond-to-meal',
+          'nutrition.qualify-estimates',
+          'nutrition.show-calories',
+          'nutrition.show-protein',
+          'nutrition.show-carbohydrates',
+          'nutrition.provide-recommendation',
+          'nutrition.close-without-question',
+        ],
+        ['nutrition.respond-to-meal', 'nutrition.qualify-estimates'],
+        'ACKNOWLEDGE_AND_ADJUST',
+      ),
+    );
+
+    const analysis = result.blocks.find(
+      (block) => block.type === 'PRIMARY_OBSERVATION',
+    );
+    const disclaimer = result.blocks.find(
+      (block) => block.type === 'UNCERTAINTY_QUALIFICATION',
+    );
+
+    if (!analysis || !disclaimer) {
+      throw new Error('Blocos esperados ausentes no teste');
+    }
+
+    const allocatedLength = result.blocks.reduce(
+      (total, block) => total + block.maximumLength,
+      0,
+    );
+    const previousEqualShare = Math.floor(
+      result.maximumLength / result.blocks.length,
+    );
+
+    expect(result.maximumLength).toBe(424);
+    expect(result.blocks).toHaveLength(4);
+    expect(previousEqualShare).toBe(106);
+    expect(allocatedLength).toBeLessThanOrEqual(result.maximumLength);
+    expect(analysis.decisionIds.length).toBeGreaterThan(
+      disclaimer.decisionIds.length,
+    );
+    expect(analysis.maximumLength).toBe(134);
+    expect(analysis.maximumLength).toBeGreaterThan(112);
+    expect(disclaimer.maximumLength).toBeLessThan(previousEqualShare);
+  });
+
   it('is deterministic, deeply immutable and contains no realized text', () => {
     const input = plan([
       'nutrition.respond-to-meal',

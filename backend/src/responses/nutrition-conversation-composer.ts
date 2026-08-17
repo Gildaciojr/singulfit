@@ -243,7 +243,13 @@ export class NutritionConversationComposer {
     );
     const blocks = this.enforceFactLimit(
       ordered.map((definition, order) =>
-        this.block(definition, order, decisionPlan, maximumLength, flow),
+        this.block(
+          definition,
+          order,
+          decisionPlan,
+          this.blockMaximumLength(definition, ordered, maximumLength),
+          flow,
+        ),
       ),
       profile.budgets.maximumFactCount,
     );
@@ -492,6 +498,25 @@ export class NutritionConversationComposer {
     }
     throw new Error('Motivação sem decisão estrutural de apoio');
   }
+  private blockMaximumLength(
+    definition: BlockDefinition,
+    definitions: readonly BlockDefinition[],
+    maximumLength: number,
+  ): number {
+    const groupCount = Math.max(1, definitions.length);
+    const equalShare = Math.floor(maximumLength / groupCount);
+    const baseline = Math.max(40, Math.floor((equalShare * 4) / 5));
+    const reserved = baseline * groupCount;
+    const distributable = Math.max(0, maximumLength - reserved);
+    const totalWeight = definitions.reduce(
+      (total, current) => total + Math.max(1, current.decisionIds.length),
+      0,
+    );
+    const blockWeight = Math.max(1, definition.decisionIds.length);
+
+    return baseline + Math.floor((distributable * blockWeight) / totalWeight);
+  }
+
   private block(
     definition: BlockDefinition,
     order: number,
@@ -530,16 +555,7 @@ export class NutritionConversationComposer {
           ? 'BULLETS'
           : 'PROSE',
       required,
-      maximumLength: Math.max(
-        40,
-        Math.floor(
-          maximumLength /
-            Math.max(
-              1,
-              this.group(plan.selectedDecisions, plan.dialogueProfile).length,
-            ),
-        ),
-      ),
+      maximumLength,
     });
   }
 
