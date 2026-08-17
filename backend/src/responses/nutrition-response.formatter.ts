@@ -55,7 +55,7 @@ export class NutritionResponseFormatter {
     const displayedItems = analysis.items.slice(0, itemLimit);
     const foods = displayedItems.map(
       (item) =>
-        `${this.foodEmoji(item.foodName)} ${item.foodName} (${this.formatNumber(item.estimatedGrams.toNumber())}g)`,
+        `${this.foodEmoji(item.foodName)} ${item.foodName}, ~${this.formatNumber(item.estimatedGrams.toNumber())} g`,
     );
     if (analysis.items.length > itemLimit) {
       foods.push(
@@ -64,128 +64,59 @@ export class NutritionResponseFormatter {
     }
 
     const recommendation = responseContext.recommendations[0];
-    const activeInsight = responseContext.context.activeInsights[0];
-    const trend = responseContext.context.trends.find(
-      (item) => item.windowDays === 7,
-    );
-    const score = analysis.qualityScore?.score;
 
     return [
-      this.opening(analysis, responseContext),
+      this.opening(analysis),
       '',
       ...(foods.length > 0
         ? foods
         : ['Não consegui separar com segurança os itens da imagem.']),
       '',
-      `A estimativa ficou em ${this.formatNumber(totals.calories)} kcal, com ${this.formatNumber(totals.protein)}g de proteína, ${this.formatNumber(totals.carbs)}g de carboidratos e ${this.formatNumber(totals.fat)}g de gorduras.`,
+      `Estimativa: ${this.formatNumber(totals.calories)} kcal — ${this.formatNumber(totals.protein)} g de proteína, ${this.formatNumber(totals.carbs)} g de carboidratos e ${this.formatNumber(totals.fat)} g de gorduras.`,
       '',
-      this.qualityMeaning(score),
-      this.goalImpact(
+      this.goalAssessment(
         responseContext.context.goal,
         analysis.qualityScore,
         totals.protein,
       ),
-      activeInsight &&
-      this.isPublicText(activeInsight.title) &&
-      this.isPublicText(activeInsight.summary)
-        ? `${activeInsight.title}. ${activeInsight.summary}`
-        : this.trendMeaning(trend, responseContext.context.recentMeals.length),
-      this.rhythmMeaning(responseContext.coach, responseContext.behavior),
+      recommendation?.action,
       '',
-      recommendation
-        ? `${recommendation.title}: ${recommendation.action}`
-        : 'Na próxima refeição, tente combinar uma fonte de proteína, vegetais ou fibras, uma fonte de energia e água.',
-      '',
-      this.closing(score, responseContext),
-      '',
-      'Como a leitura foi feita pela imagem, as quantidades são estimadas e podem variar.',
+      'Valores estimados pela imagem e podem variar.',
     ]
-      .filter((line, index, lines) => line !== '' || lines[index - 1] !== '')
+      .filter(
+        (line, index, lines): line is string =>
+          line !== undefined && (line !== '' || lines[index - 1] !== ''),
+      )
       .join('\n');
   }
 
-  private opening(
-    analysis: NutritionResponseAnalysis,
-    context: NutritionResponseContext,
-  ): string {
+  private opening(analysis: NutritionResponseAnalysis): string {
     const meal = this.categoryLabel(analysis.mealCategory);
-    const goal = this.goalLabel(context.context.goal);
-    if (analysis.items.length === 1) {
-      return `Pela foto, identifiquei ${analysis.items[0]?.foodName} no seu ${meal}. Vamos olhar como essa escolha conversa com seu objetivo de ${goal}.`;
-    }
-    if (analysis.items.length > 1) {
-      return `Pela foto, identifiquei alguns itens no seu ${meal}. Vou te mostrar o principal para o seu objetivo de ${goal}.`;
-    }
-    return `Recebi a foto do seu ${meal}. Mesmo sem separar todos os itens, consigo te orientar pelo que foi estimado.`;
+    return analysis.items.length > 0
+      ? `Pela foto, identifiquei no seu ${meal}:`
+      : `Pela foto do seu ${meal}:`;
   }
 
-  private qualityMeaning(score: number | undefined): string {
-    if (score === undefined)
-      return 'Ainda não há informação suficiente para avaliar o equilíbrio da refeição.';
-    if (score >= 80)
-      return 'A refeição tem uma base nutricional bem equilibrada e vale repetir essa lógica.';
-    if (score >= 60)
-      return 'A refeição tem uma boa base; um ajuste pequeno pode deixá-la mais completa.';
-    if (score >= 40)
-      return 'A refeição cobre parte do que você precisa, mas pode ganhar mais equilíbrio com uma mudança simples.';
-    return 'Essa escolha teve pouco valor nutricional sozinha. Tudo bem: a próxima refeição pode equilibrar o dia com proteína e fibras.';
-  }
-
-  private goalImpact(
+  private goalAssessment(
     goal: FitnessGoal | null,
     quality: NutritionResponseAnalysis['qualityScore'],
     protein: number,
   ): string {
     const label = this.goalLabel(goal);
-    if (!quality)
-      return `Vou considerar esta refeição no acompanhamento do seu objetivo de ${label}.`;
+    if (!quality) return `Estimativa registrada para seu objetivo de ${label}.`;
     if (goal === FitnessGoal.MUSCLE_GAIN && quality.proteinScore < 60) {
-      return `Para ${label}, os ${this.formatNumber(protein)}g de proteína podem ficar melhores com uma fonte proteica mais presente na próxima refeição.`;
+      return `Para ${label}, o aporte de ${this.formatNumber(protein)} g de proteína ficou baixo.`;
     }
     if (goal === FitnessGoal.WEIGHT_LOSS && quality.fiberScore < 60) {
-      return `Para ${label}, incluir mais fibras ou vegetais pode ajudar na saciedade sem complicar a refeição.`;
+      return `Para ${label}, a composição pode ganhar mais fibras para favorecer a saciedade.`;
     }
-    return `Para ${label}, o melhor caminho é manter o que funcionou aqui e ajustar apenas o ponto menos completo.`;
-  }
-
-  private trendMeaning(
-    trend: { direction: string } | undefined,
-    recentMealCount: number,
-  ): string {
-    if (!trend) {
-      return recentMealCount > 0
-        ? 'Cada novo registro ajuda a entender melhor o que funciona na sua rotina.'
-        : 'Esta refeição começa a formar um histórico para orientações mais conectadas à sua rotina.';
+    if (quality.score >= 80 && quality.proteinScore >= 60) {
+      return `Boa composição para seu objetivo de ${label}, com bom aporte de proteína.`;
     }
-    if (trend.direction === 'IMPROVING')
-      return 'Suas escolhas recentes mostram evolução; vale manter o que está sendo fácil repetir.';
-    if (trend.direction === 'DECLINING')
-      return 'Suas escolhas oscilaram um pouco nos últimos dias, então vamos priorizar um passo simples e repetível.';
-    return 'Suas escolhas recentes estão estáveis; agora um ajuste pequeno pode destravar a próxima evolução.';
-  }
-
-  private rhythmMeaning(
-    coach: CoachResponseSignals,
-    behavior: BehavioralSignals,
-  ): string {
-    if (coach.churnRisk === 'HIGH' || coach.experience.momentum.score < 40)
-      return 'Seu ritmo caiu um pouco, então não precisamos aumentar a cobrança: vamos recuperar a constância com um passo menor.';
-    if (coach.churnRisk === 'MEDIUM' || behavior.adherenceScore < 60)
-      return 'Sua rotina ainda oscila, e por isso uma mudança fácil de repetir vale mais do que tentar acertar tudo de uma vez.';
-    return 'Você vem mantendo continuidade; preserve o básico que já funciona antes de acrescentar novas mudanças.';
-  }
-
-  private closing(
-    score: number | undefined,
-    context: NutritionResponseContext,
-  ): string {
-    if (context.coach.experience.fatigue.score >= 70)
-      return 'Para não sobrecarregar, escolha só uma ação desta análise para testar na próxima refeição.';
-    if (context.behavior.stage === 'CONTEMPLATION')
-      return 'Sem cobrança: escolha apenas uma mudança que faça sentido experimentar.';
-    if (score !== undefined && score >= 80)
-      return 'Essa base está funcionando. Quer que eu te ajude a pensar em outra refeição seguindo a mesma lógica?';
-    return 'Quer que eu te sugira uma opção prática para equilibrar a próxima refeição?';
+    if (quality.score >= 60) {
+      return `Composição adequada para seu objetivo de ${label}.`;
+    }
+    return `A composição pode ser ajustada para apoiar melhor seu objetivo de ${label}.`;
   }
 
   private goalLabel(goal: FitnessGoal | null): string {
@@ -238,11 +169,5 @@ export class NutritionResponseFormatter {
     return new Intl.NumberFormat('pt-BR', {
       maximumFractionDigits: 1,
     }).format(value);
-  }
-
-  private isPublicText(value: string): boolean {
-    return !/(?:\bscore\b|\bíndice\b|\bconfidence\b|\bmomentum\b|\bretention\b|\brisk\b|\d+\s*\/\s*100)/iu.test(
-      value,
-    );
   }
 }

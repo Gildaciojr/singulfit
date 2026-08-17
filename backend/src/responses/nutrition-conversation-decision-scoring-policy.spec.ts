@@ -2,8 +2,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DecisionCandidate } from './conversation-decision.contract';
 import type { NutritionConversationContext } from './nutrition-conversation-context.interface';
+import { isCompactMealAnalysis } from './nutrition-conversation-compact-meal.policy';
+import { NutritionConversationComposer } from './nutrition-conversation-composer';
 import { NutritionConversationDecisionEngine } from './nutrition-conversation-decision-engine';
 import { NutritionConversationDecisionScoringPolicy } from './nutrition-conversation-decision-scoring-policy';
+import { NutritionConversationStylePlanner } from './nutrition-conversation-style-planner';
 
 function context(): NutritionConversationContext {
   return {
@@ -371,7 +374,7 @@ describe('NutritionConversationDecisionScoringPolicy', () => {
     expect(plan.maximumCommunicativeDecisions).toBeLessThanOrEqual(6);
   });
 
-  it('suppresses demonstrable redundancy and does not select every macro', () => {
+  it('treats the four macros as non-redundant summary components', () => {
     const source: NutritionConversationContext = {
       ...context(),
       communication: {
@@ -403,10 +406,189 @@ describe('NutritionConversationDecisionScoringPolicy', () => {
       id.startsWith('nutrition.show-'),
     );
 
-    expect(numericIds).toEqual(['nutrition.show-protein']);
-    expect(suppression(plan, 'nutrition.show-calories')?.reason).toBe(
-      'REDUNDANT',
+    expect(numericIds).toEqual([
+      'nutrition.show-protein',
+      'nutrition.show-carbohydrates',
+      'nutrition.show-fat',
+      'nutrition.show-calories',
+      'nutrition.show-quality',
+    ]);
+    expect(suppression(plan, 'nutrition.show-calories')).toBeUndefined();
+  });
+
+  it('keeps a plain meal photo compact even when historical signals exist', () => {
+    const base = context();
+    const source: NutritionConversationContext = {
+      ...base,
+      facts: {
+        ...base.facts,
+        foods: [
+          { name: 'Arroz branco', estimatedGrams: 140 },
+          { name: 'Feijão', estimatedGrams: 130 },
+          { name: 'Frango grelhado', estimatedGrams: 170 },
+        ],
+        totalCalories: 558,
+        totalProtein: 61.1,
+        totalCarbs: 56.4,
+        totalFat: 6.9,
+      },
+      userContext: { ...base.userContext, goal: 'WEIGHT_LOSS' },
+      communication: {
+        ...base.communication,
+        preferredMessageLength: 424,
+      },
+      dialogue: {
+        interactionIntent: 'MEAL_ANALYSIS',
+        explicitDetailRequest: false,
+        specificQuestion: false,
+        clarificationRequired: false,
+        previousCommitmentAvailable: true,
+      },
+    };
+    const plan = policy.select(
+      source,
+      new NutritionConversationDecisionEngine().generate(source),
     );
+    const ids = selectedIds(plan);
+    const composition = new NutritionConversationComposer().compose(
+      source,
+      plan,
+    );
+    const analysis = composition.blocks.find(
+      (block) => block.type === 'PRIMARY_OBSERVATION',
+    );
+    const style = new NutritionConversationStylePlanner().plan(
+      source,
+      composition,
+      ['RESPOND_TO_MEAL'],
+    );
+
+    expect(ids).toEqual([
+      'nutrition.respond-to-meal',
+      'nutrition.qualify-estimates',
+      'nutrition.provide-recommendation',
+      'nutrition.show-protein',
+      'nutrition.mention-goal',
+      'nutrition.show-carbohydrates',
+      'nutrition.show-fat',
+      'nutrition.show-calories',
+    ]);
+    expect(ids).not.toEqual(
+      expect.arrayContaining([
+        'nutrition.ask-question',
+        'nutrition.use-memory',
+        'nutrition.compare-history',
+        'nutrition.mention-trend',
+        'nutrition.mention-longitudinal',
+        'nutrition.celebrate-improvement',
+      ]),
+    );
+    expect(plan.dialogueProfile).toBe('ACKNOWLEDGE_AND_ADJUST');
+    expect(plan.maximumCommunicativeDecisions).toBeLessThanOrEqual(3);
+    expect(analysis?.decisionIds).toEqual(
+      expect.arrayContaining([
+        'nutrition.respond-to-meal',
+        'nutrition.show-calories',
+        'nutrition.show-protein',
+        'nutrition.show-carbohydrates',
+        'nutrition.show-fat',
+        'nutrition.mention-goal',
+      ]),
+    );
+    expect(analysis?.factIds).toEqual(
+      expect.arrayContaining([
+        'facts.mealCategory',
+        'facts.foods',
+        'facts.totalCalories',
+        'facts.totalProtein',
+        'facts.totalCarbs',
+        'facts.totalFat',
+        'userContext.goal',
+      ]),
+    );
+    expect(
+      composition.blocks.reduce(
+        (total, block) => total + block.maximumLength,
+        0,
+      ),
+    ).toBeLessThanOrEqual(composition.maximumLength);
+    expect(composition.blocks.every((block) => block.maximumLength > 0)).toBe(
+      true,
+    );
+    expect(
+      composition.blocks.map((block) => [block.type, block.maximumLength]),
+    ).toEqual([
+      ['UNCERTAINTY_QUALIFICATION', 123],
+      ['PRIMARY_OBSERVATION', 178],
+      ['CORRECTION', 123],
+    ]);
+    expect(style).toEqual(
+      expect.objectContaining({
+        openingStrategy: 'DIRECT',
+        closingStrategy: 'NONE',
+        pacing: 'COMPACT',
+        transitionStyle: 'SEAMLESS',
+        maximumQuestions: 0,
+      }),
+    );
+  });
+
+  it('preserves clarification when emotional uncertainty exists', () => {
+    const base = context();
+    const source: NutritionConversationContext = {
+      ...base,
+      facts: {
+        ...base.facts,
+        totalCalories: null,
+        totalProtein: null,
+        totalCarbs: null,
+        totalFat: null,
+        qualityScore: null,
+      },
+      userContext: {
+        ...base.userContext,
+        memory: undefined,
+        recentMeals: [],
+        insight: undefined,
+        trend: undefined,
+        longitudinalSignal: undefined,
+      },
+      direction: {
+        supportingEvidence: { positiveFactors: [], limitingFactors: [] },
+      },
+      recognition: { signals: [] },
+      emotional: {
+        signals: [
+          {
+            kind: 'UNCERTAINTY',
+            origin: 'MEAL_ANALYSIS',
+            confidence: 'HIGH',
+            evidence: ['Imagem com identificação nutricional incerta'],
+          },
+        ],
+      },
+      dialogue: {
+        interactionIntent: 'MEAL_ANALYSIS',
+        explicitDetailRequest: false,
+        specificQuestion: false,
+        clarificationRequired: false,
+        previousCommitmentAvailable: false,
+      },
+    };
+    const plan = policy.select(
+      source,
+      new NutritionConversationDecisionEngine().generate(source),
+    );
+
+    expect(isCompactMealAnalysis(source)).toBe(false);
+    expect(plan.dialogueProfile).toBe('CLARIFY_BEFORE_ANALYSIS');
+    expect(selectedIds(plan)).toContain('nutrition.ask-question');
+    expect(suppression(plan, 'nutrition.ask-question')).toBeUndefined();
+    expect(
+      plan.suppressedDecisions.some((decision) =>
+        decision.rationaleCodes.includes('COMPACT_MEAL_ANALYSIS_POLICY'),
+      ),
+    ).toBe(false);
   });
   it('selects at most one encouragement and one guidance decision', () => {
     const source: NutritionConversationContext = {
@@ -534,10 +716,11 @@ describe('NutritionConversationDecisionScoringPolicy', () => {
           'facts.totalCarbs',
           'facts.qualityScore',
           'facts.confidence',
+          'facts.totalFat',
         ],
       }),
       candidate('nutrition.show-fat', {
-        factIds: ['facts.totalFat'],
+        factIds: ['userContext.goal'],
       }),
     ]);
 

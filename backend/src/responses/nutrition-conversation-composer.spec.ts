@@ -156,8 +156,8 @@ describe('NutritionConversationComposer', () => {
   });
 
   it.each([
-    ['below', 4],
-    ['equal', 5],
+    ['below', 7],
+    ['equal', 8],
   ] as const)(
     'preserves every decision fact %s the profile budget',
     (_label, count) => {
@@ -168,7 +168,7 @@ describe('NutritionConversationComposer', () => {
   );
 
   it('fails closed instead of silently pruning a decision fact above budget', () => {
-    expect(() => composer.compose(context(), planWithFactCount(6))).toThrow(
+    expect(() => composer.compose(context(), planWithFactCount(9))).toThrow(
       'DecisionPlan excede orçamento de fatos da composição',
     );
   });

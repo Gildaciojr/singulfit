@@ -240,6 +240,9 @@ describe('NutritionConversationLanguageRealizer', () => {
     );
     expect(result.candidateTextSource).toBe('VALIDATED_UNITS');
     expect(result.disclaimerRealized).toBe(true);
+    expect(Array.from(result.realizedUnits[0].text).length).toBeLessThanOrEqual(
+      payload().structure.blocks[0].maximumLength,
+    );
     expect(result.questionRealized).toBe(true);
     expect(result.realizedUnits.map((unit) => unit.unitType)).toEqual([
       'DISCLAIMER',
@@ -692,7 +695,8 @@ describe('NutritionConversationLanguageRealizer', () => {
     const unitLength = Array.from(longText).length;
     expect(unitLength).toBeGreaterThan(130);
 
-    const result = await realizer(success(output)).service.realize(payload());
+    const target = realizer(success(output));
+    const result = await target.service.realize(payload());
 
     expect(result.status).toBe('INVALID_STRUCTURE');
     expect(result.failureCode).toBe('UNIT_LIMIT_EXCEEDED');
@@ -707,6 +711,8 @@ describe('NutritionConversationLanguageRealizer', () => {
     ]);
     expect(JSON.stringify(result.violationDetails)).not.toContain(longText);
     expect(result.violationDetails?.[0]).not.toHaveProperty('text');
+    expect(result.candidateText).toBeNull();
+    expect(target.execute).toHaveBeenCalledTimes(1);
   });
 
   it('reports question-mark cardinality without exposing unit text', async () => {

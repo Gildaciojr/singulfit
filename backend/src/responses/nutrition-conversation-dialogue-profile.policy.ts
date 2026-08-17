@@ -9,6 +9,7 @@ import type {
   SelectedDecision,
 } from './conversation-decision.contract';
 import type { NutritionConversationContext } from './nutrition-conversation-context.interface';
+import { isCompactMealAnalysis } from './nutrition-conversation-compact-meal.policy';
 
 const BASE_BLOCKS: readonly ConversationBlockType[] = Object.freeze([
   'UNCERTAINTY_QUALIFICATION',
@@ -55,7 +56,7 @@ const PROFILES: Readonly<
     rhythm: 'WARM',
     budgets: {
       maximumPerceptibleDecisions: 2,
-      maximumFactCount: 5,
+      maximumFactCount: 8,
       maximumBlockCount: 3,
       maximumParagraphCount: 2,
       maximumQuestions: 0,
@@ -75,7 +76,7 @@ const PROFILES: Readonly<
     rhythm: 'PROGRESSIVE',
     budgets: {
       maximumPerceptibleDecisions: 3,
-      maximumFactCount: 7,
+      maximumFactCount: 8,
       maximumBlockCount: 4,
       maximumParagraphCount: 3,
       maximumQuestions: 0,
@@ -378,9 +379,12 @@ export class NutritionConversationDialogueProfilePolicy {
       (context.communication.shouldAskQuestion ||
         lowConfidence ||
         context.dialogue?.specificQuestion === true);
+    const compactMealAnalysis = isCompactMealAnalysis(context);
 
     let profile: ConversationDialogueProfile;
     if (lowConfidence && usefulQuestion) profile = 'CLARIFY_BEFORE_ANALYSIS';
+    else if (compactMealAnalysis)
+      profile = correction ? 'ACKNOWLEDGE_AND_ADJUST' : 'ACKNOWLEDGE_ONLY';
     else if (recovery) profile = 'RECOVERY';
     else if (overloaded) profile = 'REASSURE_AND_SIMPLIFY';
     else if (detailedEligible) profile = 'DETAILED_ANALYSIS';

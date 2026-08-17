@@ -130,7 +130,14 @@ function context(scenario: Scenario): NutritionConversationContext {
           ? 'FOLLOW_UP'
           : scenario === 'TEACH_BRIEFLY'
             ? 'SPECIFIC_QUESTION'
-            : 'MEAL_ANALYSIS',
+            : [
+                  'REFLECT_AND_ASK',
+                  'RECOVERY',
+                  'CELEBRATE',
+                  'REASSURE_AND_SIMPLIFY',
+                ].includes(scenario)
+              ? 'FOLLOW_UP'
+              : 'MEAL_ANALYSIS',
       explicitDetailRequest: detailed,
       specificQuestion: scenario === 'TEACH_BRIEFLY',
       clarificationRequired: clarify,

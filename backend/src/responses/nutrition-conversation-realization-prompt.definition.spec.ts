@@ -3,10 +3,10 @@ import { join } from 'node:path';
 import { NUTRITION_CONVERSATION_REALIZATION_PROMPT } from './nutrition-conversation-realization-prompt.definition';
 
 describe('NUTRITION_CONVERSATION_REALIZATION_PROMPT', () => {
-  it('defines the compatible realization prompt version 6', () => {
+  it('defines the compatible realization prompt version 7', () => {
     expect(NUTRITION_CONVERSATION_REALIZATION_PROMPT).toMatchObject({
       name: 'nutrition_conversation_realization',
-      version: 6,
+      version: 7,
       capability: 'CONVERSATION_REALIZATION',
       model: 'TEXT',
       schema: {
@@ -30,6 +30,23 @@ describe('NUTRITION_CONVERSATION_REALIZATION_PROMPT', () => {
     );
     expect(instructions).toContain(
       'maximumLength limita somente o campo text da unidade; factKeys, decisionCodes e claims não fazem parte dessa contagem.',
+    );
+  });
+
+  it('requires compact image analysis without relaxing V6 contracts', () => {
+    const instructions = NUTRITION_CONVERSATION_REALIZATION_PROMPT.instructions;
+
+    expect(instructions).toContain(
+      'UNCERTAINTY_QUALIFICATION deve ser uma única frase curta.',
+    );
+    expect(instructions).toContain(
+      'Não crie introduções, transições ou fechamentos apenas para preencher a estrutura.',
+    );
+    expect(instructions).toContain(
+      'Fatos históricos disponíveis não autorizam comentário de continuidade quando a estrutura não os selecionou.',
+    );
+    expect(instructions).toContain(
+      'Nunca produza text com mais caracteres do que o maximumLength do respectivo bloco, nem por um caractere.',
     );
   });
 

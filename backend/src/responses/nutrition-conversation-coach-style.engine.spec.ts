@@ -202,7 +202,9 @@ describe('NutritionConversationCoachStyleEngine', () => {
         identity: 'SINGULFIT_COACH_V1',
         role: 'SPORTS_NUTRITION_COACH',
         toneStrategy: 'CALM_OBJECTIVE',
-        pacing: 'BALANCED',
+        openingStrategy: 'DIRECT',
+        pacing: 'COMPACT',
+        closingStrategy: 'NONE',
       }),
     );
     expect(first.personality).toEqual(
@@ -280,6 +282,13 @@ describe('NutritionConversationCoachStyleEngine', () => {
 
   it('uses context, fatigue, complexity and memory without randomness', () => {
     const fatigued = context({
+      dialogue: {
+        interactionIntent: 'FOLLOW_UP',
+        explicitDetailRequest: false,
+        specificQuestion: false,
+        clarificationRequired: false,
+        previousCommitmentAvailable: true,
+      },
       episodicMemory: {
         episodes: [
           {

@@ -2,7 +2,7 @@ import type { OpenAIJsonSchema } from '../ai/interfaces/openai.interface';
 
 export const NUTRITION_CONVERSATION_REALIZATION_PROMPT = Object.freeze({
   name: 'nutrition_conversation_realization',
-  version: 6,
+  version: 7,
   capability: 'CONVERSATION_REALIZATION',
   model: 'TEXT' as const,
   instructions: `Você realiza linguagem nutricional para WhatsApp em português brasileiro.
@@ -22,6 +22,12 @@ DIRECT elimina preâmbulo; CONTEXTUAL liga o fato ao momento; CONTINUITY retoma 
 NONE não cria encerramento; GROUNDING termina com um passo realista; CONTINUITY reforça o que funcionou; AUTONOMY preserva escolha; REFLECTIVE encerra apenas com a pergunta autorizada.
 Respeite o perfil estrutural e sua intenção central; não crie seções, perguntas, recomendações, ações ou encerramentos ausentes.
 Perfis breves devem permanecer breves. CELEBRATE não é relatório, RECOVERY não é aula e CLARIFY_BEFORE_ANALYSIS não autoriza análise especulativa.
+Em MEAL_ANALYSIS sem pergunta específica, pedido de detalhe ou necessidade de esclarecimento, realize somente o resumo nutricional compacto definido pelos blocos.
+Nesse fluxo, UNCERTAINTY_QUALIFICATION deve ser uma única frase curta. Não explique a metodologia da visão nem escreva um parágrafo de disclaimer.
+Uma unidade pode ser semanticamente completa com uma única frase curta.
+Não crie introduções, transições ou fechamentos apenas para preencher a estrutura.
+Não repita o objetivo em múltiplos blocos nem repita em outro bloco uma orientação já expressa em CORRECTION.
+Fatos históricos disponíveis não autorizam comentário de continuidade quando a estrutura não os selecionou.
 Use apenas fatos vinculados a cada bloco.
 factKeys registram as fontes autorizadas realmente usadas pela unidade; possuir um factKey não obriga a copiar todos os valores desse fato para claims.
 claims descreve somente o conteúdo efetivamente realizado em text, não todo o conteúdo disponível nos factKeys.

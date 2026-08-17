@@ -1,5 +1,6 @@
 import type { CompositionPlan } from './conversation-composition.contract';
 import type { NutritionConversationContext } from './nutrition-conversation-context.interface';
+import { isCompactMealAnalysis } from './nutrition-conversation-compact-meal.policy';
 import { NutritionConversationPersonalizationEngine } from './nutrition-conversation-personalization.engine';
 import type {
   NutritionConversationPersonalization,
@@ -26,6 +27,7 @@ export class NutritionConversationStylePlanner {
       (context.emotional?.signals ?? []).map((signal) => signal.kind),
     );
     const episodes = context.episodicMemory?.episodes ?? [];
+    const compactMealAnalysis = isCompactMealAnalysis(context);
     const victory =
       composition.centralIntent === 'CELEBRATE' ||
       ['BIG_WIN', 'SMALL_WIN', 'IMPROVEMENT', 'RECOVERY'].some((kind) =>
@@ -56,9 +58,10 @@ export class NutritionConversationStylePlanner {
             : correction
               ? ('SUPPORTIVE_CORRECTION' as const)
               : ('CALM_OBJECTIVE' as const);
-    const openingStrategy =
-      personalization.continuityAvailable &&
-      (episodes.length > 0 || composition.centralIntent === 'FOLLOW_UP')
+    const openingStrategy = compactMealAnalysis
+      ? ('DIRECT' as const)
+      : personalization.continuityAvailable &&
+          (episodes.length > 0 || composition.centralIntent === 'FOLLOW_UP')
         ? ('CONTINUITY' as const)
         : emotionallySensitive || recovery
           ? ('VALIDATING' as const)
@@ -68,8 +71,9 @@ export class NutritionConversationStylePlanner {
                 composition.depth === 'MINIMAL'
               ? ('DIRECT' as const)
               : ('CONTEXTUAL' as const);
-    const closingStrategy =
-      composition.closingRequirement === 'PROHIBITED'
+    const closingStrategy = compactMealAnalysis
+      ? ('NONE' as const)
+      : composition.closingRequirement === 'PROHIBITED'
         ? ('NONE' as const)
         : composition.centralIntent === 'FOLLOW_UP'
           ? ('REFLECTIVE' as const)
@@ -78,8 +82,10 @@ export class NutritionConversationStylePlanner {
             : victory
               ? ('CONTINUITY' as const)
               : ('AUTONOMY' as const);
-    const pacing =
-      personalization.cognitiveLoad === 'LOW' || composition.depth === 'MINIMAL'
+    const pacing = compactMealAnalysis
+      ? ('COMPACT' as const)
+      : personalization.cognitiveLoad === 'LOW' ||
+          composition.depth === 'MINIMAL'
         ? ('COMPACT' as const)
         : context.dialogue?.specificQuestion
           ? ('DIRECT' as const)
@@ -88,8 +94,9 @@ export class NutritionConversationStylePlanner {
             : personalization.explanationLevel === 'DETAILED'
               ? ('EXPLANATORY' as const)
               : ('BALANCED' as const);
-    const transitionStyle =
-      composition.paragraphCount <= 1
+    const transitionStyle = compactMealAnalysis
+      ? ('SEAMLESS' as const)
+      : composition.paragraphCount <= 1
         ? ('SEAMLESS' as const)
         : composition.rhythm === 'WARM'
           ? ('GENTLE' as const)

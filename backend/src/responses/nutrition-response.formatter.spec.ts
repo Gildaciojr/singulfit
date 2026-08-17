@@ -15,34 +15,34 @@ describe('NutritionResponseFormatter', () => {
   it('formats meal items and nutritional totals for WhatsApp', () => {
     const formatter = new NutritionResponseFormatter();
 
-    const content = formatter.format(
-      {
-        items: [
-          {
-            foodName: 'Arroz Branco',
-            estimatedGrams: new Prisma.Decimal('180'),
-          },
-          {
-            foodName: 'Feijão Carioca',
-            estimatedGrams: new Prisma.Decimal('120'),
-          },
-          {
-            foodName: 'Peito de Frango',
-            estimatedGrams: new Prisma.Decimal('150'),
-          },
-        ],
-        totalCalories: new Prisma.Decimal('523'),
-        totalProtein: new Prisma.Decimal('41'),
-        totalCarbs: new Prisma.Decimal('52'),
-        totalFat: new Prisma.Decimal('11'),
-        mealCategory: MealCategory.LUNCH,
-        qualityScore: {
-          score: 82,
-          proteinScore: 90,
-          fiberScore: 65,
-          goalAdherenceScore: 84,
+    const analysis: Parameters<NutritionResponseFormatter['format']>[0] = {
+      items: [
+        {
+          foodName: 'Arroz Branco',
+          estimatedGrams: new Prisma.Decimal('180'),
         },
+        {
+          foodName: 'Feijão Carioca',
+          estimatedGrams: new Prisma.Decimal('120'),
+        },
+        {
+          foodName: 'Peito de Frango',
+          estimatedGrams: new Prisma.Decimal('150'),
+        },
+      ],
+      totalCalories: new Prisma.Decimal('523'),
+      totalProtein: new Prisma.Decimal('41'),
+      totalCarbs: new Prisma.Decimal('52'),
+      totalFat: new Prisma.Decimal('11'),
+      mealCategory: MealCategory.LUNCH,
+      qualityScore: {
+        score: 82,
+        proteinScore: 90,
+        fiberScore: 65,
+        goalAdherenceScore: 84,
       },
+    };
+    const responseContext: Parameters<NutritionResponseFormatter['format']>[1] =
       {
         context: {
           userId: 'user-id',
@@ -250,22 +250,74 @@ describe('NutritionResponseFormatter', () => {
           memories: [],
           monthlyReview: null,
         },
-      },
-    );
+      };
+    const content = formatter.format(analysis, responseContext);
 
-    expect(content).toContain('🍚 Arroz Branco (180g)');
-    expect(content).toContain('🫘 Feijão Carioca (120g)');
-    expect(content).toContain('🥩 Peito de Frango (150g)');
+    expect(content).toContain('🍚 Arroz Branco, ~180 g');
+    expect(content).toContain('🫘 Feijão Carioca, ~120 g');
+    expect(content).toContain('🥩 Peito de Frango, ~150 g');
     expect(content).toContain(
-      'A estimativa ficou em 523 kcal, com 41g de proteína, 52g de carboidratos e 11g de gorduras.',
+      'Estimativa: 523 kcal — 41 g de proteína, 52 g de carboidratos e 11 g de gorduras.',
     );
     expect(content).not.toMatch(/(?:score|índice|momentum|retenção|\/100)/iu);
-    expect(content).toContain('base nutricional bem equilibrada');
-    expect(content).toContain('Para ganho de massa');
-    expect(content).toContain('Proteína oscilando');
+    expect(content).toContain('objetivo de ganho de massa');
     expect(content).toContain('Inclua uma fonte de proteína no almoço.');
-    expect(content).toContain(
-      'Como a leitura foi feita pela imagem, as quantidades são estimadas e podem variar.',
+    expect(content).toContain('Valores estimados pela imagem e podem variar.');
+    expect(content).not.toMatch(
+      /Você vem mantendo continuidade|preserve o básico|Quer que eu te ajude|\?/iu,
     );
+    expect(content.length).toBeLessThanOrEqual(520);
+
+    const withoutRecommendation = formatter.format(analysis, {
+      ...responseContext,
+      recommendations: [],
+    });
+    expect(withoutRecommendation).not.toContain(
+      'Inclua uma fonte de proteína no almoço.',
+    );
+    expect(withoutRecommendation).not.toMatch(/\?/u);
+
+    const hydration = formatter.format(analysis, {
+      ...responseContext,
+      recommendations: [
+        {
+          title: 'Hidratação',
+          rationale: 'Recomendação autorizada',
+          action: 'Lembre-se de manter uma boa hidratação ao longo do dia.',
+        },
+      ],
+    });
+    expect(hydration).toContain(
+      'Lembre-se de manter uma boa hidratação ao longo do dia.',
+    );
+
+    const drink = formatter.format(
+      {
+        ...analysis,
+        mealCategory: MealCategory.SNACK,
+        items: [
+          {
+            foodName: 'Água',
+            estimatedGrams: new Prisma.Decimal('300'),
+          },
+        ],
+      },
+      { ...responseContext, recommendations: [] },
+    );
+    const fruit = formatter.format(
+      {
+        ...analysis,
+        mealCategory: MealCategory.SNACK,
+        items: [
+          {
+            foodName: 'Banana',
+            estimatedGrams: new Prisma.Decimal('90'),
+          },
+        ],
+      },
+      { ...responseContext, recommendations: [] },
+    );
+    expect(drink).toContain('🥤 Água, ~300 g');
+    expect(fruit).toContain('🍽️ Banana, ~90 g');
   });
 });

@@ -84,9 +84,9 @@ const DECISION_BLOCK: Readonly<
     rank: 40,
   },
   'nutrition.mention-goal': {
-    key: 'continuity',
-    type: 'HISTORICAL_COMPARISON',
-    rank: 50,
+    key: 'analysis',
+    type: 'PRIMARY_OBSERVATION',
+    rank: 20,
   },
   'nutrition.compare-history': {
     key: 'continuity',

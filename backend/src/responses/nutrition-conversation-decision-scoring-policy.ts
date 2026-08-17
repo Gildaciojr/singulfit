@@ -9,6 +9,10 @@ import type {
   SuppressedDecision,
 } from './conversation-decision.contract';
 import type { NutritionConversationContext } from './nutrition-conversation-context.interface';
+import {
+  allowsCompactMealDecision,
+  isCompactMealAnalysis,
+} from './nutrition-conversation-compact-meal.policy';
 import { NutritionConversationDialogueProfilePolicy } from './nutrition-conversation-dialogue-profile.policy';
 
 const PRIORITY_ORDER: Readonly<
@@ -19,6 +23,10 @@ const NON_PERCEPTIBLE_DECISIONS = new Set([
   'nutrition.respond-briefly',
   'nutrition.reduce-conversational-load',
   'nutrition.close-without-question',
+  'nutrition.show-calories',
+  'nutrition.show-protein',
+  'nutrition.show-carbohydrates',
+  'nutrition.show-fat',
 ]);
 
 interface CandidateEvaluation {
@@ -51,6 +59,7 @@ export class NutritionConversationDecisionScoringPolicy {
     const selectedIds = new Set<ConversationDecisionId>();
     const selectedCandidates: DecisionCandidate[] = [];
     const suppressions = new Map<ConversationDecisionId, SuppressionRecord>();
+    const compactMealAnalysis = isCompactMealAnalysis(context);
 
     for (const candidate of candidates) {
       if (candidate.prohibited) {
@@ -60,6 +69,17 @@ export class NutritionConversationDecisionScoringPolicy {
 
         this.suppress(suppressions, candidate, 'PROHIBITED', [
           'CANDIDATE_MARKED_PROHIBITED',
+        ]);
+        continue;
+      }
+
+      if (
+        compactMealAnalysis &&
+        !candidate.required &&
+        !allowsCompactMealDecision(candidate.id)
+      ) {
+        this.suppress(suppressions, candidate, 'PROFILE_MISMATCH', [
+          'COMPACT_MEAL_ANALYSIS_POLICY',
         ]);
         continue;
       }
@@ -496,6 +516,10 @@ export class NutritionConversationDecisionScoringPolicy {
       'nutrition.reduce-conversational-load',
       'nutrition.use-emoji',
       'nutrition.close-without-question',
+      'nutrition.show-calories',
+      'nutrition.show-protein',
+      'nutrition.show-carbohydrates',
+      'nutrition.show-fat',
     ].includes(candidate.id);
   }
 
@@ -876,16 +900,7 @@ export class NutritionConversationDecisionScoringPolicy {
   }
 
   private redundancyGroup(candidate: DecisionCandidate): string | null {
-    if (
-      [
-        'nutrition.show-calories',
-        'nutrition.show-protein',
-        'nutrition.show-carbohydrates',
-        'nutrition.show-fat',
-        'nutrition.show-quality',
-      ].includes(candidate.id)
-    )
-      return 'NUTRITION_FACT';
+    if (candidate.id === 'nutrition.show-quality') return 'NUTRITION_QUALITY';
     if (
       [
         'nutrition.celebrate-improvement',
