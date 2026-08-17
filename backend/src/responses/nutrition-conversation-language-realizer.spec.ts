@@ -514,7 +514,11 @@ describe('NutritionConversationLanguageRealizer', () => {
         ...completeOutput(),
         units: completeOutput().units.map((unit, index) =>
           index === 1
-            ? { ...unit, claims: { ...unit.claims, numbers: [31] } }
+            ? {
+                ...unit,
+                text: 'O frango oferece 31 g de proteína.',
+                claims: { ...unit.claims, numbers: [] },
+              }
             : unit,
         ),
       },
@@ -587,51 +591,51 @@ describe('NutritionConversationLanguageRealizer', () => {
     expect(result.failureCode).toBe('INVALID_UNIT_ROLE:QUESTION_AUTHORIZATION');
   });
 
-  it('reports an undeclared number present in unit text without exposing its raw value', async () => {
+  it('derives numeric claims from realized text when the provider omits them', async () => {
     const output = completeOutput();
     output.units[1] = {
       ...output.units[1],
-      text: 'O frango oferece 31 g de proteína.',
       claims: { ...output.units[1].claims, numbers: [] },
     };
 
     const result = await realizer(success(output)).service.realize(payload());
 
-    expect(result.status).toBe('INVALID_STRUCTURE');
-    expect(result.failureCode).toBe('UNDECLARED_TEXT_CLAIM');
-    expect(result.violationDetails).toEqual([
-      {
-        code: 'TEXT_NUMBER_NOT_DECLARED',
-        blockKey: 'block-2-primary-observation',
-        claimReference: expect.stringMatching(/^[a-f0-9]{16}$/),
-      },
-    ]);
-    expect(result.violationDetails?.[0]).not.toHaveProperty('number');
-    expect(result.violationDetails?.[0]).not.toHaveProperty('value');
-    expect(result.violationDetails?.[0]).not.toHaveProperty('text');
+    expect(result.status).toBe('COMPLETED');
+    expect(result.realizedUnits[1].claims.numbers).toEqual([30]);
   });
 
-  it('reports a declared number that was not realized in unit text', async () => {
+  it('ignores provider-declared canary gram values absent from realized text', async () => {
     const output = completeOutput();
     output.units[1] = {
       ...output.units[1],
-      text: 'O frango oferece proteína.',
-      claims: { ...output.units[1].claims, numbers: [30] },
+      claims: {
+        ...output.units[1].claims,
+        numbers: [180, 180, 160],
+      },
     };
 
     const result = await realizer(success(output)).service.realize(payload());
 
-    expect(result.status).toBe('INVALID_STRUCTURE');
-    expect(result.failureCode).toBe('UNDECLARED_TEXT_CLAIM');
-    expect(result.violationDetails).toEqual([
-      {
-        code: 'DECLARED_NUMBER_NOT_REALIZED',
-        blockKey: 'block-2-primary-observation',
-        claimReference: expect.stringMatching(/^[a-f0-9]{16}$/),
+    expect(result.status).toBe('COMPLETED');
+    expect(result.realizedUnits[1].claims.numbers).toEqual([30]);
+    expect(result.candidateText).not.toMatch(/\b(?:160|180)\b/u);
+  });
+
+  it('does not give provider-only numeric claims authority over realized text', async () => {
+    const output = completeOutput();
+    output.units[1] = {
+      ...output.units[1],
+      claims: {
+        ...output.units[1].claims,
+        numbers: [9999],
       },
-    ]);
-    expect(result.violationDetails?.[0]).not.toHaveProperty('number');
-    expect(result.violationDetails?.[0]).not.toHaveProperty('value');
+    };
+
+    const result = await realizer(success(output)).service.realize(payload());
+
+    expect(result.status).toBe('COMPLETED');
+    expect(result.realizedUnits[1].claims.numbers).toEqual([30]);
+    expect(result.candidateText).not.toContain('9999');
   });
 
   it('reports an authorized food claim that was not realized in unit text', async () => {
@@ -657,43 +661,22 @@ describe('NutritionConversationLanguageRealizer', () => {
     );
   });
 
-  it('bounds text claim violation details to twenty sanitized entries', async () => {
+  it('fails closed when realized text contains a number not authorized by linked facts', async () => {
     const output = completeOutput();
     output.units[1] = {
       ...output.units[1],
-      text: Array.from({ length: 25 }, (_, index) => String(index + 101)).join(
-        ' ',
-      ),
+      text: 'O frango oferece 31 g de proteína.',
       claims: {
         ...output.units[1].claims,
         numbers: [],
-        foods: [],
       },
     };
 
     const result = await realizer(success(output)).service.realize(payload());
 
     expect(result.status).toBe('INVALID_STRUCTURE');
-    expect(result.failureCode).toBe('UNDECLARED_TEXT_CLAIM');
-    expect(result.violationDetails).toHaveLength(20);
-    expect(
-      result.violationDetails?.every(
-        (detail) =>
-          detail.code === 'TEXT_NUMBER_NOT_DECLARED' &&
-          detail.blockKey === 'block-2-primary-observation' &&
-          typeof detail.claimReference === 'string' &&
-          /^[a-f0-9]{16}$/.test(detail.claimReference),
-      ),
-    ).toBe(true);
-    expect(
-      result.violationDetails?.every(
-        (detail) =>
-          !('number' in detail) &&
-          !('value' in detail) &&
-          !('text' in detail) &&
-          !('food' in detail),
-      ),
-    ).toBe(true);
+    expect(result.failureCode).toBe('UNIT_VALIDATION:NUMBER_NOT_AUTHORIZED');
+    expect(result.candidateText).toBeNull();
   });
 
   it('reports a per-unit length overflow without exposing unit text', async () => {

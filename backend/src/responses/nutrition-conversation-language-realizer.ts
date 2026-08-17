@@ -411,6 +411,7 @@ export class NutritionConversationLanguageRealizer {
     const factKeys = this.stringArray(value.factKeys);
     const claims = this.parseClaims(value.claims);
     if (!decisionCodes || !factKeys || !claims) return null;
+    const text = value.text.trim();
     return Object.freeze({
       blockKey: value.blockKey,
       unitType: this.unitRolePolicy.role(block.type),
@@ -418,8 +419,11 @@ export class NutritionConversationLanguageRealizer {
         decisionCodes as SanitizedConversationDecision[],
       ),
       factKeys: Object.freeze(factKeys),
-      text: value.text.trim(),
-      claims,
+      text,
+      claims: Object.freeze({
+        ...claims,
+        numbers: Object.freeze(this.textNumbers(text)),
+      }),
     });
   }
 
