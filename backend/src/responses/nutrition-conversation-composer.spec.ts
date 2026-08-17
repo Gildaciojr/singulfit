@@ -293,17 +293,116 @@ describe('NutritionConversationComposer', () => {
     ).toBe(expected);
   });
 
-  it('allocates more length to denser blocks without increasing the global budget', () => {
+  it('allocates compact meal length by semantic load without increasing the global budget', () => {
     const base = context();
     const source: NutritionConversationContext = {
       ...base,
       policies: { requiresEstimateQualification: true },
+      direction: {
+        authorizedRecommendation: {
+          title: 'Hidratação',
+          action: 'Mantenha boa hidratação ao longo do dia.',
+        },
+        supportingEvidence: { positiveFactors: [], limitingFactors: [] },
+      },
+      dialogue: {
+        interactionIntent: 'MEAL_ANALYSIS',
+        specificQuestion: false,
+        explicitDetailRequest: false,
+        clarificationRequired: false,
+        previousCommitmentAvailable: false,
+      },
       communication: {
         ...base.communication,
         preferredMessageLength: 424,
       },
     };
 
+    const result = composer.compose(
+      source,
+      plan(
+        [
+          'nutrition.respond-to-meal',
+          'nutrition.qualify-estimates',
+          'nutrition.show-calories',
+          'nutrition.show-protein',
+          'nutrition.show-carbohydrates',
+          'nutrition.show-fat',
+          'nutrition.mention-goal',
+          'nutrition.provide-recommendation',
+        ],
+        ['nutrition.respond-to-meal', 'nutrition.qualify-estimates'],
+        'ACKNOWLEDGE_AND_ADJUST',
+      ),
+    );
+
+    const analysis = result.blocks.find(
+      (block) => block.type === 'PRIMARY_OBSERVATION',
+    );
+    const disclaimer = result.blocks.find(
+      (block) => block.type === 'UNCERTAINTY_QUALIFICATION',
+    );
+    const correction = result.blocks.find(
+      (block) => block.type === 'CORRECTION',
+    );
+
+    if (!analysis || !disclaimer || !correction) {
+      throw new Error('Blocos esperados ausentes no teste');
+    }
+
+    const allocatedLength = result.blocks.reduce(
+      (total, block) => total + block.maximumLength,
+      0,
+    );
+    const repeated = composer.compose(
+      source,
+      plan(
+        [
+          'nutrition.respond-to-meal',
+          'nutrition.qualify-estimates',
+          'nutrition.show-calories',
+          'nutrition.show-protein',
+          'nutrition.show-carbohydrates',
+          'nutrition.show-fat',
+          'nutrition.mention-goal',
+          'nutrition.provide-recommendation',
+        ],
+        ['nutrition.respond-to-meal', 'nutrition.qualify-estimates'],
+        'ACKNOWLEDGE_AND_ADJUST',
+      ),
+    );
+
+    expect(result.maximumLength).toBe(424);
+    expect(result.blocks).toHaveLength(3);
+    expect(allocatedLength).toBeLessThanOrEqual(result.maximumLength);
+    expect(analysis.maximumLength).toBe(258);
+    expect(analysis.maximumLength).toBeGreaterThan(147);
+    expect(analysis.maximumLength).toBeGreaterThan(disclaimer.maximumLength);
+    expect(analysis.maximumLength).toBeGreaterThan(correction.maximumLength);
+    expect(disclaimer.maximumLength).toBe(83);
+    expect(correction.maximumLength).toBe(83);
+    expect(repeated.blocks.map((block) => block.maximumLength)).toEqual(
+      result.blocks.map((block) => block.maximumLength),
+    );
+  });
+
+  it('keeps the previous allocator unchanged outside compact meal analysis', () => {
+    const base = context();
+    const source: NutritionConversationContext = {
+      ...base,
+      policies: { requiresEstimateQualification: true },
+      dialogue: {
+        interactionIntent: 'DETAIL_REQUEST',
+        specificQuestion: false,
+        explicitDetailRequest: true,
+        clarificationRequired: false,
+        previousCommitmentAvailable: false,
+      },
+      communication: {
+        ...base.communication,
+        preferredMessageLength: 424,
+      },
+    };
     const result = composer.compose(
       source,
       plan(
@@ -321,35 +420,13 @@ describe('NutritionConversationComposer', () => {
       ),
     );
 
-    const analysis = result.blocks.find(
-      (block) => block.type === 'PRIMARY_OBSERVATION',
-    );
-    const disclaimer = result.blocks.find(
-      (block) => block.type === 'UNCERTAINTY_QUALIFICATION',
-    );
-
-    if (!analysis || !disclaimer) {
-      throw new Error('Blocos esperados ausentes no teste');
-    }
-
-    const allocatedLength = result.blocks.reduce(
-      (total, block) => total + block.maximumLength,
-      0,
-    );
-    const previousEqualShare = Math.floor(
-      result.maximumLength / result.blocks.length,
-    );
-
     expect(result.maximumLength).toBe(424);
-    expect(result.blocks).toHaveLength(4);
-    expect(previousEqualShare).toBe(106);
-    expect(allocatedLength).toBeLessThanOrEqual(result.maximumLength);
-    expect(analysis.decisionIds.length).toBeGreaterThan(
-      disclaimer.decisionIds.length,
-    );
-    expect(analysis.maximumLength).toBe(134);
-    expect(analysis.maximumLength).toBeGreaterThan(112);
-    expect(disclaimer.maximumLength).toBeLessThan(previousEqualShare);
+    expect(result.blocks.map((block) => block.maximumLength)).toEqual([
+      96, 134, 96, 96,
+    ]);
+    expect(
+      result.blocks.reduce((total, block) => total + block.maximumLength, 0),
+    ).toBeLessThanOrEqual(result.maximumLength);
   });
 
   it('is deterministic, deeply immutable and contains no realized text', () => {

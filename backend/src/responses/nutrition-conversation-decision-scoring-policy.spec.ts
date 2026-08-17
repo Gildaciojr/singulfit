@@ -518,9 +518,9 @@ describe('NutritionConversationDecisionScoringPolicy', () => {
     expect(
       composition.blocks.map((block) => [block.type, block.maximumLength]),
     ).toEqual([
-      ['UNCERTAINTY_QUALIFICATION', 123],
-      ['PRIMARY_OBSERVATION', 178],
-      ['CORRECTION', 123],
+      ['UNCERTAINTY_QUALIFICATION', 83],
+      ['PRIMARY_OBSERVATION', 258],
+      ['CORRECTION', 83],
     ]);
     expect(style).toEqual(
       expect.objectContaining({

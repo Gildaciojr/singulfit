@@ -9,6 +9,7 @@ import type {
   SelectedDecision,
 } from './conversation-decision.contract';
 import type { NutritionConversationContext } from './nutrition-conversation-context.interface';
+import { isCompactMealAnalysis } from './nutrition-conversation-compact-meal.policy';
 import { NutritionConversationDialogueProfilePolicy } from './nutrition-conversation-dialogue-profile.policy';
 import { NutritionConversationFlowPlanner } from './nutrition-conversation-flow-planner';
 import type { NutritionConversationFlowPlan } from './nutrition-conversation-planning.contract';
@@ -212,6 +213,8 @@ const EMOTIONAL_DECISIONS = new Set([
   'nutrition.answer-curiosity',
 ]);
 
+const COMPACT_BLOCK_MINIMUM_LENGTH = 48;
+
 export class NutritionConversationComposer {
   private readonly dialogueProfilePolicy =
     new NutritionConversationDialogueProfilePolicy();
@@ -228,6 +231,7 @@ export class NutritionConversationComposer {
     );
     const flow = this.flowPlanner.plan(context, decisionPlan);
     const maximumLength = this.maximumLength(context, decisionPlan);
+    const compactMealAnalysis = isCompactMealAnalysis(context);
     const grouped = this.group(
       decisionPlan.selectedDecisions,
       decisionPlan.dialogueProfile,
@@ -247,7 +251,12 @@ export class NutritionConversationComposer {
           definition,
           order,
           decisionPlan,
-          this.blockMaximumLength(definition, ordered, maximumLength),
+          this.blockMaximumLength(
+            definition,
+            ordered,
+            maximumLength,
+            compactMealAnalysis,
+          ),
           flow,
         ),
       ),
@@ -502,7 +511,16 @@ export class NutritionConversationComposer {
     definition: BlockDefinition,
     definitions: readonly BlockDefinition[],
     maximumLength: number,
+    compactMealAnalysis: boolean,
   ): number {
+    if (compactMealAnalysis) {
+      return this.compactBlockMaximumLength(
+        definition,
+        definitions,
+        maximumLength,
+      );
+    }
+
     const groupCount = Math.max(1, definitions.length);
     const equalShare = Math.floor(maximumLength / groupCount);
     const baseline = Math.max(40, Math.floor((equalShare * 4) / 5));
@@ -515,6 +533,26 @@ export class NutritionConversationComposer {
     const blockWeight = Math.max(1, definition.decisionIds.length);
 
     return baseline + Math.floor((distributable * blockWeight) / totalWeight);
+  }
+
+  private compactBlockMaximumLength(
+    definition: BlockDefinition,
+    definitions: readonly BlockDefinition[],
+    maximumLength: number,
+  ): number {
+    const groupCount = Math.max(1, definitions.length);
+    const floor = Math.min(
+      COMPACT_BLOCK_MINIMUM_LENGTH,
+      Math.floor(maximumLength / groupCount),
+    );
+    const distributable = Math.max(0, maximumLength - floor * groupCount);
+    const totalWeight = definitions.reduce(
+      (total, current) => total + Math.max(1, current.decisionIds.length),
+      0,
+    );
+    const blockWeight = Math.max(1, definition.decisionIds.length);
+
+    return floor + Math.floor((distributable * blockWeight) / totalWeight);
   }
 
   private block(
