@@ -3,10 +3,10 @@ import { join } from 'node:path';
 import { NUTRITION_CONVERSATION_REALIZATION_PROMPT } from './nutrition-conversation-realization-prompt.definition';
 
 describe('NUTRITION_CONVERSATION_REALIZATION_PROMPT', () => {
-  it('defines the compatible realization prompt version 5', () => {
+  it('defines the compatible realization prompt version 6', () => {
     expect(NUTRITION_CONVERSATION_REALIZATION_PROMPT).toMatchObject({
       name: 'nutrition_conversation_realization',
-      version: 5,
+      version: 6,
       capability: 'CONVERSATION_REALIZATION',
       model: 'TEXT',
       schema: {
@@ -14,6 +14,23 @@ describe('NUTRITION_CONVERSATION_REALIZATION_PROMPT', () => {
         schema: expect.objectContaining({ type: 'object' }),
       },
     });
+  });
+
+  it('states the exact per-block text length contract', () => {
+    const instructions = NUTRITION_CONVERSATION_REALIZATION_PROMPT.instructions;
+
+    expect(instructions).toContain(
+      'structure.blocks[].maximumLength do blockKey correspondente é um teto rígido para o campo text.',
+    );
+    expect(instructions).toContain(
+      'Nunca produza text com mais caracteres do que o maximumLength do respectivo bloco, nem por um caractere.',
+    );
+    expect(instructions).toContain(
+      'Prefira uma formulação concisa e confortavelmente abaixo do teto; não tente preencher todo o maximumLength disponível.',
+    );
+    expect(instructions).toContain(
+      'maximumLength limita somente o campo text da unidade; factKeys, decisionCodes e claims não fazem parte dessa contagem.',
+    );
   });
 
   it('states the canonical claim semantics without domain examples', () => {
