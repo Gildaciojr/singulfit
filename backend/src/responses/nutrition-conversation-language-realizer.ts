@@ -53,8 +53,7 @@ type UnitRoleViolation =
   | 'CLOSING_CARDINALITY'
   | 'CLOSING_AUTHORIZATION'
   | 'DISCLAIMER_CARDINALITY'
-  | 'DISCLAIMER_MISSING'
-  | 'DISCLAIMER_FACT_COVERAGE';
+  | 'DISCLAIMER_MISSING';
 
 const REALIZER_TIMEOUT_MS = 20_000;
 const OMISSION_REASONS = new Set<ConversationLanguageUnitOmissionReason>([
@@ -550,13 +549,6 @@ export class NutritionConversationLanguageRealizer {
     if (!disclaimerRequired) return null;
     if (disclaimerUnits.length === 0) return 'DISCLAIMER_MISSING';
     if (disclaimerUnits.length > 1) return 'DISCLAIMER_CARDINALITY';
-    if (
-      payload.facts.disclaimerRequired.some(
-        (fact) => !disclaimerUnits[0].factKeys.includes(fact),
-      )
-    ) {
-      return 'DISCLAIMER_FACT_COVERAGE';
-    }
     return null;
   }
 

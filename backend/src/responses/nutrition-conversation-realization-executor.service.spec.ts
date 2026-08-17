@@ -578,7 +578,7 @@ describe('NutritionConversationRealizationExecutorService', () => {
 
   it.each([
     'UNIT_VALIDATION:MEMORY_NOT_AUTHORIZED',
-    'INVALID_UNIT_ROLE:DISCLAIMER_FACT_COVERAGE',
+    'INVALID_UNIT_ROLE:DISCLAIMER_MISSING',
   ] as const)(
     'persists the specific terminal failure code %s',
     async (code) => {

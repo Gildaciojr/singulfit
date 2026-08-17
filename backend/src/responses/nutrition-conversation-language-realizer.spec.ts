@@ -46,7 +46,7 @@ function payload(): SanitizedConversationPayload {
           key: 'block-1-uncertainty-qualification',
           type: 'UNCERTAINTY_QUALIFICATION',
           decisions: ['QUALIFY_ESTIMATES'],
-          facts: ['facts.foods', 'facts.totalProtein'],
+          facts: ['facts.foods'],
           order: 0,
           paragraph: 0,
           presentation: 'PROSE',
@@ -113,7 +113,7 @@ function completeOutput() {
       {
         blockKey: 'block-1-uncertainty-qualification',
         decisionCodes: ['QUALIFY_ESTIMATES'],
-        factKeys: ['facts.foods', 'facts.totalProtein'],
+        factKeys: ['facts.foods'],
         text: 'Os valores são estimativas visuais.',
         claims: {
           numbers: [],
@@ -149,6 +149,101 @@ function completeOutput() {
     ],
     omittedUnits: [],
   };
+}
+
+function compactMealPayload(): SanitizedConversationPayload {
+  const source = payload();
+  const macroFacts = [
+    {
+      key: 'facts.totalCalories' as const,
+      source: 'MEAL_ANALYSIS' as const,
+      value: 520,
+      estimated: true,
+    },
+    {
+      key: 'facts.totalCarbs' as const,
+      source: 'MEAL_ANALYSIS' as const,
+      value: 50,
+      estimated: true,
+    },
+    {
+      key: 'facts.totalFat' as const,
+      source: 'MEAL_ANALYSIS' as const,
+      value: 12,
+      estimated: true,
+    },
+  ];
+  const macroKeys = [
+    'facts.totalCalories',
+    'facts.totalProtein',
+    'facts.totalCarbs',
+    'facts.totalFat',
+  ] as const;
+
+  return {
+    ...source,
+    facts: {
+      ...source.facts,
+      allowed: [...source.facts.allowed, ...macroFacts],
+      disclaimerRequired: ['facts.foods', ...macroKeys],
+    },
+    selectedDecisions: [
+      'QUALIFY_ESTIMATES',
+      'RESPOND_TO_MEAL',
+      'SHOW_CALORIES',
+      'SHOW_PROTEIN',
+      'SHOW_CARBOHYDRATES',
+      'SHOW_FAT',
+      'ASK_QUESTION',
+    ],
+    structure: {
+      ...source.structure,
+      blocks: source.structure.blocks.map((block, index) =>
+        index === 1
+          ? {
+              ...block,
+              decisions: [
+                'RESPOND_TO_MEAL',
+                'SHOW_CALORIES',
+                'SHOW_PROTEIN',
+                'SHOW_CARBOHYDRATES',
+                'SHOW_FAT',
+              ],
+              facts: ['facts.foods', ...macroKeys],
+            }
+          : block,
+      ),
+    },
+  };
+}
+
+function compactMealOutput() {
+  const output = completeOutput();
+  output.units[1] = {
+    ...output.units[1],
+    decisionCodes: [
+      'RESPOND_TO_MEAL',
+      'SHOW_CALORIES',
+      'SHOW_PROTEIN',
+      'SHOW_CARBOHYDRATES',
+      'SHOW_FAT',
+    ],
+    factKeys: [
+      'facts.foods',
+      'facts.totalCalories',
+      'facts.totalProtein',
+      'facts.totalCarbs',
+      'facts.totalFat',
+    ],
+    text: 'O frango soma 520 kcal, 30 g de proteína, 50 g de carboidratos e 12 g de gorduras.',
+    claims: {
+      numbers: [520, 30, 50, 12],
+      foods: ['Frango'],
+      usesMemory: false,
+      usesRecommendation: false,
+    },
+  };
+  return output;
 }
 
 function success(structuredOutput: unknown): ConversationAIResponse {
@@ -445,9 +540,9 @@ describe('NutritionConversationLanguageRealizer', () => {
         allowed: [
           ...source.facts.allowed,
           {
-            key: 'facts.totalFat',
+            key: 'facts.totalCalories',
             source: 'MEAL_ANALYSIS',
-            value: 10,
+            value: 520,
             estimated: true,
           },
         ],
@@ -456,12 +551,13 @@ describe('NutritionConversationLanguageRealizer', () => {
         ...source.structure,
         blocks: source.structure.blocks.map((block, index) => ({
           ...block,
-          facts: index === 1 ? [...block.facts, 'facts.totalFat'] : block.facts,
+          facts:
+            index === 1 ? [...block.facts, 'facts.totalCalories'] : block.facts,
         })),
       },
     };
     const output = completeOutput();
-    output.units[0].factKeys = ['facts.totalFat'];
+    output.units[0].factKeys = ['facts.totalCalories'];
 
     const result = await realizer(success(output)).service.realize(scoped);
 
@@ -471,7 +567,7 @@ describe('NutritionConversationLanguageRealizer', () => {
       {
         code: 'FACT_NOT_LINKED_TO_BLOCK',
         blockKey: 'block-1-uncertainty-qualification',
-        factKey: 'facts.totalFat',
+        factKey: 'facts.totalCalories',
       },
     ]);
     expect(result.candidateText).toBeNull();
@@ -546,17 +642,16 @@ describe('NutritionConversationLanguageRealizer', () => {
     expect(result.candidateText).toBeNull();
   });
 
-  it('reports the exact canonical role invariant that failed', async () => {
-    const output = completeOutput();
-    output.units[0].factKeys = ['facts.foods'];
+  it('realizes one block-scoped disclaimer for all globally estimated meal facts', async () => {
+    const target = realizer(success(compactMealOutput()));
+    const result = await target.service.realize(compactMealPayload());
 
-    const result = await realizer(success(output)).service.realize(payload());
-
-    expect(result.status).toBe('INVALID_STRUCTURE');
-    expect(result.failureCode).toBe(
-      'INVALID_UNIT_ROLE:DISCLAIMER_FACT_COVERAGE',
-    );
-    expect(result.candidateText).toBeNull();
+    expect(result.status).toBe('COMPLETED');
+    expect(result.failureCode).toBeUndefined();
+    expect(result.disclaimerRealized).toBe(true);
+    expect(result.realizedUnits[0].factKeys).toEqual(['facts.foods']);
+    expect(result.realizedUnits[1].claims.numbers).toEqual([520, 30, 50, 12]);
+    expect(target.execute).toHaveBeenCalledTimes(1);
   });
 
   it('reports a missing required disclaimer with a bounded structural code', async () => {
@@ -566,7 +661,7 @@ describe('NutritionConversationLanguageRealizer', () => {
       {
         blockKey: 'block-1-uncertainty-qualification',
         decisionCodes: ['QUALIFY_ESTIMATES'],
-        factKeys: ['facts.foods', 'facts.totalProtein'],
+        factKeys: ['facts.foods'],
         reason: 'REALIZATION_FAILURE',
       },
     ];
@@ -575,6 +670,68 @@ describe('NutritionConversationLanguageRealizer', () => {
 
     expect(result.status).toBe('INVALID_STRUCTURE');
     expect(result.failureCode).toBe('INVALID_UNIT_ROLE:DISCLAIMER_MISSING');
+  });
+
+  it('rejects more than one realized disclaimer', async () => {
+    const source = payload();
+    const duplicateBlockKey = 'block-4-uncertainty-qualification';
+    const duplicatePayload: SanitizedConversationPayload = {
+      ...source,
+      structure: {
+        ...source.structure,
+        blocks: [
+          ...source.structure.blocks,
+          {
+            ...source.structure.blocks[0],
+            key: duplicateBlockKey,
+            order: 3,
+            paragraph: 3,
+          },
+        ],
+        paragraphCount: 4,
+      },
+    };
+    const output = completeOutput();
+    output.units.push({
+      ...output.units[0],
+      blockKey: duplicateBlockKey,
+    });
+
+    const result = await realizer(success(output)).service.realize(
+      duplicatePayload,
+    );
+
+    expect(result.status).toBe('INVALID_STRUCTURE');
+    expect(result.failureCode).toBe('INVALID_UNIT_ROLE:DISCLAIMER_CARDINALITY');
+  });
+
+  it('does not require a disclaimer when no estimated fact requires one', async () => {
+    const source = payload();
+    const withoutDisclaimer: SanitizedConversationPayload = {
+      ...source,
+      facts: { ...source.facts, disclaimerRequired: [] },
+      selectedDecisions: source.selectedDecisions.filter(
+        (decision) => decision !== 'QUALIFY_ESTIMATES',
+      ),
+      structure: {
+        ...source.structure,
+        blocks: source.structure.blocks.slice(1),
+        paragraphCount: 2,
+      },
+      policies: {
+        ...source.policies,
+        estimateQualificationRequired: false,
+      },
+    };
+    const output = completeOutput();
+    output.units = output.units.slice(1);
+
+    const result = await realizer(success(output)).service.realize(
+      withoutDisclaimer,
+    );
+
+    expect(result.status).toBe('COMPLETED');
+    expect(result.disclaimerRealized).toBe(false);
   });
 
   it('fails closed when a question block exists without question authorization', async () => {
