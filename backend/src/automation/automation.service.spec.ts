@@ -5,7 +5,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { SubscriptionAccessService } from '../subscriptions/subscription-access.service';
 import { AUTOMATION_RULE_CODES } from './automation.constants';
-import { AutomationService } from './automation.service';
+import {
+  AutomationService,
+  COACH_PROACTIVE_MIN_GAP_MINUTES,
+} from './automation.service';
 import { CoachService } from './coach.service';
 import { EventBusService } from '../event-bus/event-bus.service';
 import { CoachIntelligenceService } from './coach-intelligence.service';
@@ -96,6 +99,9 @@ describe('AutomationService', () => {
       },
       habitSnapshot: {
         findUnique: jest.fn().mockResolvedValue(null),
+      },
+      coachMessage: {
+        findMany: jest.fn().mockResolvedValue([]),
       },
       churnRiskAssessment: {
         findUnique: jest.fn().mockResolvedValue({
@@ -534,6 +540,9 @@ describe('AutomationService', () => {
       subject.transaction,
     );
     expect(subject.evolutionGateway.sendText).not.toHaveBeenCalled();
+    expect(
+      subject.coachIntelligence.getExperienceSignals,
+    ).not.toHaveBeenCalled();
   });
 
   it('enforces the daily cap before realization', async () => {
@@ -545,7 +554,11 @@ describe('AutomationService', () => {
         automationPreference: subject.preferences,
       },
     ]);
-    subject.prisma.scheduledMessage.count.mockResolvedValue(3);
+    subject.prisma.coachMessage.findMany.mockResolvedValue([
+      { context: { source: 'COACH_PROACTIVE_V1' } },
+      { context: { source: 'COACH_PROACTIVE_V1' } },
+      { context: { source: 'COACH_PROACTIVE_V1' } },
+    ]);
 
     await subject.service.materializeDueMessages(
       new Date('2026-08-18T13:00:00.000Z'),
@@ -559,24 +572,50 @@ describe('AutomationService', () => {
 
   it.each([
     [
-      'lunch and dinner',
-      AUTOMATION_RULE_CODES.MEAL_REMINDER,
+      'lunch, hydration and workout',
       [
-        ['LUNCH_CHECK', 'LUNCH', '2026-08-18T15:45:00.000Z'],
-        ['DINNER_CHECK', 'DINNER', '2026-08-18T22:45:00.000Z'],
+        [
+          'LUNCH_CHECK',
+          'LUNCH',
+          '2026-08-18T15:45:00.000Z',
+          AUTOMATION_RULE_CODES.MEAL_REMINDER,
+        ],
+        [
+          'HYDRATION_CHECK',
+          'HYDRATION_AFTERNOON',
+          '2026-08-18T18:45:00.000Z',
+          AUTOMATION_RULE_CODES.HYDRATION_REMINDER,
+        ],
+        [
+          'WORKOUT_CHECK',
+          'WORKOUT',
+          '2026-08-18T22:00:00.000Z',
+          AUTOMATION_RULE_CODES.DAILY_WORKOUT,
+        ],
       ],
+      3,
     ],
     [
       'two hydration slots',
-      AUTOMATION_RULE_CODES.HYDRATION_REMINDER,
       [
-        ['HYDRATION_CHECK', 'HYDRATION_MORNING', '2026-08-18T13:30:00.000Z'],
-        ['HYDRATION_CHECK', 'HYDRATION_AFTERNOON', '2026-08-18T18:30:00.000Z'],
+        [
+          'HYDRATION_CHECK',
+          'HYDRATION_MORNING',
+          '2026-08-18T13:30:00.000Z',
+          AUTOMATION_RULE_CODES.HYDRATION_REMINDER,
+        ],
+        [
+          'HYDRATION_CHECK',
+          'HYDRATION_AFTERNOON',
+          '2026-08-18T18:30:00.000Z',
+          AUTOMATION_RULE_CODES.HYDRATION_REMINDER,
+        ],
       ],
+      2,
     ],
   ] as const)(
-    'allows %s with exact-slot dedupe under the same rule',
-    async (_name, ruleCode, definitions) => {
+    'allows %s with exact-slot dedupe',
+    async (_name, definitions, expectedCount) => {
       const subject = createSubject();
       subject.prisma.user.findMany.mockResolvedValue([
         {
@@ -585,17 +624,19 @@ describe('AutomationService', () => {
           automationPreference: subject.preferences,
         },
       ]);
-      subject.prisma.automationRule.findUnique.mockResolvedValue({
-        ...subject.rule,
-        code: ruleCode,
-      });
-      const slots = definitions.map(([intent, slotKey, scheduledFor]) => ({
-        intent,
-        slotKey,
-        ruleCode,
-        scheduledFor: new Date(scheduledFor),
-        localTime: '12:00',
-      }));
+      subject.prisma.automationRule.findUnique.mockImplementation(
+        ({ where }: { where: { code: string } }) =>
+          Promise.resolve({ ...subject.rule, code: where.code }),
+      );
+      const slots = definitions.map(
+        ([intent, slotKey, scheduledFor, ruleCode]) => ({
+          intent,
+          slotKey,
+          ruleCode,
+          scheduledFor: new Date(scheduledFor),
+          localTime: '12:00',
+        }),
+      );
       Reflect.set(subject.service, 'proactiveSchedule', {
         materializableSlots: jest.fn().mockReturnValue(slots),
         localDayRange: jest.fn().mockReturnValue({
@@ -608,12 +649,12 @@ describe('AutomationService', () => {
         subject.service.materializeDueMessages(
           new Date('2026-08-18T15:00:00.000Z'),
         ),
-      ).resolves.toEqual({ scanned: 1, materialized: 2 });
+      ).resolves.toEqual({ scanned: 1, materialized: expectedCount });
 
       expect(subject.transaction.scheduledMessage.create).toHaveBeenCalledTimes(
-        2,
+        expectedCount,
       );
-      expect(subject.eventBus.publish).toHaveBeenCalledTimes(2);
+      expect(subject.eventBus.publish).toHaveBeenCalledTimes(expectedCount);
     },
   );
 
@@ -653,6 +694,13 @@ describe('AutomationService', () => {
     subject.prisma.user.findMany
       .mockResolvedValueOnce(users)
       .mockResolvedValueOnce([]);
+    Reflect.set(subject.service, 'proactiveSchedule', {
+      materializableSlots: jest.fn().mockReturnValue([]),
+      localDayRange: jest.fn().mockReturnValue({
+        start: new Date('2026-08-18T03:00:00.000Z'),
+        end: new Date('2026-08-19T03:00:00.000Z'),
+      }),
+    });
 
     await expect(
       subject.service.materializeDueMessages(
@@ -667,5 +715,101 @@ describe('AutomationService', () => {
         skip: 1,
       }),
     );
+    expect(
+      subject.coachIntelligence.getExperienceSignals,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('ignores a recent reactive outbound for proactive cooldown ownership', async () => {
+    const subject = createSubject();
+    subject.prisma.user.findMany.mockResolvedValue([
+      {
+        id: 'user-id',
+        preferences: { timezone: 'America/Sao_Paulo' },
+        automationPreference: subject.preferences,
+      },
+    ]);
+    subject.prisma.coachMessage.findMany.mockResolvedValue([
+      {
+        context: { source: 'WHATSAPP_COACH_COMMAND' },
+        scheduledFor: new Date('2026-08-18T13:00:00.000Z'),
+      },
+    ]);
+
+    await expect(
+      subject.service.materializeDueMessages(
+        new Date('2026-08-18T13:00:00.000Z'),
+      ),
+    ).resolves.toEqual({ scanned: 1, materialized: 1 });
+  });
+
+  it('blocks a proactive contact 179 minutes after the previous proactive', async () => {
+    const subject = createSubject();
+    subject.prisma.user.findMany.mockResolvedValue([
+      {
+        id: 'user-id',
+        preferences: { timezone: 'America/Sao_Paulo' },
+        automationPreference: subject.preferences,
+      },
+    ]);
+    subject.prisma.coachMessage.findMany.mockResolvedValue([
+      {
+        context: { source: 'COACH_PROACTIVE_V1' },
+        scheduledFor: new Date('2026-08-18T10:31:00.000Z'),
+      },
+    ]);
+
+    await expect(
+      subject.service.materializeDueMessages(
+        new Date('2026-08-18T13:00:00.000Z'),
+      ),
+    ).resolves.toEqual({ scanned: 1, materialized: 0 });
+    expect(
+      subject.coachService.generateProactiveContent,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('allows a proactive contact at the exact 180-minute boundary', async () => {
+    const subject = createSubject();
+    subject.prisma.user.findMany.mockResolvedValue([
+      {
+        id: 'user-id',
+        preferences: { timezone: 'America/Sao_Paulo' },
+        automationPreference: subject.preferences,
+      },
+    ]);
+    subject.prisma.coachMessage.findMany.mockResolvedValue([
+      {
+        context: { source: 'COACH_PROACTIVE_V1' },
+        scheduledFor: new Date('2026-08-18T10:30:00.000Z'),
+      },
+    ]);
+
+    await expect(
+      subject.service.materializeDueMessages(
+        new Date('2026-08-18T13:00:00.000Z'),
+      ),
+    ).resolves.toEqual({ scanned: 1, materialized: 1 });
+    expect(COACH_PROACTIVE_MIN_GAP_MINUTES).toBe(180);
+  });
+
+  it('does not materialize proactive outreach without entitlement', async () => {
+    const subject = createSubject({ subscriptionStatus: null });
+    subject.prisma.user.findMany.mockResolvedValue([
+      {
+        id: 'user-id',
+        preferences: { timezone: 'America/Sao_Paulo' },
+        automationPreference: subject.preferences,
+      },
+    ]);
+
+    await expect(
+      subject.service.materializeDueMessages(
+        new Date('2026-08-18T13:00:00.000Z'),
+      ),
+    ).resolves.toEqual({ scanned: 1, materialized: 0 });
+    expect(
+      subject.coachService.generateProactiveContent,
+    ).not.toHaveBeenCalled();
   });
 });

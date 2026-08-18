@@ -31,6 +31,7 @@ import {
 } from './coach-proactive.contract';
 
 const AUTOMATION_CODES = new Set<string>(Object.values(AUTOMATION_RULE_CODES));
+export const COACH_PROACTIVE_MIN_GAP_MINUTES = 180;
 
 type ScheduledMessageWithRule = Prisma.ScheduledMessageGetPayload<{
   include: {
@@ -86,11 +87,6 @@ export class AutomationService {
         if (!automation?.remindersEnabled) continue;
         try {
           await this.subscriptionAccessService.requireAccess(user.id, at);
-          const experience = await this.coachIntelligence.getExperienceSignals(
-            user.id,
-            at,
-          );
-          if (!experience.canSendCoachMessage) continue;
           const slots = this.proactiveSchedule.materializableSlots(
             at,
             user.preferences ?? {},
@@ -99,27 +95,17 @@ export class AutomationService {
             at,
             user.preferences?.timezone,
           );
-          let dailyCount = await this.prisma.scheduledMessage.count({
-            where: {
-              userId: user.id,
-              status: { not: ScheduledMessageStatus.CANCELED },
-              scheduledFor: { gte: range.start, lt: range.end },
-              automationRule: {
-                code: {
-                  in: [
-                    AUTOMATION_RULE_CODES.GOOD_MORNING,
-                    AUTOMATION_RULE_CODES.DAILY_WORKOUT,
-                    AUTOMATION_RULE_CODES.MEAL_REMINDER,
-                    AUTOMATION_RULE_CODES.HYDRATION_REMINDER,
-                    AUTOMATION_RULE_CODES.DAILY_CHECK_IN,
-                  ],
-                },
-              },
-            },
-          });
+          let dailyCount = await this.proactiveCountInPeriod(
+            user.id,
+            range.start,
+            range.end,
+          );
           for (const slot of slots) {
             if (dailyCount >= COACH_PROACTIVE_DAILY_CAP) break;
             if (!this.isRuleEnabled(slot.ruleCode, automation)) continue;
+            if (await this.hasProactiveCooldownConflict(user.id, slot)) {
+              continue;
+            }
             if (await this.materializeProactiveSlot(user.id, slot)) {
               materialized += 1;
               dailyCount += 1;
@@ -848,6 +834,65 @@ export class AutomationService {
       }
       throw error;
     }
+  }
+
+  private async proactiveCountInPeriod(
+    userId: string,
+    start: Date,
+    end: Date,
+  ): Promise<number> {
+    const messages = await this.prisma.coachMessage.findMany({
+      where: {
+        userId,
+        scheduledFor: { gte: start, lt: end },
+        context: { path: ['source'], equals: COACH_PROACTIVE_SOURCE },
+      },
+      select: { context: true },
+      take: COACH_PROACTIVE_DAILY_CAP,
+    });
+    return messages.filter((message) =>
+      this.isCoachProactiveContext(message.context),
+    ).length;
+  }
+
+  private async hasProactiveCooldownConflict(
+    userId: string,
+    slot: CoachProactiveSlot,
+  ): Promise<boolean> {
+    const minimumGapMs = COACH_PROACTIVE_MIN_GAP_MINUTES * 60_000;
+    const messages = await this.prisma.coachMessage.findMany({
+      where: {
+        userId,
+        scheduledFor: {
+          gt: new Date(slot.scheduledFor.getTime() - minimumGapMs),
+          lt: slot.scheduledFor,
+        },
+        context: { path: ['source'], equals: COACH_PROACTIVE_SOURCE },
+      },
+      select: { context: true, scheduledFor: true },
+      orderBy: [{ scheduledFor: 'desc' }, { id: 'desc' }],
+      take: 10,
+    });
+    return messages.some((message) => {
+      if (
+        !message.scheduledFor ||
+        !this.isCoachProactiveContext(message.context)
+      ) {
+        return false;
+      }
+      const elapsedMs =
+        slot.scheduledFor.getTime() - message.scheduledFor.getTime();
+      return elapsedMs > 0 && elapsedMs < minimumGapMs;
+    });
+  }
+
+  private isCoachProactiveContext(value: Prisma.JsonValue): boolean {
+    return (
+      typeof value === 'object' &&
+      value !== null &&
+      !Array.isArray(value) &&
+      Reflect.get(value, 'source') === COACH_PROACTIVE_SOURCE
+    );
   }
 
   private isRuleEnabled(
