@@ -65,7 +65,7 @@ describe('PlanningExecutionRoutePolicyService', () => {
     },
   );
 
-  it('keeps WORKOUT Legacy because no production V2 rollout exists', () => {
+  it('selects Workout V2 before any productive effect', () => {
     const subject = setup('ELIGIBLE');
 
     expect(
@@ -74,11 +74,12 @@ describe('PlanningExecutionRoutePolicyService', () => {
         profileId: 'profile-id',
         decision: decision('GENERATE_WORKOUT_PLAN'),
         generationInput: null,
+        workoutGenerationInput: { userId: 'user-id' } as never,
       }),
     ).toEqual({
       nutrition: null,
-      workout: 'LEGACY',
-      reason: 'NO_WORKOUT_V2_PRODUCTION_ROLLOUT',
+      workout: 'V2',
+      reason: 'WORKOUT_V2_PRODUCTIVE_GENERATION',
       nutritionPilotStatus: null,
       suppressNutritionShadow: false,
     });

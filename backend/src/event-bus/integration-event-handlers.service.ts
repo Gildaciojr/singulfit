@@ -115,6 +115,13 @@ export class IntegrationEventHandlersService implements OnModuleInit {
       await this.profileAcquisitionRollout.captureActiveResponse(input);
 
     if (acquisition.handled) {
+      if (acquisition.continuationMessageId) {
+        await this.coachCommandService.processTextMessage({
+          userId: input.userId,
+          messageId: acquisition.continuationMessageId,
+          workoutContinuationMessageId: acquisition.originalRequestMessageId,
+        });
+      }
       return;
     }
 

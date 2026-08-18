@@ -31,6 +31,8 @@ import { WorkoutKnowledgeResolverService } from '../workout-knowledge/workout-kn
 import { WorkoutReasoningEngineService } from '../workout-reasoning/workout-reasoning-engine.service';
 import type { WorkoutReasoningResult } from '../workout-reasoning/workout-reasoning.contract';
 import { WORKOUT_ARTIFACT_TYPE } from '../workout/v2/workout-planning-artifact.contract';
+import { GenerateWorkoutPlanV2InputBuilder } from '../workout/v2/generate-workout-plan-v2-input.builder';
+import type { GenerateWorkoutPlanV2Input } from '../workout/v2/workout-planning-generation.contract';
 import { PrismaService } from '../prisma/prisma.service';
 import type { CoachCommandIntent } from './coach-command.service';
 import type { LegacyCoachIntentAdaptation } from './legacy-coach-intent-adapter.contract';
@@ -78,6 +80,8 @@ interface PreparedV2PlanningContext {
   readonly generationInput: GenerateNutritionPlanV2Input | null;
   readonly expectedArtifactType: NutritionArtifactType | null;
   readonly goalResolution: CurrentGoalResolution | undefined;
+  readonly workoutGenerationInput: GenerateWorkoutPlanV2Input | null;
+  readonly workoutProfileId: string | null;
 }
 
 export class PendingGoalContinuationInProgressError extends Error {
@@ -111,6 +115,8 @@ export class CoachPlanningExecutionService {
     @Optional() private readonly currentGoalCommit?: CurrentGoalCommitService,
     @Optional()
     private readonly pendingActions?: PendingConversationActionService,
+    @Optional()
+    private readonly workoutPlanningInputBuilder?: GenerateWorkoutPlanV2InputBuilder,
   ) {}
 
   async execute(
@@ -222,6 +228,18 @@ export class CoachPlanningExecutionService {
                 continuationOperationKey,
               }
             : undefined,
+        workoutV2:
+          routeSelection.workout === 'V2' &&
+          preparation?.workoutGenerationInput &&
+          preparation.workoutProfileId &&
+          runtime
+            ? {
+                generationInput: preparation.workoutGenerationInput,
+                profileId: preparation.workoutProfileId,
+                correlationId: runtime.correlationId,
+                traceId: runtime.traceId,
+              }
+            : undefined,
       });
       if (pendingExecutionClaimToken && !dispatch.generationCompleted) {
         throw new Error('PENDING_GOAL_CONTINUATION_GENERATION_INCOMPLETE');
@@ -257,7 +275,11 @@ export class CoachPlanningExecutionService {
     const legacyContent = dispatch.content;
     const selectedContent = legacyContent;
     const selectedSource: CoachPlanningExecutionResult['selectedSource'] =
-      routeSelection.nutrition === 'V2' ? 'NUTRITION_V2' : 'LEGACY';
+      routeSelection.nutrition === 'V2'
+        ? 'NUTRITION_V2'
+        : routeSelection.workout === 'V2'
+          ? 'WORKOUT_V2'
+          : 'LEGACY';
     const suppressShadow = routeSelection.suppressNutritionShadow;
 
     this.logger.log(
@@ -394,6 +416,7 @@ export class CoachPlanningExecutionService {
         profileId: runtime?.profileId ?? null,
         decision: preparation?.decision ?? null,
         generationInput: preparation?.generationInput ?? null,
+        workoutGenerationInput: preparation?.workoutGenerationInput ?? null,
       });
     }
     return Object.freeze({
@@ -480,6 +503,17 @@ export class CoachPlanningExecutionService {
       referenceDate,
     });
     const builtInput = this.nutritionPlanningInputBuilder?.build(source);
+    const builtWorkoutInput =
+      intent === 'WORKOUT' && this.workoutPlanningInputBuilder
+        ? await this.workoutPlanningInputBuilder.build({
+            userId,
+            profileId: runtime?.profileId,
+            decision,
+            snapshot,
+            referenceDate,
+            currentMessage: runtime?.currentMessage,
+          })
+        : null;
     return Object.freeze({
       decision,
       snapshot,
@@ -487,6 +521,8 @@ export class CoachPlanningExecutionService {
       generationInput: builtInput ?? null,
       expectedArtifactType: builtInput?.explicitArtifactType ?? null,
       goalResolution,
+      workoutGenerationInput: builtWorkoutInput?.generationInput ?? null,
+      workoutProfileId: builtWorkoutInput?.profileId ?? null,
     });
   }
 

@@ -49,6 +49,8 @@ export interface ProfileAcquisitionCaptureResult {
   readonly reason: ProfileAcquisitionRolloutReason;
   readonly cycleId: string | null;
   readonly field: CoachProfileAcquisitionField | null;
+  readonly continuationMessageId?: string;
+  readonly originalRequestMessageId?: string;
 }
 
 export interface ProfileAcquisitionRuntimeEvaluation {

@@ -746,7 +746,7 @@ export class PendingConversationActionService {
     return (
       value === 'NUTRITION_V2_ELIGIBLE' ||
       value === 'NUTRITION_PILOT_NOT_ELIGIBLE' ||
-      value === 'NO_WORKOUT_V2_PRODUCTION_ROLLOUT' ||
+      value === 'WORKOUT_V2_PRODUCTIVE_GENERATION' ||
       value === 'CROSS_DOMAIN_ATOMICITY_PENDING' ||
       value === 'LEGACY_INTENT_OR_UNSUPPORTED_GOAL'
     );

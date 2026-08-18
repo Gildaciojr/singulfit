@@ -10,6 +10,8 @@ import { CoachPlanningExecutionDispatcherService } from './coach-planning-execut
 import type { CoachPlanningBothApplicationExecutorService } from './coach-planning-both-application-executor.service';
 import type { NutritionApplicationExecutorService } from '../diet/v2/execution/nutrition-application-executor.service';
 import type { NutritionPublicResultFormatter } from '../diet/v2/execution/nutrition-public-result.formatter';
+import type { WorkoutApplicationExecutorService } from '../workout/v2/execution/workout-application-executor.service';
+import type { WorkoutPlanV2Formatter } from '../workout/v2/workout-plan-v2.formatter';
 
 describe('CoachPlanningExecutionDispatcherService', () => {
   const unsupportedGoals: readonly ConversationGoal[] = [
@@ -78,12 +80,24 @@ describe('CoachPlanningExecutionDispatcherService', () => {
     const nutritionV2Formatter = {
       format: jest.fn().mockReturnValue('Resposta oficial V2'),
     };
+    const workoutV2Executor = {
+      execute: jest.fn().mockResolvedValue({
+        kind: 'PLAN',
+        document: { artifactType: 'WEEKLY_PLAN' },
+        aiJobCompleted: true,
+      }),
+    };
+    const workoutV2Formatter = {
+      format: jest.fn().mockReturnValue(['Treino oficial V2']),
+    };
     const dispatcher = new CoachPlanningExecutionDispatcherService(
       dietGenerator as unknown as DietGeneratorService,
       workoutGenerator as unknown as WorkoutGeneratorService,
       bothExecutor as unknown as CoachPlanningBothApplicationExecutorService,
       nutritionV2Executor as unknown as NutritionApplicationExecutorService,
       nutritionV2Formatter as unknown as NutritionPublicResultFormatter,
+      workoutV2Executor as unknown as WorkoutApplicationExecutorService,
+      workoutV2Formatter as unknown as WorkoutPlanV2Formatter,
     );
 
     return {
@@ -93,6 +107,8 @@ describe('CoachPlanningExecutionDispatcherService', () => {
       bothExecutor,
       nutritionV2Executor,
       nutritionV2Formatter,
+      workoutV2Executor,
+      workoutV2Formatter,
     };
   }
 
@@ -163,6 +179,72 @@ describe('CoachPlanningExecutionDispatcherService', () => {
     );
     expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
     expect(subject.dietGenerator.generateCandidate).not.toHaveBeenCalled();
+  });
+
+  it('executes Workout V2 once and never calls the Legacy generator', async () => {
+    const subject = createSubject();
+    await expect(
+      subject.dispatcher.dispatchStructured({
+        userId: 'user-id',
+        legacyIntent: 'WORKOUT',
+        decision: decision(CONVERSATION_GOAL.GENERATE_WORKOUT_PLAN),
+        routeSelection: {
+          nutrition: null,
+          workout: 'V2',
+          reason: 'WORKOUT_V2_PRODUCTIVE_GENERATION',
+          nutritionPilotStatus: null,
+          suppressNutritionShadow: false,
+        },
+        workoutV2: {
+          generationInput: { userId: 'user-id' } as never,
+          profileId: 'profile-id',
+          correlationId: 'correlation-id',
+        },
+      }),
+    ).resolves.toMatchObject({
+      content: 'Treino oficial V2',
+      executor: 'WORKOUT_V2',
+      workoutDisposition: 'PLAN',
+      generationCompleted: true,
+    });
+    expect(subject.workoutV2Executor.execute).toHaveBeenCalledTimes(1);
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
+  });
+
+  it('returns Workout V2 clarification without invoking Legacy', async () => {
+    const subject = createSubject();
+    subject.workoutV2Executor.execute.mockResolvedValueOnce({
+      kind: 'CLARIFICATION',
+      missingFields: ['WEEKLY_FREQUENCY'],
+      confirmationRequiredFields: [],
+      aiJobCompleted: false,
+    });
+    const result = await subject.dispatcher.dispatchStructured({
+      userId: 'user-id',
+      legacyIntent: 'WORKOUT',
+      decision: decision(CONVERSATION_GOAL.GENERATE_WORKOUT_PLAN),
+      routeSelection: {
+        nutrition: null,
+        workout: 'V2',
+        reason: 'WORKOUT_V2_PRODUCTIVE_GENERATION',
+        nutritionPilotStatus: null,
+        suppressNutritionShadow: false,
+      },
+      workoutV2: {
+        generationInput: { userId: 'user-id' } as never,
+        profileId: 'profile-id',
+        correlationId: 'correlation-id',
+      },
+    });
+
+    expect(result).toMatchObject({
+      executor: 'WORKOUT_V2',
+      workoutDisposition: 'CLARIFICATION',
+      generationCompleted: false,
+    });
+    expect(result.content).toContain('dias da semana');
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
   });
 
   it.each([

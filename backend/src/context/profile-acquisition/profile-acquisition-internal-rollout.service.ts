@@ -3,7 +3,6 @@ import { Injectable } from '@nestjs/common';
 import {
   CoachProfileAcquisitionCycle,
   CoachProfileAcquisitionCycleStatus,
-  CoachProfileConfirmationState,
   CoachProfileValueSource,
   MessageDirection,
   MessageType,
@@ -43,6 +42,7 @@ import {
 } from './profile-question.service';
 
 const ROLLOUT_ORIGIN = 'INTERNAL_PROFILE_ACQUISITION_ROLLOUT';
+const WORKOUT_V2_ORIGIN = 'WORKOUT_V2_PRODUCTIVE_GENERATION';
 
 type ActiveCycle = CoachProfileAcquisitionCycle | null;
 
@@ -62,6 +62,42 @@ export class ProfileAcquisitionInternalRolloutService {
     private readonly cycleService: ProfileAcquisitionCycleService,
   ) {}
 
+  async requestWorkoutClarification(input: {
+    readonly userId: string;
+    readonly sourceMessageId: string;
+    readonly referenceDate: Date;
+    readonly originalRequestMessageId?: string;
+  }): Promise<ProfileAcquisitionRolloutResult> {
+    const source = await this.prisma.message.findFirst({
+      where: {
+        id: input.sourceMessageId,
+        direction: MessageDirection.INBOUND,
+        type: MessageType.TEXT,
+        conversation: { userId: input.userId },
+      },
+      select: { id: true, conversationId: true },
+    });
+    if (!source) {
+      return this.rolloutResult(
+        true,
+        false,
+        'MESSAGE_NOT_FOUND',
+        this.config.get().mode,
+      );
+    }
+    return this.dispatchQuestion(
+      {
+        userId: input.userId,
+        conversationId: source.conversationId,
+        sourceMessageId: source.id,
+        sentAt: input.referenceDate,
+      },
+      this.config.get().mode,
+      PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,
+      `${WORKOUT_V2_ORIGIN}:${input.originalRequestMessageId ?? input.sourceMessageId}`,
+    );
+  }
+
   async authorizeQuestionSend(outboundMessageId: string): Promise<boolean> {
     const operational = this.config.get();
     const outbound = await this.prisma.outboundMessage.findUnique({
@@ -79,6 +115,17 @@ export class ProfileAcquisitionInternalRolloutService {
     ) {
       return false;
     }
+    const productiveCycle =
+      await this.prisma.coachProfileAcquisitionCycle.findFirst({
+        where: {
+          userId: outbound.userId,
+          sourceMessageId: outbound.sourceMessageId,
+          active: true,
+          origin: { startsWith: `${WORKOUT_V2_ORIGIN}:` },
+        },
+        select: { id: true },
+      });
+    if (productiveCycle) return true;
     const access =
       operational.mode === PROFILE_ACQUISITION_MODE.INTERNAL
         ? await this.eligibility.evaluate(outbound.userId)
@@ -124,10 +171,6 @@ export class ProfileAcquisitionInternalRolloutService {
     outboundMessageId: string,
   ): Promise<ProfileAcquisitionRolloutResult> {
     const operational = this.config.get();
-    if (operational.mode !== PROFILE_ACQUISITION_MODE.INTERNAL) {
-      return this.rolloutResult(false, false, 'MODE_OFF', operational.mode);
-    }
-
     try {
       const outbound = await this.prisma.outboundMessage.findUnique({
         where: { id: outboundMessageId },
@@ -163,22 +206,37 @@ export class ProfileAcquisitionInternalRolloutService {
       }
       const sentAt = outbound.sentAt;
       const sentOutbound = Object.freeze({ ...outbound, sentAt });
-      const access = await this.eligibility.evaluate(outbound.userId);
-      if (!access.internal) {
-        return this.rolloutResult(
-          true,
-          false,
-          'USER_NOT_INTERNAL',
-          operational.mode,
-        );
-      }
-      if (!access.eligible) {
-        return this.rolloutResult(
-          true,
-          false,
-          'USER_NOT_ELIGIBLE',
-          operational.mode,
-        );
+      const productiveCycle =
+        await this.prisma.coachProfileAcquisitionCycle.findFirst({
+          where: {
+            userId: outbound.userId,
+            sourceMessageId: outbound.sourceMessageId,
+            active: true,
+            origin: { startsWith: `${WORKOUT_V2_ORIGIN}:` },
+          },
+          select: { id: true },
+        });
+      if (!productiveCycle) {
+        if (operational.mode !== PROFILE_ACQUISITION_MODE.INTERNAL) {
+          return this.rolloutResult(false, false, 'MODE_OFF', operational.mode);
+        }
+        const access = await this.eligibility.evaluate(outbound.userId);
+        if (!access.internal) {
+          return this.rolloutResult(
+            true,
+            false,
+            'USER_NOT_INTERNAL',
+            operational.mode,
+          );
+        }
+        if (!access.eligible) {
+          return this.rolloutResult(
+            true,
+            false,
+            'USER_NOT_ELIGIBLE',
+            operational.mode,
+          );
+        }
       }
 
       if (outbound.responseType === ResponseType.PROFILE_ACQUISITION) {
@@ -286,17 +344,31 @@ export class ProfileAcquisitionInternalRolloutService {
     readonly messageId: string;
   }): Promise<ProfileAcquisitionCaptureResult> {
     const operational = this.config.get();
-    if (operational.mode !== PROFILE_ACQUISITION_MODE.INTERNAL) {
+    const productiveCycle =
+      await this.prisma.coachProfileAcquisitionCycle.findFirst({
+        where: {
+          userId: input.userId,
+          active: true,
+          origin: { startsWith: `${WORKOUT_V2_ORIGIN}:` },
+        },
+        orderBy: [{ referenceDate: 'desc' }, { id: 'desc' }],
+      });
+    if (
+      !productiveCycle &&
+      operational.mode !== PROFILE_ACQUISITION_MODE.INTERNAL
+    ) {
       return this.captureResult(false, false, false, 'MODE_OFF');
     }
 
     try {
-      const access = await this.eligibility.evaluate(input.userId);
-      if (!access.internal) {
-        return this.captureResult(false, false, false, 'USER_NOT_INTERNAL');
-      }
-      if (!access.eligible) {
-        return this.captureResult(false, false, false, 'USER_NOT_ELIGIBLE');
+      if (!productiveCycle) {
+        const access = await this.eligibility.evaluate(input.userId);
+        if (!access.internal) {
+          return this.captureResult(false, false, false, 'USER_NOT_INTERNAL');
+        }
+        if (!access.eligible) {
+          return this.captureResult(false, false, false, 'USER_NOT_ELIGIBLE');
+        }
       }
       const message = await this.prisma.message.findFirst({
         where: {
@@ -316,7 +388,8 @@ export class ProfileAcquisitionInternalRolloutService {
         return this.captureResult(false, false, false, 'MESSAGE_NOT_FOUND');
       }
       const token = this.responseToken(message.id);
-      const cycle = await this.findActiveCycle(input.userId);
+      const cycle =
+        productiveCycle ?? (await this.findActiveCycle(input.userId));
       if (!cycle) {
         const duplicate =
           await this.prisma.coachProfileAcquisitionCycle.findFirst({
@@ -397,6 +470,7 @@ export class ProfileAcquisitionInternalRolloutService {
     },
     mode: ProfileAcquisitionMode,
     intent: ProfileAcquisitionIntent = PROFILE_ACQUISITION_INTENT.DIET_PLAN_REQUEST,
+    origin = ROLLOUT_ORIGIN,
   ): Promise<ProfileAcquisitionRolloutResult> {
     const active = await this.findActiveCycle(outbound.userId);
     if (active) {
@@ -455,7 +529,7 @@ export class ProfileAcquisitionInternalRolloutService {
     const specification = runtime.specification;
     const question = this.questionRealizer.realize(specification);
     const operationKey = this.operationKey([
-      ROLLOUT_ORIGIN,
+      origin,
       outbound.userId,
       outbound.sourceMessageId,
       specification.field,
@@ -469,7 +543,7 @@ export class ProfileAcquisitionInternalRolloutService {
       userId: outbound.userId,
       specification,
       logicalTurn: runtime.evaluation.logicalTurn,
-      origin: ROLLOUT_ORIGIN,
+      origin,
       operationKey,
       referenceDate: outbound.sentAt.toISOString(),
       expiresAt: expiresAt.toISOString(),
@@ -724,6 +798,11 @@ export class ProfileAcquisitionInternalRolloutService {
         reason,
         cycle.id,
         cycle.field,
+        reason === 'ANSWER_PERSISTED' &&
+          cycle.origin.startsWith(`${WORKOUT_V2_ORIGIN}:`)
+          ? message.id
+          : undefined,
+        this.workoutOriginalRequest(cycle.origin),
       );
     } catch (error: unknown) {
       await this.cycleService.releaseResponseClaim({
@@ -849,6 +928,10 @@ export class ProfileAcquisitionInternalRolloutService {
         confirmed ? 'CONFIRMATION_COMPLETED' : 'CONFIRMATION_REJECTED',
         cycle.id,
         cycle.field,
+        confirmed && cycle.origin.startsWith(`${WORKOUT_V2_ORIGIN}:`)
+          ? message.id
+          : undefined,
+        this.workoutOriginalRequest(cycle.origin),
       );
     } catch (error: unknown) {
       await this.cycleService.releaseResponseClaim({
@@ -1045,6 +1128,8 @@ export class ProfileAcquisitionInternalRolloutService {
     reason: ProfileAcquisitionRolloutReason,
     cycleId: string | null = null,
     field: ProfileAcquisitionCaptureResult['field'] = null,
+    continuationMessageId?: string,
+    originalRequestMessageId?: string,
   ): ProfileAcquisitionCaptureResult {
     return Object.freeze({
       handled,
@@ -1053,6 +1138,13 @@ export class ProfileAcquisitionInternalRolloutService {
       reason,
       cycleId,
       field,
+      continuationMessageId,
+      originalRequestMessageId,
     });
+  }
+
+  private workoutOriginalRequest(origin: string): string | undefined {
+    const prefix = `${WORKOUT_V2_ORIGIN}:`;
+    return origin.startsWith(prefix) ? origin.slice(prefix.length) : undefined;
   }
 }

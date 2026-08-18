@@ -65,6 +65,8 @@ export type WorkoutReadinessField =
   | 'EQUIPMENT'
   | 'PHYSICAL_LIMITATIONS'
   | 'PERCEIVED_CONDITIONING'
+  | 'TARGET_DISTANCE'
+  | 'CURRENT_RUNNING_DISTANCE'
   | 'CURRENT_PLAN';
 
 export type WorkoutExecutionLevel =

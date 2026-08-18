@@ -13,12 +13,14 @@ import type {
   PendingGoalConfirmationContext,
   PendingInboundResolution,
 } from './pending-conversation-action.contract';
+import { ProfileAcquisitionInternalRolloutService } from '../context/profile-acquisition/profile-acquisition-internal-rollout.service';
 
 export type CoachCommandIntent = 'DIET' | 'WORKOUT' | 'BOTH' | 'UNKNOWN';
 
 export interface ProcessCoachCommandInput {
   userId: string;
   messageId: string;
+  workoutContinuationMessageId?: string;
 }
 
 export interface ProcessCoachCommandResult {
@@ -41,6 +43,8 @@ export class CoachCommandService {
     private readonly planningConversationResponse?: CoachPlanningConversationResponseService,
     @Optional()
     private readonly pendingActions?: PendingConversationActionService,
+    @Optional()
+    private readonly profileAcquisitionRollout?: ProfileAcquisitionInternalRolloutService,
   ) {}
 
   async shouldHandleBeforeProfileAcquisition(
@@ -114,6 +118,16 @@ export class CoachCommandService {
         reason: 'TEXT_MESSAGE_NOT_FOUND',
       };
     }
+    const workoutOriginal = input.workoutContinuationMessageId
+      ? await this.prisma.message.findFirst({
+          where: {
+            id: input.workoutContinuationMessageId,
+            conversation: { userId: input.userId },
+          },
+          select: { content: true },
+        })
+      : null;
+    const commandText = workoutOriginal?.content ?? message.content;
 
     if (!message.conversation.user.onboardingCompleted) {
       return {
@@ -138,7 +152,9 @@ export class CoachCommandService {
           ? pending.intent
           : pending.status === 'ALREADY_CONSUMED'
             ? pending.intent
-            : this.classify(message.content);
+            : input.workoutContinuationMessageId
+              ? 'WORKOUT'
+              : this.classify(commandText);
     const idempotencyKey = this.idempotencyKey(input.userId, message.id);
     const existing = await this.prisma.coachMessage.findUnique({
       where: {
@@ -186,7 +202,7 @@ export class CoachCommandService {
           userId: input.userId,
           conversationId: message.conversation.id,
           messageId: message.id,
-          text: message.content,
+          text: commandText,
           receivedAt: message.timestamp.toISOString(),
           legacyIntent: intent,
         });
@@ -200,12 +216,13 @@ export class CoachCommandService {
               intent,
               conversationId: message.conversation.id,
               messageId: message.id,
-              text: message.content,
+              text: commandText,
               referenceDate: message.timestamp,
               profileId: message.conversation.user.fitnessProfile?.id,
               pendingGoalConfirmation:
                 pending.status === 'ACTIONABLE' ? pending.context : undefined,
               suppressCurrentGoalResolution: pending.status === 'EXPIRED',
+              originalRequestMessageId: input.workoutContinuationMessageId,
             });
     if (!planningResult.responseRequired) {
       return {
@@ -292,10 +309,12 @@ export class CoachCommandService {
     readonly profileId?: string;
     readonly pendingGoalConfirmation?: PendingGoalConfirmationContext;
     readonly suppressCurrentGoalResolution: boolean;
+    readonly originalRequestMessageId?: string;
   }): Promise<{
     readonly content: string;
     readonly responseRequired: boolean;
     readonly pendingExecutionClaimToken?: string;
+    readonly workoutDisposition?: 'PLAN' | 'CLARIFICATION' | 'BLOCKED';
   }> {
     const runtime = {
       conversationId: input.conversationId,
@@ -316,9 +335,23 @@ export class CoachCommandService {
     if (!execution.responseRequired) {
       return Object.freeze({ content: '', responseRequired: false });
     }
+    if (
+      execution.dispatch?.workoutDisposition === 'CLARIFICATION' &&
+      this.profileAcquisitionRollout
+    ) {
+      const clarification =
+        await this.profileAcquisitionRollout.requestWorkoutClarification({
+          userId: input.userId,
+          sourceMessageId: input.messageId,
+          referenceDate: input.referenceDate,
+          originalRequestMessageId: input.originalRequestMessageId,
+        });
+      if (clarification.questionCreated) {
+        return Object.freeze({ content: '', responseRequired: false });
+      }
+    }
     const content =
-      execution.selectedSource !== 'NUTRITION_V2' &&
-      this.planningConversationResponse
+      execution.selectedSource === 'LEGACY' && this.planningConversationResponse
         ? await this.planningConversationResponse.select({
             userId: input.userId,
             conversationId: input.conversationId,
@@ -330,6 +363,7 @@ export class CoachCommandService {
       content,
       responseRequired: true,
       pendingExecutionClaimToken: execution.pendingExecutionClaimToken,
+      workoutDisposition: execution.dispatch?.workoutDisposition,
     });
   }
 
@@ -393,16 +427,27 @@ export class CoachCommandService {
       'alimentacao',
       'me ajuda com alimentacao',
     ]);
-    const wantsWorkout = this.includesAny(normalized, [
-      'quero treino',
-      'monte meu treino',
-      'monta meu treino',
-      'plano de treino',
-      'treino para mim',
-      'treino pra mim',
-      'academia',
-      'quero treinar',
-    ]);
+    const wantsWorkout =
+      this.includesAny(normalized, [
+        'quero treino',
+        'monte meu treino',
+        'monta meu treino',
+        'plano de treino',
+        'treino para mim',
+        'treino pra mim',
+        'academia',
+        'quero treinar',
+        'quero correr',
+        'comecar a correr',
+        'corrida',
+        'ja corro',
+        'crossfit',
+        'musculacao',
+        'treino funcional',
+        'cardio',
+        'aerobico',
+        'calistenia',
+      ]) || /\bprova de \d+ km\b/u.test(normalized);
     const wantsBoth = this.includesAny(normalized, [
       'quero os dois',
       'dieta e treino',

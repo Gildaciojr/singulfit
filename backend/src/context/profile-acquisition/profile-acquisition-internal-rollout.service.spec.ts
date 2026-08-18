@@ -2,7 +2,6 @@ import {
   CoachProfileAcquisitionCycleStatus,
   CoachProfileAcquisitionField,
   CoachProfileConfirmationState,
-  CoachProfileValueStatus,
   OutboundMessageStatus,
   ResponseType,
   UserRole,
@@ -275,7 +274,7 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
       questionCreated: false,
       reason: 'MODE_OFF',
     });
-    expect(test.prisma.outboundMessage.findUnique).not.toHaveBeenCalled();
+    expect(test.prisma.outboundMessage.findUnique).toHaveBeenCalledTimes(1);
     expect(test.eventBus.publish).not.toHaveBeenCalled();
   });
 

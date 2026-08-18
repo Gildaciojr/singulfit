@@ -7,6 +7,7 @@ import type {
   WorkoutEquipment,
   WorkoutExperienceLevel,
   WorkoutMovementConstraint,
+  WorkoutMuscleFocus,
   WorkoutObjective,
   WorkoutPlanningValue,
 } from './workout-planning-context.contract';
@@ -60,6 +61,14 @@ export type WorkoutPersonalizationFactor =
   | 'LIMITATIONS'
   | 'CONDITIONING'
   | 'INTENSITY_PREFERENCE'
+  | 'SEX'
+  | 'MUSCLE_FOCUS'
+  | 'FORMAT_PREFERENCE'
+  | 'AVAILABLE_TRAINING_DAYS'
+  | 'DAILY_TRAINING_WINDOWS'
+  | 'TARGET_DISTANCE'
+  | 'CURRENT_RUNNING_DISTANCE'
+  | 'TARGET_EVENT_DATE'
   | 'PROGRESS_EVIDENCE'
   | 'PREVIOUS_PLAN';
 
@@ -73,6 +82,7 @@ export interface WorkoutPlanningStrategy {
   readonly sessionDurationMinutes: WorkoutPlanningValue<number>;
   readonly environment: WorkoutPlanningValue<WorkoutEnvironment>;
   readonly authorizedEquipment: readonly WorkoutEquipment[];
+  readonly muscleFocus: readonly WorkoutMuscleFocus[];
   readonly requiredBlocks: readonly WorkoutBlockType[];
   readonly optionalBlocks: readonly WorkoutBlockType[];
   readonly maximumActivitiesPerSession: number;

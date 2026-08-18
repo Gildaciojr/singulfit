@@ -9,6 +9,7 @@ export type CoachPlanningExecutor =
   | 'DIET_LEGACY'
   | 'DIET_V2'
   | 'WORKOUT_LEGACY'
+  | 'WORKOUT_V2'
   | 'COMBINED_LEGACY'
   | 'UNKNOWN_LEGACY'
   | 'FAILURE_FALLBACK';
@@ -18,6 +19,7 @@ export interface CoachPlanningDispatchResult {
   readonly executor: CoachPlanningExecutor;
   readonly generationCompleted: boolean;
   readonly fallbackApplied: boolean;
+  readonly workoutDisposition?: 'PLAN' | 'CLARIFICATION' | 'BLOCKED';
 }
 
 export type CoachPlanningSelectedSource =

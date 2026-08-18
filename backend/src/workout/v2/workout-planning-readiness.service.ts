@@ -24,6 +24,13 @@ export class WorkoutPlanningReadinessService {
     previousPlanAvailable: boolean,
   ): WorkoutPlanningReadiness {
     const requiredFields = this.requiredFields(artifactType, modality);
+    if (
+      modality === WORKOUT_MODALITY.RUNNING &&
+      recognized.objective?.status !== 'NOT_SET' &&
+      recognized.objective?.value === 'COMPLETE_DISTANCE'
+    ) {
+      requiredFields.push('TARGET_DISTANCE', 'CURRENT_RUNNING_DISTANCE');
+    }
     const availableFields: WorkoutReadinessField[] = [];
     const missingFields: WorkoutReadinessField[] = [];
     const confirmationRequiredFields: WorkoutReadinessField[] = [];
@@ -57,7 +64,10 @@ export class WorkoutPlanningReadinessService {
     if (snapshot.conflicts.length > 0) safetyFlags.push('PROFILE_CONFLICT');
     if (
       snapshot.restrictions.physicalLimitations.status ===
-      'REQUIRES_CONFIRMATION'
+        'REQUIRES_CONFIRMATION' ||
+      (recognized.movementConstraints ?? []).some(
+        (constraint) => constraint.status === 'REQUIRES_CONFIRMATION',
+      )
     ) {
       safetyFlags.push('UNCONFIRMED_LIMITATION');
     }
@@ -182,6 +192,8 @@ export class WorkoutPlanningReadinessService {
       ENVIRONMENT: recognized.environment,
       EQUIPMENT: recognized.equipment,
       PERCEIVED_CONDITIONING: recognized.perceivedConditioning,
+      TARGET_DISTANCE: recognized.targetDistanceKm,
+      CURRENT_RUNNING_DISTANCE: recognized.currentRunningDistanceKm,
     };
     const datum = values[field];
     if (datum && datum.status !== 'NOT_SET') {

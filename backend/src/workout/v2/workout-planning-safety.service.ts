@@ -21,18 +21,22 @@ export class WorkoutPlanningSafetyService {
         'REHABILITATION_REQUEST',
       ].includes(flag),
     );
-    if (blocked.length > 0 || readiness.status === 'BLOCKED') {
+    if (blocked.length > 0) {
       return Object.freeze({
         outcome: 'BLOCKED',
-        reasonCodes: Object.freeze(
-          blocked.length > 0 ? blocked : ['READINESS_BLOCKED'],
-        ),
+        reasonCodes: Object.freeze(blocked),
       });
     }
     if (flags.includes('RECENT_INJURY') || flags.includes('CLINICAL_CONTEXT')) {
       return Object.freeze({
         outcome: 'PROFESSIONAL_REVIEW_RECOMMENDED',
         reasonCodes: Object.freeze(flags),
+      });
+    }
+    if (readiness.status === 'BLOCKED') {
+      return Object.freeze({
+        outcome: 'BLOCKED',
+        reasonCodes: Object.freeze(['READINESS_BLOCKED']),
       });
     }
     if (

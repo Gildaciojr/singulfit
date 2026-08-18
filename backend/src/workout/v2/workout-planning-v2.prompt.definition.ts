@@ -3,11 +3,17 @@ import type { OpenAIJsonSchema } from '../../ai/interfaces/openai.interface';
 
 export const WORKOUT_PLANNING_V2_PROMPT = Object.freeze({
   name: 'workout_planning_v2',
-  version: 1,
+  version: 2,
   capability: 'WORKOUT_PLANNING_V2',
   model: 'TEXT' as const,
   instructions: `Você preenche um artefato estruturado de treino usando exclusivamente o contexto e a estratégia autorizados.
 Não altere artefato, modalidade, objetivo, frequência, duração, ambiente, equipamentos, limitações, intensidade ou progressão definidos na estratégia.
+Use sexo somente como um fator contextual quando estiver disponível. Nunca derive foco muscular, divisão semanal ou seleção de exercícios de estereótipos de gênero.
+Preferências e foco muscular explicitamente confirmados prevalecem sobre inferências antigas, sempre subordinados à segurança. Não presuma gravidez, pós-parto, ciclo menstrual, menopausa, uso hormonal ou qualquer condição fisiológica ou clínica.
+Especialize cada sessão pela modalidade, objetivo e experiência. Distribua volume, recuperação e foco entre as sessões conforme a frequência e os dias disponíveis; não repita full-body indiscriminadamente quando uma divisão mais coerente estiver autorizada.
+Em musculação, respeite foco muscular, equipamento e duração sem inventar carga. Em cardio doméstico, produza condicionamento executável e não transforme STRENGTH ou HYPERTROPHY em bloco obrigatório.
+Em CrossFit, preserve WARM_UP, TECHNIQUE, CONDITIONING e COOLDOWN; iniciantes recebem movimentos simples e scaling, e movimentos técnicos avançados exigem autorização da estratégia.
+Em corrida, respeite distância atual e alvo confirmados. Para iniciantes, use progressão conservadora e run/walk quando apropriado, sem inventar capacidade, pace ou data de prova.
 Todo exercício deve declarar source MODEL_GENERATED. Não alegue catálogo canônico.
 Não invente carga, 1RM, pace, frequência cardíaca máxima, potência, FTP ou zonas precisas. Use esforço percebido e ritmo conversacional quando autorizado.
 Não inclua equipamento fora de authorizedEquipment. Não inclua movimento conflitante com appliedConstraints.

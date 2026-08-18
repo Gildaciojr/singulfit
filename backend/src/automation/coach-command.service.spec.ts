@@ -16,6 +16,7 @@ import { CoachPlanningExecutionService } from './coach-planning-execution.servic
 import { ConversationGoalShadowPipelineService } from './conversation-goal-shadow-pipeline.service';
 import { ConversationRuntimeIntegrationService } from '../conversation/runtime/conversation-runtime-integration.service';
 import type { CoachPlanningConversationResponseService } from './coach-planning-conversation-response.service';
+import type { ProfileAcquisitionInternalRolloutService } from '../context/profile-acquisition/profile-acquisition-internal-rollout.service';
 
 describe('CoachCommandService', () => {
   function dietPlan(): Parameters<
@@ -115,6 +116,7 @@ describe('CoachCommandService', () => {
     runtimeFailure?: Error;
     runtimeLegacy?: boolean;
     planningConversationContent?: string;
+    workoutClarification?: boolean;
   }) {
     const at = new Date('2026-06-10T12:00:00.000Z');
     const rule = {
@@ -239,6 +241,11 @@ describe('CoachCommandService', () => {
           options?.planningConversationContent ?? 'resposta conversacional',
         ),
     };
+    const profileAcquisitionRollout = {
+      requestWorkoutClarification: jest.fn().mockResolvedValue({
+        questionCreated: true,
+      }),
+    };
     const service = new CoachCommandService(
       prisma as unknown as PrismaService,
       planningExecution,
@@ -251,6 +258,10 @@ describe('CoachCommandService', () => {
         : undefined,
       options?.planningConversationContent
         ? (planningConversationResponse as unknown as CoachPlanningConversationResponseService)
+        : undefined,
+      undefined,
+      options?.workoutClarification
+        ? (profileAcquisitionRollout as unknown as ProfileAcquisitionInternalRolloutService)
         : undefined,
     );
 
@@ -266,6 +277,7 @@ describe('CoachCommandService', () => {
       conversationGoalShadow,
       conversationRuntime,
       planningConversationResponse,
+      profileAcquisitionRollout,
     };
   }
 
@@ -274,6 +286,10 @@ describe('CoachCommandService', () => {
     ['Me ajuda com alimentação', 'DIET'],
     ['monte meu treino', 'WORKOUT'],
     ['quero treinar na academia', 'WORKOUT'],
+    ['quero começar a correr', 'WORKOUT'],
+    ['quero fazer CrossFit', 'WORKOUT'],
+    ['quero um aeróbico em casa', 'WORKOUT'],
+    ['quero me preparar para uma prova de 10 km', 'WORKOUT'],
     ['quero os dois', 'BOTH'],
     ['dieta e treino', 'BOTH'],
     ['olá', 'UNKNOWN'],
@@ -345,6 +361,39 @@ describe('CoachCommandService', () => {
         }),
       }),
     );
+  });
+
+  it('sends only the acquisition question when Workout V2 needs clarification', async () => {
+    const subject = createSubject({
+      content: 'monte um treino para mim',
+      workoutClarification: true,
+    });
+    jest
+      .spyOn(subject.planningExecution, 'executeStructured')
+      .mockResolvedValueOnce({
+        content: 'Quanto tempo você tem para treinar?',
+        responseRequired: true,
+        selectedSource: 'WORKOUT_V2',
+        dispatch: {
+          content: 'Quanto tempo você tem para treinar?',
+          executor: 'WORKOUT_V2',
+          generationCompleted: false,
+          fallbackApplied: false,
+          workoutDisposition: 'CLARIFICATION',
+        },
+      } as never);
+
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+
+    expect(
+      subject.profileAcquisitionRollout.requestWorkoutClarification,
+    ).toHaveBeenCalledTimes(1);
+    expect(subject.prisma.coachMessage.create).not.toHaveBeenCalled();
+    expect(subject.eventBus.publish).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
   });
 
   it('generates both plans for a combined command', async () => {

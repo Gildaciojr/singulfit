@@ -31,6 +31,21 @@ export class WorkoutPlanningStrategyService {
       factors.push('CONDITIONING');
     if (context.training.intensityPreference.status !== 'NOT_SET')
       factors.push('INTENSITY_PREFERENCE');
+    if (context.profile.sex.status !== 'NOT_SET') factors.push('SEX');
+    if (context.training.muscleFocus.status !== 'NOT_SET')
+      factors.push('MUSCLE_FOCUS');
+    if (context.training.formatPreference.status !== 'NOT_SET')
+      factors.push('FORMAT_PREFERENCE');
+    if (context.training.availableTrainingDays.status !== 'NOT_SET')
+      factors.push('AVAILABLE_TRAINING_DAYS');
+    if (context.training.dailyTrainingWindows.status !== 'NOT_SET')
+      factors.push('DAILY_TRAINING_WINDOWS');
+    if (context.training.targetDistanceKm.status !== 'NOT_SET')
+      factors.push('TARGET_DISTANCE');
+    if (context.training.currentRunningDistanceKm.status !== 'NOT_SET')
+      factors.push('CURRENT_RUNNING_DISTANCE');
+    if (context.training.targetEventDate.status !== 'NOT_SET')
+      factors.push('TARGET_EVENT_DATE');
     if (context.progressEvidence.length > 0) factors.push('PROGRESS_EVIDENCE');
     if (context.previousPlan) factors.push('PREVIOUS_PLAN');
 
@@ -79,6 +94,10 @@ export class WorkoutPlanningStrategyService {
         context.training.equipment.status === 'NOT_SET'
           ? Object.freeze([])
           : Object.freeze([...context.training.equipment.value]),
+      muscleFocus:
+        context.training.muscleFocus.status === 'NOT_SET'
+          ? Object.freeze([])
+          : Object.freeze([...context.training.muscleFocus.value]),
       requiredBlocks: Object.freeze(blocks.required),
       optionalBlocks: Object.freeze(blocks.optional),
       maximumActivitiesPerSession:
@@ -146,6 +165,17 @@ export class WorkoutPlanningStrategyService {
       return {
         required: ['WARM_UP', 'TECHNIQUE', 'CONDITIONING', 'COOLDOWN'],
         optional: ['STRENGTH', 'MOBILITY'],
+      };
+    }
+    if (
+      modality === WORKOUT_MODALITY.CARDIO_CONDITIONING ||
+      ((modality === WORKOUT_MODALITY.HOME_WORKOUT ||
+        modality === WORKOUT_MODALITY.FUNCTIONAL) &&
+        objective === 'CONDITIONING')
+    ) {
+      return {
+        required: ['WARM_UP', 'CONDITIONING', 'COOLDOWN'],
+        optional: ['MOBILITY', 'CORE'],
       };
     }
     if (modality === WORKOUT_MODALITY.MOBILITY) {

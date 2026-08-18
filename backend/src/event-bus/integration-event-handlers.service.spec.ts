@@ -251,6 +251,54 @@ describe('IntegrationEventHandlersService', () => {
     });
   });
 
+  it('continues the original workout request after a persisted clarification answer', async () => {
+    const registry = new EventHandlerRegistry();
+    const coachCommand = { processTextMessage: jest.fn() };
+    const rollout = acquisitionRollout();
+    rollout.captureActiveResponse.mockResolvedValueOnce({
+      handled: true,
+      duplicated: false,
+      persisted: true,
+      reason: 'ANSWER_PERSISTED',
+      cycleId: 'cycle-id',
+      field: 'WEEKLY_FREQUENCY',
+      continuationMessageId: 'original-workout-message-id',
+      originalRequestMessageId: 'root-workout-message-id',
+    });
+    const handlers = new IntegrationEventHandlersService(
+      registry,
+      {} as PagBankWebhookService,
+      {} as EvolutionWebhookService,
+      {} as NutritionService,
+      {} as NutritionVisionService,
+      {} as ResponseBuilderService,
+      {} as EvolutionSendService,
+      coachCommand as unknown as CoachCommandService,
+      {} as AutomationService,
+      {} as ActivationJourneyService,
+      {} as ActivationOnboardingService,
+      rollout as unknown as ProfileAcquisitionInternalRolloutService,
+      subscriptionLifecycle() as unknown as SubscriptionLifecycleService,
+    );
+    handlers.onModuleInit();
+    const handler = registry.get(INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED);
+    if (!handler) throw new Error('Handler não registrado');
+
+    await handler(
+      outboxEvent(INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED, {
+        userId: 'user-id',
+        messageId: 'clarification-answer-id',
+      }),
+    );
+
+    expect(coachCommand.processTextMessage).toHaveBeenCalledTimes(1);
+    expect(coachCommand.processTextMessage).toHaveBeenCalledWith({
+      userId: 'user-id',
+      messageId: 'original-workout-message-id',
+      workoutContinuationMessageId: 'root-workout-message-id',
+    });
+  });
+
   it('blocks expired users before acquisition, onboarding and coach runtime', async () => {
     const registry = new EventHandlerRegistry();
     const acquisition = acquisitionRollout();

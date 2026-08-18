@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { ConversationGoalDecision } from '../context/conversation-goal-planner.contract';
 import { CONVERSATION_GOAL } from '../context/conversation-goal-planner.contract';
 import type { GenerateNutritionPlanV2Input } from '../diet/v2/nutrition-planning-generation.contract';
+import type { GenerateWorkoutPlanV2Input } from '../workout/v2/workout-planning-generation.contract';
 import {
   NutritionV2PilotService,
   type NutritionV2PilotEligibilityStatus,
@@ -12,7 +13,7 @@ export type PlanningImplementationRoute = 'LEGACY' | 'V2';
 export type PlanningRouteSelectionReason =
   | 'NUTRITION_V2_ELIGIBLE'
   | 'NUTRITION_PILOT_NOT_ELIGIBLE'
-  | 'NO_WORKOUT_V2_PRODUCTION_ROLLOUT'
+  | 'WORKOUT_V2_PRODUCTIVE_GENERATION'
   | 'CROSS_DOMAIN_ATOMICITY_PENDING'
   | 'LEGACY_INTENT_OR_UNSUPPORTED_GOAL';
 
@@ -21,6 +22,7 @@ export interface PlanningExecutionRoutePolicyInput {
   readonly profileId: string | null;
   readonly decision: ConversationGoalDecision | null;
   readonly generationInput: GenerateNutritionPlanV2Input | null;
+  readonly workoutGenerationInput?: GenerateWorkoutPlanV2Input | null;
 }
 
 export interface PlanningExecutionRouteSelection {
@@ -47,8 +49,11 @@ export class PlanningExecutionRoutePolicyService {
         'CROSS_DOMAIN_ATOMICITY_PENDING',
       );
     }
-    if (goal === CONVERSATION_GOAL.GENERATE_WORKOUT_PLAN) {
-      return this.selection(null, 'LEGACY', 'NO_WORKOUT_V2_PRODUCTION_ROLLOUT');
+    if (
+      goal === CONVERSATION_GOAL.GENERATE_WORKOUT_PLAN ||
+      input.workoutGenerationInput
+    ) {
+      return this.selection(null, 'V2', 'WORKOUT_V2_PRODUCTIVE_GENERATION');
     }
     if (decision && goal === CONVERSATION_GOAL.GENERATE_DIET_PLAN) {
       const pilot = this.nutritionPilot.evaluate({

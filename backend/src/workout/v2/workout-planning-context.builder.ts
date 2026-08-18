@@ -43,6 +43,7 @@ export class WorkoutPlanningContextBuilder {
           input.snapshot.physical.activityLevel,
         ),
         ageYears: this.snapshotValue(input.snapshot.physical.ageYears),
+        sex: this.snapshotValue(input.snapshot.physical.sex),
       }),
       training: Object.freeze({
         objective:
@@ -85,6 +86,16 @@ export class WorkoutPlanningContextBuilder {
         dailyTrainingWindows: this.optionalArraySnapshotValue(
           input.snapshot.routine.dailyTrainingWindows,
         ),
+        muscleFocus: this.orderedArrayValue(recognized.muscleFocus),
+        targetDistanceKm:
+          recognized.targetDistanceKm ??
+          Object.freeze({ status: 'NOT_SET' as const }),
+        currentRunningDistanceKm:
+          recognized.currentRunningDistanceKm ??
+          Object.freeze({ status: 'NOT_SET' as const }),
+        targetEventDate:
+          recognized.targetEventDate ??
+          Object.freeze({ status: 'NOT_SET' as const }),
       }),
       movementConstraints,
       safetySignals: Object.freeze([
@@ -172,10 +183,14 @@ export class WorkoutPlanningContextBuilder {
       case 'CROSSFIT_BOX':
       case 'HOME':
       case 'OUTDOOR':
+      case 'STREET':
       case 'TRACK':
       case 'TRAIL':
       case 'ROAD':
       case 'INDOOR':
+      case 'INDOOR_BIKE':
+      case 'OUTDOOR_BIKE':
+      case 'NO_EQUIPMENT':
         return this.typedSnapshotValue(datum, datum.value);
       default:
         return Object.freeze({ status: 'NOT_SET' });
@@ -283,6 +298,18 @@ export class WorkoutPlanningContextBuilder {
     return Object.freeze({
       status: datum.status,
       value: Object.freeze([...datum.value].sort()),
+    });
+  }
+
+  private orderedArrayValue<T>(
+    datum: WorkoutPlanningValue<readonly T[]> | undefined,
+  ): WorkoutPlanningValue<readonly T[]> {
+    if (!datum || datum.status === 'NOT_SET') {
+      return Object.freeze({ status: 'NOT_SET' });
+    }
+    return Object.freeze({
+      status: datum.status,
+      value: Object.freeze([...datum.value]),
     });
   }
 

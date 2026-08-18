@@ -1,4 +1,4 @@
-import type { ActivityLevel, FitnessGoal } from '@prisma/client';
+import type { ActivityLevel, FitnessGoal, Gender } from '@prisma/client';
 import type { CoachProfileSnapshot } from '../../context/coach-profile-snapshot.contract';
 import type {
   WorkoutArtifactType,
@@ -54,6 +54,22 @@ export type WorkoutObjective =
   | 'ACTIVE_RECOVERY'
   | 'COMPLETE_DISTANCE';
 
+export type WorkoutMuscleFocus =
+  | 'CHEST'
+  | 'BACK'
+  | 'SHOULDERS'
+  | 'ARMS'
+  | 'BICEPS'
+  | 'TRICEPS'
+  | 'CORE'
+  | 'GLUTES'
+  | 'QUADRICEPS'
+  | 'HAMSTRINGS'
+  | 'CALVES'
+  | 'LOWER_BODY'
+  | 'UPPER_BODY'
+  | 'FULL_BODY';
+
 export interface WorkoutMovementConstraint {
   readonly code:
     | 'KNEE_LOAD'
@@ -81,6 +97,10 @@ export interface WorkoutRecognizedContext {
   readonly intensityPreference?: WorkoutPlanningValue<
     'LIGHT' | 'MODERATE' | 'HIGH'
   >;
+  readonly muscleFocus?: WorkoutPlanningValue<readonly WorkoutMuscleFocus[]>;
+  readonly targetDistanceKm?: WorkoutPlanningValue<number>;
+  readonly currentRunningDistanceKm?: WorkoutPlanningValue<number>;
+  readonly targetEventDate?: WorkoutPlanningValue<string>;
   readonly movementConstraints?: readonly WorkoutMovementConstraint[];
   readonly safetySignals?: readonly WorkoutSafetyFlag[];
   readonly purpose?:
@@ -117,6 +137,7 @@ export interface WorkoutPlanningContext {
     readonly fitnessGoal: WorkoutPlanningValue<FitnessGoal>;
     readonly activityLevel: WorkoutPlanningValue<ActivityLevel>;
     readonly ageYears: WorkoutPlanningValue<number>;
+    readonly sex: WorkoutPlanningValue<Gender>;
   };
   readonly training: {
     readonly objective: WorkoutPlanningValue<WorkoutObjective>;
@@ -138,6 +159,10 @@ export interface WorkoutPlanningContext {
     readonly returningAfterBreak: WorkoutPlanningValue<boolean>;
     readonly availableTrainingDays: WorkoutPlanningValue<readonly string[]>;
     readonly dailyTrainingWindows: WorkoutPlanningValue<readonly string[]>;
+    readonly muscleFocus: WorkoutPlanningValue<readonly WorkoutMuscleFocus[]>;
+    readonly targetDistanceKm: WorkoutPlanningValue<number>;
+    readonly currentRunningDistanceKm: WorkoutPlanningValue<number>;
+    readonly targetEventDate: WorkoutPlanningValue<string>;
   };
   readonly movementConstraints: readonly WorkoutMovementConstraint[];
   readonly safetySignals: readonly WorkoutSafetyFlag[];

@@ -1,56 +1,106 @@
+import { UnprocessableEntityException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+import { GenerateWorkoutPlanV2InputBuilder } from './v2/generate-workout-plan-v2-input.builder';
+import { WorkoutApplicationExecutorService } from './v2/execution/workout-application-executor.service';
 import { WorkoutController } from './workout.controller';
-import { WorkoutGeneratorService } from './workout-generator.service';
 import { WorkoutService } from './workout.service';
 
 describe('WorkoutController', () => {
-  it('uses the authenticated user for generation and reads', async () => {
+  async function setup(execution: object) {
+    const publicPlan = {
+      id: 'plan-id',
+      title: 'Treino V2',
+      days: [{ exercises: [{ exerciseName: 'Agachamento' }] }],
+    };
     const workoutService = {
-      getById: jest.fn(),
+      getById: jest.fn().mockResolvedValue(publicPlan),
       getCurrent: jest.fn(),
       listHistory: jest.fn(),
     };
-    const generator = {
-      generate: jest.fn(),
+    const subscriptions = { getProfileSubscription: jest.fn() };
+    const inputBuilder = {
+      build: jest.fn().mockResolvedValue({
+        profileId: 'profile-id',
+        generationInput: { userId: 'user-id' },
+      }),
     };
+    const executor = { execute: jest.fn().mockResolvedValue(execution) };
     const module = await Test.createTestingModule({
       controllers: [WorkoutController],
       providers: [
-        {
-          provide: WorkoutService,
-          useValue: workoutService,
-        },
-        {
-          provide: WorkoutGeneratorService,
-          useValue: generator,
-        },
+        { provide: WorkoutService, useValue: workoutService },
+        { provide: SubscriptionsService, useValue: subscriptions },
+        { provide: GenerateWorkoutPlanV2InputBuilder, useValue: inputBuilder },
+        { provide: WorkoutApplicationExecutorService, useValue: executor },
       ],
     })
       .overrideGuard(JwtAuthGuard)
-      .useValue({
-        canActivate: jest.fn().mockReturnValue(true),
-      })
+      .useValue({ canActivate: jest.fn().mockReturnValue(true) })
       .compile();
-    const controller = module.get(WorkoutController);
-    const user = {
-      userId: 'user-id',
-      role: UserRole.USER,
-      sessionId: 'session-id',
-      jti: 'jti',
+    return {
+      controller: module.get(WorkoutController),
+      workoutService,
+      subscriptions,
+      inputBuilder,
+      executor,
+      publicPlan,
     };
+  }
 
-    await controller.generate(user);
-    await controller.getCurrent(user);
-    await controller.getExplicitHistory(user);
-    await controller.getById(user, 'plan-id');
-    await controller.getHistory(user);
+  const user = {
+    userId: 'user-id',
+    role: UserRole.USER,
+    sessionId: 'session-id',
+    jti: 'jti',
+  };
 
-    expect(generator.generate).toHaveBeenCalledWith('user-id');
-    expect(workoutService.getCurrent).toHaveBeenCalledWith('user-id');
-    expect(workoutService.getById).toHaveBeenCalledWith('user-id', 'plan-id');
-    expect(workoutService.listHistory).toHaveBeenCalledTimes(2);
-    expect(workoutService.listHistory).toHaveBeenCalledWith('user-id');
+  it('uses only V2 and returns the existing public WorkoutPlan shape', async () => {
+    const subject = await setup({ kind: 'PLAN', aggregateId: 'plan-id' });
+
+    await expect(subject.controller.generate(user)).resolves.toEqual(
+      subject.publicPlan,
+    );
+    expect(subject.subscriptions.getProfileSubscription).toHaveBeenCalledWith(
+      'user-id',
+    );
+    expect(subject.inputBuilder.build).toHaveBeenCalledTimes(1);
+    expect(subject.executor.execute).toHaveBeenCalledTimes(1);
+    expect(subject.workoutService.getById).toHaveBeenCalledWith(
+      'user-id',
+      'plan-id',
+    );
+  });
+
+  it('returns typed insufficient context without a legacy fallback', async () => {
+    const subject = await setup({
+      kind: 'CLARIFICATION',
+      missingFields: ['MODALITY'],
+      confirmationRequiredFields: [],
+      aiJobCompleted: false,
+    });
+
+    await expect(subject.controller.generate(user)).rejects.toBeInstanceOf(
+      UnprocessableEntityException,
+    );
+    expect(subject.executor.execute).toHaveBeenCalledTimes(1);
+    expect(subject.workoutService.getById).not.toHaveBeenCalled();
+  });
+
+  it('keeps current and history reads unchanged', async () => {
+    const subject = await setup({ kind: 'PLAN', aggregateId: 'plan-id' });
+    await subject.controller.getCurrent(user);
+    await subject.controller.getExplicitHistory(user);
+    await subject.controller.getById(user, 'plan-id');
+    await subject.controller.getHistory(user);
+
+    expect(subject.workoutService.getCurrent).toHaveBeenCalledWith('user-id');
+    expect(subject.workoutService.getById).toHaveBeenCalledWith(
+      'user-id',
+      'plan-id',
+    );
+    expect(subject.workoutService.listHistory).toHaveBeenCalledTimes(2);
   });
 });

@@ -5,6 +5,7 @@ import {
   AIJobStatus,
   AIJobType,
   FitnessGoal,
+  Gender,
 } from '@prisma/client';
 import { AIService } from '../../ai/ai.service';
 import {
@@ -40,6 +41,7 @@ import { WorkoutPlanningEngineV2Service } from './workout-planning-engine-v2.ser
 import { WorkoutPlanningReadinessService } from './workout-planning-readiness.service';
 import { WorkoutPlanningSafetyService } from './workout-planning-safety.service';
 import { WorkoutPlanningStrategyService } from './workout-planning-strategy.service';
+import { WORKOUT_PLANNING_V2_PROMPT } from './workout-planning-v2.prompt.definition';
 
 describe('Workout Planning Engine V2', () => {
   const referenceDate = new Date('2026-07-16T12:00:00.000Z');
@@ -174,6 +176,11 @@ describe('Workout Planning Engine V2', () => {
         WorkoutRecognizedContext['environment']
       >['value'];
       objective?: NonNullable<WorkoutRecognizedContext['objective']>['value'];
+      muscleFocus?: NonNullable<
+        WorkoutRecognizedContext['muscleFocus']
+      >['value'];
+      targetDistanceKm?: number;
+      currentRunningDistanceKm?: number;
       safety?: readonly WorkoutSafetyFlag[];
     } = {},
   ): WorkoutRecognizedContext {
@@ -212,6 +219,26 @@ describe('Workout Planning Engine V2', () => {
         status: 'CONFIRMED',
         value: 'MODERATE',
       }),
+      muscleFocus: options.muscleFocus
+        ? Object.freeze({
+            status: 'CONFIRMED',
+            value: Object.freeze([...options.muscleFocus]),
+          })
+        : undefined,
+      targetDistanceKm:
+        options.targetDistanceKm === undefined
+          ? undefined
+          : Object.freeze({
+              status: 'CONFIRMED',
+              value: options.targetDistanceKm,
+            }),
+      currentRunningDistanceKm:
+        options.currentRunningDistanceKm === undefined
+          ? undefined
+          : Object.freeze({
+              status: 'CONFIRMED',
+              value: options.currentRunningDistanceKm,
+            }),
       safetySignals: Object.freeze(options.safety ?? []),
     });
   }
@@ -446,6 +473,18 @@ describe('Workout Planning Engine V2', () => {
       service.evaluate(
         profile,
         'WEEKLY_PLAN',
+        'CROSSFIT',
+        recognized('CROSSFIT', ['BODYWEIGHT'], {
+          environment: 'HOME',
+          experience: 'INTERMEDIATE',
+        }),
+        false,
+      ).missingFields,
+    ).toContain('ENVIRONMENT');
+    expect(
+      service.evaluate(
+        profile,
+        'WEEKLY_PLAN',
         'CYCLING',
         recognized('CYCLING', ['BODYWEIGHT'], {
           environment: 'ROAD',
@@ -465,6 +504,31 @@ describe('Workout Planning Engine V2', () => {
         false,
       ).missingFields,
     ).not.toContain('EQUIPMENT');
+  });
+
+  it('requires clarification for a recognized movement constraint awaiting confirmation', () => {
+    const result = new WorkoutPlanningReadinessService().evaluate(
+      snapshot(),
+      'WEEKLY_PLAN',
+      'GYM_STRENGTH',
+      {
+        ...recognized('GYM_STRENGTH', ['BODYWEIGHT', 'DUMBBELL'], {
+          environment: 'FULL_GYM',
+        }),
+        movementConstraints: Object.freeze([
+          Object.freeze({
+            code: 'KNEE_LOAD' as const,
+            label: 'joelho',
+            status: 'REQUIRES_CONFIRMATION' as const,
+          }),
+        ]),
+      },
+      false,
+    );
+
+    expect(result.status).toBe('REQUIRES_CONFIRMATION');
+    expect(result.executionLevel).toBe('CLARIFICATION_ONLY');
+    expect(result.safetyFlags).toContain('UNCONFIRMED_LIMITATION');
   });
 
   it('moves workout readiness to ready from confirmed Snapshot acquisition data', () => {
@@ -936,6 +1000,249 @@ describe('Workout Planning Engine V2', () => {
       undefined,
     );
     expect(aiService.completeJobInTransaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [Gender.MALE, ['CHEST', 'BACK'], 4],
+    [Gender.FEMALE, ['GLUTES', 'LOWER_BODY'], 4],
+    [Gender.FEMALE, ['UPPER_BODY'], 3],
+    [Gender.MALE, ['LOWER_BODY'], 4],
+  ] as const)(
+    'uses sex as context without overriding explicit focus: %s / %j',
+    (sex, muscleFocus, frequency) => {
+      const base = snapshot();
+      const profile = Object.freeze({
+        ...base,
+        physical: Object.freeze({ ...base.physical, sex: known(sex) }),
+      });
+      const planningContext = context(
+        recognized(
+          'GYM_STRENGTH',
+          ['BARBELL', 'DUMBBELL', 'MACHINE', 'CABLE', 'BENCH'],
+          {
+            objective: 'HYPERTROPHY',
+            experience: 'INTERMEDIATE',
+            frequency,
+            duration: 60,
+            environment: 'FULL_GYM',
+            muscleFocus,
+          },
+        ),
+        profile,
+      );
+      const strategy = new WorkoutPlanningStrategyService().build(
+        planningContext,
+      );
+
+      expect(planningContext.profile.sex).toEqual({
+        status: 'CONFIRMED',
+        value: sex,
+      });
+      expect(strategy.muscleFocus).toEqual(muscleFocus);
+      expect(strategy.sessionCount).toBe(frequency);
+      expect(strategy.personalizationFactors).toEqual(
+        expect.arrayContaining(['SEX', 'MUSCLE_FOCUS']),
+      );
+    },
+  );
+
+  it('specializes CrossFit for experience, environment and constraints', () => {
+    const beginner = new WorkoutPlanningStrategyService().build(
+      context(
+        recognized('CROSSFIT', ['BODYWEIGHT', 'ROW_ERGOMETER'], {
+          environment: 'CROSSFIT_BOX',
+          experience: 'BEGINNER',
+          frequency: 3,
+        }),
+      ),
+    );
+    const intermediateInput = Object.freeze({
+      ...recognized('CROSSFIT', ['BODYWEIGHT', 'DUMBBELL'], {
+        environment: 'CROSSFIT_BOX',
+        experience: 'INTERMEDIATE',
+      }),
+      movementConstraints: Object.freeze([
+        Object.freeze({
+          code: 'KNEE_LOAD' as const,
+          label: 'restrição de joelho',
+          status: 'CONFIRMED' as const,
+        }),
+      ]),
+    });
+    const intermediate = new WorkoutPlanningStrategyService().build(
+      context(intermediateInput),
+    );
+
+    expect(beginner.requiredBlocks).toEqual([
+      'WARM_UP',
+      'TECHNIQUE',
+      'CONDITIONING',
+      'COOLDOWN',
+    ]);
+    expect(beginner.technicalMovementsAllowed).toBe(false);
+    expect(intermediate.technicalMovementsAllowed).toBe(true);
+    expect(intermediate.appliedConstraints).toEqual([
+      expect.objectContaining({ code: 'KNEE_LOAD' }),
+    ]);
+  });
+
+  it('carries existing format, intensity, days and windows into personalization', () => {
+    const base = snapshot();
+    const profile = Object.freeze({
+      ...base,
+      training: Object.freeze({
+        ...base.training,
+        intensityPreference: known('HIGH'),
+        trainingFormatPreference: known('INDIVIDUAL'),
+      }),
+      routine: Object.freeze({
+        ...base.routine,
+        availableTrainingDays: known(Object.freeze(['MONDAY', 'WEDNESDAY'])),
+        dailyTrainingWindows: known(Object.freeze(['MONDAY:18:00-19:00'])),
+      }),
+    });
+    const planningContext = context(
+      recognized('GYM_STRENGTH', ['DUMBBELL'], {
+        environment: 'LIMITED_GYM',
+      }),
+      profile,
+    );
+    const strategy = new WorkoutPlanningStrategyService().build(
+      planningContext,
+    );
+
+    expect(planningContext.training).toMatchObject({
+      intensityPreference: { status: 'CONFIRMED', value: 'MODERATE' },
+      formatPreference: { status: 'CONFIRMED', value: 'INDIVIDUAL' },
+      availableTrainingDays: {
+        status: 'CONFIRMED',
+        value: ['MONDAY', 'WEDNESDAY'],
+      },
+      dailyTrainingWindows: {
+        status: 'CONFIRMED',
+        value: ['MONDAY:18:00-19:00'],
+      },
+    });
+    expect(strategy.personalizationFactors).toEqual(
+      expect.arrayContaining([
+        'INTENSITY_PREFERENCE',
+        'FORMAT_PREFERENCE',
+        'AVAILABLE_TRAINING_DAYS',
+        'DAILY_TRAINING_WINDOWS',
+      ]),
+    );
+  });
+
+  it('specializes beginner street running and distance readiness', () => {
+    const starter = recognized('RUNNING', [], {
+      objective: 'CONDITIONING',
+      environment: 'STREET',
+      experience: 'BEGINNER',
+      frequency: 3,
+    });
+    const distanceReady = recognized('RUNNING', [], {
+      objective: 'COMPLETE_DISTANCE',
+      environment: 'STREET',
+      experience: 'INTERMEDIATE',
+      frequency: 3,
+      targetDistanceKm: 10,
+      currentRunningDistanceKm: 5,
+    });
+    const distanceMissingAbility = recognized('RUNNING', [], {
+      objective: 'COMPLETE_DISTANCE',
+      environment: 'STREET',
+      experience: 'BEGINNER',
+      frequency: 3,
+      targetDistanceKm: 10,
+    });
+    const strategy = new WorkoutPlanningStrategyService().build(
+      context(starter),
+    );
+    const readiness = new WorkoutPlanningReadinessService();
+
+    expect(strategy.requiredBlocks).toEqual([
+      'WARM_UP',
+      'ENDURANCE',
+      'COOLDOWN',
+    ]);
+    expect(strategy.intensityPolicy.scale).toBe('CONVERSATIONAL_PACE');
+    expect(
+      readiness.evaluate(
+        snapshot(),
+        'WEEKLY_PLAN',
+        'RUNNING',
+        distanceReady,
+        false,
+      ),
+    ).toMatchObject({ status: 'READY', missingFields: [] });
+    expect(
+      readiness.evaluate(
+        snapshot(),
+        'WEEKLY_PLAN',
+        'RUNNING',
+        distanceMissingAbility,
+        false,
+      ),
+    ).toMatchObject({
+      status: 'BLOCKED',
+      missingFields: ['CURRENT_RUNNING_DISTANCE'],
+    });
+    const missingWithRecentInjury = readiness.evaluate(
+      snapshot(),
+      'WEEKLY_PLAN',
+      'RUNNING',
+      Object.freeze({
+        ...distanceMissingAbility,
+        safetySignals: Object.freeze(['RECENT_INJURY' as const]),
+      }),
+      false,
+    );
+    expect(
+      new WorkoutPlanningSafetyService().evaluateBeforeGeneration(
+        snapshot(),
+        missingWithRecentInjury,
+      ).outcome,
+    ).toBe('PROFESSIONAL_REVIEW_RECOMMENDED');
+  });
+
+  it.each([
+    ['CARDIO_CONDITIONING', 'CONDITIONING'],
+    ['HOME_WORKOUT', 'CONDITIONING'],
+  ] as const)(
+    'uses conditioning blocks without mandatory strength for %s',
+    (modality, objective) => {
+      const strategy = new WorkoutPlanningStrategyService().build(
+        context(
+          recognized(modality, [], {
+            objective,
+            environment: 'HOME',
+            duration: 30,
+          }),
+        ),
+      );
+
+      expect(strategy.requiredBlocks).toContain('CONDITIONING');
+      expect(strategy.requiredBlocks).not.toContain('STRENGTH');
+      expect(strategy.requiredBlocks).not.toContain('HYPERTROPHY');
+      expect(strategy.authorizedEquipment).toEqual([]);
+    },
+  );
+
+  it('publishes prompt V2 with explicit personalization and stereotype guards', () => {
+    expect(WORKOUT_PLANNING_V2_PROMPT).toMatchObject({
+      name: 'workout_planning_v2',
+      version: 2,
+      capability: 'WORKOUT_PLANNING_V2',
+    });
+    expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(
+      'Nunca derive foco muscular',
+    );
+    expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(
+      'Preferências e foco muscular explicitamente confirmados prevalecem',
+    );
+    expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(
+      'não repita full-body indiscriminadamente',
+    );
   });
 
   it('strictly parses discriminated activities and rejects malformed JSON', () => {

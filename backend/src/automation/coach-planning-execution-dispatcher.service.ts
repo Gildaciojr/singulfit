@@ -20,6 +20,9 @@ import type { GenerateNutritionPlanV2Input } from '../diet/v2/nutrition-planning
 import { NutritionApplicationExecutorService } from '../diet/v2/execution/nutrition-application-executor.service';
 import { NutritionPublicResultFormatter } from '../diet/v2/execution/nutrition-public-result.formatter';
 import type { PlanningExecutionRouteSelection } from './planning-execution-route-policy.service';
+import type { GenerateWorkoutPlanV2Input } from '../workout/v2/workout-planning-generation.contract';
+import { WorkoutApplicationExecutorService } from '../workout/v2/execution/workout-application-executor.service';
+import { WorkoutPlanV2Formatter } from '../workout/v2/workout-plan-v2.formatter';
 
 type GeneratedDietPlan = Awaited<ReturnType<DietGeneratorService['generate']>>;
 type GeneratedWorkoutPlan = Awaited<
@@ -39,6 +42,12 @@ export interface CoachPlanningExecutionDispatchInput {
     readonly traceId?: string;
     readonly continuationOperationKey?: string;
   };
+  readonly workoutV2?: {
+    readonly generationInput: GenerateWorkoutPlanV2Input;
+    readonly profileId: string;
+    readonly correlationId: string;
+    readonly traceId?: string;
+  };
 }
 
 @Injectable()
@@ -51,6 +60,10 @@ export class CoachPlanningExecutionDispatcherService {
     private readonly nutritionV2Executor?: NutritionApplicationExecutorService,
     @Optional()
     private readonly nutritionV2Formatter?: NutritionPublicResultFormatter,
+    @Optional()
+    private readonly workoutV2Executor?: WorkoutApplicationExecutorService,
+    @Optional()
+    private readonly workoutV2Formatter?: WorkoutPlanV2Formatter,
   ) {}
 
   async dispatch(input: CoachPlanningExecutionDispatchInput): Promise<string> {
@@ -66,6 +79,10 @@ export class CoachPlanningExecutionDispatcherService {
         input.legacyIntent,
         input.continuationOperationKey,
       );
+    }
+
+    if (input.routeSelection?.workout === 'V2') {
+      return this.generateWorkoutV2(input);
     }
 
     switch (input.decision.goal) {
@@ -233,6 +250,57 @@ export class CoachPlanningExecutionDispatcherService {
     );
   }
 
+  private async generateWorkoutV2(
+    input: CoachPlanningExecutionDispatchInput,
+  ): Promise<CoachPlanningDispatchResult> {
+    if (!input.workoutV2 || !this.workoutV2Executor) {
+      throw new ServiceUnavailableException(
+        'Rota Workout V2 selecionada sem infraestrutura executável',
+      );
+    }
+    const result = await this.workoutV2Executor.execute({
+      generationInput: input.workoutV2.generationInput,
+      ownership: {
+        userId: input.userId,
+        profileId: input.workoutV2.profileId,
+      },
+      executionContext: {
+        correlationId: input.workoutV2.correlationId,
+        traceId: input.workoutV2.traceId,
+      },
+    });
+    if (result.kind === 'CLARIFICATION') {
+      return this.result(
+        this.workoutClarification([
+          ...result.missingFields,
+          ...result.confirmationRequiredFields,
+        ]),
+        'WORKOUT_V2',
+        false,
+        'CLARIFICATION',
+      );
+    }
+    if (result.kind === 'BLOCKED') {
+      return this.result(
+        'Não vou gerar um treino enquanto esse contexto de segurança precisar de cuidado ou avaliação profissional.',
+        'WORKOUT_V2',
+        false,
+        'BLOCKED',
+      );
+    }
+    if (!this.workoutV2Formatter) {
+      throw new ServiceUnavailableException(
+        'Formatter Workout V2 indisponível',
+      );
+    }
+    const content = this.workoutV2Formatter
+      .format(result.document)
+      .join('\n\n')
+      .slice(0, 3_500)
+      .trimEnd();
+    return this.result(content, 'WORKOUT_V2', true, 'PLAN');
+  }
+
   private async generateCombined(
     userId: string,
   ): Promise<CoachPlanningDispatchResult> {
@@ -280,13 +348,42 @@ export class CoachPlanningExecutionDispatcherService {
     content: string,
     executor: CoachPlanningExecutor,
     generationCompleted: boolean,
+    workoutDisposition?: CoachPlanningDispatchResult['workoutDisposition'],
   ): CoachPlanningDispatchResult {
     return Object.freeze({
       content,
       executor,
       generationCompleted,
       fallbackApplied: false,
+      workoutDisposition,
     });
+  }
+
+  private workoutClarification(fields: readonly string[]): string {
+    const field = fields[0];
+    const messages: Readonly<Record<string, string>> = Object.freeze({
+      MODALITY:
+        'Você pretende treinar em academia, em casa, ao ar livre ou em outra modalidade?',
+      EXPERIENCE:
+        'Como você descreve sua experiência nessa modalidade: iniciante, intermediária ou avançada?',
+      WEEKLY_FREQUENCY:
+        'Em quantos dias da semana você realmente consegue treinar?',
+      SESSION_DURATION:
+        'Quanto tempo você normalmente tem disponível para cada treino?',
+      ENVIRONMENT: 'Em qual ambiente seus treinos vão acontecer?',
+      EQUIPMENT: 'Quais equipamentos você terá disponíveis para treinar?',
+      PHYSICAL_LIMITATIONS:
+        'Você tem alguma limitação física que eu precise considerar?',
+      PERCEIVED_CONDITIONING:
+        'Como você percebe seu condicionamento hoje: baixo, moderado ou alto?',
+      TARGET_DISTANCE: 'Qual distância você quer completar?',
+      CURRENT_RUNNING_DISTANCE:
+        'Qual distância você consegue correr hoje com segurança?',
+    });
+    return (
+      (field ? messages[field] : undefined) ??
+      'Preciso confirmar alguns dados do seu contexto antes de montar um treino seguro.'
+    );
   }
 
   private unknownIntentMessage(): string {

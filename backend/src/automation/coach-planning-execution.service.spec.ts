@@ -17,8 +17,121 @@ import type { PlanningExecutionRoutePolicyService } from './planning-execution-r
 import { FitnessGoal } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import { UserGoalEngineService } from './user-goal-engine.service';
+import type { GenerateWorkoutPlanV2InputBuilder } from '../workout/v2/generate-workout-plan-v2-input.builder';
 
 describe('CoachPlanningExecutionService', () => {
+  it('routes a current workout request to V2 and transports declared frequency', async () => {
+    const unavailableDatum = Object.freeze({
+      status: 'UNKNOWN' as const,
+      sources: Object.freeze([]),
+    });
+    const snapshot = Object.freeze({
+      completion: Object.freeze({ overall: 'PARTIAL', sections: [] }),
+      longitudinal: Object.freeze({
+        latestProgressWeightKg: unavailableDatum,
+        goalProgression: unavailableDatum,
+        nutritionEvolution: unavailableDatum,
+      }),
+    }) as unknown as CoachProfileSnapshot;
+    const decision = Object.freeze({
+      recognizedIntent: 'WORKOUT_PLAN_REQUEST',
+      goal: 'ASK_PROFILE_INFORMATION',
+      reason: 'PROFILE_INFORMATION_REQUIRED',
+      targetPlan: 'WORKOUT',
+      profileCompletionState: 'PARTIAL',
+      canExecute: false,
+      confidence: 'HIGH',
+      selectedProfileField: 'TRAINING_MODALITY',
+      metPreconditions: Object.freeze([]),
+      missingPreconditions: Object.freeze([]),
+      pendingDependencies: Object.freeze([]),
+    }) satisfies ConversationGoalDecision;
+    const generationInput = Object.freeze({
+      userId: 'user-id',
+      recognizedContext: Object.freeze({
+        weeklyFrequency: Object.freeze({ status: 'CONFIRMED', value: 4 }),
+      }),
+    });
+    const dispatcher = {
+      dispatchStructured: jest.fn().mockResolvedValue({
+        content: 'Treino V2',
+        executor: 'WORKOUT_V2',
+        generationCompleted: true,
+        fallbackApplied: false,
+        workoutDisposition: 'PLAN',
+      }),
+    };
+    const workoutBuilder = {
+      build: jest.fn().mockResolvedValue({
+        generationInput,
+        profileId: 'profile-id',
+      }),
+    };
+    const routePolicy = {
+      select: jest.fn().mockReturnValue({
+        nutrition: null,
+        workout: 'V2',
+        reason: 'WORKOUT_V2_PRODUCTIVE_GENERATION',
+        nutritionPilotStatus: null,
+        suppressNutritionShadow: false,
+      }),
+    };
+    const service = new CoachPlanningExecutionService(
+      dispatcher as unknown as CoachPlanningExecutionDispatcherService,
+      {
+        build: jest.fn().mockResolvedValue(snapshot),
+      } as unknown as CoachProfileSnapshotBuilder,
+      {
+        adapt: jest.fn().mockReturnValue({
+          recognizedIntent: 'WORKOUT_PLAN_REQUEST',
+          planTarget: 'WORKOUT',
+          acquisitionIntent: Object.freeze({}),
+        }),
+      } as unknown as LegacyCoachIntentAdapter,
+      {
+        decide: jest.fn().mockReturnValue(Object.freeze({})),
+      } as unknown as CoachAdaptiveProfileCollectorService,
+      {
+        plan: jest.fn().mockReturnValue(decision),
+      } as unknown as ConversationGoalPlannerService,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      routePolicy as unknown as PlanningExecutionRoutePolicyService,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      workoutBuilder as unknown as GenerateWorkoutPlanV2InputBuilder,
+    );
+
+    const result = await service.executeStructured('user-id', 'WORKOUT', {
+      conversationId: 'conversation-id',
+      messageId: 'message-id',
+      correlationId: 'message-id',
+      profileId: 'profile-id',
+      currentMessage: 'quero treinar 4 vezes por semana',
+      referenceDate: new Date('2026-08-18T12:00:00.000Z'),
+    });
+
+    expect(result.selectedSource).toBe('WORKOUT_V2');
+    expect(workoutBuilder.build).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentMessage: 'quero treinar 4 vezes por semana',
+      }),
+    );
+    expect(dispatcher.dispatchStructured).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workoutV2: expect.objectContaining({ generationInput }),
+      }),
+    );
+  });
+
   it('builds the V2 input with the same snapshot and reference date without executing it', async () => {
     const unavailableDatum = Object.freeze({
       status: 'UNKNOWN' as const,

@@ -1,11 +1,43 @@
-import { readdirSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import type { WorkoutPlanningEngineV2Service } from '../workout-planning-engine-v2.service';
 import type { WorkoutPlanV2PersistenceService } from '../persistence/workout-plan-v2-persistence.service';
-import type { PersistWorkoutPlanV2Input } from '../persistence/workout-plan-v2-persistence.contract';
+import type { WorkoutApplicationExecutionInputV2 } from './workout-application-execution.contract';
 import { WorkoutApplicationExecutorService } from './workout-application-executor.service';
 
 describe('WorkoutApplicationExecutorService', () => {
-  it('accepts an existing candidate contract and delegates only to persistence', async () => {
+  function input(): WorkoutApplicationExecutionInputV2 {
+    return Object.freeze({
+      generationInput: Object.freeze({ userId: 'user-id' }),
+      ownership: Object.freeze({ userId: 'user-id', profileId: 'profile-id' }),
+      executionContext: Object.freeze({ correlationId: 'correlation-id' }),
+    }) as unknown as WorkoutApplicationExecutionInputV2;
+  }
+
+  function ready() {
+    return Object.freeze({
+      resolution: Object.freeze({ reason: 'EXPLICIT_REQUEST' }),
+      readiness: Object.freeze({
+        status: 'READY',
+        missingFields: Object.freeze([]),
+        confirmationRequiredFields: Object.freeze([]),
+        safetyFlags: Object.freeze([]),
+      }),
+      context: Object.freeze({}),
+      strategy: Object.freeze({}),
+      safety: Object.freeze({
+        outcome: 'ALLOWED',
+        reasonCodes: Object.freeze([]),
+      }),
+    });
+  }
+
+  function setup(prepared = ready()) {
+    const engine = {
+      prepare: jest.fn().mockReturnValue(prepared),
+      generateCandidate: jest.fn().mockResolvedValue({
+        status: 'PENDING_COMPLETION',
+        output: { artifactType: 'WEEKLY_PLAN' },
+      }),
+    };
     const persistence = {
       persist: jest.fn().mockResolvedValue({
         persistence: 'CREATED',
@@ -15,48 +47,134 @@ describe('WorkoutApplicationExecutorService', () => {
           document: { artifactType: 'WEEKLY_PLAN' },
         },
       }),
-    } as unknown as jest.Mocked<WorkoutPlanV2PersistenceService>;
-    const executor = new WorkoutApplicationExecutorService(persistence);
-    const candidate = Object.freeze({
-      marker: 'candidate',
-    }) as unknown as PersistWorkoutPlanV2Input;
+    };
+    return {
+      engine,
+      persistence,
+      executor: new WorkoutApplicationExecutorService(
+        engine as unknown as WorkoutPlanningEngineV2Service,
+        persistence as unknown as WorkoutPlanV2PersistenceService,
+      ),
+    };
+  }
 
-    await expect(executor.execute(candidate)).resolves.toMatchObject({
+  it('prepares before one generation and persists a pending candidate once', async () => {
+    const subject = setup();
+    await expect(subject.executor.execute(input())).resolves.toMatchObject({
       kind: 'PLAN',
       aggregateId: 'plan-id',
-      artifactType: 'WEEKLY_PLAN',
       persistence: 'CREATED',
-      aiJobCompleted: true,
     });
-    expect(persistence.persist.mock.calls).toEqual([[candidate]]);
-    expect(Object.keys(executor)).toEqual(['persistence']);
+    expect(subject.engine.prepare).toHaveBeenCalledTimes(1);
+    expect(subject.engine.generateCandidate).toHaveBeenCalledTimes(1);
+    expect(subject.persistence.persist).toHaveBeenCalledTimes(1);
+    expect(subject.engine.prepare.mock.invocationCallOrder[0]).toBeLessThan(
+      subject.engine.generateCandidate.mock.invocationCallOrder[0],
+    );
+    expect(
+      subject.engine.generateCandidate.mock.invocationCallOrder[0],
+    ).toBeLessThan(subject.persistence.persist.mock.invocationCallOrder[0]);
   });
 
-  it('has no productive caller outside Workout V2', () => {
-    const sourceRoot = resolve(__dirname, '..', '..', '..');
-    const modulePath = resolve(__dirname, '..', '..', 'workout.module.ts');
-    const v2Root = resolve(__dirname, '..');
-    const files = typescriptFiles(sourceRoot).filter(
-      (file) =>
-        !file.endsWith('.spec.ts') &&
-        file !== modulePath &&
-        !file.startsWith(`${v2Root}\\`) &&
-        !file.startsWith(`${v2Root}/`),
-    );
-    const references = files.filter((file) =>
-      /WorkoutPlanningEngineV2Service|WorkoutApplicationExecutorService/.test(
-        readFileSync(file, 'utf8'),
-      ),
-    );
+  it.each([
+    ['BLOCKED', ['MODALITY'], []],
+    ['REQUIRES_CONFIRMATION', [], ['PHYSICAL_LIMITATIONS']],
+  ] as const)(
+    'returns clarification for readiness %s without effects',
+    async (status, missingFields, confirmationRequiredFields) => {
+      const subject = setup({
+        ...ready(),
+        readiness: {
+          status,
+          missingFields,
+          confirmationRequiredFields,
+          safetyFlags: [],
+        },
+        safety:
+          status === 'BLOCKED'
+            ? { outcome: 'BLOCKED', reasonCodes: ['READINESS_BLOCKED'] }
+            : {
+                outcome: 'REQUIRES_CONFIRMATION',
+                reasonCodes: ['PROFILE_CONFIRMATION_REQUIRED'],
+              },
+      });
+      await expect(subject.executor.execute(input())).resolves.toMatchObject({
+        kind: 'CLARIFICATION',
+        missingFields,
+        confirmationRequiredFields,
+      });
+      expect(subject.engine.generateCandidate).not.toHaveBeenCalled();
+      expect(subject.persistence.persist).not.toHaveBeenCalled();
+    },
+  );
 
-    expect(references).toEqual([]);
+  it('blocks safety before generation and persistence', async () => {
+    const subject = setup({
+      ...ready(),
+      safety: { outcome: 'BLOCKED', reasonCodes: ['ACUTE_PAIN'] },
+    });
+    await expect(subject.executor.execute(input())).resolves.toMatchObject({
+      kind: 'BLOCKED',
+      reasonCodes: ['ACUTE_PAIN'],
+    });
+    expect(subject.engine.generateCandidate).not.toHaveBeenCalled();
+    expect(subject.persistence.persist).not.toHaveBeenCalled();
   });
+
+  it('clarifies missing current running distance before AIJob, provider or persistence', async () => {
+    const subject = setup({
+      ...ready(),
+      readiness: {
+        status: 'BLOCKED',
+        missingFields: ['CURRENT_RUNNING_DISTANCE'],
+        confirmationRequiredFields: [],
+        safetyFlags: [],
+      },
+      safety: {
+        outcome: 'BLOCKED',
+        reasonCodes: ['READINESS_BLOCKED'],
+      },
+    });
+
+    await expect(subject.executor.execute(input())).resolves.toMatchObject({
+      kind: 'CLARIFICATION',
+      missingFields: ['CURRENT_RUNNING_DISTANCE'],
+    });
+    expect(subject.engine.generateCandidate).not.toHaveBeenCalled();
+    expect(subject.persistence.persist).not.toHaveBeenCalled();
+  });
+
+  it('reuses ALREADY_COMPLETED through idempotent persistence', async () => {
+    const subject = setup();
+    subject.engine.generateCandidate.mockResolvedValueOnce({
+      status: 'ALREADY_COMPLETED',
+      output: { artifactType: 'WEEKLY_PLAN' },
+    });
+    subject.persistence.persist.mockResolvedValueOnce({
+      persistence: 'REUSED',
+      aiJobCompleted: true,
+      aggregate: {
+        id: 'plan-id',
+        document: { artifactType: 'WEEKLY_PLAN' },
+      },
+    });
+    await expect(subject.executor.execute(input())).resolves.toMatchObject({
+      kind: 'PLAN',
+      persistence: 'REUSED',
+    });
+    expect(subject.engine.generateCandidate).toHaveBeenCalledTimes(1);
+    expect(subject.persistence.persist).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['provider failure', 'validator safety failure'])(
+    'never persists after %s',
+    async (message) => {
+      const subject = setup();
+      subject.engine.generateCandidate.mockRejectedValueOnce(
+        new Error(message),
+      );
+      await expect(subject.executor.execute(input())).rejects.toThrow(message);
+      expect(subject.persistence.persist).not.toHaveBeenCalled();
+    },
+  );
 });
-
-function typescriptFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) return typescriptFiles(path);
-    return entry.isFile() && entry.name.endsWith('.ts') ? [path] : [];
-  });
-}

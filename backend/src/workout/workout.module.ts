@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AIModule } from '../ai/ai.module';
 import { AuthModule } from '../auth/auth.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
+import { ContextModule } from '../context/context.module';
 import { WorkoutController } from './workout.controller';
 import { WorkoutGeneratorService } from './workout-generator.service';
 import { WorkoutService } from './workout.service';
@@ -18,9 +19,10 @@ import { WorkoutPlanV2PersistenceService } from './v2/persistence/workout-plan-v
 import { WorkoutPlanV2PersistenceValidator } from './v2/persistence/workout-plan-v2-persistence.validator';
 import { PrismaWorkoutPlanV2Gateway } from './v2/persistence/prisma-workout-plan-v2.gateway';
 import { WORKOUT_PLAN_V2_REPOSITORY } from './v2/persistence/workout-plan-v2.repository';
+import { GenerateWorkoutPlanV2InputBuilder } from './v2/generate-workout-plan-v2-input.builder';
 
 @Module({
-  imports: [AuthModule, AIModule, SubscriptionsModule],
+  imports: [AuthModule, AIModule, SubscriptionsModule, ContextModule],
   controllers: [WorkoutController],
   providers: [
     WorkoutService,
@@ -32,6 +34,7 @@ import { WORKOUT_PLAN_V2_REPOSITORY } from './v2/persistence/workout-plan-v2.rep
     WorkoutPlanningSafetyService,
     WorkoutPlanV2Validator,
     WorkoutPlanV2Formatter,
+    GenerateWorkoutPlanV2InputBuilder,
     WorkoutPlanningEngineV2Service,
     WorkoutPlanV2PersistenceValidator,
     PrismaWorkoutPlanV2Gateway,
@@ -47,6 +50,8 @@ import { WORKOUT_PLAN_V2_REPOSITORY } from './v2/persistence/workout-plan-v2.rep
     WorkoutGeneratorService,
     WorkoutPlanningEngineV2Service,
     WorkoutPlanV2Formatter,
+    GenerateWorkoutPlanV2InputBuilder,
+    WorkoutApplicationExecutorService,
   ],
 })
 export class WorkoutModule {}
