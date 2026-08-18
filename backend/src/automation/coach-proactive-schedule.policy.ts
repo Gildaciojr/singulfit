@@ -29,6 +29,11 @@ interface SlotDefinition {
   readonly minute: number;
 }
 
+const COACH_PROACTIVE_MEAL_TIME_WINDOWS = Object.freeze({
+  LUNCH: Object.freeze({ start: 11 * 60, end: 15 * 60, target: 12 * 60 }),
+  DINNER: Object.freeze({ start: 18 * 60, end: 22 * 60, target: 19 * 60 }),
+});
+
 @Injectable()
 export class CoachProactiveSchedulePolicy {
   dailySlots(
@@ -209,11 +214,15 @@ export class CoachProactiveSchedulePolicy {
   }
 
   private time(value: string | null | undefined, fallback: number): number {
+    return this.parseTime(value) ?? fallback;
+  }
+
+  private parseTime(value: string | null | undefined): number | null {
     const match = value?.trim().match(/^(\d{1,2}):(\d{2})$/u);
-    if (!match) return fallback;
+    if (!match) return null;
     const hour = Number(match[1]);
     const minute = Number(match[2]);
-    return hour <= 23 && minute <= 59 ? hour * 60 + minute : fallback;
+    return hour <= 23 && minute <= 59 ? hour * 60 + minute : null;
   }
 
   private mealTime(
@@ -235,8 +244,7 @@ export class CoachProactiveSchedulePolicy {
       const strings = value.filter(
         (entry): entry is string => typeof entry === 'string',
       );
-      const candidateString = strings[period === 'LUNCH' ? 0 : 1];
-      return this.time(candidateString, fallback);
+      return this.simpleMealTime(strings, period, fallback);
     }
     if (typeof value === 'object' && value !== null) {
       const record = value as Record<string, unknown>;
@@ -244,6 +252,29 @@ export class CoachProactiveSchedulePolicy {
       if (typeof candidate === 'string') return this.time(candidate, fallback);
     }
     return fallback;
+  }
+
+  private simpleMealTime(
+    values: readonly string[],
+    period: 'LUNCH' | 'DINNER',
+    fallback: number,
+  ): number {
+    if (values.length <= 2) {
+      return this.time(values[period === 'LUNCH' ? 0 : 1], fallback);
+    }
+    const window = COACH_PROACTIVE_MEAL_TIME_WINDOWS[period];
+    const candidates = values
+      .map((value) => this.parseTime(value))
+      .filter(
+        (value): value is number =>
+          value !== null && value >= window.start && value <= window.end,
+      )
+      .sort(
+        (left, right) =>
+          Math.abs(left - window.target) - Math.abs(right - window.target) ||
+          left - right,
+      );
+    return candidates[0] ?? fallback;
   }
 
   private localDate(at: Date, timezone: string): LocalDateParts {
