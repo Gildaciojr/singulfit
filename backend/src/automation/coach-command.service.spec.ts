@@ -346,20 +346,55 @@ describe('CoachCommandService', () => {
 
   it('generates and schedules a workout command response', async () => {
     const subject = createSubject({ content: 'monte meu treino' });
+    jest
+      .spyOn(subject.planningExecution, 'executeStructured')
+      .mockResolvedValueOnce({
+        content: '🏋️ *Seu treino V2*\n\nTreino estruturado',
+        responseRequired: true,
+        selectedSource: 'WORKOUT_V2',
+        dispatch: {
+          content: '🏋️ *Seu treino V2*\n\nTreino estruturado',
+          executor: 'WORKOUT_V2',
+          generationCompleted: true,
+          fallbackApplied: false,
+          workoutDisposition: 'PLAN',
+        },
+      } as never);
 
-    await subject.service.processTextMessage({
-      userId: 'user-id',
-      messageId: 'message-id',
-    });
+    await expect(
+      subject.service.processTextMessage({
+        userId: 'user-id',
+        messageId: 'message-id',
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        handled: true,
+        duplicated: false,
+        intent: 'WORKOUT',
+      }),
+    );
 
-    expect(subject.workoutGenerator.generate).toHaveBeenCalledWith('user-id');
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
     expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.dietGenerator.generateCandidate).not.toHaveBeenCalled();
+    expect(subject.prisma.coachMessage.create).toHaveBeenCalledTimes(1);
     expect(subject.prisma.coachMessage.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          content: expect.stringContaining('Organizei Treino inicial'),
+          content: '🏋️ *Seu treino V2*\n\nTreino estruturado',
         }),
       }),
+    );
+    expect(subject.eventBus.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'AUTOMATION_TRIGGERED',
+        payload: expect.objectContaining({
+          source: 'WHATSAPP_COACH_COMMAND',
+          sourceMessageId: 'message-id',
+        }),
+      }),
+      subject.transaction,
     );
   });
 

@@ -20,6 +20,64 @@ import { UserGoalEngineService } from './user-goal-engine.service';
 import type { GenerateWorkoutPlanV2InputBuilder } from '../workout/v2/generate-workout-plan-v2-input.builder';
 
 describe('CoachPlanningExecutionService', () => {
+  it('fails closed without dispatching legacy when Workout V2 preparation throws', async () => {
+    const dispatcher = { dispatchStructured: jest.fn() };
+    const service = new CoachPlanningExecutionService(
+      dispatcher as unknown as CoachPlanningExecutionDispatcherService,
+      {
+        build: jest.fn().mockRejectedValue(new Error('snapshot unavailable')),
+      } as unknown as CoachProfileSnapshotBuilder,
+      { adapt: jest.fn() } as unknown as LegacyCoachIntentAdapter,
+      { decide: jest.fn() } as unknown as CoachAdaptiveProfileCollectorService,
+      { plan: jest.fn() } as unknown as ConversationGoalPlannerService,
+    );
+
+    const result = await service.executeStructured('user-id', 'WORKOUT', {
+      conversationId: 'conversation-id',
+      messageId: 'message-id',
+      correlationId: 'message-id',
+      referenceDate: new Date('2026-08-18T12:00:00.000Z'),
+    });
+
+    expect(result).toMatchObject({
+      selectedSource: 'WORKOUT_V2',
+      dispatch: {
+        executor: 'FAILURE_FALLBACK',
+        generationCompleted: false,
+        fallbackApplied: false,
+        workoutDisposition: 'BLOCKED',
+      },
+      metadata: {
+        generationCompleted: false,
+        routeSelection: {
+          workout: 'V2',
+          reason: 'WORKOUT_V2_PRODUCTIVE_GENERATION',
+        },
+      },
+    });
+    expect(dispatcher.dispatchStructured).not.toHaveBeenCalled();
+  });
+
+  it('fails closed without dispatching legacy when Workout V2 dependencies are unavailable', async () => {
+    const dispatcher = { dispatchStructured: jest.fn() };
+    const service = new CoachPlanningExecutionService(
+      dispatcher as unknown as CoachPlanningExecutionDispatcherService,
+    );
+
+    const result = await service.executeStructured('user-id', 'WORKOUT');
+
+    expect(result).toMatchObject({
+      selectedSource: 'WORKOUT_V2',
+      dispatch: {
+        executor: 'FAILURE_FALLBACK',
+        generationCompleted: false,
+        fallbackApplied: false,
+        workoutDisposition: 'BLOCKED',
+      },
+    });
+    expect(dispatcher.dispatchStructured).not.toHaveBeenCalled();
+  });
+
   it('routes a current workout request to V2 and transports declared frequency', async () => {
     const unavailableDatum = Object.freeze({
       status: 'UNKNOWN' as const,

@@ -142,7 +142,16 @@ export class CoachPlanningExecutionService {
       this.logger.warn(
         `Planning V2 preparation unavailable: ${this.safeMessage(error)}`,
       );
-      // A infraestrutura V2 permanece estritamente não bloqueante nesta fase.
+      if (intent === 'WORKOUT') {
+        return this.workoutPreparationFailureResult(error, runtime);
+      }
+      // Diet e combined preservam a tolerância anterior nesta fronteira.
+    }
+    if (intent === 'WORKOUT' && !preparation) {
+      return this.workoutPreparationFailureResult(
+        new Error('Workout V2 productive preparation unavailable'),
+        runtime,
+      );
     }
 
     const reasoningEnabled = runtime !== undefined;
@@ -377,6 +386,51 @@ export class CoachPlanningExecutionService {
     const pending = runtime?.pendingGoalConfirmation;
     if (!pending || !runtime) return undefined;
     return `pending-goal-continuation:${pending.actionId}:${runtime.messageId}:nutrition`;
+  }
+
+  private workoutPreparationFailureResult(
+    error: unknown,
+    runtime: CoachPlanningRuntimeContext | undefined,
+  ): CoachPlanningExecutionResult {
+    const routeSelection = Object.freeze({
+      nutrition: null,
+      workout: 'V2' as const,
+      reason: 'WORKOUT_V2_PRODUCTIVE_GENERATION' as const,
+      nutritionPilotStatus: null,
+      suppressNutritionShadow: false,
+    });
+    const dispatch = Object.freeze({
+      content: this.failureMessage(error),
+      executor: 'FAILURE_FALLBACK' as const,
+      generationCompleted: false,
+      fallbackApplied: false,
+      workoutDisposition: 'BLOCKED' as const,
+    });
+    const unavailable = this.unavailableReasoning('PRODUCTION_FAILED').state;
+    return Object.freeze({
+      content: dispatch.content,
+      responseRequired: true,
+      selectedSource: 'WORKOUT_V2' as const,
+      decision: null,
+      nutritionReasoning: null,
+      workoutReasoning: null,
+      longitudinalDecision: null,
+      humanContext: null,
+      reasoning: Object.freeze({
+        nutrition: unavailable,
+        workout: unavailable,
+        longitudinal: unavailable,
+      }),
+      dispatch,
+      metadata: Object.freeze({
+        correlationId: runtime?.correlationId ?? null,
+        operationKey: runtime?.messageId ?? null,
+        executor: dispatch.executor,
+        fallbackApplied: false,
+        generationCompleted: false,
+        routeSelection,
+      }),
+    });
   }
 
   private async releasePendingExecution(
