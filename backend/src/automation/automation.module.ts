@@ -41,6 +41,9 @@ import { PlanningExecutionRoutePolicyService } from './planning-execution-route-
 import { CoachPlanningBothApplicationExecutorService } from './coach-planning-both-application-executor.service';
 import { CurrentGoalCommitService } from './current-goal-commit.service';
 import { PendingConversationActionService } from './pending-conversation-action.service';
+import { AIModule } from '../ai/ai.module';
+import { CoachProactiveSchedulePolicy } from './coach-proactive-schedule.policy';
+import { CoachProactiveRealizerService } from './coach-proactive-realizer.service';
 
 @Module({
   imports: [
@@ -59,6 +62,7 @@ import { PendingConversationActionService } from './pending-conversation-action.
     NutritionExecutionModule,
     ConversationRuntimeModule,
     ConversationRealizationModule,
+    AIModule,
   ],
   controllers: [AutomationController, CoachAdminController],
   providers: [
@@ -87,6 +91,8 @@ import { PendingConversationActionService } from './pending-conversation-action.
     CoachPlanningBothApplicationExecutorService,
     CurrentGoalCommitService,
     PendingConversationActionService,
+    CoachProactiveSchedulePolicy,
+    CoachProactiveRealizerService,
   ],
   exports: [
     AutomationService,

@@ -10,6 +10,7 @@ import { WorkerHeartbeatService } from './worker-heartbeat.service';
 import { WorkerIdentityService } from './worker-identity.service';
 import { ActivationJourneyService } from '../activation/activation-journey.service';
 import { SubscriptionLifecycleService } from '../subscriptions/subscription-lifecycle.service';
+import { AutomationService } from '../automation/automation.service';
 
 @Injectable()
 export class AutomationWorkerService extends BaseOutboxWorker {
@@ -20,6 +21,7 @@ export class AutomationWorkerService extends BaseOutboxWorker {
     identityService: WorkerIdentityService,
     private readonly activationJourney: ActivationJourneyService,
     private readonly subscriptionLifecycle: SubscriptionLifecycleService,
+    private readonly automation: AutomationService,
   ) {
     super(
       WORKER_NAME.AUTOMATION,
@@ -34,5 +36,6 @@ export class AutomationWorkerService extends BaseOutboxWorker {
   protected override async runMaintenance(at: Date): Promise<void> {
     await this.activationJourney.processDue(at);
     await this.subscriptionLifecycle.processDue(at);
+    await this.automation.materializeDueMessages(at);
   }
 }

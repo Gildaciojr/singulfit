@@ -20,6 +20,7 @@ describe('ConversationTurnContextBuilderService', () => {
   ) {
     const prisma = {
       conversation: { findFirst: jest.fn().mockResolvedValue(conversation) },
+      scheduledMessage: { findMany: jest.fn().mockResolvedValue([]) },
       coachProfileAcquisitionCycle: {
         findFirst: jest.fn().mockResolvedValue(null),
       },
@@ -196,6 +197,85 @@ describe('ConversationTurnContextBuilderService', () => {
     await expect(subject.service.build(input)).rejects.toThrow(
       'Conversa não encontrada',
     );
+  });
+
+  it.each([
+    [
+      'hidratação',
+      'Oi Gildácio, como está sua hidratação hoje? Quanto você já conseguiu beber?',
+      '1 litro',
+    ],
+    ['almoço', 'Oi Gildácio, já conseguiu almoçar?', 'ainda não'],
+    ['treino', 'Conseguiu treinar hoje? Como foi?', 'foi pesado'],
+  ] as const)(
+    'includes the recent proactive %s referent before a terse reply',
+    async (_referent, proactive, reply) => {
+      const subject = createSubject({ messages: [] });
+      subject.prisma.scheduledMessage.findMany.mockResolvedValueOnce([
+        {
+          content: proactive,
+          scheduledFor: new Date('2026-08-01T11:59:00.000Z'),
+        },
+      ]);
+
+      const result = await subject.service.build({ ...input, text: reply });
+
+      expect(result.humanContext.recentConversation).toEqual([
+        { direction: 'COACH', text: proactive },
+      ]);
+      expect(result.understandingInput.text).toBe(reply);
+    },
+  );
+
+  it('keeps a new explicit question dominant over older proactive context', async () => {
+    const subject = createSubject({ messages: [] });
+    subject.prisma.scheduledMessage.findMany.mockResolvedValueOnce([
+      {
+        content: 'Oi Gildácio, como está sua hidratação hoje?',
+        scheduledFor: new Date('2026-08-01T11:00:00.000Z'),
+      },
+    ]);
+
+    const result = await subject.service.build({
+      ...input,
+      text: 'qual é meu treino de amanhã?',
+    });
+
+    expect(result.understandingInput.text).toBe('qual é meu treino de amanhã?');
+    expect(result.humanContext.currentMessage).toBe(
+      'qual é meu treino de amanhã?',
+    );
+    expect(result.humanContext.recentConversation).toEqual([
+      {
+        direction: 'COACH',
+        text: 'Oi Gildácio, como está sua hidratação hoje?',
+      },
+    ]);
+  });
+
+  it('deduplicates an equivalent scheduled and conversation representation', async () => {
+    const text = 'Oi Gildácio, já conseguiu almoçar?';
+    const subject = createSubject({
+      messages: [
+        {
+          direction: MessageDirection.OUTBOUND,
+          content: text,
+          timestamp: new Date('2026-08-01T11:59:00.000Z'),
+        },
+      ],
+    });
+    subject.prisma.scheduledMessage.findMany.mockResolvedValueOnce([
+      {
+        content: text,
+        scheduledFor: new Date('2026-08-01T11:59:00.000Z'),
+      },
+    ]);
+
+    const result = await subject.service.build({ ...input, text: 'ainda não' });
+
+    expect(result.humanContext.recentConversation).toEqual([
+      { direction: 'COACH', text },
+    ]);
   });
 
   it('propagates a missing profile snapshot for runtime isolation', async () => {

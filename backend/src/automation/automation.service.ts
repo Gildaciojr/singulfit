@@ -21,6 +21,14 @@ import { EventBusService } from '../event-bus/event-bus.service';
 import { INTERNAL_EVENT } from '../event-bus/event-bus.constants';
 import { CoachIntelligenceService } from './coach-intelligence.service';
 import { BehavioralIntelligenceService } from '../behavior/behavioral-intelligence.service';
+import {
+  COACH_PROACTIVE_DAILY_CAP,
+  CoachProactiveSchedulePolicy,
+} from './coach-proactive-schedule.policy';
+import {
+  COACH_PROACTIVE_SOURCE,
+  type CoachProactiveSlot,
+} from './coach-proactive.contract';
 
 const AUTOMATION_CODES = new Set<string>(Object.values(AUTOMATION_RULE_CODES));
 
@@ -43,7 +51,90 @@ export class AutomationService {
     private readonly eventBus: EventBusService,
     private readonly coachIntelligence: CoachIntelligenceService,
     private readonly behavioralIntelligence: BehavioralIntelligenceService,
+    private readonly proactiveSchedule: CoachProactiveSchedulePolicy,
   ) {}
+
+  async materializeDueMessages(at = new Date()): Promise<{
+    readonly scanned: number;
+    readonly materialized: number;
+  }> {
+    const batchSize = 100;
+    let cursor: string | undefined;
+    let scanned = 0;
+    let materialized = 0;
+    while (true) {
+      const users = await this.prisma.user.findMany({
+        where: {
+          isActive: true,
+          automationPreference: { is: { remindersEnabled: true } },
+        },
+        select: {
+          id: true,
+          preferences: true,
+          automationPreference: true,
+        },
+        orderBy: { id: 'asc' },
+        take: batchSize,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      if (users.length === 0) {
+        return Object.freeze({ scanned, materialized });
+      }
+      scanned += users.length;
+      for (const user of users) {
+        const automation = user.automationPreference;
+        if (!automation?.remindersEnabled) continue;
+        try {
+          await this.subscriptionAccessService.requireAccess(user.id, at);
+          const experience = await this.coachIntelligence.getExperienceSignals(
+            user.id,
+            at,
+          );
+          if (!experience.canSendCoachMessage) continue;
+          const slots = this.proactiveSchedule.materializableSlots(
+            at,
+            user.preferences ?? {},
+          );
+          const range = this.proactiveSchedule.localDayRange(
+            at,
+            user.preferences?.timezone,
+          );
+          let dailyCount = await this.prisma.scheduledMessage.count({
+            where: {
+              userId: user.id,
+              status: { not: ScheduledMessageStatus.CANCELED },
+              scheduledFor: { gte: range.start, lt: range.end },
+              automationRule: {
+                code: {
+                  in: [
+                    AUTOMATION_RULE_CODES.GOOD_MORNING,
+                    AUTOMATION_RULE_CODES.DAILY_WORKOUT,
+                    AUTOMATION_RULE_CODES.MEAL_REMINDER,
+                    AUTOMATION_RULE_CODES.HYDRATION_REMINDER,
+                    AUTOMATION_RULE_CODES.DAILY_CHECK_IN,
+                  ],
+                },
+              },
+            },
+          });
+          for (const slot of slots) {
+            if (dailyCount >= COACH_PROACTIVE_DAILY_CAP) break;
+            if (!this.isRuleEnabled(slot.ruleCode, automation)) continue;
+            if (await this.materializeProactiveSlot(user.id, slot)) {
+              materialized += 1;
+              dailyCount += 1;
+            }
+          }
+        } catch {
+          // Falha isolada, falta de acesso ou contexto não bloqueia os demais usuários.
+        }
+      }
+      if (users.length < batchSize) {
+        return Object.freeze({ scanned, materialized });
+      }
+      cursor = users.at(-1)?.id;
+    }
+  }
 
   async getPreferences(userId: string) {
     await this.subscriptionsService.getProfileSubscription(userId);
@@ -674,6 +765,89 @@ export class AutomationService {
         userId,
       },
     });
+  }
+
+  private async materializeProactiveSlot(
+    userId: string,
+    slot: CoachProactiveSlot,
+  ): Promise<boolean> {
+    const rule = await this.prisma.automationRule.findUnique({
+      where: { code: slot.ruleCode },
+    });
+    if (!rule?.enabled) return false;
+    const existing = await this.prisma.scheduledMessage.findUnique({
+      where: {
+        userId_automationRuleId_scheduledFor: {
+          userId,
+          automationRuleId: rule.id,
+          scheduledFor: slot.scheduledFor,
+        },
+      },
+      select: { id: true },
+    });
+    if (existing) return false;
+
+    const realized = await this.coachService.generateProactiveContent(
+      userId,
+      slot,
+    );
+    try {
+      await this.prisma.$transaction(async (transaction) => {
+        const coachMessage = await transaction.coachMessage.upsert({
+          where: { idempotencyKey: realized.operationKey },
+          update: {},
+          create: {
+            userId,
+            type: 'FOLLOW_UP',
+            idempotencyKey: realized.operationKey,
+            content: realized.content,
+            context: {
+              source: COACH_PROACTIVE_SOURCE,
+              intent: slot.intent,
+              slotKey: slot.slotKey,
+              ruleCode: slot.ruleCode,
+            },
+            scheduledFor: slot.scheduledFor,
+          },
+        });
+        const scheduledMessage = await transaction.scheduledMessage.create({
+          data: {
+            userId,
+            automationRuleId: rule.id,
+            scheduledFor: slot.scheduledFor,
+            content: coachMessage.content,
+          },
+          include: { automationRule: true },
+        });
+        await this.eventBus.publish(
+          {
+            eventType: INTERNAL_EVENT.AUTOMATION_TRIGGERED,
+            aggregateType: 'SCHEDULED_MESSAGE',
+            aggregateId: scheduledMessage.id,
+            payload: {
+              scheduledMessageId: scheduledMessage.id,
+              userId,
+              automationRuleId: rule.id,
+              ruleCode: slot.ruleCode,
+              source: COACH_PROACTIVE_SOURCE,
+              intent: slot.intent,
+              slotKey: slot.slotKey,
+            },
+            availableAt: slot.scheduledFor,
+          },
+          transaction,
+        );
+      });
+      return true;
+    } catch (error: unknown) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        return false;
+      }
+      throw error;
+    }
   }
 
   private isRuleEnabled(

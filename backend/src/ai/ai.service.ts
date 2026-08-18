@@ -153,6 +153,7 @@ export class AIService {
 
   async createStandaloneJob(input: CreateStandaloneAIJobInput) {
     const standaloneTypes = new Set<AIJobType>([
+      AIJobType.TEXT,
       AIJobType.DIET,
       AIJobType.WORKOUT,
       AIJobType.PROGRESS,

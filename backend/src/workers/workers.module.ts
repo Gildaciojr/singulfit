@@ -17,6 +17,7 @@ import { ProductionModule } from '../production/production.module';
 import { RUNTIME_MODE } from '../production/runtime-mode';
 import { ActivationModule } from '../activation/activation.module';
 import { SubscriptionLifecycleModule } from '../subscriptions/subscription-lifecycle.module';
+import { AutomationModule } from '../automation/automation.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { SubscriptionLifecycleModule } from '../subscriptions/subscription-lifec
     ContextModule,
     ActivationModule,
     SubscriptionLifecycleModule,
+    AutomationModule,
     IntegrationEventsModule,
     OperationsModule,
   ],

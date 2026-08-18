@@ -7,6 +7,7 @@ import {
 import { CoachService } from './coach.service';
 import { CoachIntelligenceService } from './coach-intelligence.service';
 import type { CurrentNutritionPlanReaderService } from '../diet/current-nutrition-plan-reader.service';
+import type { CoachProactiveRealizerService } from './coach-proactive-realizer.service';
 
 describe('CoachService', () => {
   function createSubject() {
@@ -79,6 +80,12 @@ describe('CoachService', () => {
           adherenceScore: 88,
         }),
       },
+      userPreferences: {
+        findUnique: jest.fn().mockResolvedValue({
+          preferredTrainingTime: '18:00',
+          preferredMealTimes: [],
+        }),
+      },
     };
     const coachIntelligence = {
       generateCoachMessage: jest.fn().mockResolvedValue({
@@ -98,10 +105,18 @@ describe('CoachService', () => {
         ],
       }),
     };
+    const proactiveRealizer = {
+      realize: jest
+        .fn()
+        .mockImplementation((input: { fallback: string }) =>
+          Promise.resolve(input.fallback),
+        ),
+    };
     const service = new CoachService(
       prisma as unknown as PrismaService,
       coachIntelligence as unknown as CoachIntelligenceService,
       currentNutritionPlanReader as unknown as CurrentNutritionPlanReaderService,
+      proactiveRealizer as unknown as CoachProactiveRealizerService,
     );
 
     return {
@@ -109,6 +124,7 @@ describe('CoachService', () => {
       prisma,
       coachIntelligence,
       currentNutritionPlanReader,
+      proactiveRealizer,
     };
   }
 
@@ -250,5 +266,51 @@ describe('CoachService', () => {
     expect(content).toContain('emagrecimento');
     expect(content).toContain('Pode me contar com suas palavras');
     expect(content).not.toMatch(/\b[123]\./u);
+  });
+
+  it('uses the first real name and a fact-safe fallback for proactive hydration', async () => {
+    const subject = createSubject();
+    subject.prisma.user.findUnique.mockResolvedValueOnce({
+      name: 'Gildácio Júnior',
+      fitnessProfile: { goal: 'HEALTH' },
+      goalClassification: { goal: 'HEALTH' },
+    });
+
+    const result = await subject.service.generateProactiveContent('user-id', {
+      intent: 'HYDRATION_CHECK',
+      slotKey: 'HYDRATION_MORNING',
+      ruleCode: AUTOMATION_RULE_CODES.HYDRATION_REMINDER,
+      scheduledFor: new Date('2026-08-18T13:30:00.000Z'),
+      localTime: '10:30',
+    });
+
+    expect(result.content).toBe(
+      'Oi, Gildácio! Como está sua hidratação hoje? Quanto você já conseguiu beber?',
+    );
+    expect(result.content).not.toContain('atleta');
+    expect(result.operationKey).toBe(
+      'proactive:user-id:HYDRATION_REMINDER:HYDRATION_MORNING:2026-08-18T13:30:00.000Z',
+    );
+    expect(subject.proactiveRealizer.realize).toHaveBeenCalledWith(
+      expect.objectContaining({ preferredName: 'Gildácio' }),
+    );
+  });
+
+  it('does not claim an active nutrition plan when the canonical reader returns absence', async () => {
+    const subject = createSubject();
+    subject.currentNutritionPlanReader.getCurrent.mockResolvedValueOnce(null);
+
+    const result = await subject.service.generateProactiveContent('user-id', {
+      intent: 'MEAL_PLAN_CHECK',
+      slotKey: 'MEAL_PLAN',
+      ruleCode: AUTOMATION_RULE_CODES.MEAL_REMINDER,
+      scheduledFor: new Date('2026-08-19T17:00:00.000Z'),
+      localTime: '14:00',
+    });
+
+    expect(result.content).toBe(
+      'Oi, SingulFit! Como está sua alimentação hoje?',
+    );
+    expect(result.content).not.toContain('seu plano');
   });
 });

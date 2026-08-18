@@ -84,6 +84,43 @@ describe('AIService', () => {
     );
   });
 
+  it('explicitly allows a standalone text job for proactive realization', async () => {
+    const createdJob = {
+      id: 'text-job-id',
+      type: AIJobType.TEXT,
+      promptVersion: { id: 'prompt-id', prompt: 'Prompt' },
+    };
+    const transaction = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      aIJob: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue(createdJob),
+      },
+    };
+    const service = createService({
+      prisma: {
+        $transaction: jest.fn(
+          (callback: (client: typeof transaction) => unknown) =>
+            callback(transaction),
+        ),
+      },
+      promptService: {
+        getActive: jest
+          .fn()
+          .mockResolvedValue({ id: 'prompt-id', prompt: 'Prompt' }),
+      },
+    });
+
+    await expect(
+      service.createStandaloneJob({
+        userId: 'user-id',
+        type: AIJobType.TEXT,
+        promptName: 'coach_proactive_outreach',
+      }),
+    ).resolves.toBe(createdJob);
+  });
+
   it('creates an idempotent message job and reserves image quota atomically', async () => {
     const createdJob = {
       id: 'image-job-id',

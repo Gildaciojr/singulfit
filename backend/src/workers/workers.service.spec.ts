@@ -77,6 +77,12 @@ describe('dedicated workers', () => {
         {
           processDue: jest.fn().mockResolvedValue({ scanned: 0, processed: 0 }),
         } as import('../subscriptions/subscription-lifecycle.service').SubscriptionLifecycleService,
+        {
+          materializeDueMessages: jest.fn().mockResolvedValue({
+            scanned: 0,
+            materialized: 0,
+          }),
+        } as import('../automation/automation.service').AutomationService,
       ),
     ];
 
