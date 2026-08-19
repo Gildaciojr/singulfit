@@ -8,6 +8,7 @@ import { CoachService } from './coach.service';
 import { CoachIntelligenceService } from './coach-intelligence.service';
 import type { CurrentNutritionPlanReaderService } from '../diet/current-nutrition-plan-reader.service';
 import type { CoachProactiveRealizerService } from './coach-proactive-realizer.service';
+import type { CurrentWorkoutPlanReaderService } from '../workout/v2/current-workout-plan-reader.service';
 
 describe('CoachService', () => {
   function createSubject() {
@@ -112,11 +113,31 @@ describe('CoachService', () => {
           Promise.resolve(input.fallback),
         ),
     };
+    const workoutSession = {
+      sessionKey: 'session-2',
+      sequence: 2,
+      label: 'Costas e bíceps',
+      estimatedDurationMinutes: 60,
+      blocks: [],
+    };
+    const currentWorkoutPlanReader = {
+      read: jest.fn().mockResolvedValue({
+        status: 'AVAILABLE',
+        plan: {
+          document: { title: 'Plano V2' },
+        },
+      }),
+      select: jest.fn().mockReturnValue({
+        kind: 'SESSION',
+        session: workoutSession,
+      }),
+    };
     const service = new CoachService(
       prisma as unknown as PrismaService,
       coachIntelligence as unknown as CoachIntelligenceService,
       currentNutritionPlanReader as unknown as CurrentNutritionPlanReaderService,
       proactiveRealizer as unknown as CoachProactiveRealizerService,
+      currentWorkoutPlanReader as unknown as CurrentWorkoutPlanReaderService,
     );
 
     return {
@@ -125,6 +146,7 @@ describe('CoachService', () => {
       coachIntelligence,
       currentNutritionPlanReader,
       proactiveRealizer,
+      currentWorkoutPlanReader,
     };
   }
 
@@ -313,4 +335,50 @@ describe('CoachService', () => {
     );
     expect(result.content).not.toContain('seu plano');
   });
+
+  it('uses the confirmed Workout V2 session for the proactive workout check', async () => {
+    const subject = createSubject();
+    const scheduledFor = new Date('2026-08-18T22:00:00.000Z');
+
+    const result = await subject.service.generateProactiveContent('user-id', {
+      intent: 'WORKOUT_CHECK',
+      slotKey: 'WORKOUT',
+      ruleCode: AUTOMATION_RULE_CODES.DAILY_WORKOUT,
+      scheduledFor,
+      localTime: '19:00',
+    });
+
+    expect(result?.content).toBe(
+      'Oi, SingulFit! Conseguiu fazer a sessão 2 — Costas e bíceps hoje? Como foi?',
+    );
+    expect(subject.currentWorkoutPlanReader.select).toHaveBeenCalledWith(
+      expect.anything(),
+      'hoje',
+      scheduledFor,
+    );
+    expect(subject.proactiveRealizer.realize).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workoutPlanSummary: 'Sessão 2: Costas e bíceps (60 min)',
+      }),
+    );
+  });
+
+  it.each(['REST_DAY', 'CALENDAR_UNAVAILABLE'] as const)(
+    'does not create a proactive workout check for %s',
+    async (kind) => {
+      const subject = createSubject();
+      subject.currentWorkoutPlanReader.select.mockReturnValueOnce({ kind });
+
+      await expect(
+        subject.service.generateProactiveContent('user-id', {
+          intent: 'WORKOUT_CHECK',
+          slotKey: 'WORKOUT',
+          ruleCode: AUTOMATION_RULE_CODES.DAILY_WORKOUT,
+          scheduledFor: new Date('2026-08-18T22:00:00.000Z'),
+          localTime: '19:00',
+        }),
+      ).resolves.toBeNull();
+      expect(subject.proactiveRealizer.realize).not.toHaveBeenCalled();
+    },
+  );
 });

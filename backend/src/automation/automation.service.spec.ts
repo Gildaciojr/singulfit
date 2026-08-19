@@ -570,6 +570,41 @@ describe('AutomationService', () => {
     expect(subject.eventBus.publish).not.toHaveBeenCalled();
   });
 
+  it('does not persist or publish a workout slot without calendar evidence', async () => {
+    const subject = createSubject();
+    const scheduledFor = new Date('2026-08-18T22:00:00.000Z');
+    subject.prisma.user.findMany.mockResolvedValue([
+      {
+        id: 'user-id',
+        preferences: { timezone: 'America/Sao_Paulo' },
+        automationPreference: subject.preferences,
+      },
+    ]);
+    subject.coachService.generateProactiveContent.mockResolvedValueOnce(null);
+    Reflect.set(subject.service, 'proactiveSchedule', {
+      materializableSlots: jest.fn().mockReturnValue([
+        {
+          intent: 'WORKOUT_CHECK',
+          slotKey: 'WORKOUT',
+          ruleCode: AUTOMATION_RULE_CODES.DAILY_WORKOUT,
+          scheduledFor,
+          localTime: '19:00',
+        },
+      ]),
+      localDayRange: jest.fn().mockReturnValue({
+        start: new Date('2026-08-18T03:00:00.000Z'),
+        end: new Date('2026-08-19T03:00:00.000Z'),
+      }),
+    });
+
+    await expect(
+      subject.service.materializeDueMessages(scheduledFor),
+    ).resolves.toEqual({ scanned: 1, materialized: 0 });
+    expect(subject.transaction.coachMessage.upsert).not.toHaveBeenCalled();
+    expect(subject.transaction.scheduledMessage.create).not.toHaveBeenCalled();
+    expect(subject.eventBus.publish).not.toHaveBeenCalled();
+  });
+
   it.each([
     [
       'lunch, hydration and workout',

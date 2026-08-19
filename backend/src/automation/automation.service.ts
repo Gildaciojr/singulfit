@@ -777,6 +777,7 @@ export class AutomationService {
       userId,
       slot,
     );
+    if (!realized) return false;
     try {
       await this.prisma.$transaction(async (transaction) => {
         const coachMessage = await transaction.coachMessage.upsert({

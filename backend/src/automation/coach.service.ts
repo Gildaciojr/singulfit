@@ -15,6 +15,8 @@ import {
   type CoachProactiveSlot,
 } from './coach-proactive.contract';
 import { CoachProactiveRealizerService } from './coach-proactive-realizer.service';
+import { CurrentWorkoutPlanReaderService } from '../workout/v2/current-workout-plan-reader.service';
+import type { WorkoutSessionV2 } from '../workout/v2/workout-plan-v2.contract';
 
 const GOAL_LABELS: Record<string, string> = {
   WEIGHT_LOSS: 'emagrecimento',
@@ -39,6 +41,7 @@ export class CoachService {
     private readonly coachIntelligence: CoachIntelligenceService,
     private readonly currentNutritionPlanReader: CurrentNutritionPlanReaderService,
     private readonly proactiveRealizer: CoachProactiveRealizerService,
+    private readonly currentWorkoutPlanReader: CurrentWorkoutPlanReaderService,
   ) {}
 
   async generateContent(
@@ -166,7 +169,10 @@ export class CoachService {
   async generateProactiveContent(
     userId: string,
     slot: CoachProactiveSlot,
-  ): Promise<{ readonly content: string; readonly operationKey: string }> {
+  ): Promise<{
+    readonly content: string;
+    readonly operationKey: string;
+  } | null> {
     const [user, workout, nutritionPlan, preferences] = await Promise.all([
       this.prisma.user.findUnique({
         where: { id: userId },
@@ -176,20 +182,32 @@ export class CoachService {
           goalClassification: { select: { goal: true } },
         },
       }),
-      this.prisma.workoutPlan.findFirst({
-        where: { userId, status: WorkoutStatus.ACTIVE },
-        select: { title: true },
-        orderBy: { generatedAt: 'desc' },
-      }),
+      this.currentWorkoutPlanReader.read(userId),
       this.currentNutritionPlanReader.getCurrent(userId),
       this.prisma.userPreferences.findUnique({ where: { userId } }),
     ]);
+    const workoutSession =
+      slot.intent === COACH_PROACTIVE_INTENTS.WORKOUT_CHECK &&
+      workout.status === 'AVAILABLE'
+        ? this.currentWorkoutPlanReader.select(
+            workout.plan,
+            'hoje',
+            slot.scheduledFor,
+          )
+        : null;
+    if (
+      slot.intent === COACH_PROACTIVE_INTENTS.WORKOUT_CHECK &&
+      workoutSession?.kind !== 'SESSION'
+    ) {
+      return null;
+    }
     const preferredName = user?.name?.trim().split(/\s+/u, 1)[0] || null;
     const operationKey = `proactive:${userId}:${slot.ruleCode}:${slot.slotKey}:${slot.scheduledFor.toISOString()}`;
     const fallback = this.proactiveFallback(
       preferredName,
       slot.intent,
       nutritionPlan !== null,
+      workoutSession?.kind === 'SESSION' ? workoutSession.session : null,
     );
     const realization: CoachProactiveRealizationInput = {
       userId,
@@ -201,7 +219,12 @@ export class CoachService {
       goal:
         user?.goalClassification?.goal ?? user?.fitnessProfile?.goal ?? null,
       nutritionPlanSummary: nutritionPlan?.title ?? null,
-      workoutPlanSummary: workout?.title ?? null,
+      workoutPlanSummary:
+        workoutSession?.kind === 'SESSION'
+          ? this.workoutSessionSummary(workoutSession.session)
+          : workout.status === 'AVAILABLE'
+            ? workout.plan.document.title
+            : null,
       trainingTime: preferences?.preferredTrainingTime ?? null,
       mealTimes: preferences?.preferredMealTimes ?? [],
       fallback,
@@ -280,6 +303,7 @@ export class CoachService {
     preferredName: string | null,
     intent: CoachProactiveRealizationInput['intent'],
     nutritionPlanAvailable: boolean,
+    workoutSession: WorkoutSessionV2 | null,
   ): string {
     const greeting = preferredName ? `Oi, ${preferredName}!` : 'Oi!';
     switch (intent) {
@@ -298,10 +322,16 @@ export class CoachService {
       case COACH_PROACTIVE_INTENTS.DINNER_CHECK:
         return `${greeting} Já jantou? Como ficou sua alimentação hoje à noite?`;
       case COACH_PROACTIVE_INTENTS.WORKOUT_CHECK:
-        return `${greeting} Conseguiu treinar hoje? Como foi?`;
+        return workoutSession
+          ? `${greeting} Conseguiu fazer a sessão ${workoutSession.sequence} — ${workoutSession.label} hoje? Como foi?`
+          : `${greeting} Como foi seu treino hoje?`;
       case COACH_PROACTIVE_INTENTS.DAILY_CHECK_IN:
         return `${greeting} Como estão sua energia e sua rotina hoje?`;
     }
+  }
+
+  private workoutSessionSummary(session: WorkoutSessionV2): string {
+    return `Sessão ${session.sequence}: ${session.label} (${session.estimatedDurationMinutes} min)`;
   }
 
   private workoutReminder(
