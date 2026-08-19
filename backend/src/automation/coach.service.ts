@@ -11,6 +11,7 @@ import type { CurrentNutritionPlan } from '../diet/current-nutrition-plan-reader
 import type { NutritionPlanMeal } from '../diet/v2/nutrition-plan-v2.contract';
 import {
   COACH_PROACTIVE_INTENTS,
+  type CoachProactiveContentResult,
   type CoachProactiveRealizationInput,
   type CoachProactiveSlot,
 } from './coach-proactive.contract';
@@ -169,10 +170,7 @@ export class CoachService {
   async generateProactiveContent(
     userId: string,
     slot: CoachProactiveSlot,
-  ): Promise<{
-    readonly content: string;
-    readonly operationKey: string;
-  } | null> {
+  ): Promise<CoachProactiveContentResult | null> {
     const [user, workout, nutritionPlan, preferences] = await Promise.all([
       this.prisma.user.findUnique({
         where: { id: userId },
@@ -232,6 +230,18 @@ export class CoachService {
     return Object.freeze({
       content: await this.proactiveRealizer.realize(realization),
       operationKey,
+      context: Object.freeze({
+        workoutPlanId:
+          workout.status === 'AVAILABLE' ? workout.plan.aggregateId : null,
+        workoutSessionSequence:
+          workoutSession?.kind === 'SESSION'
+            ? workoutSession.session.sequence
+            : null,
+        workoutSessionLabel:
+          workoutSession?.kind === 'SESSION'
+            ? workoutSession.session.label
+            : null,
+      }),
     });
   }
 

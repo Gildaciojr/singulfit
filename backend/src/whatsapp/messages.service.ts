@@ -19,6 +19,7 @@ export interface CreateInboundMessageInput {
   externalMessageId: string;
   type: MessageType;
   content: string;
+  replyToExternalMessageId?: string;
   remoteJid: string;
   timestamp: Date;
   mediaUrl?: string;
@@ -158,6 +159,7 @@ export class MessagesService {
             content: data.content.trim(),
             instanceName: data.instanceName,
             externalMessageId: data.externalMessageId,
+            replyToExternalMessageId: data.replyToExternalMessageId,
             remoteJid: data.remoteJid,
             timestamp: data.timestamp,
             mediaUrl: data.mediaUrl,
@@ -287,7 +289,9 @@ export class MessagesService {
       message.direction !== MessageDirection.INBOUND ||
       message.type !== data.type ||
       message.content !== data.content.trim() ||
-      message.remoteJid !== data.remoteJid
+      message.remoteJid !== data.remoteJid ||
+      message.replyToExternalMessageId !==
+        (data.replyToExternalMessageId ?? null)
     ) {
       throw new ConflictException(
         'ID externo da Evolution já utilizado por outra mensagem',

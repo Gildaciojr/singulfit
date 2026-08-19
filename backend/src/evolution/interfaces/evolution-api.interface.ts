@@ -21,6 +21,7 @@ export interface EvolutionInboundMessage {
   messageTimestamp: Date;
   messageType: 'TEXT' | 'IMAGE' | 'AUDIO' | 'DOCUMENT';
   content: string;
+  replyToExternalMessageId?: string;
   mediaUrl?: string;
   mediaBase64?: string;
   mimeType?: string;

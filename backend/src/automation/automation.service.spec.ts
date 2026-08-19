@@ -49,6 +49,9 @@ describe('AutomationService', () => {
     };
     const transaction = {
       $queryRaw: jest.fn().mockResolvedValue([{ locked: true }]),
+      conversation: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'conversation-id' }),
+      },
       scheduledMessage: {
         upsert: jest.fn().mockResolvedValue(scheduledMessage),
         create: jest.fn().mockResolvedValue(scheduledMessage),
@@ -146,6 +149,11 @@ describe('AutomationService', () => {
       generateProactiveContent: jest.fn().mockResolvedValue({
         content: 'Mensagem proativa natural',
         operationKey: 'proactive-operation-key',
+        context: {
+          workoutPlanId: 'workout-plan-id',
+          workoutSessionSequence: 2,
+          workoutSessionLabel: 'Costas e bíceps',
+        },
       }),
       generateOnboardingKickoff: jest
         .fn()
@@ -382,6 +390,15 @@ describe('AutomationService', () => {
       number: '+5511999999999',
       text: 'Treino personalizado',
     });
+    expect(subject.prisma.scheduledMessage.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: 'scheduled-id' }),
+        data: expect.objectContaining({
+          status: ScheduledMessageStatus.SENT,
+          externalMessageId: 'external-id',
+        }),
+      }),
+    );
   });
 
   it('persists a failed status when Evolution rejects the message', async () => {
@@ -538,6 +555,30 @@ describe('AutomationService', () => {
         }),
       }),
       subject.transaction,
+    );
+    expect(subject.transaction.coachMessage.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          context: expect.objectContaining({
+            source: 'COACH_PROACTIVE_V1',
+            workoutPlanId: 'workout-plan-id',
+            workoutSessionSequence: 2,
+          }),
+        }),
+      }),
+    );
+    expect(subject.transaction.scheduledMessage.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          conversationId: 'conversation-id',
+          coachMessageId: 'coach-message-id',
+          responseExpiresAt: new Date('2026-08-19T13:30:00.000Z'),
+          context: expect.objectContaining({
+            source: 'COACH_PROACTIVE_V1',
+            workoutPlanId: 'workout-plan-id',
+          }),
+        }),
+      }),
     );
     expect(subject.evolutionGateway.sendText).not.toHaveBeenCalled();
     expect(

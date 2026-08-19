@@ -160,6 +160,7 @@ describe('MessagesService', () => {
       phoneNumber: '+5511999999999',
       instanceName: 'singulfit',
       externalMessageId: 'wamid-image',
+      replyToExternalMessageId: 'proactive-outbound-wa-id',
       type: MessageType.IMAGE,
       content: 'Meu almoço',
       remoteJid: '5511999999999@s.whatsapp.net',
@@ -177,6 +178,7 @@ describe('MessagesService', () => {
       data: expect.objectContaining({
         instanceName: 'singulfit',
         externalMessageId: 'wamid-image',
+        replyToExternalMessageId: 'proactive-outbound-wa-id',
         mediaUrl: 'https://media.example.com/image.enc',
         mimeType: 'image/jpeg',
         fileSize: 2048,

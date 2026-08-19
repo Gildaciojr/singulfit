@@ -187,6 +187,24 @@ describe('EvolutionWebhookService', () => {
     );
   });
 
+  it('preserves the explicit WhatsApp reply id for proactive correlation', async () => {
+    const subject = createSubject();
+
+    await process(subject.service, {
+      extendedTextMessage: {
+        text: 'Consegui fazer tudo',
+        contextInfo: { stanzaId: 'proactive-outbound-wa-id' },
+      },
+    });
+
+    expect(subject.messagesService.createInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: 'Consegui fazer tudo',
+        replyToExternalMessageId: 'proactive-outbound-wa-id',
+      }),
+    );
+  });
+
   it.each([
     {
       label: 'image',

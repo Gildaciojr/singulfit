@@ -32,6 +32,7 @@ import {
 
 const AUTOMATION_CODES = new Set<string>(Object.values(AUTOMATION_RULE_CODES));
 export const COACH_PROACTIVE_MIN_GAP_MINUTES = 180;
+export const COACH_PROACTIVE_RESPONSE_WINDOW_HOURS = 24;
 
 type ScheduledMessageWithRule = Prisma.ScheduledMessageGetPayload<{
   include: {
@@ -696,7 +697,7 @@ export class AutomationService {
     }
 
     try {
-      await this.evolutionGateway.sendText({
+      const sent = await this.evolutionGateway.sendText({
         number: claimed.message.user.phoneE164 ?? claimed.message.user.phone,
         text: claimed.message.content,
       });
@@ -707,6 +708,7 @@ export class AutomationService {
         },
         data: {
           status: ScheduledMessageStatus.SENT,
+          externalMessageId: sent.externalMessageId,
           leaseExpiresAt: null,
         },
       });
@@ -780,6 +782,11 @@ export class AutomationService {
     if (!realized) return false;
     try {
       await this.prisma.$transaction(async (transaction) => {
+        const conversation = await transaction.conversation.findFirst({
+          where: { userId, status: 'ACTIVE' },
+          orderBy: [{ lastMessageAt: 'desc' }, { startedAt: 'desc' }],
+          select: { id: true },
+        });
         const coachMessage = await transaction.coachMessage.upsert({
           where: { idempotencyKey: realized.operationKey },
           update: {},
@@ -793,6 +800,7 @@ export class AutomationService {
               intent: slot.intent,
               slotKey: slot.slotKey,
               ruleCode: slot.ruleCode,
+              ...realized.context,
             },
             scheduledFor: slot.scheduledFor,
           },
@@ -803,6 +811,19 @@ export class AutomationService {
             automationRuleId: rule.id,
             scheduledFor: slot.scheduledFor,
             content: coachMessage.content,
+            conversationId: conversation?.id,
+            coachMessageId: coachMessage.id,
+            responseExpiresAt: new Date(
+              slot.scheduledFor.getTime() +
+                COACH_PROACTIVE_RESPONSE_WINDOW_HOURS * 3_600_000,
+            ),
+            context: {
+              source: COACH_PROACTIVE_SOURCE,
+              intent: slot.intent,
+              slotKey: slot.slotKey,
+              ruleCode: slot.ruleCode,
+              ...realized.context,
+            },
           },
           include: { automationRule: true },
         });

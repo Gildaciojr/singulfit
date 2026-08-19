@@ -365,6 +365,15 @@ enum ScheduledMessageStatus {
   CANCELED
 }
 
+enum CoachProactiveWorkoutOutcome {
+  COMPLETED
+  PARTIAL
+  SKIPPED
+  DEFERRED
+  ISSUE_REPORTED
+  UNKNOWN
+}
+
 enum EnergyLevel {
   LOW
   MEDIUM
@@ -1520,23 +1529,36 @@ model UserAutomationPreference {
 }
 
 model ScheduledMessage {
-  id               String                 @id @default(uuid())
-  userId           String
-  automationRuleId String
-  scheduledFor     DateTime
-  status           ScheduledMessageStatus @default(PENDING)
-  content          String
-  attempts         Int                    @default(0)
-  leaseExpiresAt   DateTime?
-  createdAt        DateTime               @default(now())
+  id                String                        @id @default(uuid())
+  userId            String
+  automationRuleId  String
+  conversationId    String?
+  coachMessageId    String?                       @unique
+  scheduledFor      DateTime
+  status            ScheduledMessageStatus        @default(PENDING)
+  content           String
+  context           Json                          @default("{}")
+  externalMessageId String?                       @unique
+  responseMessageId String?                       @unique
+  responseExpiresAt DateTime?
+  responseOutcome   CoachProactiveWorkoutOutcome?
+  respondedAt       DateTime?
+  attempts          Int                           @default(0)
+  leaseExpiresAt    DateTime?
+  createdAt         DateTime                      @default(now())
 
-  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  automationRule AutomationRule @relation(fields: [automationRuleId], references: [id], onDelete: Restrict)
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  automationRule  AutomationRule @relation(fields: [automationRuleId], references: [id], onDelete: Restrict)
+  conversation    Conversation?  @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  coachMessage    CoachMessage?  @relation("ScheduledMessageCoach", fields: [coachMessageId], references: [id], onDelete: SetNull)
+  responseMessage Message?       @relation("ScheduledMessageResponse", fields: [responseMessageId], references: [id], onDelete: SetNull)
 
   @@unique([userId, automationRuleId, scheduledFor])
   @@index([status, scheduledFor])
   @@index([status, leaseExpiresAt])
   @@index([userId, scheduledFor])
+  @@index([conversationId, responseExpiresAt])
+  @@index([userId, responseOutcome, respondedAt])
   @@map("scheduled_messages")
 }
 
@@ -1793,6 +1815,7 @@ model Conversation {
   meals                      Meal[]
   outboundMessages           OutboundMessage[]
   pendingConversationActions PendingConversationAction[]
+  scheduledMessages          ScheduledMessage[]
 
   @@index([userId, status])
   @@index([subscriptionId])
@@ -1803,21 +1826,22 @@ model Conversation {
 }
 
 model Message {
-  id                String           @id @default(uuid())
-  conversationId    String
-  direction         MessageDirection
-  type              MessageType
-  content           String
-  instanceName      String           @default("INTERNAL")
-  externalMessageId String?
-  remoteJid         String?
-  timestamp         DateTime         @default(now())
-  mediaUrl          String?
-  mimeType          String?
-  fileSize          Int?
-  deliveredAt       DateTime?
-  readAt            DateTime?
-  createdAt         DateTime         @default(now())
+  id                       String           @id @default(uuid())
+  conversationId           String
+  direction                MessageDirection
+  type                     MessageType
+  content                  String
+  instanceName             String           @default("INTERNAL")
+  externalMessageId        String?
+  replyToExternalMessageId String?
+  remoteJid                String?
+  timestamp                DateTime         @default(now())
+  mediaUrl                 String?
+  mimeType                 String?
+  fileSize                 Int?
+  deliveredAt              DateTime?
+  readAt                   DateTime?
+  createdAt                DateTime         @default(now())
 
   conversation             Conversation                @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   aiJobs                   AIJob[]
@@ -1827,6 +1851,7 @@ model Message {
   aiResponseEvaluations    AIResponseEvaluation[]
   pendingActionsOriginated PendingConversationAction[] @relation("PendingActionSourceMessage")
   pendingActionsConsumed   PendingConversationAction[] @relation("PendingActionConsumerMessage")
+  proactiveResponse        ScheduledMessage?           @relation("ScheduledMessageResponse")
 
   @@unique([instanceName, externalMessageId])
   @@index([conversationId, createdAt])
@@ -2885,7 +2910,8 @@ model CoachMessage {
   scheduledFor   DateTime?
   createdAt      DateTime         @default(now())
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scheduledMessage ScheduledMessage? @relation("ScheduledMessageCoach")
 
   @@index([userId, generatedAt])
   @@index([type, generatedAt])

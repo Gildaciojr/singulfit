@@ -45,3 +45,13 @@ export interface CoachProactiveRealizationInput {
   readonly mealTimes: unknown;
   readonly fallback: string;
 }
+
+export interface CoachProactiveContentResult {
+  readonly content: string;
+  readonly operationKey: string;
+  readonly context: {
+    readonly workoutPlanId: string | null;
+    readonly workoutSessionSequence: number | null;
+    readonly workoutSessionLabel: string | null;
+  };
+}

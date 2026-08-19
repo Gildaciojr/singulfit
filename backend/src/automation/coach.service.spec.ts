@@ -124,6 +124,7 @@ describe('CoachService', () => {
       read: jest.fn().mockResolvedValue({
         status: 'AVAILABLE',
         plan: {
+          aggregateId: 'workout-plan-id',
           document: { title: 'Plano V2' },
         },
       }),
@@ -351,6 +352,11 @@ describe('CoachService', () => {
     expect(result?.content).toBe(
       'Oi, SingulFit! Conseguiu fazer a sessão 2 — Costas e bíceps hoje? Como foi?',
     );
+    expect(result?.context).toEqual({
+      workoutPlanId: 'workout-plan-id',
+      workoutSessionSequence: 2,
+      workoutSessionLabel: 'Costas e bíceps',
+    });
     expect(subject.currentWorkoutPlanReader.select).toHaveBeenCalledWith(
       expect.anything(),
       'hoje',

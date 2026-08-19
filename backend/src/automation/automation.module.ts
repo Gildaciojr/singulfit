@@ -44,6 +44,7 @@ import { PendingConversationActionService } from './pending-conversation-action.
 import { AIModule } from '../ai/ai.module';
 import { CoachProactiveSchedulePolicy } from './coach-proactive-schedule.policy';
 import { CoachProactiveRealizerService } from './coach-proactive-realizer.service';
+import { CoachProactiveResponseService } from './coach-proactive-response.service';
 
 @Module({
   imports: [
@@ -93,6 +94,7 @@ import { CoachProactiveRealizerService } from './coach-proactive-realizer.servic
     PendingConversationActionService,
     CoachProactiveSchedulePolicy,
     CoachProactiveRealizerService,
+    CoachProactiveResponseService,
   ],
   exports: [
     AutomationService,
@@ -100,6 +102,7 @@ import { CoachProactiveRealizerService } from './coach-proactive-realizer.servic
     CoachService,
     CoachIntelligenceService,
     CoachExperienceService,
+    CoachProactiveResponseService,
   ],
 })
 export class AutomationModule {}

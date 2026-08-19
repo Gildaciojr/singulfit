@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit, Optional } from '@nestjs/common';
 import {
   MediaType,
   OutboxEvent,
@@ -22,6 +22,7 @@ import { INTERNAL_EVENT } from './event-bus.constants';
 import { EventHandlerRegistry } from './event-handler.registry';
 import { ProfileAcquisitionInternalRolloutService } from '../context/profile-acquisition/profile-acquisition-internal-rollout.service';
 import { SubscriptionLifecycleService } from '../subscriptions/subscription-lifecycle.service';
+import { CoachProactiveResponseService } from '../automation/coach-proactive-response.service';
 
 @Injectable()
 export class IntegrationEventHandlersService implements OnModuleInit {
@@ -39,6 +40,8 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     private readonly activationOnboardingService: ActivationOnboardingService,
     private readonly profileAcquisitionRollout: ProfileAcquisitionInternalRolloutService,
     private readonly subscriptionLifecycle: SubscriptionLifecycleService,
+    @Optional()
+    private readonly proactiveResponse?: CoachProactiveResponseService,
   ) {}
 
   onModuleInit(): void {
@@ -128,9 +131,12 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     const result =
       await this.activationOnboardingService.processTextMessage(input);
 
-    if (!result.handled) {
-      await this.coachCommandService.processTextMessage(input);
+    if (result.handled) return;
+    if (this.proactiveResponse) {
+      const proactive = await this.proactiveResponse.capture(input);
+      if (proactive.handled) return;
     }
+    await this.coachCommandService.processTextMessage(input);
   }
 
   private async processMedia(event: OutboxEvent): Promise<void> {

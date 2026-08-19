@@ -332,6 +332,7 @@ export class EvolutionWebhookService {
       externalMessageId: inboundMessage.externalMessageId,
       type: MessageType[inboundMessage.messageType],
       content: inboundMessage.content,
+      replyToExternalMessageId: inboundMessage.replyToExternalMessageId,
       remoteJid: inboundMessage.remoteJid,
       timestamp: inboundMessage.messageTimestamp,
       mediaUrl: inboundMessage.mediaUrl,
@@ -436,8 +437,26 @@ export class EvolutionWebhookService {
       remoteJid,
       fromMe: entry.key.fromMe === true,
       messageTimestamp: this.parseTimestamp(entry.messageTimestamp),
+      replyToExternalMessageId: this.replyToExternalMessageId(message),
       ...parsedContent,
     };
+  }
+
+  private replyToExternalMessageId(
+    message: Record<string, unknown>,
+  ): string | undefined {
+    const candidates = [
+      this.asRecord(message.extendedTextMessage),
+      this.asRecord(message.imageMessage),
+      this.asRecord(message.audioMessage),
+      this.asRecord(message.documentMessage),
+    ];
+    for (const candidate of candidates) {
+      const context = this.asRecord(candidate?.contextInfo);
+      const stanzaId = this.optionalString(context?.stanzaId);
+      if (stanzaId) return stanzaId;
+    }
+    return undefined;
   }
 
   private parseMessageContent(
