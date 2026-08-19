@@ -108,6 +108,27 @@ describe('PlanningExecutionRoutePolicyService', () => {
     expect(subject.nutritionPilot.evaluate).not.toHaveBeenCalled();
   });
 
+  it('selects Workout V2 for plan mutations without an admin or pilot gate', () => {
+    const subject = setup('NOT_AUTHORIZED');
+
+    expect(
+      subject.policy.select({
+        userId: 'ordinary-user',
+        profileId: 'profile-id',
+        decision: decision('UPDATE_WORKOUT_PLAN'),
+        generationInput: null,
+        workoutMutation: true,
+      }),
+    ).toEqual({
+      nutrition: null,
+      workout: 'V2',
+      reason: 'WORKOUT_V2_PLAN_MUTATION',
+      nutritionPilotStatus: null,
+      suppressNutritionShadow: false,
+    });
+    expect(subject.nutritionPilot.evaluate).not.toHaveBeenCalled();
+  });
+
   it('keeps BOTH entirely Legacy while cross-domain atomicity is pending', () => {
     const subject = setup('ELIGIBLE');
 

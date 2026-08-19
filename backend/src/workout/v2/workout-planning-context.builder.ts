@@ -115,6 +115,7 @@ export class WorkoutPlanningContextBuilder {
       previousPlan: input.previousPlan
         ? this.previousPlan(input.previousPlan)
         : null,
+      mutation: recognized.mutation ?? null,
       lifecyclePurpose: recognized.purpose ?? 'CREATION',
     });
   }
@@ -387,6 +388,27 @@ export class WorkoutPlanningContextBuilder {
         plan.sessions.map((session) => session.label),
       ),
       validationStatus: plan.validation.status,
+      sessions: Object.freeze(
+        plan.sessions.map((session) =>
+          Object.freeze({
+            sessionKey: session.sessionKey,
+            sequence: session.sequence,
+            label: session.label,
+            activities: Object.freeze(
+              session.blocks.flatMap((block) =>
+                block.activities.map((activity) =>
+                  Object.freeze({
+                    activityKey: activity.activityKey,
+                    name: activity.name,
+                    movementPattern: activity.movementPattern,
+                    equipment: Object.freeze([...activity.equipment]),
+                  }),
+                ),
+              ),
+            ),
+          }),
+        ),
+      ),
     });
   }
 

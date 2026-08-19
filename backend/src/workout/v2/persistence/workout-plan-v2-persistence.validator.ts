@@ -24,6 +24,7 @@ import type {
 const CANONICAL_PLAN_ARTIFACTS = new Set<string>([
   'WEEKLY_PLAN',
   'PLAN_ADAPTATION',
+  'EXERCISE_SUBSTITUTION',
 ]);
 
 export interface ValidatedWorkoutPlanV2Persistence {

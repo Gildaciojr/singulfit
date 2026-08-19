@@ -149,6 +149,34 @@ describe('CoachPlanningExecutionDispatcherService', () => {
     expect(subject.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
   });
 
+  it('returns a mutation clarification without invoking V2 generation or Legacy', async () => {
+    const subject = createSubject();
+
+    await expect(
+      subject.dispatcher.dispatchStructured({
+        userId: 'user-id',
+        legacyIntent: 'WORKOUT',
+        decision: decision(CONVERSATION_GOAL.UPDATE_WORKOUT_PLAN),
+        routeSelection: {
+          nutrition: null,
+          workout: 'V2',
+          reason: 'WORKOUT_V2_PLAN_MUTATION',
+          nutritionPilotStatus: null,
+          suppressNutritionShadow: false,
+        },
+        workoutV2Response: 'Qual exercício exato você quer trocar?',
+      }),
+    ).resolves.toMatchObject({
+      content: 'Qual exercício exato você quer trocar?',
+      executor: 'WORKOUT_V2',
+      workoutDisposition: 'CLARIFICATION',
+      generationCompleted: false,
+    });
+    expect(subject.workoutV2Executor.execute).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
+  });
+
   it.each([
     [CONVERSATION_GOAL.GENERATE_DIET_PLAN, 1, 0, 0, 0],
     [CONVERSATION_GOAL.GENERATE_WORKOUT_PLAN, 0, 1, 0, 0],

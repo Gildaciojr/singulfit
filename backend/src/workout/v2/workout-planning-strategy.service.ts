@@ -140,10 +140,18 @@ export class WorkoutPlanningStrategyService {
     )
       return 0;
     if (
-      context.artifactType === WORKOUT_ARTIFACT_TYPE.WEEKLY_PLAN &&
+      (context.artifactType === WORKOUT_ARTIFACT_TYPE.WEEKLY_PLAN ||
+        context.artifactType === WORKOUT_ARTIFACT_TYPE.PLAN_ADAPTATION) &&
       context.training.weeklyFrequency.status !== 'NOT_SET'
     )
       return Math.min(7, context.training.weeklyFrequency.value);
+    if (
+      (context.artifactType === WORKOUT_ARTIFACT_TYPE.PLAN_ADAPTATION ||
+        context.artifactType === WORKOUT_ARTIFACT_TYPE.EXERCISE_SUBSTITUTION) &&
+      context.previousPlan
+    ) {
+      return context.previousPlan.sessionCount;
+    }
     return 1;
   }
 

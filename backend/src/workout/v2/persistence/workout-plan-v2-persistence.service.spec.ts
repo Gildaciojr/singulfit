@@ -274,6 +274,9 @@ describe('WorkoutPlanV2PersistenceService', () => {
       aggregate: { id: 'plan-id', document: { schemaVersion: 2 } },
     });
     expect(test.repository.inTransaction.mock.calls).toHaveLength(1);
+    expect(test.repository.archiveActive.mock.calls).toEqual([
+      [transaction, 'user-id'],
+    ]);
     expect(test.repository.create.mock.calls).toHaveLength(1);
     expect(test.order).toEqual(['persist', 'audit', 'complete']);
     expect(test.ai.completeJobInTransaction.mock.calls).toEqual([
@@ -371,5 +374,41 @@ describe('WorkoutPlanV2PersistenceService', () => {
       'não aplicável como plano canônico',
     );
     expect(test.repository.inTransaction.mock.calls).toHaveLength(0);
+  });
+
+  it('archives the old active plan and persists an exercise substitution as the new active V2 plan', async () => {
+    const test = setup();
+    const generation = pendingGeneration();
+    const substitution: PendingWorkoutPlanningGenerationResult = {
+      ...generation,
+      output: {
+        ...generation.output,
+        artifactType: 'EXERCISE_SUBSTITUTION',
+        lifecycleReason: 'ADAPTATION',
+        strategy: {
+          ...generation.output.strategy,
+          artifactType: 'EXERCISE_SUBSTITUTION',
+        },
+      },
+    };
+
+    await expect(
+      test.service.persist(input(substitution)),
+    ).resolves.toMatchObject({
+      persistence: 'CREATED',
+      aggregate: {
+        status: 'ACTIVE',
+        document: { artifactType: 'EXERCISE_SUBSTITUTION' },
+      },
+    });
+    expect(test.repository.archiveActive.mock.calls).toEqual([
+      [transaction, 'user-id'],
+    ]);
+    expect(test.repository.create.mock.calls).toEqual([
+      [
+        transaction,
+        expect.objectContaining({ userId: 'user-id', status: 'ACTIVE' }),
+      ],
+    ]);
   });
 });

@@ -15,6 +15,7 @@ export type PlanningRouteSelectionReason =
   | 'NUTRITION_PILOT_NOT_ELIGIBLE'
   | 'WORKOUT_V2_PRODUCTIVE_GENERATION'
   | 'WORKOUT_V2_CANONICAL_READ'
+  | 'WORKOUT_V2_PLAN_MUTATION'
   | 'CROSS_DOMAIN_ATOMICITY_PENDING'
   | 'LEGACY_INTENT_OR_UNSUPPORTED_GOAL';
 
@@ -24,6 +25,7 @@ export interface PlanningExecutionRoutePolicyInput {
   readonly decision: ConversationGoalDecision | null;
   readonly generationInput: GenerateNutritionPlanV2Input | null;
   readonly workoutGenerationInput?: GenerateWorkoutPlanV2Input | null;
+  readonly workoutMutation?: boolean;
 }
 
 export interface PlanningExecutionRouteSelection {
@@ -56,6 +58,9 @@ export class PlanningExecutionRoutePolicyService {
         goal === CONVERSATION_GOAL.SHOW_PLAN_STATUS)
     ) {
       return this.selection(null, 'V2', 'WORKOUT_V2_CANONICAL_READ');
+    }
+    if (input.workoutMutation) {
+      return this.selection(null, 'V2', 'WORKOUT_V2_PLAN_MUTATION');
     }
     if (
       goal === CONVERSATION_GOAL.GENERATE_WORKOUT_PLAN ||

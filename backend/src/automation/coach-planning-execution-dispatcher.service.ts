@@ -38,6 +38,7 @@ export interface CoachPlanningExecutionDispatchInput {
   readonly continuationOperationKey?: string;
   readonly currentMessage?: string;
   readonly referenceDate?: Date;
+  readonly workoutV2Response?: string;
   readonly nutritionV2?: {
     readonly generationInput: GenerateNutritionPlanV2Input;
     readonly profileId: string;
@@ -87,6 +88,14 @@ export class CoachPlanningExecutionDispatcherService {
     }
 
     if (input.routeSelection?.workout === 'V2') {
+      if (input.workoutV2Response) {
+        return this.result(
+          input.workoutV2Response,
+          'WORKOUT_V2',
+          false,
+          'CLARIFICATION',
+        );
+      }
       if (
         input.decision.goal === CONVERSATION_GOAL.SHOW_CURRENT_PLAN ||
         input.decision.goal === CONVERSATION_GOAL.SHOW_PLAN_STATUS

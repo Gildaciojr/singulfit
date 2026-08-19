@@ -35,6 +35,7 @@ import {
 import { WorkoutPlanningContextBuilder } from './workout-planning-context.builder';
 import type {
   WorkoutEquipment,
+  WorkoutPlanningContext,
   WorkoutRecognizedContext,
 } from './workout-planning-context.contract';
 import { WorkoutPlanningEngineV2Service } from './workout-planning-engine-v2.service';
@@ -1045,6 +1046,48 @@ describe('Workout Planning Engine V2', () => {
       );
     },
   );
+
+  it.each([
+    WORKOUT_ARTIFACT_TYPE.PLAN_ADAPTATION,
+    WORKOUT_ARTIFACT_TYPE.EXERCISE_SUBSTITUTION,
+  ] as const)(
+    'preserves the canonical previous-plan session count for %s without an explicit frequency change',
+    (artifactType) => {
+      const base = context(
+        recognized('GYM_STRENGTH', ['BODYWEIGHT'], { artifact: artifactType }),
+      );
+      const mutationContext = {
+        ...base,
+        training: {
+          ...base.training,
+          weeklyFrequency: { status: 'NOT_SET' },
+        },
+        previousPlan: { sessionCount: 4 },
+      } as unknown as WorkoutPlanningContext;
+
+      expect(
+        new WorkoutPlanningStrategyService().build(mutationContext)
+          .sessionCount,
+      ).toBe(4);
+    },
+  );
+
+  it('uses an explicit adaptation frequency instead of the previous-plan count', () => {
+    const base = context(
+      recognized('GYM_STRENGTH', ['BODYWEIGHT'], {
+        artifact: WORKOUT_ARTIFACT_TYPE.PLAN_ADAPTATION,
+        frequency: 2,
+      }),
+    );
+    const mutationContext = {
+      ...base,
+      previousPlan: { sessionCount: 4 },
+    } as unknown as WorkoutPlanningContext;
+
+    expect(
+      new WorkoutPlanningStrategyService().build(mutationContext).sessionCount,
+    ).toBe(2);
+  });
 
   it('specializes CrossFit for experience, environment and constraints', () => {
     const beginner = new WorkoutPlanningStrategyService().build(

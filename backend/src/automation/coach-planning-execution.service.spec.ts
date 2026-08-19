@@ -18,6 +18,7 @@ import { FitnessGoal } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import { UserGoalEngineService } from './user-goal-engine.service';
 import type { GenerateWorkoutPlanV2InputBuilder } from '../workout/v2/generate-workout-plan-v2-input.builder';
+import type { WorkoutPlanMutationResolverService } from '../workout/v2/workout-plan-mutation-resolver.service';
 
 describe('CoachPlanningExecutionService', () => {
   it('fails closed without dispatching legacy when Workout V2 preparation throws', async () => {
@@ -225,6 +226,154 @@ describe('CoachPlanningExecutionService', () => {
     );
     expect(dispatcher.dispatchStructured).toHaveBeenCalledWith(
       expect.objectContaining({
+        workoutV2: expect.objectContaining({ generationInput }),
+      }),
+    );
+  });
+
+  it('routes a Workout mutation with the canonical previous plan and no Legacy fallback', async () => {
+    const unavailableDatum = Object.freeze({
+      status: 'UNKNOWN' as const,
+      sources: Object.freeze([]),
+    });
+    const snapshot = Object.freeze({
+      completion: Object.freeze({ overall: 'COMPLETE', sections: [] }),
+      longitudinal: Object.freeze({
+        latestProgressWeightKg: unavailableDatum,
+        goalProgression: unavailableDatum,
+        nutritionEvolution: unavailableDatum,
+      }),
+    }) as unknown as CoachProfileSnapshot;
+    const previousPlan = Object.freeze({
+      modality: 'GYM_STRENGTH',
+      strategy: Object.freeze({ authorizedEquipment: ['BODYWEIGHT'] }),
+      sessions: Object.freeze([{ sessionKey: 'session-1' }]),
+    });
+    const declared = Object.freeze({
+      weeklyFrequency: Object.freeze({ status: 'CONFIRMED', value: 3 }),
+    });
+    const mutationContext = Object.freeze({
+      ...declared,
+      artifactType: 'PLAN_ADAPTATION',
+      purpose: 'ADAPTATION',
+      mutation: Object.freeze({
+        kind: 'PLAN_ADAPTATION',
+        sourceActivityKey: null,
+        sourceActivityName: null,
+        reason: 'FREQUENCY',
+      }),
+    });
+    const generationInput = Object.freeze({ userId: 'user-id' });
+    const workoutBuilder = {
+      recognizeDeclaredContext: jest.fn().mockReturnValue(declared),
+      build: jest.fn().mockResolvedValue({
+        generationInput,
+        profileId: 'profile-id',
+      }),
+    };
+    const mutationResolver = {
+      resolve: jest.fn().mockResolvedValue({
+        status: 'READY',
+        previousPlan,
+        recognizedContext: mutationContext,
+      }),
+    };
+    const routePolicy = {
+      select: jest.fn().mockReturnValue({
+        nutrition: null,
+        workout: 'V2',
+        reason: 'WORKOUT_V2_PLAN_MUTATION',
+        nutritionPilotStatus: null,
+        suppressNutritionShadow: false,
+      }),
+    };
+    const dispatcher = {
+      dispatchStructured: jest.fn().mockResolvedValue({
+        content: 'Plano adaptado V2',
+        executor: 'WORKOUT_V2',
+        generationCompleted: true,
+        fallbackApplied: false,
+        workoutDisposition: 'PLAN',
+      }),
+    };
+    const decision = Object.freeze({
+      recognizedIntent: 'WORKOUT_PLAN_UPDATE_REQUEST',
+      goal: 'UPDATE_WORKOUT_PLAN',
+      reason: 'WORKOUT_PROFILE_READY',
+      targetPlan: 'WORKOUT',
+      profileCompletionState: 'COMPLETE',
+      canExecute: true,
+      confidence: 'HIGH',
+      selectedProfileField: null,
+      metPreconditions: Object.freeze([]),
+      missingPreconditions: Object.freeze([]),
+      pendingDependencies: Object.freeze([]),
+    }) satisfies ConversationGoalDecision;
+    const service = new CoachPlanningExecutionService(
+      dispatcher as unknown as CoachPlanningExecutionDispatcherService,
+      {
+        build: jest.fn().mockResolvedValue(snapshot),
+      } as unknown as CoachProfileSnapshotBuilder,
+      {
+        adapt: jest.fn().mockReturnValue({
+          recognizedIntent: 'WORKOUT_PLAN_REQUEST',
+          planTarget: 'WORKOUT',
+          acquisitionIntent: Object.freeze({}),
+        }),
+      } as unknown as LegacyCoachIntentAdapter,
+      {
+        decide: jest.fn().mockReturnValue(Object.freeze({})),
+      } as unknown as CoachAdaptiveProfileCollectorService,
+      {
+        plan: jest.fn().mockReturnValue(decision),
+      } as unknown as ConversationGoalPlannerService,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      routePolicy as unknown as PlanningExecutionRoutePolicyService,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      workoutBuilder as unknown as GenerateWorkoutPlanV2InputBuilder,
+      mutationResolver as unknown as WorkoutPlanMutationResolverService,
+    );
+
+    const result = await service.executeStructured('user-id', 'WORKOUT', {
+      conversationId: 'conversation-id',
+      messageId: 'message-id',
+      correlationId: 'message-id',
+      profileId: 'profile-id',
+      currentMessage: 'Vou treinar só 3 vezes esta semana',
+      referenceDate: new Date('2026-08-19T12:00:00.000Z'),
+    });
+
+    expect(result).toMatchObject({
+      selectedSource: 'WORKOUT_V2',
+      dispatch: { executor: 'WORKOUT_V2', generationCompleted: true },
+    });
+    expect(mutationResolver.resolve).toHaveBeenCalledWith(
+      'user-id',
+      'Vou treinar só 3 vezes esta semana',
+      declared,
+    );
+    expect(workoutBuilder.build).toHaveBeenCalledWith(
+      expect.objectContaining({
+        declaredContext: mutationContext,
+        previousPlan,
+      }),
+    );
+    expect(routePolicy.select).toHaveBeenCalledWith(
+      expect.objectContaining({ workoutMutation: true }),
+    );
+    expect(dispatcher.dispatchStructured).toHaveBeenCalledWith(
+      expect.objectContaining({
+        legacyIntent: 'WORKOUT',
         workoutV2: expect.objectContaining({ generationInput }),
       }),
     );

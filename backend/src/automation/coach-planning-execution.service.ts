@@ -45,6 +45,10 @@ import type {
   WorkoutRecognizedContext,
 } from '../workout/v2/workout-planning-context.contract';
 import type { GenerateWorkoutPlanV2Input } from '../workout/v2/workout-planning-generation.contract';
+import {
+  WorkoutPlanMutationResolverService,
+  type WorkoutPlanMutationResolution,
+} from '../workout/v2/workout-plan-mutation-resolver.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { CoachCommandIntent } from './coach-command.service';
 import type { LegacyCoachIntentAdaptation } from './legacy-coach-intent-adapter.contract';
@@ -94,6 +98,8 @@ interface PreparedV2PlanningContext {
   readonly goalResolution: CurrentGoalResolution | undefined;
   readonly workoutGenerationInput: GenerateWorkoutPlanV2Input | null;
   readonly workoutProfileId: string | null;
+  readonly workoutMutation: boolean;
+  readonly workoutV2Response: string | null;
   readonly profileAcquisitionContext: ProfileAcquisitionConversationContext;
 }
 
@@ -130,6 +136,8 @@ export class CoachPlanningExecutionService {
     private readonly pendingActions?: PendingConversationActionService,
     @Optional()
     private readonly workoutPlanningInputBuilder?: GenerateWorkoutPlanV2InputBuilder,
+    @Optional()
+    private readonly workoutMutationResolver?: WorkoutPlanMutationResolverService,
   ) {}
 
   async execute(
@@ -240,6 +248,7 @@ export class CoachPlanningExecutionService {
         continuationOperationKey,
         currentMessage: runtime?.currentMessage,
         referenceDate: runtime?.referenceDate,
+        workoutV2Response: preparation?.workoutV2Response ?? undefined,
         nutritionV2:
           routeSelection.nutrition === 'V2' &&
           preparation?.generationInput &&
@@ -487,6 +496,7 @@ export class CoachPlanningExecutionService {
         decision: preparation?.decision ?? null,
         generationInput: preparation?.generationInput ?? null,
         workoutGenerationInput: preparation?.workoutGenerationInput ?? null,
+        workoutMutation: preparation?.workoutMutation ?? false,
       });
     }
     return Object.freeze({
@@ -542,25 +552,57 @@ export class CoachPlanningExecutionService {
       runtime?.pendingGoalConfirmation,
     );
     const legacyAdaptation = this.intentAdapter.adapt(intent);
-    const adaptation = this.workoutReadRequested(
+    const readRequested = this.workoutReadRequested(
       intent,
       runtime?.currentMessage,
-    )
+    );
+    const baseWorkoutContext =
+      intent === 'WORKOUT' && this.workoutPlanningInputBuilder
+        ? this.workoutPlanningInputBuilder.recognizeDeclaredContext(
+            runtime?.currentMessage,
+          )
+        : undefined;
+    let mutation: WorkoutPlanMutationResolution = Object.freeze({
+      status: 'NOT_A_MUTATION' as const,
+    });
+    if (this.workoutMutationRequested(intent, runtime?.currentMessage)) {
+      mutation = this.workoutMutationResolver
+        ? await this.workoutMutationResolver.resolve(
+            userId,
+            runtime?.currentMessage,
+            baseWorkoutContext ?? Object.freeze({}),
+          )
+        : Object.freeze({
+            status: 'CLARIFICATION' as const,
+            message:
+              'Não consegui preparar a alteração do plano com segurança agora.',
+          });
+    }
+    const adaptation = readRequested
       ? Object.freeze({
           ...legacyAdaptation,
           recognizedIntent: CONVERSATION_RECOGNIZED_INTENT.CURRENT_PLAN_REQUEST,
           planTarget: 'WORKOUT' as const,
         })
-      : legacyAdaptation;
+      : mutation.status !== 'NOT_A_MUTATION'
+        ? Object.freeze({
+            ...legacyAdaptation,
+            recognizedIntent:
+              CONVERSATION_RECOGNIZED_INTENT.WORKOUT_PLAN_UPDATE_REQUEST,
+            planTarget: 'WORKOUT' as const,
+          })
+        : legacyAdaptation;
     const declaredWorkoutContext =
-      intent === 'WORKOUT' &&
-      adaptation.recognizedIntent !==
-        CONVERSATION_RECOGNIZED_INTENT.CURRENT_PLAN_REQUEST &&
-      this.workoutPlanningInputBuilder
-        ? this.workoutPlanningInputBuilder.recognizeDeclaredContext(
-            runtime?.currentMessage,
-          )
-        : undefined;
+      mutation.status === 'READY'
+        ? mutation.recognizedContext
+        : readRequested
+          ? undefined
+          : baseWorkoutContext;
+    const workoutV2Response =
+      mutation.status === 'CLARIFICATION' ||
+      mutation.status === 'NO_CURRENT_PLAN'
+        ? mutation.message
+        : null;
     const profileAcquisitionContext = this.profileAcquisitionContext(
       declaredWorkoutContext,
     );
@@ -599,6 +641,7 @@ export class CoachPlanningExecutionService {
       intent === 'WORKOUT' &&
       adaptation.recognizedIntent !==
         CONVERSATION_RECOGNIZED_INTENT.CURRENT_PLAN_REQUEST &&
+      !workoutV2Response &&
       this.workoutPlanningInputBuilder
         ? await this.workoutPlanningInputBuilder.build({
             userId,
@@ -608,6 +651,8 @@ export class CoachPlanningExecutionService {
             snapshot,
             referenceDate,
             currentMessage: runtime?.currentMessage,
+            previousPlan:
+              mutation.status === 'READY' ? mutation.previousPlan : undefined,
           })
         : null;
     return Object.freeze({
@@ -619,6 +664,8 @@ export class CoachPlanningExecutionService {
       goalResolution,
       workoutGenerationInput: builtWorkoutInput?.generationInput ?? null,
       workoutProfileId: builtWorkoutInput?.profileId ?? null,
+      workoutMutation: mutation.status !== 'NOT_A_MUTATION',
+      workoutV2Response,
       profileAcquisitionContext,
     });
   }
@@ -641,6 +688,21 @@ export class CoachPlanningExecutionService {
       /\btreino\s+(?:de\s+)?(?:segunda|terca|quarta|quinta|sexta|sabado|domingo|\d)\b/u.test(
         normalized,
       )
+    );
+  }
+
+  private workoutMutationRequested(
+    intent: CoachCommandIntent,
+    message: string | undefined,
+  ): boolean {
+    if (intent !== 'WORKOUT' || !message) return false;
+    const normalized = message
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+    if (/\bnovo plano\b/u.test(normalized)) return false;
+    return /\b(troque|trocar|substitua|substituir|nao posso fazer|nao tenho essa maquina|sem essa maquina|agora|adapte|adapta|ajuste|ajusta|inclua|incluir|so tenho|so vou treinar|vou treinar so|focar mais|vou comecar a correr|quero comecar a correr)\b/u.test(
+      normalized,
     );
   }
 

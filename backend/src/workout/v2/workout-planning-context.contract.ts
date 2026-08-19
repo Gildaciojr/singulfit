@@ -103,6 +103,19 @@ export interface WorkoutRecognizedContext {
   readonly targetEventDate?: WorkoutPlanningValue<string>;
   readonly movementConstraints?: readonly WorkoutMovementConstraint[];
   readonly safetySignals?: readonly WorkoutSafetyFlag[];
+  readonly mutation?: Readonly<{
+    kind: 'PLAN_ADAPTATION' | 'EXERCISE_SUBSTITUTION';
+    sourceActivityKey: string | null;
+    sourceActivityName: string | null;
+    reason:
+      | 'DURATION'
+      | 'FREQUENCY'
+      | 'MUSCLE_FOCUS'
+      | 'MODALITY'
+      | 'EQUIPMENT'
+      | 'LIMITATION'
+      | 'PREFERENCE';
+  }>;
   readonly purpose?:
     | 'CREATION'
     | 'REPLACEMENT'
@@ -126,6 +139,17 @@ export interface WorkoutPreviousPlanSummary {
   readonly sessionCount: number;
   readonly sessionLabels: readonly string[];
   readonly validationStatus: WorkoutPlanV2['validation']['status'];
+  readonly sessions: readonly Readonly<{
+    sessionKey: string;
+    sequence: number;
+    label: string;
+    activities: readonly Readonly<{
+      activityKey: string;
+      name: string;
+      movementPattern: string;
+      equipment: readonly WorkoutEquipment[];
+    }>[];
+  }>[];
 }
 
 export interface WorkoutPlanningContext {
@@ -169,6 +193,7 @@ export interface WorkoutPlanningContext {
   readonly progressEvidence: readonly WorkoutProgressEvidence[];
   readonly currentPlanAvailable: boolean;
   readonly previousPlan: WorkoutPreviousPlanSummary | null;
+  readonly mutation: WorkoutRecognizedContext['mutation'] | null;
   readonly lifecyclePurpose: NonNullable<WorkoutRecognizedContext['purpose']>;
 }
 

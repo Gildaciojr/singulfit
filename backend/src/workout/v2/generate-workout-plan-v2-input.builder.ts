@@ -170,7 +170,7 @@ export class GenerateWorkoutPlanV2InputBuilder {
     const distances = this.runningDistances(text);
     const frequency = this.integer(
       text,
-      /\b(\d)\s*(?:x|vezes?|dias?)\s*(?:por|na)?\s*semana\b/u,
+      /\b(\d)\s*(?:x|vezes?|dias?)\s*(?:por|na|esta)?\s*semana\b/u,
       1,
       7,
     );

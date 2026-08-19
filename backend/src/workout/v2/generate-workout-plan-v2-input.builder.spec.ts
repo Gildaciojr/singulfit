@@ -22,6 +22,11 @@ describe('GenerateWorkoutPlanV2InputBuilder', () => {
       { status: 'CONFIRMED', value: 4 },
     ],
     [
+      'vou treinar só 3 vezes esta semana',
+      'weeklyFrequency',
+      { status: 'CONFIRMED', value: 3 },
+    ],
+    [
       'quero treinar em casa',
       'environment',
       { status: 'CONFIRMED', value: 'HOME' },
