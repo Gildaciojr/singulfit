@@ -1220,7 +1220,6 @@ model WorkoutDay {
 
   @@unique([workoutPlanId, dayNumber])
   @@index([workoutPlanId])
-  @@index([workoutPlanId, weekday])
   @@map("workout_days")
 }
 

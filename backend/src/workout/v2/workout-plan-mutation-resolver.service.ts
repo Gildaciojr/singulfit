@@ -34,6 +34,9 @@ export class WorkoutPlanMutationResolverService {
     if (!kind) return Object.freeze({ status: 'NOT_A_MUTATION' });
     const current = await this.reader.read(userId);
     if (current.status !== 'AVAILABLE') {
+      if (kind === 'SUBSTITUTION_CANDIDATE') {
+        return Object.freeze({ status: 'NOT_A_MUTATION' });
+      }
       return Object.freeze({
         status: 'NO_CURRENT_PLAN',
         message:
@@ -60,9 +63,11 @@ export class WorkoutPlanMutationResolverService {
         status: 'READY',
         previousPlan: current.plan.document,
         recognizedContext: Object.freeze({
-          ...declared,
+          ...this.mergeDefined(
+            this.previousContext(current.plan.document),
+            declared,
+          ),
           artifactType: WORKOUT_ARTIFACT_TYPE.PLAN_ADAPTATION,
-          modality: this.modality(current.plan.document.modality),
           purpose: 'ADAPTATION',
           mutation: Object.freeze({
             kind: 'PLAN_ADAPTATION',
@@ -91,19 +96,21 @@ export class WorkoutPlanMutationResolverService {
             status: 'CONFIRMED' as const,
             value: Object.freeze(
               current.plan.document.strategy.authorizedEquipment.filter(
-                (item) => item !== 'MACHINE',
+                (item) => !target.activity.equipment.includes(item),
               ),
             ),
           })
-        : declared.equipment;
+        : undefined;
     return Object.freeze({
       status: 'READY',
       previousPlan: current.plan.document,
       recognizedContext: Object.freeze({
-        ...declared,
+        ...this.mergeDefined(
+          this.previousContext(current.plan.document),
+          declared,
+        ),
         artifactType: WORKOUT_ARTIFACT_TYPE.EXERCISE_SUBSTITUTION,
-        modality: this.modality(current.plan.document.modality),
-        equipment,
+        ...(equipment ? { equipment } : {}),
         purpose: 'ADAPTATION',
         mutation: Object.freeze({
           kind: 'EXERCISE_SUBSTITUTION',
@@ -117,7 +124,12 @@ export class WorkoutPlanMutationResolverService {
 
   private kind(
     text: string,
-  ): 'ADAPTATION' | 'SUBSTITUTION' | 'AMBIGUOUS_MODALITY' | null {
+  ):
+    | 'ADAPTATION'
+    | 'SUBSTITUTION'
+    | 'SUBSTITUTION_CANDIDATE'
+    | 'AMBIGUOUS_MODALITY'
+    | null {
     if (/\bnovo plano\b/u.test(text)) return null;
     if (
       /\b(vou comecar a correr|quero comecar a correr)\b/u.test(text) &&
@@ -132,6 +144,7 @@ export class WorkoutPlanMutationResolverService {
     ) {
       return 'SUBSTITUTION';
     }
+    if (/\bnao tenho\b/u.test(text)) return 'SUBSTITUTION_CANDIDATE';
     if (
       /\b(agora|adapte|adapta|ajuste|ajusta|inclua|incluir|so tenho|so vou treinar|vou treinar so|focar mais)\b/u.test(
         text,
@@ -185,7 +198,7 @@ export class WorkoutPlanMutationResolverService {
   private substitutionReason(
     text: string,
   ): NonNullable<WorkoutRecognizedContext['mutation']>['reason'] {
-    if (/\b(maquina|equipamento)\b/u.test(text)) return 'EQUIPMENT';
+    if (/\b(maquina|equipamento|nao tenho)\b/u.test(text)) return 'EQUIPMENT';
     return /\b(dor|lesao|nao posso)\b/u.test(text)
       ? 'LIMITATION'
       : 'PREFERENCE';
@@ -193,6 +206,42 @@ export class WorkoutPlanMutationResolverService {
 
   private modality(value: WorkoutModality) {
     return Object.freeze({ status: 'CONFIRMED' as const, value });
+  }
+
+  private previousContext(plan: WorkoutPlanV2): WorkoutRecognizedContext {
+    return Object.freeze({
+      modality: this.modality(plan.modality),
+      objective: Object.freeze({ ...plan.strategy.objective }),
+      experience: Object.freeze({ ...plan.strategy.experience }),
+      weeklyFrequency: Object.freeze({
+        status: 'CONFIRMED' as const,
+        value: plan.strategy.sessionCount,
+      }),
+      sessionDurationMinutes: Object.freeze({
+        ...plan.strategy.sessionDurationMinutes,
+      }),
+      environment: Object.freeze({ ...plan.strategy.environment }),
+      equipment: Object.freeze({
+        status: 'CONFIRMED' as const,
+        value: Object.freeze([...plan.strategy.authorizedEquipment]),
+      }),
+      muscleFocus: Object.freeze({
+        status: 'CONFIRMED' as const,
+        value: Object.freeze([...plan.strategy.muscleFocus]),
+      }),
+    });
+  }
+
+  private mergeDefined(
+    previous: WorkoutRecognizedContext,
+    declared: WorkoutRecognizedContext,
+  ): WorkoutRecognizedContext {
+    return Object.freeze({
+      ...previous,
+      ...Object.fromEntries(
+        Object.entries(declared).filter(([, value]) => value !== undefined),
+      ),
+    });
   }
 
   private normalize(value: string): string {

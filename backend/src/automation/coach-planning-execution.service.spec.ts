@@ -204,6 +204,7 @@ describe('CoachPlanningExecutionService', () => {
       environment: { value: 'FULL_GYM', evidence: 'EXPLICIT' },
       weeklyFrequency: { value: 4, evidence: 'EXPLICIT' },
       sessionDurationMinutes: { value: 60, evidence: 'EXPLICIT' },
+      requiresWorkoutCalendar: true,
     });
     expect(workoutBuilder.recognizeDeclaredContext).toHaveBeenCalledWith(
       currentMessage,
@@ -215,6 +216,7 @@ describe('CoachPlanningExecutionService', () => {
           environment: { value: 'FULL_GYM', evidence: 'EXPLICIT' },
           weeklyFrequency: { value: 4, evidence: 'EXPLICIT' },
           sessionDurationMinutes: { value: 60, evidence: 'EXPLICIT' },
+          requiresWorkoutCalendar: true,
         },
       }),
     );

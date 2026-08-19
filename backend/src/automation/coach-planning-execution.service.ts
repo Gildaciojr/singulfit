@@ -605,6 +605,9 @@ export class CoachPlanningExecutionService {
         : null;
     const profileAcquisitionContext = this.profileAcquisitionContext(
       declaredWorkoutContext,
+      intent === 'WORKOUT' &&
+        !readRequested &&
+        mutation.status === 'NOT_A_MUTATION',
     );
     const adaptiveDecision = this.collector.decide(
       this.collectorInput(snapshot, adaptation, profileAcquisitionContext),
@@ -701,7 +704,7 @@ export class CoachPlanningExecutionService {
       .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase();
     if (/\bnovo plano\b/u.test(normalized)) return false;
-    return /\b(troque|trocar|substitua|substituir|nao posso fazer|nao tenho essa maquina|sem essa maquina|agora|adapte|adapta|ajuste|ajusta|inclua|incluir|so tenho|so vou treinar|vou treinar so|focar mais|vou comecar a correr|quero comecar a correr)\b/u.test(
+    return /\b(troque|trocar|substitua|substituir|nao posso fazer|nao tenho|sem essa maquina|agora|adapte|adapta|ajuste|ajusta|inclua|incluir|so tenho|so vou treinar|vou treinar so|focar mais|vou comecar a correr|quero comecar a correr)\b/u.test(
       normalized,
     );
   }
@@ -1062,8 +1065,9 @@ export class CoachPlanningExecutionService {
 
   private profileAcquisitionContext(
     recognized: WorkoutRecognizedContext | undefined,
+    requiresWorkoutCalendar = false,
   ): ProfileAcquisitionConversationContext {
-    if (!recognized) return Object.freeze({});
+    if (!recognized) return Object.freeze({ requiresWorkoutCalendar });
     const modality = this.explicitWorkoutValue(recognized.modality);
 
     return Object.freeze({
@@ -1080,6 +1084,7 @@ export class CoachPlanningExecutionService {
       sessionDurationMinutes: this.explicitWorkoutValue(
         recognized.sessionDurationMinutes,
       ),
+      requiresWorkoutCalendar,
     });
   }
 

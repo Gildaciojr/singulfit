@@ -6,7 +6,15 @@ import type { WorkoutRecognizedContext } from './workout-planning-context.contra
 function plan(): WorkoutPlanV2 {
   return {
     modality: 'GYM_STRENGTH',
-    strategy: { authorizedEquipment: ['BODYWEIGHT', 'MACHINE'] },
+    strategy: {
+      objective: { status: 'CONFIRMED', value: 'GENERAL_HEALTH' },
+      experience: { status: 'CONFIRMED', value: 'INTERMEDIATE' },
+      sessionCount: 2,
+      sessionDurationMinutes: { status: 'CONFIRMED', value: 50 },
+      environment: { status: 'CONFIRMED', value: 'FULL_GYM' },
+      authorizedEquipment: ['BODYWEIGHT', 'MACHINE'],
+      muscleFocus: ['LOWER_BODY'],
+    },
     sessions: [
       {
         sessionKey: 'session-1',
@@ -122,6 +130,30 @@ describe('WorkoutPlanMutationResolverService', () => {
     });
   });
 
+  it('applies a declared modality change while preserving undeclared plan properties', async () => {
+    const { resolver } = setup();
+
+    await expect(
+      resolver.resolve('user-id', 'Ajuste meu treino para incluir corrida', {
+        modality: { status: 'CONFIRMED', value: 'RUNNING' },
+      }),
+    ).resolves.toMatchObject({
+      status: 'READY',
+      recognizedContext: {
+        modality: { status: 'CONFIRMED', value: 'RUNNING' },
+        objective: { status: 'CONFIRMED', value: 'GENERAL_HEALTH' },
+        experience: { status: 'CONFIRMED', value: 'INTERMEDIATE' },
+        weeklyFrequency: { status: 'CONFIRMED', value: 2 },
+        sessionDurationMinutes: { status: 'CONFIRMED', value: 50 },
+        environment: { status: 'CONFIRMED', value: 'FULL_GYM' },
+        equipment: {
+          status: 'CONFIRMED',
+          value: ['BODYWEIGHT', 'MACHINE'],
+        },
+      },
+    });
+  });
+
   it('resolves an exercise substitution by the current plan activity', async () => {
     const { resolver } = setup();
     await expect(
@@ -158,6 +190,28 @@ describe('WorkoutPlanMutationResolverService', () => {
     const { resolver } = setup();
     await expect(
       resolver.resolve('user-id', 'Não tenho essa máquina', {}),
+    ).resolves.toMatchObject({ status: 'CLARIFICATION' });
+  });
+
+  it('resolves a named unavailable current exercise without inventing another source', async () => {
+    const { resolver } = setup();
+
+    await expect(
+      resolver.resolve('user-id', 'Não tenho leg press', {}),
+    ).resolves.toMatchObject({
+      status: 'READY',
+      recognizedContext: {
+        equipment: { status: 'CONFIRMED', value: ['BODYWEIGHT'] },
+        mutation: {
+          sourceActivityKey: 'leg-press',
+          sourceActivityName: 'Leg press',
+          reason: 'EQUIPMENT',
+        },
+      },
+    });
+
+    await expect(
+      resolver.resolve('user-id', 'Não tenho cadeira extensora', {}),
     ).resolves.toMatchObject({ status: 'CLARIFICATION' });
   });
 

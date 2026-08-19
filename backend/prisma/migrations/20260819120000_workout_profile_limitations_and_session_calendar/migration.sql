@@ -12,6 +12,3 @@ CREATE TYPE "WorkoutWeekday" AS ENUM (
 
 ALTER TABLE "workout_days"
 ADD COLUMN "weekday" "WorkoutWeekday";
-
-CREATE INDEX "workout_days_workoutPlanId_weekday_idx"
-ON "workout_days"("workoutPlanId", "weekday");

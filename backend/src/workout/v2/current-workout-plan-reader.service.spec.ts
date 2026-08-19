@@ -77,8 +77,10 @@ function record(options?: {
   calendar?: boolean;
   userId?: string;
   document?: unknown;
+  timezone?: string;
+  weekdays?: readonly WorkoutWeekday[];
 }) {
-  const weekdays = [
+  const weekdays = options?.weekdays ?? [
     WorkoutWeekday.MONDAY,
     WorkoutWeekday.WEDNESDAY,
     WorkoutWeekday.FRIDAY,
@@ -93,9 +95,11 @@ function record(options?: {
       status: 'COMPLETED',
       result: { acceptedOutput: options?.document ?? document() },
     },
-    user: { preferences: { timezone: 'America/Sao_Paulo' } },
-    days: [1, 2, 3].map((dayNumber, index) => ({
-      dayNumber,
+    user: {
+      preferences: { timezone: options?.timezone ?? 'America/Sao_Paulo' },
+    },
+    days: weekdays.map((weekday, index) => ({
+      dayNumber: index + 1,
       weekday: options?.calendar === false ? null : weekdays[index],
     })),
   };
@@ -127,6 +131,14 @@ describe('CurrentWorkoutPlanReaderService', () => {
 
   it('fails closed for an invalid acceptedOutput discriminator', async () => {
     const { service } = setup(record({ document: { schemaVersion: 1 } }));
+    await expect(service.read('user-id')).resolves.toEqual({
+      status: 'INVALID_V2_PLAN',
+      plan: null,
+    });
+  });
+
+  it('fails closed instead of selecting a day with an invalid timezone', async () => {
+    const { service } = setup(record({ timezone: 'Invalid/Timezone' }));
     await expect(service.read('user-id')).resolves.toEqual({
       status: 'INVALID_V2_PLAN',
       plan: null,
@@ -179,6 +191,36 @@ describe('CurrentWorkoutPlanReaderService', () => {
     ).resolves.toContain('Sessão 2: Peito');
     await expect(
       service.present('user-id', 'Treino de terça', new Date()),
+    ).resolves.toContain('dia de descanso');
+  });
+
+  it('keeps session order separate from the explicit four-day calendar', async () => {
+    const fourSessions = {
+      ...document(),
+      sessions: [
+        session(1, 'Pernas', 'Agachamento'),
+        session(2, 'Peito', 'Supino'),
+        session(3, 'Costas', 'Remada'),
+        session(4, 'Ombros', 'Desenvolvimento'),
+      ],
+    };
+    const { service } = setup(
+      record({
+        document: fourSessions,
+        weekdays: [
+          WorkoutWeekday.MONDAY,
+          WorkoutWeekday.TUESDAY,
+          WorkoutWeekday.THURSDAY,
+          WorkoutWeekday.SATURDAY,
+        ],
+      }),
+    );
+
+    await expect(
+      service.present('user-id', 'Treino de quinta', new Date()),
+    ).resolves.toContain('Sessão 3: Costas');
+    await expect(
+      service.present('user-id', 'Treino de quarta', new Date()),
     ).resolves.toContain('dia de descanso');
   });
 

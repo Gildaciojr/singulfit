@@ -180,6 +180,41 @@ describe('Structured profile acquisition persistence', () => {
     });
   });
 
+  it('persists explicitly answered training weekdays as a confirmed typed list', async () => {
+    const test = await subject();
+    const specification = test.questions.forField(
+      CoachProfileAcquisitionField.AVAILABLE_TRAINING_DAYS,
+      'MISSING_CONTEXTUAL_FIELD',
+    );
+    const answer = test.recognizer.recognize(
+      specification,
+      'segunda, terça, quinta e sábado',
+    );
+    const command = test.factory.create({
+      userId: 'user-id',
+      answer,
+      source: CoachProfileValueSource.USER_REPORTED,
+      referenceDate,
+      sourceOperationKey: 'training-days-message-id',
+      reason: 'INITIAL_ANSWER',
+    });
+    if (!command) throw new Error('Comando de dias de treino esperado');
+
+    await expect(test.mutations.execute(command)).resolves.toMatchObject({
+      status: 'CREATED',
+      field: CoachProfileAcquisitionField.AVAILABLE_TRAINING_DAYS,
+    });
+    expect(test.tx.coachProfileFieldValue.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        field: CoachProfileAcquisitionField.AVAILABLE_TRAINING_DAYS,
+        valueType: CoachProfileValueType.TEXT_LIST,
+        textListValue: ['MONDAY', 'TUESDAY', 'THURSDAY', 'SATURDAY'],
+        status: CoachProfileValueStatus.CONFIRMED,
+        isActive: true,
+      }),
+    });
+  });
+
   it('returns DUPLICATE for a durable operation and does not create history twice', async () => {
     const test = await subject();
     test.tx.coachProfileFieldValue.findUnique.mockResolvedValue({

@@ -522,6 +522,27 @@ describe('CoachProfileSnapshotBuilder', () => {
     },
   );
 
+  it('projects confirmed training weekdays in their declared order', async () => {
+    const record = userRecord();
+    const test = await subject({
+      ...record,
+      coachProfileFieldValues: [
+        acquired({
+          field: CoachProfileAcquisitionField.AVAILABLE_TRAINING_DAYS,
+          valueType: CoachProfileValueType.TEXT_LIST,
+          textListValue: ['MONDAY', 'TUESDAY', 'THURSDAY', 'SATURDAY'],
+        }),
+      ],
+    });
+
+    const snapshot = await test.builder.build('user-id', referenceDate);
+    expect(snapshot.routine.availableTrainingDays).toEqual({
+      status: COACH_PROFILE_KNOWLEDGE_STATUS.KNOWN,
+      value: ['MONDAY', 'TUESDAY', 'THURSDAY', 'SATURDAY'],
+      sources: ['PROFILE_ACQUISITION'],
+    });
+  });
+
   it.each([
     'Nenhuma restrição',
     ' Sem restrições. ',

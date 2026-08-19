@@ -157,6 +157,11 @@ describe('Structured profile acquisition registry and recognition', () => {
       'Hipertensão',
       ['Hipertensão'],
     ],
+    [
+      CoachProfileAcquisitionField.AVAILABLE_TRAINING_DAYS,
+      'segunda, terça, quinta e sábado',
+      ['MONDAY', 'TUESDAY', 'THURSDAY', 'SATURDAY'],
+    ],
   ])('recognizes %s deterministically from %s', (field, answer, expected) => {
     const first = recognizer.recognize(specification(field), answer);
     const second = recognizer.recognize(specification(field), answer);

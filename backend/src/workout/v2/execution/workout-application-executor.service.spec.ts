@@ -87,10 +87,12 @@ describe('WorkoutApplicationExecutorService', () => {
 
   it('persists a validated explicit weekday calendar separately from session order', async () => {
     const subject = setup();
-    await subject.executor.execute(input(['MONDAY', 'WEDNESDAY', 'FRIDAY']));
+    await subject.executor.execute(
+      input(['MONDAY', 'TUESDAY', 'THURSDAY', 'SATURDAY']),
+    );
     expect(subject.persistence.persist).toHaveBeenCalledWith(
       expect.objectContaining({
-        calendarWeekdays: ['MONDAY', 'WEDNESDAY', 'FRIDAY'],
+        calendarWeekdays: ['MONDAY', 'TUESDAY', 'THURSDAY', 'SATURDAY'],
       }),
     );
   });

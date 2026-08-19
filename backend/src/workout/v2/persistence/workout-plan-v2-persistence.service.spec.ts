@@ -294,6 +294,20 @@ describe('WorkoutPlanV2PersistenceService', () => {
     ]);
   });
 
+  it('maps session order to explicit weekdays without interpreting dayNumber as weekday', async () => {
+    const test = setup();
+    await test.service.persist({
+      ...input(),
+      calendarWeekdays: ['THURSDAY'],
+    });
+
+    expect(test.repository.create.mock.calls[0][1]).toEqual(
+      expect.objectContaining({
+        days: [expect.objectContaining({ dayNumber: 1, weekday: 'THURSDAY' })],
+      }),
+    );
+  });
+
   it('does not complete the AIJob when canonical persistence fails', async () => {
     const test = setup();
     test.repository.create.mockRejectedValue(new Error('persistence failed'));

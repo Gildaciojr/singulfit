@@ -46,6 +46,7 @@ interface ProfileFixture {
   readonly declaredFoodPreferences?: CoachProfileDatum<readonly string[]>;
   readonly declaredFoodRejections?: CoachProfileDatum<readonly string[]>;
   readonly eatingOutFrequency?: CoachProfileDatum<string>;
+  readonly availableTrainingDays?: CoachProfileDatum<readonly string[]>;
 }
 
 describe('CoachAdaptiveProfileCollectorService', () => {
@@ -131,6 +132,7 @@ describe('CoachAdaptiveProfileCollectorService', () => {
         sleepTime: unknown(),
         trainingTime: unknown(),
         mealTimes: unknown(),
+        availableTrainingDays: input.availableTrainingDays ?? unknown(),
       }),
       restrictions: Object.freeze({
         foodRestrictions: input.foodRestrictions ?? unknown(),
@@ -193,6 +195,9 @@ describe('CoachAdaptiveProfileCollectorService', () => {
       declaredFoodPreferences: known(Object.freeze([])),
       declaredFoodRejections: known(Object.freeze([])),
       eatingOutFrequency: known('RARELY'),
+      availableTrainingDays: known(
+        Object.freeze(['MONDAY', 'TUESDAY', 'THURSDAY', 'SATURDAY']),
+      ),
       ...overrides,
     });
   }
@@ -258,6 +263,42 @@ describe('CoachAdaptiveProfileCollectorService', () => {
       { plan: 'DIET', ready: true, blockingFields: [] },
       { plan: 'WORKOUT', ready: true, blockingFields: [] },
     ]);
+  });
+
+  it('requires real training days before a productive weekly Workout plan', () => {
+    const result = decide(
+      PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,
+      completeProfile({ availableTrainingDays: unknown() }),
+      {
+        conversationContext: Object.freeze({
+          requiresWorkoutCalendar: true,
+        }),
+      },
+    );
+
+    expect(result.selectedCandidate).toMatchObject({
+      field: PROFILE_ACQUISITION_FIELD.AVAILABLE_TRAINING_DAYS,
+      domain: 'ROUTINE',
+      blocksPlans: ['WORKOUT'],
+    });
+    expect(result.readiness).toContainEqual({
+      plan: 'WORKOUT',
+      ready: false,
+      blockingFields: [PROFILE_ACQUISITION_FIELD.AVAILABLE_TRAINING_DAYS],
+    });
+  });
+
+  it('does not make calendar a blocker outside productive weekly-plan creation', () => {
+    const result = decide(
+      PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,
+      completeProfile({ availableTrainingDays: unknown() }),
+    );
+
+    expect(result.readiness).toContainEqual({
+      plan: 'WORKOUT',
+      ready: true,
+      blockingFields: [],
+    });
   });
 
   it('removes every explicitly declared current-turn workout field from readiness without inventing absent facts', () => {

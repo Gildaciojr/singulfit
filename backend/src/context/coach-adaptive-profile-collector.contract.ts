@@ -43,6 +43,7 @@ export interface ProfileAcquisitionConversationContext {
   readonly equipment?: ProfileAcquisitionContextValue<readonly string[]>;
   readonly weeklyFrequency?: ProfileAcquisitionContextValue<number>;
   readonly sessionDurationMinutes?: ProfileAcquisitionContextValue<number>;
+  readonly requiresWorkoutCalendar?: boolean;
 }
 
 export const PROFILE_ACQUISITION_FIELD = {

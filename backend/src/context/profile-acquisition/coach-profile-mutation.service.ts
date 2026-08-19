@@ -89,7 +89,7 @@ export class CoachProfileMutationCommandFactoryService {
       referenceDate: referenceDate.toISOString(),
       operationKey: this.operationKey(
         input,
-        this.fingerprint(input.answer.value),
+        this.fingerprint(input.answer.field, input.answer.value),
         definition.definitionVersion,
       ),
       reason: input.reason,
@@ -141,11 +141,29 @@ export class CoachProfileMutationCommandFactoryService {
     return 'profile-acquisition:' + digest;
   }
 
-  private fingerprint(value: RecognizedProfileValue): string {
-    const normalized = Array.isArray(value) ? [...value].sort() : value;
+  private fingerprint(
+    field: CoachProfileAcquisitionField,
+    value: RecognizedProfileValue,
+  ): string {
+    const normalized = Array.isArray(value)
+      ? this.normalizedList(field, value)
+      : value;
     return createHash('sha256')
       .update(JSON.stringify(normalized))
       .digest('hex');
+  }
+
+  private normalizedList(
+    field: CoachProfileAcquisitionField,
+    value: readonly string[],
+  ): readonly string[] {
+    const unique = new Set(value);
+    if (field === CoachProfileAcquisitionField.AVAILABLE_TRAINING_DAYS) {
+      return this.registry
+        .get(field)
+        .allowedOptions.filter((option) => unique.has(option));
+    }
+    return [...unique].sort();
   }
 
   private freezeValue(value: RecognizedProfileValue): RecognizedProfileValue {
@@ -194,6 +212,7 @@ export class CoachProfileMutationService {
     const serialized =
       command.action === 'SET'
         ? this.serialize(
+            command.field,
             command.value,
             definition.valueType,
             definition.allowedOptions,
@@ -584,6 +603,7 @@ export class CoachProfileMutationService {
   }
 
   private serialize(
+    field: CoachProfileAcquisitionField,
     value: RecognizedProfileValue,
     valueType: CoachProfileValueType,
     options: readonly string[],
@@ -625,13 +645,17 @@ export class CoachProfileMutationService {
           (options.length === 0 || options.includes(item)),
       )
     ) {
-      const normalized = [
+      const unique = [
         ...new Set(
           value
             .filter((item): item is string => typeof item === 'string')
             .map((item) => item.trim()),
         ),
-      ].sort();
+      ];
+      const normalized =
+        field === CoachProfileAcquisitionField.AVAILABLE_TRAINING_DAYS
+          ? options.filter((option) => unique.includes(option))
+          : unique.sort();
       return this.serialized(null, null, null, normalized);
     }
     return null;

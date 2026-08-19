@@ -587,7 +587,7 @@ export class CoachAdaptiveProfileCollectorService {
       confirmationPolicy: definition.confirmationPolicy,
       dependencies,
       unmetDependencies,
-      blocksPlans: definition.blocksPlans,
+      blocksPlans: this.blocksPlans(definition, input),
       reason: result.reason,
     });
   }
@@ -685,7 +685,7 @@ export class CoachAdaptiveProfileCollectorService {
     modality: ProfileAcquisitionModality | null,
   ): ProfileAcquisitionPlanReadiness {
     const blockingFields = FIELD_DEFINITIONS.filter((definition) =>
-      definition.blocksPlans.includes(plan),
+      this.blocksPlans(definition, input).includes(plan),
     )
       .filter((definition) =>
         this.isApplicableForReadiness(definition, modality),
@@ -726,6 +726,19 @@ export class CoachAdaptiveProfileCollectorService {
       (datum.status === COACH_PROFILE_KNOWLEDGE_STATUS.INFERRED &&
         definition.confirmationPolicy === 'INFERENCE_ALLOWED')
     );
+  }
+
+  private blocksPlans(
+    definition: ProfileAcquisitionFieldDefinition,
+    input: CoachAdaptiveProfileCollectorInput,
+  ): readonly ProfileAcquisitionPlan[] {
+    if (
+      definition.field === PROFILE_ACQUISITION_FIELD.AVAILABLE_TRAINING_DAYS &&
+      input.conversationContext.requiresWorkoutCalendar
+    ) {
+      return Object.freeze(['WORKOUT']);
+    }
+    return definition.blocksPlans;
   }
 
   private dependencySatisfied(
