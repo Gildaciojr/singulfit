@@ -34,6 +34,7 @@ export interface GenerateWorkoutPlanV2InputSource {
   readonly profileId?: string;
   readonly decision?: ConversationGoalDecision;
   readonly recognizedContext?: WorkoutRecognizedContext;
+  readonly declaredContext?: WorkoutRecognizedContext;
   readonly snapshot?: CoachProfileSnapshot;
   readonly referenceDate: Date;
   readonly currentMessage?: string;
@@ -67,7 +68,8 @@ export class GenerateWorkoutPlanV2InputBuilder {
     const recognizedContext = this.recognizedContext(
       source.recognizedContext,
       snapshot,
-      source.currentMessage,
+      source.declaredContext ??
+        this.recognizeDeclaredContext(source.currentMessage),
     );
 
     return Object.freeze({
@@ -82,6 +84,12 @@ export class GenerateWorkoutPlanV2InputBuilder {
         previousPlan: source.previousPlan,
       }),
     });
+  }
+
+  recognizeDeclaredContext(
+    message: string | undefined,
+  ): WorkoutRecognizedContext {
+    return this.declaredContext(message);
   }
 
   private async profileId(userId: string): Promise<string> {
@@ -122,9 +130,8 @@ export class GenerateWorkoutPlanV2InputBuilder {
   private recognizedContext(
     current: WorkoutRecognizedContext | undefined,
     snapshot: CoachProfileSnapshot,
-    currentMessage: string | undefined,
+    declared: WorkoutRecognizedContext,
   ): WorkoutRecognizedContext {
-    const declared = this.declaredContext(currentMessage);
     return Object.freeze({
       ...current,
       ...declared,

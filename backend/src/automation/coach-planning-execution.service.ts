@@ -3,8 +3,12 @@ import { type NutritionArtifactType } from '@prisma/client';
 import { performance } from 'node:perf_hooks';
 import type {
   CoachAdaptiveProfileCollectorInput,
+  ProfileAcquisitionContextValue,
+  ProfileAcquisitionConversationContext,
   ProfileAcquisitionDecision,
+  ProfileAcquisitionModality,
 } from '../context/coach-adaptive-profile-collector.contract';
+import { PROFILE_ACQUISITION_MODALITY } from '../context/coach-adaptive-profile-collector.contract';
 import { CoachAdaptiveProfileCollectorService } from '../context/coach-adaptive-profile-collector.service';
 import { CoachProfileSnapshotBuilder } from '../context/coach-profile-snapshot.builder';
 import { CoachConversationHumanContextBuilder } from '../context/coach-conversation-human-context.builder';
@@ -30,8 +34,16 @@ import type { NutritionReasoningResult } from '../nutrition-reasoning/nutrition-
 import { WorkoutKnowledgeResolverService } from '../workout-knowledge/workout-knowledge-resolver.service';
 import { WorkoutReasoningEngineService } from '../workout-reasoning/workout-reasoning-engine.service';
 import type { WorkoutReasoningResult } from '../workout-reasoning/workout-reasoning.contract';
-import { WORKOUT_ARTIFACT_TYPE } from '../workout/v2/workout-planning-artifact.contract';
+import {
+  WORKOUT_ARTIFACT_TYPE,
+  WORKOUT_MODALITY,
+  type WorkoutModality,
+} from '../workout/v2/workout-planning-artifact.contract';
 import { GenerateWorkoutPlanV2InputBuilder } from '../workout/v2/generate-workout-plan-v2-input.builder';
+import type {
+  WorkoutPlanningValue,
+  WorkoutRecognizedContext,
+} from '../workout/v2/workout-planning-context.contract';
 import type { GenerateWorkoutPlanV2Input } from '../workout/v2/workout-planning-generation.contract';
 import { PrismaService } from '../prisma/prisma.service';
 import type { CoachCommandIntent } from './coach-command.service';
@@ -82,6 +94,7 @@ interface PreparedV2PlanningContext {
   readonly goalResolution: CurrentGoalResolution | undefined;
   readonly workoutGenerationInput: GenerateWorkoutPlanV2Input | null;
   readonly workoutProfileId: string | null;
+  readonly profileAcquisitionContext: ProfileAcquisitionConversationContext;
 }
 
 export class PendingGoalContinuationInProgressError extends Error {
@@ -352,6 +365,7 @@ export class CoachPlanningExecutionService {
       content: selectedContent,
       responseRequired: true,
       pendingExecutionClaimToken,
+      profileAcquisitionContext: preparation?.profileAcquisitionContext,
       selectedSource,
       decision: preparation?.decision ?? null,
       nutritionReasoning: nutrition.result,
@@ -526,8 +540,17 @@ export class CoachPlanningExecutionService {
       runtime?.pendingGoalConfirmation,
     );
     const adaptation = this.intentAdapter.adapt(intent);
+    const declaredWorkoutContext =
+      intent === 'WORKOUT' && this.workoutPlanningInputBuilder
+        ? this.workoutPlanningInputBuilder.recognizeDeclaredContext(
+            runtime?.currentMessage,
+          )
+        : undefined;
+    const profileAcquisitionContext = this.profileAcquisitionContext(
+      declaredWorkoutContext,
+    );
     const adaptiveDecision = this.collector.decide(
-      this.collectorInput(snapshot, adaptation),
+      this.collectorInput(snapshot, adaptation, profileAcquisitionContext),
     );
     const plannedDecision = this.planner.plan(
       this.plannerInput(snapshot, adaptation, adaptiveDecision),
@@ -563,6 +586,7 @@ export class CoachPlanningExecutionService {
             userId,
             profileId: runtime?.profileId,
             decision,
+            declaredContext: declaredWorkoutContext,
             snapshot,
             referenceDate,
             currentMessage: runtime?.currentMessage,
@@ -577,6 +601,7 @@ export class CoachPlanningExecutionService {
       goalResolution,
       workoutGenerationInput: builtWorkoutInput?.generationInput ?? null,
       workoutProfileId: builtWorkoutInput?.profileId ?? null,
+      profileAcquisitionContext,
     });
   }
 
@@ -916,19 +941,71 @@ export class CoachPlanningExecutionService {
   private collectorInput(
     snapshot: CoachProfileSnapshot,
     adaptation: LegacyCoachIntentAdaptation,
+    conversationContext: ProfileAcquisitionConversationContext = Object.freeze(
+      {},
+    ),
   ): CoachAdaptiveProfileCollectorInput {
     const noInteractions = Object.freeze([]);
 
     return Object.freeze({
       snapshot,
       intent: adaptation.acquisitionIntent,
-      conversationContext: Object.freeze({}),
+      conversationContext,
       memory: Object.freeze({ interactions: noInteractions }),
       recentHistory: Object.freeze({
         currentLogicalTurn: 0,
         interactions: noInteractions,
       }),
     });
+  }
+
+  private profileAcquisitionContext(
+    recognized: WorkoutRecognizedContext | undefined,
+  ): ProfileAcquisitionConversationContext {
+    if (!recognized) return Object.freeze({});
+    const modality = this.explicitWorkoutValue(recognized.modality);
+
+    return Object.freeze({
+      modality: modality
+        ? Object.freeze({
+            value: this.profileAcquisitionModality(modality.value),
+            evidence: modality.evidence,
+          })
+        : undefined,
+      experience: this.explicitWorkoutValue(recognized.experience),
+      environment: this.explicitWorkoutValue(recognized.environment),
+      equipment: this.explicitWorkoutValue(recognized.equipment),
+      weeklyFrequency: this.explicitWorkoutValue(recognized.weeklyFrequency),
+      sessionDurationMinutes: this.explicitWorkoutValue(
+        recognized.sessionDurationMinutes,
+      ),
+    });
+  }
+
+  private explicitWorkoutValue<T>(
+    value: WorkoutPlanningValue<T> | undefined,
+  ): ProfileAcquisitionContextValue<T> | undefined {
+    if (!value || value.status !== 'CONFIRMED') return undefined;
+    return Object.freeze({ value: value.value, evidence: 'EXPLICIT' as const });
+  }
+
+  private profileAcquisitionModality(
+    modality: WorkoutModality,
+  ): ProfileAcquisitionModality {
+    switch (modality) {
+      case WORKOUT_MODALITY.GYM_STRENGTH:
+        return PROFILE_ACQUISITION_MODALITY.GYM;
+      case WORKOUT_MODALITY.HOME_WORKOUT:
+        return PROFILE_ACQUISITION_MODALITY.HOME;
+      case WORKOUT_MODALITY.RUNNING:
+        return PROFILE_ACQUISITION_MODALITY.RUNNING;
+      case WORKOUT_MODALITY.CROSSFIT:
+        return PROFILE_ACQUISITION_MODALITY.CROSSFIT;
+      case WORKOUT_MODALITY.CYCLING:
+        return PROFILE_ACQUISITION_MODALITY.CYCLING;
+      default:
+        return PROFILE_ACQUISITION_MODALITY.OTHER;
+    }
   }
 
   private plannerInput(

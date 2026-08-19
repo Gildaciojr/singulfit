@@ -243,7 +243,12 @@ describe('CoachCommandService', () => {
     };
     const profileAcquisitionRollout = {
       requestWorkoutClarification: jest.fn().mockResolvedValue({
+        executed: true,
         questionCreated: true,
+        reason: 'QUESTION_PREPARED' as const,
+        mode: 'INTERNAL' as const,
+        cycleId: 'cycle-id',
+        field: 'TRAINING_EXPERIENCE' as const,
       }),
     };
     const service = new CoachCommandService(
@@ -409,6 +414,12 @@ describe('CoachCommandService', () => {
         content: 'Quanto tempo você tem para treinar?',
         responseRequired: true,
         selectedSource: 'WORKOUT_V2',
+        profileAcquisitionContext: {
+          modality: { value: 'GYM', evidence: 'EXPLICIT' },
+          environment: { value: 'FULL_GYM', evidence: 'EXPLICIT' },
+          weeklyFrequency: { value: 4, evidence: 'EXPLICIT' },
+          sessionDurationMinutes: { value: 60, evidence: 'EXPLICIT' },
+        },
         dispatch: {
           content: 'Quanto tempo você tem para treinar?',
           executor: 'WORKOUT_V2',
@@ -425,9 +436,213 @@ describe('CoachCommandService', () => {
 
     expect(
       subject.profileAcquisitionRollout.requestWorkoutClarification,
-    ).toHaveBeenCalledTimes(1);
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationContext: {
+          modality: { value: 'GYM', evidence: 'EXPLICIT' },
+          environment: { value: 'FULL_GYM', evidence: 'EXPLICIT' },
+          weeklyFrequency: { value: 4, evidence: 'EXPLICIT' },
+          sessionDurationMinutes: { value: 60, evidence: 'EXPLICIT' },
+        },
+      }),
+    );
     expect(subject.prisma.coachMessage.create).not.toHaveBeenCalled();
     expect(subject.eventBus.publish).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+  });
+
+  it('fails closed without sending an untracked Workout V2 clarification when acquisition is OFF', async () => {
+    const subject = createSubject({
+      content: 'monte um treino para mim',
+      workoutClarification: true,
+    });
+    subject.profileAcquisitionRollout.requestWorkoutClarification.mockResolvedValueOnce(
+      {
+        executed: false,
+        questionCreated: false,
+        reason: 'MODE_OFF',
+        mode: 'OFF',
+        cycleId: null,
+        field: null,
+      },
+    );
+    jest
+      .spyOn(subject.planningExecution, 'executeStructured')
+      .mockResolvedValueOnce({
+        content: 'Qual é a sua experiência de treino?',
+        responseRequired: true,
+        selectedSource: 'WORKOUT_V2',
+        dispatch: {
+          content: 'Qual é a sua experiência de treino?',
+          executor: 'WORKOUT_V2',
+          generationCompleted: false,
+          fallbackApplied: false,
+          workoutDisposition: 'CLARIFICATION',
+        },
+      } as never);
+
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+
+    expect(subject.prisma.coachMessage.create).toHaveBeenCalledTimes(1);
+    expect(subject.prisma.coachMessage.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          content: expect.stringContaining(
+            'Não consegui registrar com segurança',
+          ),
+        }),
+      }),
+    );
+    expect(subject.prisma.coachMessage.create).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          content: 'Qual é a sua experiência de treino?',
+        }),
+      }),
+    );
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when Workout V2 clarification has no acquisition dependency', async () => {
+    const subject = createSubject({ content: 'monte um treino para mim' });
+    jest
+      .spyOn(subject.planningExecution, 'executeStructured')
+      .mockResolvedValueOnce({
+        content: 'Qual é a sua experiência de treino?',
+        responseRequired: true,
+        selectedSource: 'WORKOUT_V2',
+        dispatch: {
+          content: 'Qual é a sua experiência de treino?',
+          executor: 'WORKOUT_V2',
+          generationCompleted: false,
+          fallbackApplied: false,
+          workoutDisposition: 'CLARIFICATION',
+        },
+      } as never);
+
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+
+    expect(subject.prisma.coachMessage.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          content: expect.stringContaining(
+            'Não consegui registrar com segurança',
+          ),
+        }),
+      }),
+    );
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
+  });
+
+  it('suppresses a concurrent clarification when an acquisition question is already active', async () => {
+    const subject = createSubject({
+      content: 'monte um treino para mim',
+      workoutClarification: true,
+    });
+    subject.profileAcquisitionRollout.requestWorkoutClarification.mockResolvedValueOnce(
+      {
+        executed: true,
+        questionCreated: false,
+        reason: 'QUESTION_ALREADY_ACTIVE',
+        mode: 'INTERNAL',
+        cycleId: 'active-cycle-id',
+        field: 'TRAINING_EXPERIENCE',
+      },
+    );
+    jest
+      .spyOn(subject.planningExecution, 'executeStructured')
+      .mockResolvedValueOnce({
+        content: 'Qual é a sua experiência de treino?',
+        responseRequired: true,
+        selectedSource: 'WORKOUT_V2',
+        dispatch: {
+          content: 'Qual é a sua experiência de treino?',
+          executor: 'WORKOUT_V2',
+          generationCompleted: false,
+          fallbackApplied: false,
+          workoutDisposition: 'CLARIFICATION',
+        },
+      } as never);
+
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+
+    expect(subject.prisma.coachMessage.create).not.toHaveBeenCalled();
+    expect(subject.eventBus.publish).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+  });
+
+  it('reprocesses a productive clarification continuation as WORKOUT with the original request context', async () => {
+    const originalMessage =
+      'Quero que você monte um treino de musculação para mim. quero treinar 4 vezes por semana, cerca de 60 minutos por treino, na academia.';
+    const subject = createSubject({
+      content: 'Não tenho nenhuma.',
+      workoutClarification: true,
+    });
+    subject.prisma.message.findFirst
+      .mockResolvedValueOnce({
+        id: 'answer-message-id',
+        content: 'Não tenho nenhuma.',
+        timestamp: new Date('2026-06-10T12:05:00.000Z'),
+        conversation: {
+          id: 'conversation-id',
+          user: { onboardingCompleted: true },
+        },
+      })
+      .mockResolvedValueOnce({ content: originalMessage });
+    const context = {
+      modality: { value: 'GYM' as const, evidence: 'EXPLICIT' as const },
+      environment: { value: 'FULL_GYM', evidence: 'EXPLICIT' as const },
+      weeklyFrequency: { value: 4, evidence: 'EXPLICIT' as const },
+      sessionDurationMinutes: { value: 60, evidence: 'EXPLICIT' as const },
+    };
+    const execution = jest
+      .spyOn(subject.planningExecution, 'executeStructured')
+      .mockResolvedValueOnce({
+        content: 'Qual é a sua experiência de treino?',
+        responseRequired: true,
+        selectedSource: 'WORKOUT_V2',
+        profileAcquisitionContext: context,
+        dispatch: {
+          content: 'Qual é a sua experiência de treino?',
+          executor: 'WORKOUT_V2',
+          generationCompleted: false,
+          fallbackApplied: false,
+          workoutDisposition: 'CLARIFICATION',
+        },
+      } as never);
+
+    await expect(
+      subject.service.processTextMessage({
+        userId: 'user-id',
+        messageId: 'answer-message-id',
+        workoutContinuationMessageId: 'original-request-id',
+      }),
+    ).resolves.toMatchObject({ intent: 'WORKOUT' });
+
+    expect(execution).toHaveBeenCalledWith(
+      'user-id',
+      'WORKOUT',
+      expect.objectContaining({ currentMessage: originalMessage }),
+    );
+    expect(
+      subject.profileAcquisitionRollout.requestWorkoutClarification,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        originalRequestMessageId: 'original-request-id',
+        conversationContext: context,
+      }),
+    );
     expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
   });
 

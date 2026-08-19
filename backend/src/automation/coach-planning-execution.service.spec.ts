@@ -78,7 +78,9 @@ describe('CoachPlanningExecutionService', () => {
     expect(dispatcher.dispatchStructured).not.toHaveBeenCalled();
   });
 
-  it('routes a current workout request to V2 and transports declared frequency', async () => {
+  it('uses the same declared workout context for current-turn readiness and generation', async () => {
+    const currentMessage =
+      'Quero que você monte um treino de musculação para mim. quero treinar 4 vezes por semana, cerca de 60 minutos por treino, na academia.';
     const unavailableDatum = Object.freeze({
       status: 'UNKNOWN' as const,
       sources: Object.freeze([]),
@@ -104,11 +106,27 @@ describe('CoachPlanningExecutionService', () => {
       missingPreconditions: Object.freeze([]),
       pendingDependencies: Object.freeze([]),
     }) satisfies ConversationGoalDecision;
+    const recognizedContext = Object.freeze({
+      modality: Object.freeze({
+        status: 'CONFIRMED' as const,
+        value: 'GYM_STRENGTH' as const,
+      }),
+      environment: Object.freeze({
+        status: 'CONFIRMED' as const,
+        value: 'FULL_GYM' as const,
+      }),
+      weeklyFrequency: Object.freeze({
+        status: 'CONFIRMED' as const,
+        value: 4,
+      }),
+      sessionDurationMinutes: Object.freeze({
+        status: 'CONFIRMED' as const,
+        value: 60,
+      }),
+    });
     const generationInput = Object.freeze({
       userId: 'user-id',
-      recognizedContext: Object.freeze({
-        weeklyFrequency: Object.freeze({ status: 'CONFIRMED', value: 4 }),
-      }),
+      recognizedContext,
     });
     const dispatcher = {
       dispatchStructured: jest.fn().mockResolvedValue({
@@ -120,6 +138,7 @@ describe('CoachPlanningExecutionService', () => {
       }),
     };
     const workoutBuilder = {
+      recognizeDeclaredContext: jest.fn().mockReturnValue(recognizedContext),
       build: jest.fn().mockResolvedValue({
         generationInput,
         profileId: 'profile-id',
@@ -134,6 +153,9 @@ describe('CoachPlanningExecutionService', () => {
         suppressNutritionShadow: false,
       }),
     };
+    const collector = {
+      decide: jest.fn().mockReturnValue(Object.freeze({})),
+    };
     const service = new CoachPlanningExecutionService(
       dispatcher as unknown as CoachPlanningExecutionDispatcherService,
       {
@@ -146,9 +168,7 @@ describe('CoachPlanningExecutionService', () => {
           acquisitionIntent: Object.freeze({}),
         }),
       } as unknown as LegacyCoachIntentAdapter,
-      {
-        decide: jest.fn().mockReturnValue(Object.freeze({})),
-      } as unknown as CoachAdaptiveProfileCollectorService,
+      collector as unknown as CoachAdaptiveProfileCollectorService,
       {
         plan: jest.fn().mockReturnValue(decision),
       } as unknown as ConversationGoalPlannerService,
@@ -173,14 +193,34 @@ describe('CoachPlanningExecutionService', () => {
       messageId: 'message-id',
       correlationId: 'message-id',
       profileId: 'profile-id',
-      currentMessage: 'quero treinar 4 vezes por semana',
+      currentMessage,
       referenceDate: new Date('2026-08-18T12:00:00.000Z'),
     });
 
     expect(result.selectedSource).toBe('WORKOUT_V2');
+    expect(result.profileAcquisitionContext).toEqual({
+      modality: { value: 'GYM', evidence: 'EXPLICIT' },
+      environment: { value: 'FULL_GYM', evidence: 'EXPLICIT' },
+      weeklyFrequency: { value: 4, evidence: 'EXPLICIT' },
+      sessionDurationMinutes: { value: 60, evidence: 'EXPLICIT' },
+    });
+    expect(workoutBuilder.recognizeDeclaredContext).toHaveBeenCalledWith(
+      currentMessage,
+    );
+    expect(collector.decide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationContext: {
+          modality: { value: 'GYM', evidence: 'EXPLICIT' },
+          environment: { value: 'FULL_GYM', evidence: 'EXPLICIT' },
+          weeklyFrequency: { value: 4, evidence: 'EXPLICIT' },
+          sessionDurationMinutes: { value: 60, evidence: 'EXPLICIT' },
+        },
+      }),
+    );
     expect(workoutBuilder.build).toHaveBeenCalledWith(
       expect.objectContaining({
-        currentMessage: 'quero treinar 4 vezes por semana',
+        currentMessage,
+        declaredContext: recognizedContext,
       }),
     );
     expect(dispatcher.dispatchStructured).toHaveBeenCalledWith(

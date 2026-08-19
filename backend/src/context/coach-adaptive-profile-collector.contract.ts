@@ -27,13 +27,22 @@ export const PROFILE_ACQUISITION_MODALITY = {
 export type ProfileAcquisitionModality =
   (typeof PROFILE_ACQUISITION_MODALITY)[keyof typeof PROFILE_ACQUISITION_MODALITY];
 
-export type ProfileAcquisitionModalityEvidence = 'EXPLICIT' | 'INFERRED';
+export type ProfileAcquisitionContextEvidence = 'EXPLICIT' | 'INFERRED';
+export type ProfileAcquisitionModalityEvidence =
+  ProfileAcquisitionContextEvidence;
+
+export interface ProfileAcquisitionContextValue<T> {
+  readonly value: T;
+  readonly evidence: ProfileAcquisitionContextEvidence;
+}
 
 export interface ProfileAcquisitionConversationContext {
-  readonly modality?: {
-    readonly value: ProfileAcquisitionModality;
-    readonly evidence: ProfileAcquisitionModalityEvidence;
-  };
+  readonly modality?: ProfileAcquisitionContextValue<ProfileAcquisitionModality>;
+  readonly experience?: ProfileAcquisitionContextValue<string>;
+  readonly environment?: ProfileAcquisitionContextValue<string>;
+  readonly equipment?: ProfileAcquisitionContextValue<readonly string[]>;
+  readonly weeklyFrequency?: ProfileAcquisitionContextValue<number>;
+  readonly sessionDurationMinutes?: ProfileAcquisitionContextValue<number>;
 }
 
 export const PROFILE_ACQUISITION_FIELD = {

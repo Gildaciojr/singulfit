@@ -48,17 +48,19 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
       sourceMessageId: string | null;
       resultCode: string | null;
       confirmationState: CoachProfileConfirmationState;
+      origin: string;
+      userId: string;
     }> = {},
   ) {
     return {
       id: 'cycle-id',
-      userId: 'admin-id',
+      userId: overrides.userId ?? 'admin-id',
       field: overrides.field ?? CoachProfileAcquisitionField.DESIRED_MEAL_COUNT,
       status: overrides.status ?? CoachProfileAcquisitionCycleStatus.ASKED,
       questionKind: 'INTEGER',
       questionVersion: 1,
       logicalTurn: 4,
-      origin: 'INTERNAL_PROFILE_ACQUISITION_ROLLOUT',
+      origin: overrides.origin ?? 'INTERNAL_PROFILE_ACQUISITION_ROLLOUT',
       operationKey: 'operation-key',
       active: true,
       resultCode: overrides.resultCode ?? null,
@@ -278,6 +280,114 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
     expect(test.eventBus.publish).not.toHaveBeenCalled();
   });
 
+  it('runs the productive Workout V2 clarification lifecycle for a non-ADMIN user with the canonical context', async () => {
+    const test = subject('INTERNAL');
+    const context = Object.freeze({
+      modality: Object.freeze({
+        value: 'GYM' as const,
+        evidence: 'EXPLICIT' as const,
+      }),
+      environment: Object.freeze({
+        value: 'FULL_GYM',
+        evidence: 'EXPLICIT' as const,
+      }),
+      weeklyFrequency: Object.freeze({
+        value: 4,
+        evidence: 'EXPLICIT' as const,
+      }),
+      sessionDurationMinutes: Object.freeze({
+        value: 60,
+        evidence: 'EXPLICIT' as const,
+      }),
+    });
+    const workoutSpecification = Object.freeze({
+      ...specification,
+      field: CoachProfileAcquisitionField.TRAINING_EXPERIENCE,
+      templateCode: 'PROFILE_QUESTION_TRAINING_EXPERIENCE_V1',
+    });
+    test.prisma.message.findFirst.mockResolvedValue({
+      id: 'workout-request-id',
+      conversationId: 'conversation-id',
+    });
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(null);
+    test.runtime.evaluate.mockResolvedValue({
+      evaluation: {
+        logicalTurn: 4,
+        selectedField: workoutSpecification.field,
+        canAsk: true,
+        reason: 'READY',
+      },
+      specification: workoutSpecification,
+    });
+
+    await expect(
+      test.service.requestWorkoutClarification({
+        userId: 'common-user-id',
+        sourceMessageId: 'workout-request-id',
+        referenceDate: sentAt,
+        conversationContext: context,
+      }),
+    ).resolves.toMatchObject({
+      questionCreated: true,
+      reason: 'QUESTION_PREPARED',
+      field: CoachProfileAcquisitionField.TRAINING_EXPERIENCE,
+    });
+    expect(test.runtime.evaluate).toHaveBeenCalledWith(
+      'common-user-id',
+      sentAt,
+      PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,
+      context,
+    );
+    expect(test.eligibility.evaluate).not.toHaveBeenCalled();
+
+    const productiveCycle = activeCycle({
+      userId: 'common-user-id',
+      field: CoachProfileAcquisitionField.TRAINING_EXPERIENCE,
+      sourceMessageId: 'workout-request-id',
+      origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:workout-request-id',
+    });
+    test.prisma.outboundMessage.findUnique.mockResolvedValue({
+      id: 'question-outbound-id',
+      userId: 'common-user-id',
+      sourceMessageId: 'workout-request-id',
+      responseType: ResponseType.PROFILE_ACQUISITION,
+    });
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+      productiveCycle,
+    );
+
+    await expect(
+      test.service.authorizeQuestionSend('question-outbound-id'),
+    ).resolves.toBe(true);
+    expect(test.eligibility.evaluate).not.toHaveBeenCalled();
+
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+      productiveCycle,
+    );
+    test.prisma.message.findFirst.mockResolvedValue({
+      id: 'answer-message-id',
+      content: 'sou iniciante',
+      timestamp: answerAt,
+      conversationId: 'conversation-id',
+    });
+
+    await expect(
+      test.service.captureActiveResponse({
+        userId: 'common-user-id',
+        messageId: 'answer-message-id',
+      }),
+    ).resolves.toMatchObject({
+      handled: true,
+      persisted: true,
+      continuationMessageId: 'answer-message-id',
+      originalRequestMessageId: 'workout-request-id',
+    });
+    expect(test.eligibility.evaluate).not.toHaveBeenCalled();
+  });
+
   it('keeps an external user completely outside the rollout', async () => {
     const test = subject();
     test.eligibility.evaluate.mockResolvedValue({
@@ -311,6 +421,7 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
       'admin-id',
       sentAt,
       PROFILE_ACQUISITION_INTENT.DIET_PLAN_REQUEST,
+      {},
     );
     expect(test.cycles.prepare).toHaveBeenCalledTimes(1);
     expect(test.tx.outboundMessage.create).toHaveBeenCalledWith({
@@ -361,6 +472,7 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
       'admin-id',
       sentAt,
       PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,
+      {},
     );
   });
 
@@ -425,7 +537,9 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
     const test = subject();
     test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
     test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
-      activeCycle(),
+      activeCycle({
+        origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:root-workout-message-id',
+      }),
     );
 
     await expect(
@@ -437,6 +551,8 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
       handled: true,
       persisted: true,
       reason: 'ANSWER_PERSISTED',
+      continuationMessageId: 'answer-message-id',
+      originalRequestMessageId: 'root-workout-message-id',
     });
     expect(test.mutationService.execute).toHaveBeenCalledTimes(1);
     expect(test.cycles.complete).toHaveBeenCalledWith(

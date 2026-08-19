@@ -14,6 +14,7 @@ import { INTERNAL_EVENT } from '../../event-bus/event-bus.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   PROFILE_ACQUISITION_INTENT,
+  type ProfileAcquisitionConversationContext,
   type ProfileAcquisitionIntent,
 } from '../coach-adaptive-profile-collector.contract';
 import {
@@ -67,6 +68,7 @@ export class ProfileAcquisitionInternalRolloutService {
     readonly sourceMessageId: string;
     readonly referenceDate: Date;
     readonly originalRequestMessageId?: string;
+    readonly conversationContext?: ProfileAcquisitionConversationContext;
   }): Promise<ProfileAcquisitionRolloutResult> {
     const source = await this.prisma.message.findFirst({
       where: {
@@ -95,6 +97,7 @@ export class ProfileAcquisitionInternalRolloutService {
       this.config.get().mode,
       PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,
       `${WORKOUT_V2_ORIGIN}:${input.originalRequestMessageId ?? input.sourceMessageId}`,
+      input.conversationContext,
     );
   }
 
@@ -471,6 +474,9 @@ export class ProfileAcquisitionInternalRolloutService {
     mode: ProfileAcquisitionMode,
     intent: ProfileAcquisitionIntent = PROFILE_ACQUISITION_INTENT.DIET_PLAN_REQUEST,
     origin = ROLLOUT_ORIGIN,
+    conversationContext: ProfileAcquisitionConversationContext = Object.freeze(
+      {},
+    ),
   ): Promise<ProfileAcquisitionRolloutResult> {
     const active = await this.findActiveCycle(outbound.userId);
     if (active) {
@@ -517,6 +523,7 @@ export class ProfileAcquisitionInternalRolloutService {
       outbound.userId,
       outbound.sentAt,
       intent,
+      conversationContext,
     );
     if (!runtime.evaluation.canAsk || !runtime.specification) {
       const reason = this.runtimeReason(runtime.evaluation.reason);

@@ -55,6 +55,42 @@ describe('GenerateWorkoutPlanV2InputBuilder', () => {
     },
   );
 
+  it('recognizes the complete explicit context from the production workout request without inventing absent facts', async () => {
+    const message =
+      'Quero que você monte um treino de musculação para mim. quero treinar 4 vezes por semana, cerca de 60 minutos por treino, na academia.';
+    const declared = builder.recognizeDeclaredContext(message);
+
+    expect(declared).toEqual(
+      expect.objectContaining({
+        modality: { status: 'CONFIRMED', value: 'GYM_STRENGTH' },
+        environment: { status: 'CONFIRMED', value: 'FULL_GYM' },
+        weeklyFrequency: { status: 'CONFIRMED', value: 4 },
+        sessionDurationMinutes: { status: 'CONFIRMED', value: 60 },
+      }),
+    );
+    expect(declared.experience).toBeUndefined();
+    expect(declared.equipment).toBeUndefined();
+    expect(declared.movementConstraints).toEqual([]);
+    expect(declared.safetySignals).toEqual([]);
+
+    const result = await builder.build({
+      userId: 'user-id',
+      profileId: 'profile-id',
+      snapshot,
+      referenceDate: new Date('2026-08-19T12:00:00.000Z'),
+      currentMessage: message,
+    });
+
+    expect(result.generationInput.recognizedContext).toEqual(
+      expect.objectContaining({
+        modality: declared.modality,
+        environment: declared.environment,
+        weeklyFrequency: declared.weeklyFrequency,
+        sessionDurationMinutes: declared.sessionDurationMinutes,
+      }),
+    );
+  });
+
   it('does not invent an unavailable modality', async () => {
     const result = await builder.build({
       userId: 'user-id',

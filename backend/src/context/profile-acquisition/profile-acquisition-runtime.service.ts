@@ -6,6 +6,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   PROFILE_ACQUISITION_INTENT,
+  type ProfileAcquisitionConversationContext,
   type ProfileAcquisitionIntent,
   type ProfileAcquisitionInteraction,
 } from '../coach-adaptive-profile-collector.contract';
@@ -39,6 +40,9 @@ export class ProfileAcquisitionRuntimeService {
     userId: string,
     referenceDate: Date,
     intent: ProfileAcquisitionIntent = PROFILE_ACQUISITION_INTENT.DIET_PLAN_REQUEST,
+    conversationContext: ProfileAcquisitionConversationContext = Object.freeze(
+      {},
+    ),
   ): Promise<ProfileAcquisitionRuntimeState> {
     const [snapshot, cycles, logicalTurn] = await Promise.all([
       this.snapshotBuilder.build(userId, referenceDate),
@@ -86,7 +90,7 @@ export class ProfileAcquisitionRuntimeService {
     const adaptiveDecision = this.collector.decide({
       snapshot,
       intent,
-      conversationContext: Object.freeze({}),
+      conversationContext,
       memory: Object.freeze({ interactions: Object.freeze([]) }),
       recentHistory: Object.freeze({
         currentLogicalTurn: logicalTurn,

@@ -4,6 +4,7 @@ import type { NutritionReasoningResult } from '../nutrition-reasoning/nutrition-
 import type { WorkoutReasoningResult } from '../workout-reasoning/workout-reasoning.contract';
 import type { CoachConversationHumanContext } from '../context/coach-conversation-human-context.contract';
 import type { PlanningExecutionRouteSelection } from './planning-execution-route-policy.service';
+import type { ProfileAcquisitionConversationContext } from '../context/coach-adaptive-profile-collector.contract';
 
 export type CoachPlanningExecutor =
   | 'DIET_LEGACY'
@@ -52,6 +53,7 @@ export interface CoachPlanningExecutionResult {
   readonly content: string;
   readonly responseRequired: boolean;
   readonly pendingExecutionClaimToken?: string;
+  readonly profileAcquisitionContext?: ProfileAcquisitionConversationContext;
   readonly selectedSource: CoachPlanningSelectedSource;
   readonly decision: ConversationGoalDecision | null;
   readonly nutritionReasoning: NutritionReasoningResult | null;

@@ -335,20 +335,29 @@ export class CoachCommandService {
     if (!execution.responseRequired) {
       return Object.freeze({ content: '', responseRequired: false });
     }
-    if (
-      execution.dispatch?.workoutDisposition === 'CLARIFICATION' &&
-      this.profileAcquisitionRollout
-    ) {
-      const clarification =
-        await this.profileAcquisitionRollout.requestWorkoutClarification({
-          userId: input.userId,
-          sourceMessageId: input.messageId,
-          referenceDate: input.referenceDate,
-          originalRequestMessageId: input.originalRequestMessageId,
-        });
-      if (clarification.questionCreated) {
-        return Object.freeze({ content: '', responseRequired: false });
+    if (execution.dispatch?.workoutDisposition === 'CLARIFICATION') {
+      if (!this.profileAcquisitionRollout) {
+        return this.blockedWorkoutClarification();
       }
+      try {
+        const clarification =
+          await this.profileAcquisitionRollout.requestWorkoutClarification({
+            userId: input.userId,
+            sourceMessageId: input.messageId,
+            referenceDate: input.referenceDate,
+            originalRequestMessageId: input.originalRequestMessageId,
+            conversationContext: execution.profileAcquisitionContext,
+          });
+        if (
+          clarification.questionCreated ||
+          clarification.reason === 'QUESTION_ALREADY_ACTIVE'
+        ) {
+          return Object.freeze({ content: '', responseRequired: false });
+        }
+      } catch {
+        return this.blockedWorkoutClarification();
+      }
+      return this.blockedWorkoutClarification();
     }
     const content =
       execution.selectedSource === 'LEGACY' && this.planningConversationResponse
@@ -364,6 +373,19 @@ export class CoachCommandService {
       responseRequired: true,
       pendingExecutionClaimToken: execution.pendingExecutionClaimToken,
       workoutDisposition: execution.dispatch?.workoutDisposition,
+    });
+  }
+
+  private blockedWorkoutClarification(): {
+    readonly content: string;
+    readonly responseRequired: true;
+    readonly workoutDisposition: 'BLOCKED';
+  } {
+    return Object.freeze({
+      content:
+        'Não consegui registrar com segurança a próxima pergunta do seu treino. Tente novamente em instantes para continuarmos sem perder suas respostas.',
+      responseRequired: true,
+      workoutDisposition: 'BLOCKED' as const,
     });
   }
 

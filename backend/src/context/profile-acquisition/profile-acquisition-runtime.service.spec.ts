@@ -4,6 +4,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CoachAdaptiveProfileCollectorService } from '../coach-adaptive-profile-collector.service';
+import { PROFILE_ACQUISITION_INTENT } from '../coach-adaptive-profile-collector.contract';
 import { CoachProfileSnapshotBuilder } from '../coach-profile-snapshot.builder';
 import type { CoachProfileSnapshot } from '../coach-profile-snapshot.contract';
 import {
@@ -137,5 +138,109 @@ describe('ProfileAcquisitionRuntimeService', () => {
     expect(
       Object.isFrozen(await service.evaluate('admin-id', referenceDate)),
     ).toBe(true);
+  });
+
+  it('uses the canonical current-turn context when selecting the persistent workout question', async () => {
+    const snapshot = {
+      completion: { overall: 'PARTIAL', sections: Object.freeze([]) },
+    } as unknown as CoachProfileSnapshot;
+    const prisma = {
+      coachProfileAcquisitionCycle: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      message: { count: jest.fn().mockResolvedValue(1) },
+    };
+    const snapshotBuilder = { build: jest.fn().mockResolvedValue(snapshot) };
+    const adaptiveDecision = Object.freeze({
+      intent: 'WORKOUT_PLAN_REQUEST',
+      shouldAsk: true,
+      selectedCandidate: Object.freeze({
+        field: 'TRAINING_EXPERIENCE',
+        state: 'READY_TO_ASK',
+      }),
+      orderedCandidates: Object.freeze([]),
+      readiness: Object.freeze([
+        Object.freeze({
+          plan: 'WORKOUT',
+          ready: false,
+          blockingFields: Object.freeze([
+            'TRAINING_EXPERIENCE',
+            'TRAINING_EQUIPMENT',
+          ]),
+        }),
+      ]),
+      reason: 'FIELD_SELECTED',
+    });
+    const collector = { decide: jest.fn().mockReturnValue(adaptiveDecision) };
+    const planner = {
+      plan: jest.fn().mockReturnValue({
+        goal: CONVERSATION_GOAL.ASK_PROFILE_INFORMATION,
+      }),
+    };
+    const specification = Object.freeze({
+      field: CoachProfileAcquisitionField.TRAINING_EXPERIENCE,
+      questionKind: 'SINGLE_SELECT' as const,
+      responseType: 'SINGLE_SELECT' as const,
+      allowedOptions: Object.freeze([]),
+      allowsFreeText: true,
+      confirmationPolicy: 'IMPLICIT_ON_VALID_RESPONSE' as const,
+      reasonCode: 'MISSING_CONTEXTUAL_FIELD' as const,
+      version: 1,
+      templateCode: 'PROFILE_QUESTION_TRAINING_EXPERIENCE_V1',
+    });
+    const questions = {
+      toCollectorField: jest.fn(),
+      fromDecision: jest.fn().mockReturnValue(specification),
+    };
+    const service = new ProfileAcquisitionRuntimeService(
+      prisma as unknown as PrismaService,
+      snapshotBuilder as unknown as CoachProfileSnapshotBuilder,
+      collector as unknown as CoachAdaptiveProfileCollectorService,
+      planner as unknown as ConversationGoalPlannerService,
+      questions as unknown as ProfileQuestionSpecificationService,
+    );
+    const context = Object.freeze({
+      modality: Object.freeze({
+        value: 'GYM' as const,
+        evidence: 'EXPLICIT' as const,
+      }),
+      environment: Object.freeze({
+        value: 'FULL_GYM',
+        evidence: 'EXPLICIT' as const,
+      }),
+      weeklyFrequency: Object.freeze({
+        value: 4,
+        evidence: 'EXPLICIT' as const,
+      }),
+      sessionDurationMinutes: Object.freeze({
+        value: 60,
+        evidence: 'EXPLICIT' as const,
+      }),
+    });
+
+    await expect(
+      service.evaluate(
+        'user-id',
+        new Date('2026-08-19T12:00:00.000Z'),
+        PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,
+        context,
+      ),
+    ).resolves.toMatchObject({
+      evaluation: {
+        selectedField: CoachProfileAcquisitionField.TRAINING_EXPERIENCE,
+        canAsk: true,
+      },
+    });
+    expect(collector.decide).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationContext: context }),
+    );
+    expect(adaptiveDecision.readiness[0].blockingFields).not.toEqual(
+      expect.arrayContaining([
+        'TRAINING_MODALITY',
+        'TRAINING_ENVIRONMENT',
+        'TRAINING_FREQUENCY',
+        'SESSION_DURATION',
+      ]),
+    );
   });
 });

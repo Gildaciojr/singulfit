@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import {
   COACH_PROFILE_KNOWLEDGE_STATUS,
   CoachProfileDatum,
-  CoachProfileKnowledgeStatus,
   CoachProfileSnapshot,
 } from './coach-profile-snapshot.contract';
 import {
@@ -543,10 +542,10 @@ export class CoachAdaptiveProfileCollectorService {
     modality: ProfileAcquisitionModality | null,
   ): ProfileAcquisitionCandidate {
     const datum = definition.datum(input.snapshot);
-    const contextualModality =
-      definition.field === PROFILE_ACQUISITION_FIELD.TRAINING_MODALITY
-        ? input.conversationContext.modality
-        : undefined;
+    const contextualValue = this.contextualValue(
+      definition.field,
+      input.conversationContext,
+    );
     const active = definition.intents.includes(input.intent);
     const interaction = interactions.get(definition.field);
     const dependencies = definition.dependencies;
@@ -571,7 +570,7 @@ export class CoachAdaptiveProfileCollectorService {
         );
     const result = this.state({
       active: active && !dependencyNotApplicable,
-      contextualModality,
+      contextualValue,
       datum,
       definition,
       interaction,
@@ -595,8 +594,7 @@ export class CoachAdaptiveProfileCollectorService {
 
   private state(input: {
     readonly active: boolean;
-    readonly contextualModality?: {
-      readonly value: ProfileAcquisitionModality;
+    readonly contextualValue?: {
       readonly evidence: 'EXPLICIT' | 'INFERRED';
     };
     readonly datum: CoachProfileDatum<unknown>;
@@ -608,7 +606,7 @@ export class CoachAdaptiveProfileCollectorService {
     readonly state: ProfileAcquisitionState;
     readonly reason: ProfileAcquisitionReason;
   } {
-    if (input.contextualModality?.evidence === 'EXPLICIT') {
+    if (input.contextualValue?.evidence === 'EXPLICIT') {
       return this.stateResult('ALREADY_KNOWN', 'CONTEXT_EXPLICIT_VALUE');
     }
 
@@ -654,7 +652,7 @@ export class CoachAdaptiveProfileCollectorService {
       return this.stateResult('WAITING_DEPENDENCY', 'DEPENDENCY_NOT_MET');
     }
 
-    if (input.contextualModality?.evidence === 'INFERRED') {
+    if (input.contextualValue?.evidence === 'INFERRED') {
       return this.stateResult(
         'WAITING_CONFIRMATION',
         'INFERRED_VALUE_REQUIRES_CONFIRMATION',
@@ -713,8 +711,8 @@ export class CoachAdaptiveProfileCollectorService {
     >,
   ): boolean {
     if (
-      definition.field === PROFILE_ACQUISITION_FIELD.TRAINING_MODALITY &&
-      input.conversationContext.modality?.evidence === 'EXPLICIT'
+      this.contextualValue(definition.field, input.conversationContext)
+        ?.evidence === 'EXPLICIT'
     ) {
       return true;
     }
@@ -798,6 +796,32 @@ export class CoachAdaptiveProfileCollectorService {
     }
 
     return PROFILE_ACQUISITION_MODALITY.OTHER;
+  }
+
+  private contextualValue(
+    field: ProfileAcquisitionField,
+    context: CoachAdaptiveProfileCollectorInput['conversationContext'],
+  ):
+    | {
+        readonly evidence: 'EXPLICIT' | 'INFERRED';
+      }
+    | undefined {
+    switch (field) {
+      case PROFILE_ACQUISITION_FIELD.TRAINING_MODALITY:
+        return context.modality;
+      case PROFILE_ACQUISITION_FIELD.TRAINING_EXPERIENCE:
+        return context.experience;
+      case PROFILE_ACQUISITION_FIELD.TRAINING_ENVIRONMENT:
+        return context.environment;
+      case PROFILE_ACQUISITION_FIELD.TRAINING_EQUIPMENT:
+        return context.equipment;
+      case PROFILE_ACQUISITION_FIELD.TRAINING_FREQUENCY:
+        return context.weeklyFrequency;
+      case PROFILE_ACQUISITION_FIELD.SESSION_DURATION:
+        return context.sessionDurationMinutes;
+      default:
+        return undefined;
+    }
   }
 
   private latestInteractions(

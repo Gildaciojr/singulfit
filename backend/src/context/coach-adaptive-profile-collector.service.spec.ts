@@ -1,6 +1,7 @@
 import { ActivityLevel, FitnessGoal } from '@prisma/client';
 import {
   CoachAdaptiveProfileCollectorInput,
+  ProfileAcquisitionConversationContext,
   PROFILE_ACQUISITION_FIELD,
   PROFILE_ACQUISITION_INTENT,
   PROFILE_ACQUISITION_MODALITY,
@@ -205,19 +206,22 @@ describe('CoachAdaptiveProfileCollectorService', () => {
       readonly currentLogicalTurn?: number;
       readonly memory?: readonly ProfileAcquisitionInteraction[];
       readonly history?: readonly ProfileAcquisitionInteraction[];
+      readonly conversationContext?: ProfileAcquisitionConversationContext;
     } = {},
   ) {
     const input: CoachAdaptiveProfileCollectorInput = Object.freeze({
       snapshot: currentSnapshot,
       intent,
-      conversationContext: Object.freeze({
-        modality: options.modality
-          ? Object.freeze({
-              value: options.modality,
-              evidence: options.modalityEvidence ?? 'EXPLICIT',
-            })
-          : undefined,
-      }),
+      conversationContext:
+        options.conversationContext ??
+        Object.freeze({
+          modality: options.modality
+            ? Object.freeze({
+                value: options.modality,
+                evidence: options.modalityEvidence ?? 'EXPLICIT',
+              })
+            : undefined,
+        }),
       memory: Object.freeze({
         interactions: Object.freeze([...(options.memory ?? [])]),
       }),
@@ -254,6 +258,47 @@ describe('CoachAdaptiveProfileCollectorService', () => {
       { plan: 'DIET', ready: true, blockingFields: [] },
       { plan: 'WORKOUT', ready: true, blockingFields: [] },
     ]);
+  });
+
+  it('removes every explicitly declared current-turn workout field from readiness without inventing absent facts', () => {
+    const result = decide(
+      PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,
+      snapshot(),
+      {
+        conversationContext: Object.freeze({
+          modality: Object.freeze({ value: 'GYM', evidence: 'EXPLICIT' }),
+          environment: Object.freeze({
+            value: 'FULL_GYM',
+            evidence: 'EXPLICIT',
+          }),
+          weeklyFrequency: Object.freeze({
+            value: 4,
+            evidence: 'EXPLICIT',
+          }),
+          sessionDurationMinutes: Object.freeze({
+            value: 60,
+            evidence: 'EXPLICIT',
+          }),
+        }),
+      },
+    );
+    const workout = result.readiness.find((item) => item.plan === 'WORKOUT');
+
+    expect(workout?.blockingFields).not.toEqual(
+      expect.arrayContaining([
+        PROFILE_ACQUISITION_FIELD.TRAINING_MODALITY,
+        PROFILE_ACQUISITION_FIELD.TRAINING_ENVIRONMENT,
+        PROFILE_ACQUISITION_FIELD.TRAINING_FREQUENCY,
+        PROFILE_ACQUISITION_FIELD.SESSION_DURATION,
+      ]),
+    );
+    expect(workout?.blockingFields).toEqual(
+      expect.arrayContaining([
+        PROFILE_ACQUISITION_FIELD.TRAINING_EXPERIENCE,
+        PROFILE_ACQUISITION_FIELD.PHYSICAL_LIMITATIONS,
+        PROFILE_ACQUISITION_FIELD.TRAINING_EQUIPMENT,
+      ]),
+    );
   });
 
   it('selects only the highest-priority missing field for an empty diet profile', () => {
