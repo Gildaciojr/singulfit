@@ -77,6 +77,17 @@ const FIELD_DEFINITIONS: CoachProfileFieldDefinitionMap = Object.freeze({
     allowedOptions: ['BEGINNER', 'INTERMEDIATE', 'ADVANCED'],
     consumers: [SNAPSHOT, COLLECTOR, WORKOUT],
   }),
+  [CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS]: definition({
+    field: CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS,
+    domain: 'TRAINING',
+    valueType: CoachProfileValueType.TEXT_LIST,
+    priority: 'CRITICAL',
+    confirmationPolicy: 'ALWAYS_EXPLICIT',
+    inferencePolicy: 'PROHIBITED',
+    updatePolicy: 'EXPLICIT_ON_CONFLICT',
+    sensitivity: 'SENSITIVE',
+    consumers: [SNAPSHOT, COLLECTOR, WORKOUT],
+  }),
   [CoachProfileAcquisitionField.WEEKLY_FREQUENCY]: definition({
     field: CoachProfileAcquisitionField.WEEKLY_FREQUENCY,
     domain: 'TRAINING',

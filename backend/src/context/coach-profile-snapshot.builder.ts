@@ -440,7 +440,7 @@ export class CoachProfileSnapshotBuilder {
       profileMedicalConditions,
       acquiredMedicalConditions,
     );
-    const physicalLimitations = this.constraintsDatum(
+    const profilePhysicalLimitations = this.constraintsDatum(
       this.mergeConstraints(
         fitness?.injuryRestrictions.map((restriction) =>
           this.constraint(
@@ -451,6 +451,17 @@ export class CoachProfileSnapshotBuilder {
       ),
       false,
       fitness ? [COACH_PROFILE_DATA_SOURCE.FITNESS_PROFILE] : [],
+    );
+    const acquiredPhysicalLimitations = this.acquiredConstraints(
+      this.acquisitionProjection.textList(
+        acquired,
+        CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS,
+      ),
+      'PHYSICAL_LIMITATION',
+    );
+    const physicalLimitations = this.mergePhysicalLimitationData(
+      profilePhysicalLimitations,
+      acquiredPhysicalLimitations,
     );
     const mealTimes = this.stringArray(user.preferences?.preferredMealTimes);
     const mealTimesDatum =
@@ -1141,6 +1152,21 @@ export class CoachProfileSnapshotBuilder {
       return this.inferredFromSources(value, sources);
     }
     return this.knownFromSources(value, sources);
+  }
+
+  private mergePhysicalLimitationData(
+    profile: CoachProfileDatum<readonly CoachProfileConstraint[]>,
+    acquired: CoachProfileDatum<readonly CoachProfileConstraint[]>,
+  ): CoachProfileDatum<readonly CoachProfileConstraint[]> {
+    if (
+      !('value' in acquired) ||
+      acquired.status !== COACH_PROFILE_KNOWLEDGE_STATUS.KNOWN
+    ) {
+      return this.mergeConstraintData(profile, acquired);
+    }
+    if (!('value' in profile) || profile.value.length === 0) return acquired;
+    if (acquired.value.length === 0) return acquired;
+    return this.mergeConstraintData(profile, acquired);
   }
 
   private mergeAllergyData(

@@ -1,4 +1,5 @@
 import { ConflictException, Injectable } from '@nestjs/common';
+import { WorkoutWeekday } from '@prisma/client';
 import { WorkoutPlanningEngineV2Service } from '../workout-planning-engine-v2.service';
 import { WorkoutPlanV2PersistenceService } from '../persistence/workout-plan-v2-persistence.service';
 import type {
@@ -74,6 +75,7 @@ export class WorkoutApplicationExecutorService {
       generation,
       ownership: input.ownership,
       executionContext: input.executionContext,
+      calendarWeekdays: this.calendarWeekdays(input),
     });
     return Object.freeze({
       kind: 'PLAN' as const,
@@ -84,5 +86,23 @@ export class WorkoutApplicationExecutorService {
       persistence: persisted.persistence,
       aiJobCompleted: true as const,
     });
+  }
+
+  private calendarWeekdays(
+    input: WorkoutApplicationExecutionInputV2,
+  ): readonly WorkoutWeekday[] | undefined {
+    const datum = input.generationInput.snapshot?.routine.availableTrainingDays;
+    if (!datum || !('value' in datum)) return undefined;
+    const valid = new Set<string>(Object.values(WorkoutWeekday));
+    const weekdays = datum.value.filter((value): value is WorkoutWeekday =>
+      valid.has(value),
+    );
+    if (
+      weekdays.length !== datum.value.length ||
+      new Set(weekdays).size !== weekdays.length
+    ) {
+      return undefined;
+    }
+    return Object.freeze([...weekdays]);
   }
 }

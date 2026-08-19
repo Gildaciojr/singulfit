@@ -784,6 +784,42 @@ describe('CoachProfileSnapshotBuilder', () => {
     },
   );
 
+  it.each([
+    { value: [], descriptions: [] },
+    {
+      value: ['tenho dor e lesão no joelho'],
+      descriptions: ['tenho dor e lesão no joelho'],
+    },
+  ])(
+    'projects confirmed physical limitations without treating absence as unknown',
+    async ({ value, descriptions }) => {
+      const record = userRecord();
+      const test = await subject({
+        ...record,
+        fitnessProfile: {
+          ...record.fitnessProfile,
+          injuryRestrictions: [],
+        },
+        coachProfileFieldValues: [
+          acquired({
+            field: CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS,
+            valueType: CoachProfileValueType.TEXT_LIST,
+            textListValue: value,
+          }),
+        ],
+      });
+
+      const snapshot = await test.builder.build('user-id', referenceDate);
+      const limitations = snapshot.restrictions.physicalLimitations;
+      expect(limitations.status).toBe(COACH_PROFILE_KNOWLEDGE_STATUS.KNOWN);
+      expect(
+        'value' in limitations
+          ? limitations.value.map((item) => item.description)
+          : null,
+      ).toEqual(descriptions);
+    },
+  );
+
   it('is deterministic, deeply frozen and JSON serializable without Prisma values', async () => {
     const test = await subject();
     const first = await test.builder.build('user-id', referenceDate);

@@ -81,6 +81,7 @@ export type Weekday =
 export interface CoachProfileFieldValueMap {
   readonly [CoachProfileAcquisitionField.TRAINING_MODALITY]: TrainingModality;
   readonly [CoachProfileAcquisitionField.TRAINING_EXPERIENCE]: TrainingExperience;
+  readonly [CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS]: readonly string[];
   readonly [CoachProfileAcquisitionField.WEEKLY_FREQUENCY]: number;
   readonly [CoachProfileAcquisitionField.SESSION_DURATION_MINUTES]: number;
   readonly [CoachProfileAcquisitionField.TRAINING_ENVIRONMENT]: TrainingEnvironment;

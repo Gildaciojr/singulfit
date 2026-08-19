@@ -12,6 +12,7 @@ import type { NutritionApplicationExecutorService } from '../diet/v2/execution/n
 import type { NutritionPublicResultFormatter } from '../diet/v2/execution/nutrition-public-result.formatter';
 import type { WorkoutApplicationExecutorService } from '../workout/v2/execution/workout-application-executor.service';
 import type { WorkoutPlanV2Formatter } from '../workout/v2/workout-plan-v2.formatter';
+import type { CurrentWorkoutPlanReaderService } from '../workout/v2/current-workout-plan-reader.service';
 
 describe('CoachPlanningExecutionDispatcherService', () => {
   const unsupportedGoals: readonly ConversationGoal[] = [
@@ -90,6 +91,9 @@ describe('CoachPlanningExecutionDispatcherService', () => {
     const workoutV2Formatter = {
       format: jest.fn().mockReturnValue(['Treino oficial V2']),
     };
+    const currentWorkoutPlanReader = {
+      present: jest.fn().mockResolvedValue('Plano atual oficial V2'),
+    };
     const dispatcher = new CoachPlanningExecutionDispatcherService(
       dietGenerator as unknown as DietGeneratorService,
       workoutGenerator as unknown as WorkoutGeneratorService,
@@ -98,6 +102,7 @@ describe('CoachPlanningExecutionDispatcherService', () => {
       nutritionV2Formatter as unknown as NutritionPublicResultFormatter,
       workoutV2Executor as unknown as WorkoutApplicationExecutorService,
       workoutV2Formatter as unknown as WorkoutPlanV2Formatter,
+      currentWorkoutPlanReader as unknown as CurrentWorkoutPlanReaderService,
     );
 
     return {
@@ -109,8 +114,40 @@ describe('CoachPlanningExecutionDispatcherService', () => {
       nutritionV2Formatter,
       workoutV2Executor,
       workoutV2Formatter,
+      currentWorkoutPlanReader,
     };
   }
+
+  it('reads current Workout V2 without legacy generation or provider execution', async () => {
+    const subject = createSubject();
+    await expect(
+      subject.dispatcher.dispatchStructured({
+        userId: 'user-id',
+        legacyIntent: 'WORKOUT',
+        decision: {
+          ...decision(CONVERSATION_GOAL.SHOW_CURRENT_PLAN),
+          targetPlan: 'WORKOUT',
+        },
+        routeSelection: {
+          nutrition: null,
+          workout: 'V2',
+          reason: 'WORKOUT_V2_CANONICAL_READ',
+          nutritionPilotStatus: null,
+          suppressNutritionShadow: false,
+        },
+        currentMessage: 'O que treino hoje?',
+        referenceDate: new Date('2026-08-17T02:30:00.000Z'),
+      }),
+    ).resolves.toMatchObject({
+      content: 'Plano atual oficial V2',
+      executor: 'WORKOUT_V2_READER',
+      generationCompleted: false,
+    });
+    expect(subject.currentWorkoutPlanReader.present).toHaveBeenCalledTimes(1);
+    expect(subject.workoutV2Executor.execute).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
+  });
 
   it.each([
     [CONVERSATION_GOAL.GENERATE_DIET_PLAN, 1, 0, 0, 0],

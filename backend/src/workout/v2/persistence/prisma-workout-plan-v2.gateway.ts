@@ -100,6 +100,7 @@ export class PrismaWorkoutPlanV2Gateway implements WorkoutPlanV2Repository {
         days: {
           create: input.days.map((day) => ({
             dayNumber: day.dayNumber,
+            weekday: day.weekday,
             title: day.title,
             exercises: {
               create: day.exercises.map((exercise) => ({

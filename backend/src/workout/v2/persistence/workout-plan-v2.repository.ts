@@ -4,6 +4,7 @@ import type {
   FitnessGoal,
   Prisma,
   WorkoutStatus,
+  WorkoutWeekday,
 } from '@prisma/client';
 import type { WORKOUT_PLAN_INCLUDE } from '../../workout.service';
 
@@ -35,6 +36,7 @@ export interface CreateWorkoutPlanV2Record {
   readonly generatedAt: Date;
   readonly days: readonly {
     readonly dayNumber: number;
+    readonly weekday: WorkoutWeekday | null;
     readonly title: string;
     readonly exercises: readonly {
       readonly exerciseName: string;

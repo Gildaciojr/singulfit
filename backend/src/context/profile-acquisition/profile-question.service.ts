@@ -27,6 +27,7 @@ const FIELD_BRIDGE: Readonly<
 > = Object.freeze({
   TRAINING_MODALITY: CoachProfileAcquisitionField.TRAINING_MODALITY,
   TRAINING_EXPERIENCE: CoachProfileAcquisitionField.TRAINING_EXPERIENCE,
+  PHYSICAL_LIMITATIONS: CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS,
   TRAINING_FREQUENCY: CoachProfileAcquisitionField.WEEKLY_FREQUENCY,
   SESSION_DURATION: CoachProfileAcquisitionField.SESSION_DURATION_MINUTES,
   TRAINING_ENVIRONMENT: CoachProfileAcquisitionField.TRAINING_ENVIRONMENT,
@@ -63,6 +64,7 @@ const REVERSE_FIELD_BRIDGE: Readonly<
 > = Object.freeze({
   TRAINING_MODALITY: 'TRAINING_MODALITY',
   TRAINING_EXPERIENCE: 'TRAINING_EXPERIENCE',
+  PHYSICAL_LIMITATIONS: 'PHYSICAL_LIMITATIONS',
   WEEKLY_FREQUENCY: 'TRAINING_FREQUENCY',
   SESSION_DURATION_MINUTES: 'SESSION_DURATION',
   TRAINING_ENVIRONMENT: 'TRAINING_ENVIRONMENT',
@@ -96,6 +98,8 @@ const TEMPLATE: Readonly<Record<CoachProfileAcquisitionField, string>> =
       'Onde ou como você pretende treinar: academia, em casa, corrida, bike, CrossFit ou outro formato?',
     TRAINING_EXPERIENCE:
       'Como você descreve sua experiência nessa modalidade: iniciante, intermediária ou avançada?',
+    PHYSICAL_LIMITATIONS:
+      'Você tem alguma limitação física, lesão ou movimento que eu precise considerar? Se não tiver, pode dizer que não.',
     WEEKLY_FREQUENCY:
       'Em quantos dias da semana você realmente consegue treinar?',
     SESSION_DURATION_MINUTES:

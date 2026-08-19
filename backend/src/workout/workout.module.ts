@@ -20,6 +20,8 @@ import { WorkoutPlanV2PersistenceValidator } from './v2/persistence/workout-plan
 import { PrismaWorkoutPlanV2Gateway } from './v2/persistence/prisma-workout-plan-v2.gateway';
 import { WORKOUT_PLAN_V2_REPOSITORY } from './v2/persistence/workout-plan-v2.repository';
 import { GenerateWorkoutPlanV2InputBuilder } from './v2/generate-workout-plan-v2-input.builder';
+import { CurrentWorkoutPlanReaderService } from './v2/current-workout-plan-reader.service';
+import { WorkoutPlanV2StoredDocumentParser } from './v2/workout-plan-v2-stored-document.parser';
 
 @Module({
   imports: [AuthModule, AIModule, SubscriptionsModule, ContextModule],
@@ -34,6 +36,8 @@ import { GenerateWorkoutPlanV2InputBuilder } from './v2/generate-workout-plan-v2
     WorkoutPlanningSafetyService,
     WorkoutPlanV2Validator,
     WorkoutPlanV2Formatter,
+    WorkoutPlanV2StoredDocumentParser,
+    CurrentWorkoutPlanReaderService,
     GenerateWorkoutPlanV2InputBuilder,
     WorkoutPlanningEngineV2Service,
     WorkoutPlanV2PersistenceValidator,
@@ -52,6 +56,7 @@ import { GenerateWorkoutPlanV2InputBuilder } from './v2/generate-workout-plan-v2
     WorkoutPlanV2Formatter,
     GenerateWorkoutPlanV2InputBuilder,
     WorkoutApplicationExecutorService,
+    CurrentWorkoutPlanReaderService,
   ],
 })
 export class WorkoutModule {}

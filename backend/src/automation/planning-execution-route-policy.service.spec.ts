@@ -86,6 +86,28 @@ describe('PlanningExecutionRoutePolicyService', () => {
     expect(subject.nutritionPilot.evaluate).not.toHaveBeenCalled();
   });
 
+  it('selects the canonical V2 reader for current Workout queries for every user', () => {
+    const subject = setup('NOT_AUTHORIZED');
+    expect(
+      subject.policy.select({
+        userId: 'ordinary-user',
+        profileId: 'profile-id',
+        decision: {
+          ...decision('SHOW_CURRENT_PLAN'),
+          targetPlan: 'WORKOUT',
+        },
+        generationInput: null,
+      }),
+    ).toEqual({
+      nutrition: null,
+      workout: 'V2',
+      reason: 'WORKOUT_V2_CANONICAL_READ',
+      nutritionPilotStatus: null,
+      suppressNutritionShadow: false,
+    });
+    expect(subject.nutritionPilot.evaluate).not.toHaveBeenCalled();
+  });
+
   it('keeps BOTH entirely Legacy while cross-domain atomicity is pending', () => {
     const subject = setup('ELIGIBLE');
 

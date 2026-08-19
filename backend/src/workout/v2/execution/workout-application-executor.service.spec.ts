@@ -4,9 +4,18 @@ import type { WorkoutApplicationExecutionInputV2 } from './workout-application-e
 import { WorkoutApplicationExecutorService } from './workout-application-executor.service';
 
 describe('WorkoutApplicationExecutorService', () => {
-  function input(): WorkoutApplicationExecutionInputV2 {
+  function input(days?: readonly string[]): WorkoutApplicationExecutionInputV2 {
     return Object.freeze({
-      generationInput: Object.freeze({ userId: 'user-id' }),
+      generationInput: Object.freeze({
+        userId: 'user-id',
+        snapshot: days
+          ? {
+              routine: {
+                availableTrainingDays: { status: 'KNOWN', value: days },
+              },
+            }
+          : undefined,
+      }),
       ownership: Object.freeze({ userId: 'user-id', profileId: 'profile-id' }),
       executionContext: Object.freeze({ correlationId: 'correlation-id' }),
     }) as unknown as WorkoutApplicationExecutionInputV2;
@@ -74,6 +83,24 @@ describe('WorkoutApplicationExecutorService', () => {
     expect(
       subject.engine.generateCandidate.mock.invocationCallOrder[0],
     ).toBeLessThan(subject.persistence.persist.mock.invocationCallOrder[0]);
+  });
+
+  it('persists a validated explicit weekday calendar separately from session order', async () => {
+    const subject = setup();
+    await subject.executor.execute(input(['MONDAY', 'WEDNESDAY', 'FRIDAY']));
+    expect(subject.persistence.persist).toHaveBeenCalledWith(
+      expect.objectContaining({
+        calendarWeekdays: ['MONDAY', 'WEDNESDAY', 'FRIDAY'],
+      }),
+    );
+  });
+
+  it('does not persist an invalid or duplicate weekday calendar', async () => {
+    const subject = setup();
+    await subject.executor.execute(input(['MONDAY', 'MONDAY', 'invalid']));
+    expect(subject.persistence.persist).toHaveBeenCalledWith(
+      expect.objectContaining({ calendarWeekdays: undefined }),
+    );
   });
 
   it.each([

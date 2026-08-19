@@ -14,6 +14,7 @@ export type PlanningRouteSelectionReason =
   | 'NUTRITION_V2_ELIGIBLE'
   | 'NUTRITION_PILOT_NOT_ELIGIBLE'
   | 'WORKOUT_V2_PRODUCTIVE_GENERATION'
+  | 'WORKOUT_V2_CANONICAL_READ'
   | 'CROSS_DOMAIN_ATOMICITY_PENDING'
   | 'LEGACY_INTENT_OR_UNSUPPORTED_GOAL';
 
@@ -48,6 +49,13 @@ export class PlanningExecutionRoutePolicyService {
         'LEGACY',
         'CROSS_DOMAIN_ATOMICITY_PENDING',
       );
+    }
+    if (
+      decision?.targetPlan === 'WORKOUT' &&
+      (goal === CONVERSATION_GOAL.SHOW_CURRENT_PLAN ||
+        goal === CONVERSATION_GOAL.SHOW_PLAN_STATUS)
+    ) {
+      return this.selection(null, 'V2', 'WORKOUT_V2_CANONICAL_READ');
     }
     if (
       goal === CONVERSATION_GOAL.GENERATE_WORKOUT_PLAN ||

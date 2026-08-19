@@ -117,6 +117,9 @@ export class ProfileAnswerRecognizerService {
           ['INTERMEDIATE', /intermediari/],
           ['ADVANCED', /avancad/],
         ]);
+      case CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS:
+        if (this.explicitNone(normalized)) return Object.freeze([]);
+        return this.textList(original);
       case CoachProfileAcquisitionField.WEEKLY_FREQUENCY:
       case CoachProfileAcquisitionField.DESIRED_MEAL_COUNT:
         return this.integer(normalized);
@@ -380,7 +383,7 @@ export class ProfileAnswerRecognizerService {
   }
 
   private explicitNone(value: string): boolean {
-    return /^(?:nao|nada|nenhum(?:a)?(?: alergia(?: alimentar)?s?| intolerancia(?: alimentar)?s?)?|nao tenho(?: alergia(?: alimentar)?s?| intolerancia(?: alimentar)?s?)?|nao uso(?: suplementos?)?)$/u.test(
+    return /^(?:nao|nada|nenhum(?:a)?(?: alergia(?: alimentar)?s?| intolerancia(?: alimentar)?s?)?|nao tenho(?: nenhum(?:a)?| alergia(?: alimentar)?s?| intolerancia(?: alimentar)?s?)?|nao uso(?: suplementos?)?)$/u.test(
       value,
     );
   }

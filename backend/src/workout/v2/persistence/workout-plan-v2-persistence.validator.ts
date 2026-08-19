@@ -92,7 +92,10 @@ export class WorkoutPlanV2PersistenceValidator {
       );
 
     const document = this.toJsonRecord(plan);
-    return Object.freeze({ document, projection: this.project(plan) });
+    return Object.freeze({
+      document,
+      projection: this.project(plan, input.calendarWeekdays),
+    });
   }
 
   assertOwnership(
@@ -157,6 +160,7 @@ export class WorkoutPlanV2PersistenceValidator {
       generatedAt: persisted.generatedAt.toISOString(),
       days: persisted.days.map((day) => ({
         dayNumber: day.dayNumber,
+        weekday: day.weekday ?? null,
         title: day.title,
         exercises: day.exercises.map((exercise) => ({
           exerciseName: exercise.exerciseName,
@@ -184,9 +188,16 @@ export class WorkoutPlanV2PersistenceValidator {
       );
   }
 
-  private project(plan: WorkoutPlanV2): WorkoutPlanV2Projection {
+  private project(
+    plan: WorkoutPlanV2,
+    calendarWeekdays: PersistWorkoutPlanV2Input['calendarWeekdays'],
+  ): WorkoutPlanV2Projection {
+    const calendar =
+      calendarWeekdays && calendarWeekdays.length >= plan.sessions.length
+        ? calendarWeekdays
+        : null;
     const sequences = new Set<number>();
-    const days = plan.sessions.map((session) => {
+    const days = plan.sessions.map((session, index) => {
       if (!Number.isInteger(session.sequence) || session.sequence < 1)
         throw new BadRequestException(
           'Sequência de sessão do treino V2 inválida',
@@ -216,6 +227,7 @@ export class WorkoutPlanV2PersistenceValidator {
         );
       return Object.freeze({
         dayNumber: session.sequence,
+        weekday: calendar?.[index] ?? null,
         title: session.label,
         exercises: Object.freeze(exercises),
       });

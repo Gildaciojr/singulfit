@@ -270,6 +270,54 @@ describe('Structured profile acquisition registry and recognition', () => {
     });
   });
 
+  it('bridges physical limitations and preserves confirmed absence or useful detail', () => {
+    const decision: ProfileAcquisitionDecision = {
+      intent: 'WORKOUT_PLAN_REQUEST',
+      shouldAsk: true,
+      selectedCandidate: {
+        field: 'PHYSICAL_LIMITATIONS',
+        domain: 'SAFETY',
+        importance: 'CRITICAL',
+        state: 'READY_TO_ASK',
+        knowledgeStatus: 'UNKNOWN',
+        confirmationPolicy: 'EXPLICIT_CONFIRMATION_REQUIRED',
+        dependencies: [],
+        unmetDependencies: [],
+        blocksPlans: ['WORKOUT'],
+        reason: 'MISSING_CONTEXTUAL_FIELD',
+      },
+      orderedCandidates: [],
+      readiness: [],
+      reason: 'FIELD_SELECTED',
+    };
+    const bridged = questions.fromDecision(decision);
+    const question = specification(
+      CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS,
+    );
+
+    expect(bridged?.field).toBe(
+      CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS,
+    );
+    expect(questions.toCollectorField(question.field)).toBe(
+      'PHYSICAL_LIMITATIONS',
+    );
+    expect(realizer.realize(question).text).toContain(
+      'limitação física, lesão ou movimento',
+    );
+    expect(recognizer.recognize(question, 'não tenho nenhuma')).toMatchObject({
+      disposition: 'RECOGNIZED',
+      value: [],
+      confirmationRequired: true,
+    });
+    expect(
+      recognizer.recognize(question, 'tenho dor e lesão no joelho'),
+    ).toMatchObject({
+      disposition: 'RECOGNIZED',
+      value: ['tenho dor', 'lesão no joelho'],
+      confirmationRequired: true,
+    });
+  });
+
   it('keeps acquisition OFF by default and resolves configured modes deterministically', async () => {
     const module = await Test.createTestingModule({
       providers: [

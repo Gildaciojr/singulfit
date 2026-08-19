@@ -1,4 +1,8 @@
-import type { FitnessGoal, WorkoutStatus } from '@prisma/client';
+import type {
+  FitnessGoal,
+  WorkoutStatus,
+  WorkoutWeekday,
+} from '@prisma/client';
 import type { WorkoutPlanV2 } from '../workout-plan-v2.contract';
 import type { WorkoutPlanningGenerationResult } from '../workout-planning-generation.contract';
 
@@ -16,6 +20,7 @@ export interface PersistWorkoutPlanV2Input {
   readonly generation: WorkoutPlanningGenerationResult;
   readonly ownership: WorkoutPlanV2Ownership;
   readonly executionContext?: WorkoutExecutionContextV2;
+  readonly calendarWeekdays?: readonly WorkoutWeekday[];
 }
 
 export interface PersistedWorkoutExerciseV2Projection {
@@ -30,6 +35,7 @@ export interface PersistedWorkoutExerciseV2Projection {
 export interface PersistedWorkoutDayV2Projection {
   readonly id: string;
   readonly dayNumber: number;
+  readonly weekday: WorkoutWeekday | null;
   readonly title: string;
   readonly exercises: readonly PersistedWorkoutExerciseV2Projection[];
 }

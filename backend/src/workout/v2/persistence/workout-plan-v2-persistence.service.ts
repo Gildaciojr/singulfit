@@ -128,6 +128,7 @@ export class WorkoutPlanV2PersistenceService {
           Object.freeze({
             id: day.id,
             dayNumber: day.dayNumber,
+            weekday: day.weekday ?? null,
             title: day.title,
             exercises: Object.freeze(
               day.exercises.map((exercise) => Object.freeze(exercise)),

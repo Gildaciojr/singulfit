@@ -11,6 +11,7 @@ export type CoachPlanningExecutor =
   | 'DIET_V2'
   | 'WORKOUT_LEGACY'
   | 'WORKOUT_V2'
+  | 'WORKOUT_V2_READER'
   | 'COMBINED_LEGACY'
   | 'UNKNOWN_LEGACY'
   | 'FAILURE_FALLBACK';

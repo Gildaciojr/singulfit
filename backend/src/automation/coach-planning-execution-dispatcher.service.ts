@@ -23,6 +23,7 @@ import type { PlanningExecutionRouteSelection } from './planning-execution-route
 import type { GenerateWorkoutPlanV2Input } from '../workout/v2/workout-planning-generation.contract';
 import { WorkoutApplicationExecutorService } from '../workout/v2/execution/workout-application-executor.service';
 import { WorkoutPlanV2Formatter } from '../workout/v2/workout-plan-v2.formatter';
+import { CurrentWorkoutPlanReaderService } from '../workout/v2/current-workout-plan-reader.service';
 
 type GeneratedDietPlan = Awaited<ReturnType<DietGeneratorService['generate']>>;
 type GeneratedWorkoutPlan = Awaited<
@@ -35,6 +36,8 @@ export interface CoachPlanningExecutionDispatchInput {
   readonly decision: ConversationGoalDecision | null;
   readonly routeSelection?: PlanningExecutionRouteSelection;
   readonly continuationOperationKey?: string;
+  readonly currentMessage?: string;
+  readonly referenceDate?: Date;
   readonly nutritionV2?: {
     readonly generationInput: GenerateNutritionPlanV2Input;
     readonly profileId: string;
@@ -64,6 +67,8 @@ export class CoachPlanningExecutionDispatcherService {
     private readonly workoutV2Executor?: WorkoutApplicationExecutorService,
     @Optional()
     private readonly workoutV2Formatter?: WorkoutPlanV2Formatter,
+    @Optional()
+    private readonly currentWorkoutPlanReader?: CurrentWorkoutPlanReaderService,
   ) {}
 
   async dispatch(input: CoachPlanningExecutionDispatchInput): Promise<string> {
@@ -82,6 +87,12 @@ export class CoachPlanningExecutionDispatcherService {
     }
 
     if (input.routeSelection?.workout === 'V2') {
+      if (
+        input.decision.goal === CONVERSATION_GOAL.SHOW_CURRENT_PLAN ||
+        input.decision.goal === CONVERSATION_GOAL.SHOW_PLAN_STATUS
+      ) {
+        return this.readCurrentWorkout(input);
+      }
       return this.generateWorkoutV2(input);
     }
 
@@ -299,6 +310,22 @@ export class CoachPlanningExecutionDispatcherService {
       .slice(0, 3_500)
       .trimEnd();
     return this.result(content, 'WORKOUT_V2', true, 'PLAN');
+  }
+
+  private async readCurrentWorkout(
+    input: CoachPlanningExecutionDispatchInput,
+  ): Promise<CoachPlanningDispatchResult> {
+    if (!this.currentWorkoutPlanReader) {
+      throw new ServiceUnavailableException(
+        'Reader canônico Workout V2 indisponível',
+      );
+    }
+    const content = await this.currentWorkoutPlanReader.present(
+      input.userId,
+      input.currentMessage ?? '',
+      input.referenceDate ?? new Date(),
+    );
+    return this.result(content, 'WORKOUT_V2_READER', false);
   }
 
   private async generateCombined(

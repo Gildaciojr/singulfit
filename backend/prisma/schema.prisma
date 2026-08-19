@@ -399,6 +399,7 @@ enum MemoryType {
 enum CoachProfileAcquisitionField {
   TRAINING_MODALITY
   TRAINING_EXPERIENCE
+  PHYSICAL_LIMITATIONS
   WEEKLY_FREQUENCY
   SESSION_DURATION_MINUTES
   TRAINING_ENVIRONMENT
@@ -424,6 +425,16 @@ enum CoachProfileAcquisitionField {
   TRAINING_TIME
   AVAILABLE_TRAINING_DAYS
   DAILY_TRAINING_WINDOWS
+}
+
+enum WorkoutWeekday {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
 }
 
 enum CoachProfileValueType {
@@ -1198,9 +1209,10 @@ model WorkoutPlan {
 }
 
 model WorkoutDay {
-  id            String @id @default(uuid())
+  id            String          @id @default(uuid())
   workoutPlanId String
   dayNumber     Int
+  weekday       WorkoutWeekday?
   title         String
 
   workoutPlan WorkoutPlan       @relation(fields: [workoutPlanId], references: [id], onDelete: Cascade)
@@ -1208,6 +1220,7 @@ model WorkoutDay {
 
   @@unique([workoutPlanId, dayNumber])
   @@index([workoutPlanId])
+  @@index([workoutPlanId, weekday])
   @@map("workout_days")
 }
 
@@ -2739,23 +2752,23 @@ model UserGoalClassification {
 }
 
 model PendingConversationAction {
-  id                String                            @id @default(uuid())
-  userId            String
-  conversationId    String
-  type              PendingConversationActionType
-  status            PendingConversationActionStatus   @default(AWAITING_PROMPT)
-  sourceMessageId   String
-  consumerMessageId String?                           @unique
-  originalIntent    PendingConversationOriginalIntent
-  payload           Json
-  operationKey      String                            @unique
-  createdAt         DateTime                          @default(now())
-  updatedAt         DateTime                          @updatedAt
-  expiresAt         DateTime
-  consumedAt        DateTime?
-  promptActivatedAt DateTime?
-  completedAt       DateTime?
-  resultContent     String?
+  id                      String                            @id @default(uuid())
+  userId                  String
+  conversationId          String
+  type                    PendingConversationActionType
+  status                  PendingConversationActionStatus   @default(AWAITING_PROMPT)
+  sourceMessageId         String
+  consumerMessageId       String?                           @unique
+  originalIntent          PendingConversationOriginalIntent
+  payload                 Json
+  operationKey            String                            @unique
+  createdAt               DateTime                          @default(now())
+  updatedAt               DateTime                          @updatedAt
+  expiresAt               DateTime
+  consumedAt              DateTime?
+  promptActivatedAt       DateTime?
+  completedAt             DateTime?
+  resultContent           String?
   executionLeaseExpiresAt DateTime?
   executionClaimToken     String?
 

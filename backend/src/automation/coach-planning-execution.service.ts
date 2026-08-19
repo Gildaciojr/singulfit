@@ -238,6 +238,8 @@ export class CoachPlanningExecutionService {
         decision: preparation?.decision ?? null,
         routeSelection,
         continuationOperationKey,
+        currentMessage: runtime?.currentMessage,
+        referenceDate: runtime?.referenceDate,
         nutritionV2:
           routeSelection.nutrition === 'V2' &&
           preparation?.generationInput &&
@@ -539,9 +541,22 @@ export class CoachPlanningExecutionService {
       this.withCurrentDesiredOutcome(canonicalSnapshot, goalResolution),
       runtime?.pendingGoalConfirmation,
     );
-    const adaptation = this.intentAdapter.adapt(intent);
+    const legacyAdaptation = this.intentAdapter.adapt(intent);
+    const adaptation = this.workoutReadRequested(
+      intent,
+      runtime?.currentMessage,
+    )
+      ? Object.freeze({
+          ...legacyAdaptation,
+          recognizedIntent: CONVERSATION_RECOGNIZED_INTENT.CURRENT_PLAN_REQUEST,
+          planTarget: 'WORKOUT' as const,
+        })
+      : legacyAdaptation;
     const declaredWorkoutContext =
-      intent === 'WORKOUT' && this.workoutPlanningInputBuilder
+      intent === 'WORKOUT' &&
+      adaptation.recognizedIntent !==
+        CONVERSATION_RECOGNIZED_INTENT.CURRENT_PLAN_REQUEST &&
+      this.workoutPlanningInputBuilder
         ? this.workoutPlanningInputBuilder.recognizeDeclaredContext(
             runtime?.currentMessage,
           )
@@ -581,7 +596,10 @@ export class CoachPlanningExecutionService {
     });
     const builtInput = this.nutritionPlanningInputBuilder?.build(source);
     const builtWorkoutInput =
-      intent === 'WORKOUT' && this.workoutPlanningInputBuilder
+      intent === 'WORKOUT' &&
+      adaptation.recognizedIntent !==
+        CONVERSATION_RECOGNIZED_INTENT.CURRENT_PLAN_REQUEST &&
+      this.workoutPlanningInputBuilder
         ? await this.workoutPlanningInputBuilder.build({
             userId,
             profileId: runtime?.profileId,
@@ -603,6 +621,27 @@ export class CoachPlanningExecutionService {
       workoutProfileId: builtWorkoutInput?.profileId ?? null,
       profileAcquisitionContext,
     });
+  }
+
+  private workoutReadRequested(
+    intent: CoachCommandIntent,
+    message: string | undefined,
+  ): boolean {
+    if (intent !== 'WORKOUT' || !message) return false;
+    const normalized = message
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+    return (
+      /\b(meu|minha)\s+(?:plano\s+de\s+)?treino\b/u.test(normalized) ||
+      /\bo que (?:eu )?treino (?:hoje|amanha)\b/u.test(normalized) ||
+      /\b(?:mostra|mostre|ver|qual|consulta|consultar)\b.*\b(?:treino|sessao)\b/u.test(
+        normalized,
+      ) ||
+      /\btreino\s+(?:de\s+)?(?:segunda|terca|quarta|quinta|sexta|sabado|domingo|\d)\b/u.test(
+        normalized,
+      )
+    );
   }
 
   private async commitResolvedGoal(
