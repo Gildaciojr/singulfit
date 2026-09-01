@@ -27,12 +27,19 @@ import {
 } from './coach-proactive-schedule.policy';
 import {
   COACH_PROACTIVE_SOURCE,
+  type CoachProactivePreferences,
   type CoachProactiveSlot,
 } from './coach-proactive.contract';
 
 const AUTOMATION_CODES = new Set<string>(Object.values(AUTOMATION_RULE_CODES));
 export const COACH_PROACTIVE_MIN_GAP_MINUTES = 180;
 export const COACH_PROACTIVE_RESPONSE_WINDOW_HOURS = 24;
+export const COACH_RETENTION_SOURCE = 'COACH_RETENTION_V1';
+
+const CONTROLLED_OUTREACH_SOURCES = Object.freeze([
+  COACH_PROACTIVE_SOURCE,
+  COACH_RETENTION_SOURCE,
+]);
 
 type ScheduledMessageWithRule = Prisma.ScheduledMessageGetPayload<{
   include: {
@@ -280,6 +287,7 @@ export class AutomationService {
           automationRuleId: rule.id,
           scheduledFor,
           content,
+          context: { source: COACH_RETENTION_SOURCE, ruleCode },
         },
         include: {
           automationRule: true,
@@ -551,8 +559,10 @@ export class AutomationService {
             automationRule: true,
             user: {
               select: {
+                isActive: true,
                 phone: true,
                 phoneE164: true,
+                preferences: true,
               },
             },
           },
@@ -601,6 +611,7 @@ export class AutomationService {
           AUTOMATION_RULE_CODES.SUBSCRIPTION_LIFECYCLE;
 
         if (
+          !current.user.isActive ||
           !current.automationRule.enabled ||
           !preferences ||
           (!subscriptionLifecycleNotice &&
@@ -659,6 +670,127 @@ export class AutomationService {
           }
         }
 
+        if (
+          !subscriptionLifecycleNotice &&
+          this.isControlledOutreachContext(current.context)
+        ) {
+          await transaction.$queryRaw`
+            WITH advisory_lock AS (
+              SELECT pg_advisory_xact_lock(hashtext(${`controlled-outreach-user:${current.userId}`}))
+            )
+            SELECT true AS "locked"
+            FROM advisory_lock
+          `;
+          const userPreferences: CoachProactivePreferences =
+            current.user.preferences ?? {};
+          const allowedAt = this.proactiveSchedule.nextAllowedSendAt(
+            at,
+            userPreferences,
+          );
+          const range = this.proactiveSchedule.localDayRange(
+            at,
+            userPreferences.timezone,
+          );
+          const [sentToday, recent, inFlight] = await Promise.all([
+            transaction.scheduledMessage.findMany({
+              where: {
+                userId: current.userId,
+                id: { not: current.id },
+                AND: [
+                  {
+                    OR: CONTROLLED_OUTREACH_SOURCES.map((source) => ({
+                      context: { path: ['source'], equals: source },
+                    })),
+                  },
+                  {
+                    OR: [
+                      {
+                        status: ScheduledMessageStatus.SENT,
+                        sentAt: { gte: range.start, lt: range.end },
+                      },
+                      {
+                        status: ScheduledMessageStatus.SENDING,
+                        scheduledFor: { gte: range.start, lt: range.end },
+                        leaseExpiresAt: { gt: at },
+                      },
+                    ],
+                  },
+                ],
+              },
+              select: { sentAt: true },
+              take: COACH_PROACTIVE_DAILY_CAP,
+            }),
+            transaction.scheduledMessage.findFirst({
+              where: {
+                userId: current.userId,
+                id: { not: current.id },
+                status: ScheduledMessageStatus.SENT,
+                sentAt: {
+                  gt: new Date(
+                    at.getTime() - COACH_PROACTIVE_MIN_GAP_MINUTES * 60_000,
+                  ),
+                  lt: at,
+                },
+                OR: CONTROLLED_OUTREACH_SOURCES.map((source) => ({
+                  context: { path: ['source'], equals: source },
+                })),
+              },
+              select: { sentAt: true },
+              orderBy: [{ sentAt: 'desc' }, { id: 'desc' }],
+            }),
+            transaction.scheduledMessage.findFirst({
+              where: {
+                userId: current.userId,
+                id: { not: current.id },
+                status: ScheduledMessageStatus.SENDING,
+                leaseExpiresAt: { gt: at },
+                OR: CONTROLLED_OUTREACH_SOURCES.map((source) => ({
+                  context: { path: ['source'], equals: source },
+                })),
+              },
+              select: { id: true },
+              orderBy: [{ leaseExpiresAt: 'desc' }, { id: 'desc' }],
+            }),
+          ]);
+          const cooldownAt = inFlight
+            ? new Date(at.getTime() + COACH_PROACTIVE_MIN_GAP_MINUTES * 60_000)
+            : recent?.sentAt
+              ? new Date(
+                  recent.sentAt.getTime() +
+                    COACH_PROACTIVE_MIN_GAP_MINUTES * 60_000,
+                )
+              : at;
+          const capAt =
+            sentToday.length >= COACH_PROACTIVE_DAILY_CAP
+              ? this.proactiveSchedule.nextAllowedSendAt(
+                  range.end,
+                  userPreferences,
+                )
+              : at;
+          const deferredUntil = this.proactiveSchedule.nextAllowedSendAt(
+            new Date(
+              Math.max(
+                allowedAt.getTime(),
+                cooldownAt.getTime(),
+                capAt.getTime(),
+              ),
+            ),
+            userPreferences,
+          );
+          if (deferredUntil > at) {
+            const deferred = await transaction.scheduledMessage.update({
+              where: { id: current.id },
+              data: {
+                status: ScheduledMessageStatus.PENDING,
+                scheduledFor: deferredUntil,
+                leaseExpiresAt: null,
+              },
+              include: { automationRule: true },
+            });
+            return { shouldSend: false as const, message: deferred };
+          }
+        }
+
         const message = await transaction.scheduledMessage.update({
           where: {
             id: current.id,
@@ -674,8 +806,10 @@ export class AutomationService {
             automationRule: true,
             user: {
               select: {
+                isActive: true,
                 phone: true,
                 phoneE164: true,
+                preferences: true,
               },
             },
           },
@@ -696,21 +830,11 @@ export class AutomationService {
       return claimed.message;
     }
 
+    let sent: Awaited<ReturnType<EvolutionGateway['sendText']>>;
     try {
-      const sent = await this.evolutionGateway.sendText({
+      sent = await this.evolutionGateway.sendText({
         number: claimed.message.user.phoneE164 ?? claimed.message.user.phone,
         text: claimed.message.content,
-      });
-      await this.prisma.scheduledMessage.updateMany({
-        where: {
-          id: claimed.message.id,
-          status: ScheduledMessageStatus.SENDING,
-        },
-        data: {
-          status: ScheduledMessageStatus.SENT,
-          externalMessageId: sent.externalMessageId,
-          leaseExpiresAt: null,
-        },
       });
     } catch (error: unknown) {
       await this.prisma.scheduledMessage.updateMany({
@@ -733,6 +857,12 @@ export class AutomationService {
       );
     }
 
+    await this.persistSuccessfulSend(
+      claimed.message.id,
+      sent.externalMessageId,
+      new Date(),
+    );
+
     return this.prisma.scheduledMessage.findUniqueOrThrow({
       where: {
         id: claimed.message.id,
@@ -741,6 +871,48 @@ export class AutomationService {
         automationRule: true,
       },
     });
+  }
+
+  private async persistSuccessfulSend(
+    scheduledMessageId: string,
+    externalMessageId: string,
+    sentAt: Date,
+  ): Promise<void> {
+    let persistenceError: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const persisted = await this.prisma.scheduledMessage.updateMany({
+          where: {
+            id: scheduledMessageId,
+            status: ScheduledMessageStatus.SENDING,
+          },
+          data: {
+            status: ScheduledMessageStatus.SENT,
+            externalMessageId,
+            sentAt,
+            leaseExpiresAt: null,
+          },
+        });
+        if (persisted.count > 0) return;
+        const current = await this.prisma.scheduledMessage.findUnique({
+          where: { id: scheduledMessageId },
+          select: { status: true, externalMessageId: true },
+        });
+        if (
+          current?.status === ScheduledMessageStatus.SENT &&
+          current.externalMessageId === externalMessageId
+        ) {
+          return;
+        }
+        throw new Error('Estado do envio mudou antes da confirmação local');
+      } catch (error: unknown) {
+        persistenceError = error;
+      }
+    }
+    if (persistenceError instanceof Error) throw persistenceError;
+    throw new BadGatewayException(
+      'Envio aceito pelo provider sem confirmação local persistida',
+    );
   }
 
   private getOrCreatePreferences(userId: string) {
@@ -914,6 +1086,17 @@ export class AutomationService {
       value !== null &&
       !Array.isArray(value) &&
       Reflect.get(value, 'source') === COACH_PROACTIVE_SOURCE
+    );
+  }
+
+  private isControlledOutreachContext(value: Prisma.JsonValue): boolean {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      return false;
+    }
+    const source = Reflect.get(value, 'source');
+    return (
+      typeof source === 'string' &&
+      CONTROLLED_OUTREACH_SOURCES.some((candidate) => candidate === source)
     );
   }
 

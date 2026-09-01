@@ -569,11 +569,13 @@ describe('IntegrationEventHandlersService', () => {
   it('starts contextual workout acquisition only after the legacy coach message was sent', async () => {
     const registry = new EventHandlerRegistry();
     const scheduledFor = new Date('2026-06-17T12:00:01.000Z');
+    const sentAt = new Date('2026-06-17T12:03:45.000Z');
     const automation = {
       sendScheduledMessage: jest.fn().mockResolvedValue({
         id: 'scheduled-id',
         status: 'SENT',
         scheduledFor,
+        sentAt,
       }),
     };
     const acquisition = acquisitionRollout();
@@ -610,7 +612,7 @@ describe('IntegrationEventHandlersService', () => {
       userId: 'admin-id',
       sourceMessageId: 'workout-request-id',
       intent: 'WORKOUT',
-      sentAt: scheduledFor,
+      sentAt,
     });
   });
 

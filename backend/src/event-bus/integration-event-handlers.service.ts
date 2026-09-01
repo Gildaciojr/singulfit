@@ -218,7 +218,7 @@ export class IntegrationEventHandlersService implements OnModuleInit {
         userId: this.requiredString(event.payload, 'userId'),
         sourceMessageId: this.requiredString(event.payload, 'sourceMessageId'),
         intent,
-        sentAt: sent.scheduledFor,
+        sentAt: sent.sentAt ?? sent.scheduledFor,
       });
     }
   }

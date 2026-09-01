@@ -229,4 +229,58 @@ describe('CoachProactiveSchedulePolicy', () => {
       'LUNCH',
     ]);
   });
+
+  it('uses the same timezone-aware wake window for deferred outreach', () => {
+    const preferences = {
+      timezone: 'America/Sao_Paulo',
+      preferredWakeUpTime: '08:00',
+      preferredSleepTime: '23:00',
+    };
+
+    expect(
+      policy
+        .nextAllowedSendAt(new Date('2026-08-18T06:00:00.000Z'), preferences)
+        .toISOString(),
+    ).toBe('2026-08-18T11:30:00.000Z');
+    expect(
+      policy.nextAllowedSendAt(
+        new Date('2026-08-18T15:00:00.000Z'),
+        preferences,
+      ),
+    ).toEqual(new Date('2026-08-18T15:00:00.000Z'));
+    expect(
+      policy
+        .nextAllowedSendAt(new Date('2026-08-18T06:00:00.000Z'), {
+          ...preferences,
+          timezone: 'Invalid/Timezone',
+        })
+        .toISOString(),
+    ).toBe('2026-08-18T11:30:00.000Z');
+  });
+
+  it('handles DST day boundaries and sleep windows crossing midnight', () => {
+    const dstRange = policy.localDayRange(
+      new Date('2026-10-25T12:00:00.000Z'),
+      'Europe/Lisbon',
+    );
+
+    expect(dstRange.start.toISOString()).toBe('2026-10-24T23:00:00.000Z');
+    expect(dstRange.end.toISOString()).toBe('2026-10-26T00:00:00.000Z');
+    expect(
+      policy.nextAllowedSendAt(new Date('2026-08-18T04:00:00.000Z'), {
+        timezone: 'America/Sao_Paulo',
+        preferredWakeUpTime: '08:00',
+        preferredSleepTime: '02:00',
+      }),
+    ).toEqual(new Date('2026-08-18T04:00:00.000Z'));
+    expect(
+      policy
+        .nextAllowedSendAt(new Date('2026-08-18T07:00:00.000Z'), {
+          timezone: 'America/Sao_Paulo',
+          preferredWakeUpTime: '08:00',
+          preferredSleepTime: '02:00',
+        })
+        .toISOString(),
+    ).toBe('2026-08-18T11:30:00.000Z');
+  });
 });

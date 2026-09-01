@@ -164,4 +164,62 @@ describe('ActivationService', () => {
     );
     expect(setup.getState().currentStage).toBe(ActivationStage.PAID);
   });
+
+  it('uses real scheduled send time while preserving legacy SENT users', async () => {
+    const actualSentAt = new Date('2026-06-01T10:07:00.000Z');
+    const legacyScheduledFor = new Date('2026-05-31T09:00:00.000Z');
+    let includeLegacy = false;
+    const findScheduled = jest
+      .fn()
+      .mockImplementation((args: { where: { sentAt: { not: null } | null } }) =>
+        Promise.resolve(
+          args.where.sentAt === null
+            ? includeLegacy
+              ? { scheduledFor: legacyScheduledFor }
+              : null
+            : { sentAt: actualSentAt },
+        ),
+      );
+    const nullFinder = { findFirst: jest.fn().mockResolvedValue(null) };
+    const prisma = {
+      subscription: nullFinder,
+      conversation: nullFinder,
+      activationEvent: nullFinder,
+      outboundMessage: nullFinder,
+      scheduledMessage: { findFirst: findScheduled },
+      meal: nullFinder,
+      mealAnalysis: nullFinder,
+      recommendation: nullFinder,
+      nutritionQualityScore: nullFinder,
+      coachMessage: nullFinder,
+      message: nullFinder,
+    };
+    const service = new ActivationService(
+      prisma as unknown as PrismaService,
+      new ActivationScoreService(),
+      { recordInTransaction: jest.fn() } as unknown as EventService,
+    );
+    const testable = service as unknown as {
+      collectFacts(userId: string): Promise<{
+        firstMessageSentAt: Date | null;
+      }>;
+    };
+
+    await expect(testable.collectFacts('user-id')).resolves.toEqual(
+      expect.objectContaining({ firstMessageSentAt: actualSentAt }),
+    );
+
+    findScheduled.mockImplementation(
+      (args: { where: { sentAt: { not: null } | null } }) =>
+        Promise.resolve(
+          args.where.sentAt === null
+            ? { scheduledFor: legacyScheduledFor }
+            : null,
+        ),
+    );
+    includeLegacy = true;
+    await expect(testable.collectFacts('legacy-user-id')).resolves.toEqual(
+      expect.objectContaining({ firstMessageSentAt: legacyScheduledFor }),
+    );
+  });
 });

@@ -8,6 +8,7 @@ import { AUTOMATION_RULE_CODES } from './automation.constants';
 import {
   AutomationService,
   COACH_PROACTIVE_MIN_GAP_MINUTES,
+  COACH_RETENTION_SOURCE,
 } from './automation.service';
 import { CoachService } from './coach.service';
 import { EventBusService } from '../event-bus/event-bus.service';
@@ -22,6 +23,11 @@ describe('AutomationService', () => {
     gatewayFailure?: boolean;
     subscriptionStatus?: SubscriptionStatus | null;
     canSendCoachMessage?: boolean;
+    outreach?: boolean;
+    sentToday?: number;
+    recentSentAt?: Date;
+    inFlight?: boolean;
+    isActive?: boolean;
   }) {
     const preferences = {
       id: 'preferences-id',
@@ -45,6 +51,7 @@ describe('AutomationService', () => {
       scheduledFor: new Date('2026-06-10T12:00:00.000Z'),
       status: ScheduledMessageStatus.PENDING,
       content: 'Treino personalizado',
+      context: options?.outreach ? { source: COACH_RETENTION_SOURCE } : {},
       automationRule: rule,
     };
     const transaction = {
@@ -58,10 +65,35 @@ describe('AutomationService', () => {
         findUnique: jest.fn().mockResolvedValue({
           ...scheduledMessage,
           user: {
+            isActive: options?.isActive ?? true,
             phone: '11999999999',
             phoneE164: '+5511999999999',
+            preferences: {
+              timezone: 'America/Sao_Paulo',
+              preferredWakeUpTime: '08:00',
+              preferredSleepTime: '23:00',
+            },
           },
         }),
+        findMany: jest.fn().mockResolvedValue(
+          Array.from({ length: options?.sentToday ?? 0 }, () => ({
+            sentAt: new Date('2026-06-10T12:00:00.000Z'),
+          })),
+        ),
+        findFirst: jest
+          .fn()
+          .mockImplementation(
+            (args: { where: { status: ScheduledMessageStatus } }) =>
+              Promise.resolve(
+                args.where.status === ScheduledMessageStatus.SENDING
+                  ? options?.inFlight
+                    ? { id: 'in-flight-id' }
+                    : null
+                  : options?.recentSentAt
+                    ? { sentAt: options.recentSentAt }
+                    : null,
+              ),
+          ),
         update: jest
           .fn()
           .mockImplementation(
@@ -70,8 +102,14 @@ describe('AutomationService', () => {
                 ...scheduledMessage,
                 status: args.data.status,
                 user: {
+                  isActive: options?.isActive ?? true,
                   phone: '11999999999',
                   phoneE164: '+5511999999999',
+                  preferences: {
+                    timezone: 'America/Sao_Paulo',
+                    preferredWakeUpTime: '08:00',
+                    preferredSleepTime: '23:00',
+                  },
                 },
               }),
           ),
@@ -399,6 +437,124 @@ describe('AutomationService', () => {
         }),
       }),
     );
+  });
+
+  it('defers controlled outreach until the user wake window', async () => {
+    const subject = createSubject({ outreach: true });
+
+    await subject.service.sendScheduledMessage(
+      'scheduled-id',
+      new Date('2026-06-11T06:00:00.000Z'),
+    );
+
+    expect(subject.evolutionGateway.sendText).not.toHaveBeenCalled();
+    expect(subject.transaction.scheduledMessage.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: ScheduledMessageStatus.PENDING,
+          scheduledFor: new Date('2026-06-11T11:30:00.000Z'),
+        }),
+      }),
+    );
+  });
+
+  it('defers a fourth controlled outreach to the next local day', async () => {
+    const subject = createSubject({ outreach: true, sentToday: 3 });
+
+    await subject.service.sendScheduledMessage(
+      'scheduled-id',
+      new Date('2026-06-10T13:00:00.000Z'),
+    );
+
+    expect(subject.evolutionGateway.sendText).not.toHaveBeenCalled();
+    expect(subject.transaction.scheduledMessage.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: ScheduledMessageStatus.PENDING,
+          scheduledFor: new Date('2026-06-11T11:30:00.000Z'),
+        }),
+      }),
+    );
+  });
+
+  it('shares the 180-minute cooldown across controlled outreach sources', async () => {
+    const subject = createSubject({
+      outreach: true,
+      recentSentAt: new Date('2026-06-10T12:00:00.000Z'),
+    });
+
+    await subject.service.sendScheduledMessage(
+      'scheduled-id',
+      new Date('2026-06-10T13:00:00.000Z'),
+    );
+
+    expect(subject.evolutionGateway.sendText).not.toHaveBeenCalled();
+    expect(subject.transaction.scheduledMessage.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          scheduledFor: new Date('2026-06-10T15:00:00.000Z'),
+        }),
+      }),
+    );
+  });
+
+  it('serializes the per-user fence and reserves in-flight outreach', async () => {
+    const subject = createSubject({ outreach: true, inFlight: true });
+
+    await subject.service.sendScheduledMessage(
+      'scheduled-id',
+      new Date('2026-06-10T13:00:00.000Z'),
+    );
+
+    expect(subject.transaction.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(subject.evolutionGateway.sendText).not.toHaveBeenCalled();
+    expect(subject.transaction.scheduledMessage.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: ScheduledMessageStatus.PENDING,
+          scheduledFor: new Date('2026-06-10T16:00:00.000Z'),
+        }),
+      }),
+    );
+  });
+
+  it('retries only local persistence after the provider accepted the send', async () => {
+    const subject = createSubject();
+    subject.prisma.scheduledMessage.updateMany
+      .mockRejectedValueOnce(new Error('Banco temporariamente indisponível'))
+      .mockResolvedValueOnce({ count: 1 });
+
+    await subject.service.sendScheduledMessage(
+      'scheduled-id',
+      new Date('2026-06-10T13:00:00.000Z'),
+    );
+
+    expect(subject.evolutionGateway.sendText).toHaveBeenCalledTimes(1);
+    expect(subject.prisma.scheduledMessage.updateMany).toHaveBeenCalledTimes(2);
+    expect(
+      subject.prisma.scheduledMessage.updateMany.mock.calls[1]?.[0],
+    ).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: ScheduledMessageStatus.SENT,
+          sentAt: expect.any(Date),
+        }),
+      }),
+    );
+  });
+
+  it('cancels a deferred message when the user was deactivated', async () => {
+    const subject = createSubject({ outreach: true, isActive: false });
+
+    await expect(
+      subject.service.sendScheduledMessage(
+        'scheduled-id',
+        new Date('2026-06-10T13:00:00.000Z'),
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({ status: ScheduledMessageStatus.CANCELED }),
+    );
+    expect(subject.evolutionGateway.sendText).not.toHaveBeenCalled();
   });
 
   it('persists a failed status when Evolution rejects the message', async () => {

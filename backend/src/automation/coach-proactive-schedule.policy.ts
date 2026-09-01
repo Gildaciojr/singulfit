@@ -129,6 +129,26 @@ export class CoachProactiveSchedulePolicy {
     });
   }
 
+  nextAllowedSendAt(at: Date, preferences: CoachProactivePreferences): Date {
+    const timezone = this.timezone(preferences.timezone);
+    const wake = this.time(preferences.preferredWakeUpTime, 8 * 60);
+    let sleep = this.time(preferences.preferredSleepTime, 23 * 60);
+    if (sleep <= wake) sleep += 24 * 60;
+    const localDate = this.localDate(at, timezone);
+    const local = this.parts(at, timezone);
+    const minute = local.hour * 60 + local.minute;
+    if (this.outsideSleep(minute, wake, sleep)) return at;
+
+    let target = wake + 30;
+    if (target < minute) target += 24 * 60;
+    return this.localToUtc(
+      localDate,
+      target % (24 * 60),
+      timezone,
+      Math.floor(target / (24 * 60)),
+    );
+  }
+
   private definitions(
     weekday: number,
     times: {

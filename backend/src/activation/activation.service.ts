@@ -231,6 +231,7 @@ export class ActivationService {
       activationMessage,
       outbound,
       scheduled,
+      legacyScheduled,
       meal,
       analysis,
       nutritionResponse,
@@ -274,7 +275,20 @@ export class ActivationService {
         orderBy: { sentAt: 'asc' },
       }),
       this.prisma.scheduledMessage.findFirst({
-        where: { userId, status: ScheduledMessageStatus.SENT },
+        where: {
+          userId,
+          status: ScheduledMessageStatus.SENT,
+          sentAt: { not: null },
+        },
+        select: { sentAt: true },
+        orderBy: { sentAt: 'asc' },
+      }),
+      this.prisma.scheduledMessage.findFirst({
+        where: {
+          userId,
+          status: ScheduledMessageStatus.SENT,
+          sentAt: null,
+        },
         select: { scheduledFor: true },
         orderBy: { scheduledFor: 'asc' },
       }),
@@ -322,7 +336,8 @@ export class ActivationService {
     const firstSentAt = this.earliest([
       activationMessage?.sentAt,
       outbound?.sentAt,
-      scheduled?.scheduledFor,
+      scheduled?.sentAt,
+      legacyScheduled?.scheduledFor,
     ]);
     const coachPromptAt = this.earliest([
       coachMessage?.generatedAt,
