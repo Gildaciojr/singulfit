@@ -18,13 +18,10 @@ import {
 
 interface WebhookAuthDiagnosticLog {
   condition: string;
-  expectedToken: string | null;
   receivedHeaders: Record<string, string | string[]>;
   rawBodyLength: number;
-  rawBodyPreview: string;
   secretLoaded: boolean;
-  suppliedToken: string | null;
-  xAuthenticityToken: string | null;
+  authenticityTokenPresent: boolean;
 }
 
 describe('PagBankWebhookService', () => {
@@ -221,18 +218,13 @@ describe('PagBankWebhookService', () => {
     expect(diagnostic).toEqual(
       expect.objectContaining({
         condition: 'missing_or_invalid_authenticity_token',
-        expectedToken: null,
         rawBodyLength: rawBody.length,
-        rawBodyPreview: rawBody.toString('utf8'),
         secretLoaded: true,
-        suppliedToken: 'invalid-token',
-        xAuthenticityToken: 'invalid-token',
+        authenticityTokenPresent: true,
       }),
     );
     expect(diagnostic.receivedHeaders.authorization).toBe('[masked]');
-    expect(diagnostic.receivedHeaders['x-authenticity-token']).toBe(
-      'invalid-token',
-    );
+    expect(diagnostic.receivedHeaders['x-authenticity-token']).toBe('[masked]');
     expect(
       subject.webhookEventsService.recordInTransaction,
     ).not.toHaveBeenCalled();
@@ -263,27 +255,16 @@ describe('PagBankWebhookService', () => {
     ).rejects.toBeInstanceOf(UnauthorizedException);
 
     const diagnostic = parseDiagnosticLog(loggerWarn);
-    const expectedToken = createHash('sha256')
-      .update(pagBankToken)
-      .update('-')
-      .update(rawBody)
-      .digest('hex');
-
     expect(diagnostic).toEqual(
       expect.objectContaining({
         condition: 'authenticity_token_mismatch',
-        expectedToken,
         rawBodyLength: rawBody.length,
-        rawBodyPreview: rawBody.toString('utf8'),
         secretLoaded: true,
-        suppliedToken,
-        xAuthenticityToken: suppliedToken,
+        authenticityTokenPresent: true,
       }),
     );
     expect(diagnostic.receivedHeaders.cookie).toBe('[masked]');
-    expect(diagnostic.receivedHeaders['x-authenticity-token']).toBe(
-      suppliedToken,
-    );
+    expect(diagnostic.receivedHeaders['x-authenticity-token']).toBe('[masked]');
     expect(
       subject.webhookEventsService.recordInTransaction,
     ).not.toHaveBeenCalled();

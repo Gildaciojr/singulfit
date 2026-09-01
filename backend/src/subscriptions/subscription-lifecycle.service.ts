@@ -145,6 +145,10 @@ export class SubscriptionLifecycleService {
       return null;
     }
 
+    if (cycleNumber === 1 && !reactivated) {
+      return null;
+    }
+
     const name = this.firstName(user.name);
     const content = reactivated
       ? `Bem-vindo de volta, ${name}. Mantive todo o seu histórico. Vamos continuar exatamente de onde paramos.`

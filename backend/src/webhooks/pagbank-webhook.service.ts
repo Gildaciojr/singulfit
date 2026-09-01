@@ -246,13 +246,12 @@ export class PagBankWebhookService {
     this.logger.warn(
       JSON.stringify({
         condition: diagnostic.condition,
-        expectedToken: diagnostic.expectedToken ?? null,
         receivedHeaders: this.sanitizeHeaders(diagnostic.receivedHeaders),
         rawBodyLength: diagnostic.rawBody.length,
-        rawBodyPreview: diagnostic.rawBody.toString('utf8').slice(0, 200),
         secretLoaded: diagnostic.secretLoaded,
-        suppliedToken: diagnostic.suppliedToken ?? null,
-        xAuthenticityToken: diagnostic.xAuthenticityToken ?? null,
+        authenticityTokenPresent: Boolean(
+          diagnostic.xAuthenticityToken?.trim(),
+        ),
       }),
     );
   }
@@ -287,8 +286,7 @@ export class PagBankWebhookService {
       normalizedName === 'cookie' ||
       normalizedName === 'set-cookie' ||
       normalizedName.includes('secret') ||
-      (normalizedName.includes('token') &&
-        normalizedName !== 'x-authenticity-token')
+      normalizedName.includes('token')
     );
   }
 

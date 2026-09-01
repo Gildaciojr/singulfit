@@ -102,6 +102,20 @@ describe('SubscriptionLifecycleService', () => {
     );
   });
 
+  it('leaves first-purchase welcome exclusively to the activation journey', async () => {
+    const test = subject();
+
+    await expect(
+      test.service.notifyActivated(
+        'user-id',
+        1,
+        false,
+        new Date('2026-08-14T12:00:00.000Z'),
+      ),
+    ).resolves.toBeNull();
+    expect(test.automation.scheduleSubscriptionNotice).not.toHaveBeenCalled();
+  });
+
   it('creates a missing renewal invoice after due date during grace', async () => {
     const test = subject();
     await test.service.processDue(new Date('2026-08-11T12:00:00.000Z'));
