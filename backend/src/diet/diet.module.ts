@@ -20,6 +20,7 @@ import { CurrentNutritionPlanReaderService } from './current-nutrition-plan-read
 import { NutritionPlanV2PersistenceValidator } from './v2/persistence/nutrition-plan-v2-persistence.validator';
 import { NutritionPlanOwnershipModule } from './ownership/nutrition-plan-ownership.module';
 import { CanonicalNutritionController } from './canonical-nutrition.controller';
+import { CanonicalNutritionPlanPresenterService } from './canonical-nutrition-plan-presenter.service';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { CanonicalNutritionController } from './canonical-nutrition.controller';
     NutritionPlanningEngineV2Service,
     NutritionPlanV2PersistenceValidator,
     CurrentNutritionPlanReaderService,
+    CanonicalNutritionPlanPresenterService,
   ],
   exports: [
     DietService,
@@ -54,6 +56,7 @@ import { CanonicalNutritionController } from './canonical-nutrition.controller';
     NutritionPlanV2Formatter,
     NutritionGenerationRunnerV2Service,
     CurrentNutritionPlanReaderService,
+    CanonicalNutritionPlanPresenterService,
   ],
 })
 export class DietModule {}

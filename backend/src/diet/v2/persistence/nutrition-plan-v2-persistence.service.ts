@@ -81,6 +81,10 @@ export class NutritionPlanV2PersistenceService {
       }
 
       await this.repository.archiveActive(transaction, input.ownership.userId);
+      await this.repository.archiveActiveLegacy(
+        transaction,
+        input.ownership.userId,
+      );
       const plan = input.generation.output.plan;
       const persisted = await this.repository.create(transaction, {
         userId: input.ownership.userId,

@@ -24,6 +24,8 @@ import type { GenerateWorkoutPlanV2Input } from '../workout/v2/workout-planning-
 import { WorkoutApplicationExecutorService } from '../workout/v2/execution/workout-application-executor.service';
 import { WorkoutPlanV2Formatter } from '../workout/v2/workout-plan-v2.formatter';
 import { CurrentWorkoutPlanReaderService } from '../workout/v2/current-workout-plan-reader.service';
+import { CurrentNutritionPlanReaderService } from '../diet/current-nutrition-plan-reader.service';
+import { CanonicalNutritionPlanPresenterService } from '../diet/canonical-nutrition-plan-presenter.service';
 
 type GeneratedDietPlan = Awaited<ReturnType<DietGeneratorService['generate']>>;
 type GeneratedWorkoutPlan = Awaited<
@@ -70,6 +72,10 @@ export class CoachPlanningExecutionDispatcherService {
     private readonly workoutV2Formatter?: WorkoutPlanV2Formatter,
     @Optional()
     private readonly currentWorkoutPlanReader?: CurrentWorkoutPlanReaderService,
+    @Optional()
+    private readonly currentNutritionPlanReader?: CurrentNutritionPlanReaderService,
+    @Optional()
+    private readonly currentNutritionPresenter?: CanonicalNutritionPlanPresenterService,
   ) {}
 
   async dispatch(input: CoachPlanningExecutionDispatchInput): Promise<string> {
@@ -85,6 +91,14 @@ export class CoachPlanningExecutionDispatcherService {
         input.legacyIntent,
         input.continuationOperationKey,
       );
+    }
+
+    if (
+      input.decision.targetPlan === 'DIET' &&
+      (input.decision.goal === CONVERSATION_GOAL.SHOW_CURRENT_PLAN ||
+        input.decision.goal === CONVERSATION_GOAL.SHOW_PLAN_STATUS)
+    ) {
+      return this.readCurrentNutrition(input);
     }
 
     if (input.routeSelection?.workout === 'V2') {
@@ -117,7 +131,6 @@ export class CoachPlanningExecutionDispatcherService {
       // Estes objetivos ainda não possuem executor oficial e preservam o intent legado.
       case CONVERSATION_GOAL.ANSWER_MESSAGE:
       case CONVERSATION_GOAL.ASK_PROFILE_INFORMATION:
-      case CONVERSATION_GOAL.UPDATE_DIET_PLAN:
       case CONVERSATION_GOAL.UPDATE_WORKOUT_PLAN:
       case CONVERSATION_GOAL.REVIEW_PROGRESS:
       case CONVERSATION_GOAL.SHOW_CURRENT_PLAN:
@@ -129,6 +142,8 @@ export class CoachPlanningExecutionDispatcherService {
           input.legacyIntent,
           input.continuationOperationKey,
         );
+      case CONVERSATION_GOAL.UPDATE_DIET_PLAN:
+        return this.adaptDiet(input);
       case CONVERSATION_GOAL.REQUEST_CONFIRMATION:
         return this.result(
           'Antes de gerar o plano, preciso confirmar seu objetivo atual. Você quer emagrecer, ganhar massa muscular ou manter seu estado atual?',
@@ -224,6 +239,44 @@ export class CoachPlanningExecutionDispatcherService {
     const plan = operationKey
       ? await this.dietGenerator.generate(userId, operationKey)
       : await this.dietGenerator.generate(userId);
+    return this.result(this.formatDiet(plan), 'DIET_LEGACY', true);
+  }
+
+  private async adaptDiet(
+    input: CoachPlanningExecutionDispatchInput,
+  ): Promise<CoachPlanningDispatchResult> {
+    if (!this.currentNutritionPlanReader) {
+      throw new ServiceUnavailableException(
+        'Reader canônico Nutrition indisponível',
+      );
+    }
+    const current = await this.currentNutritionPlanReader.getCurrent(
+      input.userId,
+    );
+    if (!current) {
+      return this.result(
+        'Você ainda não possui um plano alimentar ativo para adaptar.',
+        'NUTRITION_CANONICAL_READER',
+        false,
+      );
+    }
+    if (current.implementation !== 'LEGACY') {
+      return this.result(
+        'Seu plano atual está disponível, mas essa adaptação ainda precisa de revisão antes de ser aplicada. Nenhuma alteração foi feita.',
+        'NUTRITION_CANONICAL_READER',
+        false,
+        'CLARIFICATION',
+      );
+    }
+    const plan = await this.dietGenerator.generate(
+      input.userId,
+      input.continuationOperationKey,
+      {
+        requestedChange:
+          input.currentMessage?.trim() || 'Adaptar meu plano alimentar atual',
+        previousPlan: current,
+      },
+    );
     return this.result(this.formatDiet(plan), 'DIET_LEGACY', true);
   }
 
@@ -335,6 +388,29 @@ export class CoachPlanningExecutionDispatcherService {
       input.referenceDate ?? new Date(),
     );
     return this.result(content, 'WORKOUT_V2_READER', false);
+  }
+
+  private async readCurrentNutrition(
+    input: CoachPlanningExecutionDispatchInput,
+  ): Promise<CoachPlanningDispatchResult> {
+    if (!this.currentNutritionPlanReader || !this.currentNutritionPresenter) {
+      throw new ServiceUnavailableException(
+        'Reader canônico Nutrition indisponível',
+      );
+    }
+    const plan = await this.currentNutritionPlanReader.getCurrent(input.userId);
+    if (!plan) {
+      return this.result(
+        'Você ainda não possui um plano alimentar ativo.',
+        'NUTRITION_CANONICAL_READER',
+        false,
+      );
+    }
+    const content =
+      input.decision?.goal === CONVERSATION_GOAL.SHOW_PLAN_STATUS
+        ? `Seu plano alimentar ativo é *${plan.title}*.`
+        : this.currentNutritionPresenter.present(plan);
+    return this.result(content, 'NUTRITION_CANONICAL_READER', false);
   }
 
   private async generateCombined(

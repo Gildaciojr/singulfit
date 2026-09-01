@@ -103,6 +103,21 @@ export class PrismaNutritionPlanV2Gateway implements NutritionPlanV2Repository {
     });
   }
 
+  async archiveActiveLegacy(
+    transaction: Prisma.TransactionClient,
+    userId: string,
+  ): Promise<void> {
+    await transaction.dietPlan.updateMany({
+      where: {
+        userId,
+        status: 'ACTIVE',
+      },
+      data: {
+        status: 'ARCHIVED',
+      },
+    });
+  }
+
   create(
     transaction: Prisma.TransactionClient,
     input: CreateNutritionPlanV2Record,

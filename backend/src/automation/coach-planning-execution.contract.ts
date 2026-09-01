@@ -9,6 +9,7 @@ import type { ProfileAcquisitionConversationContext } from '../context/coach-ada
 export type CoachPlanningExecutor =
   | 'DIET_LEGACY'
   | 'DIET_V2'
+  | 'NUTRITION_CANONICAL_READER'
   | 'WORKOUT_LEGACY'
   | 'WORKOUT_V2'
   | 'WORKOUT_V2_READER'

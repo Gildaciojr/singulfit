@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { DietGeneratorService } from './diet-generator.service';
 import { DietController } from './diet.controller';
 import { DietService } from './diet.service';
+import { CurrentNutritionPlanReaderService } from './current-nutrition-plan-reader.service';
 
 describe('DietController', () => {
   it('uses the authenticated user for generation and reads', async () => {
@@ -15,6 +16,7 @@ describe('DietController', () => {
     const generator = {
       generate: jest.fn(),
     };
+    const currentReader = { getCurrent: jest.fn() };
     const module = await Test.createTestingModule({
       controllers: [DietController],
       providers: [
@@ -25,6 +27,10 @@ describe('DietController', () => {
         {
           provide: DietGeneratorService,
           useValue: generator,
+        },
+        {
+          provide: CurrentNutritionPlanReaderService,
+          useValue: currentReader,
         },
       ],
     })
@@ -48,7 +54,8 @@ describe('DietController', () => {
     await controller.getHistory(user);
 
     expect(generator.generate).toHaveBeenCalledWith('user-id');
-    expect(dietService.getCurrent).toHaveBeenCalledWith('user-id');
+    expect(currentReader.getCurrent).toHaveBeenCalledWith('user-id');
+    expect(dietService.getCurrent).not.toHaveBeenCalled();
     expect(dietService.getById).toHaveBeenCalledWith('user-id', 'diet-plan-id');
     expect(dietService.listHistory).toHaveBeenCalledTimes(2);
   });

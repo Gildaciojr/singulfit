@@ -11,6 +11,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthenticatedUser } from '../auth/interfaces/jwt-auth-payload.interface';
 import { DietGeneratorService } from './diet-generator.service';
 import { DietService } from './diet.service';
+import { CurrentNutritionPlanReaderService } from './current-nutrition-plan-reader.service';
 
 @Controller('api/v1/diets')
 @UseGuards(JwtAuthGuard)
@@ -18,6 +19,7 @@ export class DietController {
   constructor(
     private readonly dietService: DietService,
     private readonly dietGeneratorService: DietGeneratorService,
+    private readonly currentReader: CurrentNutritionPlanReaderService,
   ) {}
 
   @Post('generate')
@@ -27,7 +29,7 @@ export class DietController {
 
   @Get('current')
   getCurrent(@CurrentUser() user: AuthenticatedUser) {
-    return this.dietService.getCurrent(user.userId);
+    return this.currentReader.getCurrent(user.userId);
   }
 
   @Get('history')

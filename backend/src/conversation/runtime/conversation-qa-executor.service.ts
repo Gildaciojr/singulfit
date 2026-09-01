@@ -1,4 +1,4 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { ConflictException, Injectable, Optional } from '@nestjs/common';
 import { AIJobStatus, AIJobType, Prisma } from '@prisma/client';
 import { performance } from 'node:perf_hooks';
 import { AIService } from '../../ai/ai.service';
@@ -11,6 +11,7 @@ import { COACH_CONVERSATIONAL_QA_V2_PROMPT } from './coach-conversational-qa.pro
 import { ConversationCurrentNutritionContextService } from './conversation-current-nutrition-context.service';
 import { ConversationPublicAnswerBoundaryService } from './conversation-public-answer-boundary.service';
 import { normalizeConversationQACandidate } from './conversation-qa-candidate-normalizer';
+import { ConversationNutritionDeterministicAnswerService } from './conversation-nutrition-deterministic-answer.service';
 import type {
   ConversationAnswerCandidate,
   ConversationAnswerDisposition,
@@ -79,6 +80,8 @@ export class ConversationQAExecutorService {
     private readonly prisma: PrismaService,
     private readonly currentNutrition: ConversationCurrentNutritionContextService,
     private readonly boundary: ConversationPublicAnswerBoundaryService,
+    @Optional()
+    private readonly deterministicNutrition?: ConversationNutritionDeterministicAnswerService,
   ) {}
 
   async execute(
@@ -90,6 +93,22 @@ export class ConversationQAExecutorService {
       return this.failed('INSUFFICIENT_RUNTIME_BUDGET');
     }
     const currentNutrition = await this.currentNutrition.read(input.userId);
+    const deterministic = this.deterministicNutrition?.answer({
+      request: input.humanContext.currentMessage,
+      route: input.route,
+      current: currentNutrition,
+    });
+    if (deterministic) {
+      return Object.freeze({
+        status: 'COMPLETED' as const,
+        content: deterministic.content,
+        observability: this.observability(
+          0,
+          deterministic.candidate,
+          'DETERMINISTIC_FALLBACK',
+        ),
+      });
+    }
     let job: Awaited<ReturnType<AIService['createJob']>>;
     try {
       job = await this.ai.createJob({

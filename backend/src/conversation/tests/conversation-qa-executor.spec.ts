@@ -2,6 +2,7 @@ import { AIJobStatus, AIJobType } from '@prisma/client';
 import { ConflictException } from '@nestjs/common';
 import { ConversationPublicAnswerBoundaryService } from '../runtime/conversation-public-answer-boundary.service';
 import { ConversationQAExecutorService } from '../runtime/conversation-qa-executor.service';
+import { ConversationNutritionDeterministicAnswerService } from '../runtime/conversation-nutrition-deterministic-answer.service';
 import type { CoachConversationHumanContext } from '../../context/coach-conversation-human-context.contract';
 import type { PublicNutritionResponse } from '../../diet/v2/presentation/public-nutrition-response.contract';
 import type { ConversationExecutionRoute } from '../contracts/conversation-execution-route.contract';
@@ -99,7 +100,11 @@ describe('ConversationQAExecutorService', () => {
     } as ConversationExecutionRoute;
   }
 
-  function createSubject(output: object, status = AIJobStatus.PENDING) {
+  function createSubject(
+    output: object,
+    status = AIJobStatus.PENDING,
+    deterministicNutrition = false,
+  ) {
     const response = {
       responseId: 'provider-response',
       model: 'model',
@@ -143,12 +148,38 @@ describe('ConversationQAExecutorService', () => {
         prisma as never,
         currentNutrition as never,
         new ConversationPublicAnswerBoundaryService(),
+        deterministicNutrition
+          ? new ConversationNutritionDeterministicAnswerService()
+          : undefined,
       ),
       ai,
       prisma,
       currentNutrition,
     };
   }
+
+  it('answers canonical nutrition facts without creating or running an AI job', async () => {
+    const subject = createSubject({}, AIJobStatus.PENDING, true);
+
+    await expect(
+      subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+        route: route('NUTRITION_GUIDANCE'),
+        humanContext: human('Qual é minha meta de proteína?'),
+      }),
+    ).resolves.toMatchObject({
+      status: 'COMPLETED',
+      content: 'Sua meta diária no plano é 118 g de proteína.',
+      observability: {
+        answerSource: 'DETERMINISTIC_FALLBACK',
+        totalTokens: 0,
+      },
+    });
+    expect(subject.ai.createJob).not.toHaveBeenCalled();
+    expect(subject.ai.runTextJob).not.toHaveBeenCalled();
+  });
 
   const cases = [
     {

@@ -62,6 +62,10 @@ export interface NutritionPlanV2Repository {
     transaction: Prisma.TransactionClient,
     userId: string,
   ): Promise<void>;
+  archiveActiveLegacy(
+    transaction: Prisma.TransactionClient,
+    userId: string,
+  ): Promise<void>;
   create(
     transaction: Prisma.TransactionClient,
     input: CreateNutritionPlanV2Record,

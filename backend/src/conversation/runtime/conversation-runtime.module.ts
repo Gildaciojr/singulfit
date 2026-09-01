@@ -21,6 +21,7 @@ import { ConversationCurrentNutritionContextService } from './conversation-curre
 import { ConversationPublicAnswerBoundaryService } from './conversation-public-answer-boundary.service';
 import { ConversationQAExecutorService } from './conversation-qa-executor.service';
 import { ConversationQAFollowUpContextService } from './conversation-qa-follow-up-context.service';
+import { ConversationNutritionDeterministicAnswerService } from './conversation-nutrition-deterministic-answer.service';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { ConversationQAFollowUpContextService } from './conversation-qa-follow-u
     ConversationPublicAnswerBoundaryService,
     ConversationQAExecutorService,
     ConversationQAFollowUpContextService,
+    ConversationNutritionDeterministicAnswerService,
   ],
   exports: [
     ConversationRuntimeOperationalConfigService,

@@ -169,6 +169,9 @@ describe('DietGeneratorService', () => {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         create: jest.fn().mockResolvedValue(persistedPlan),
       },
+      nutritionPlanV2: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
       aIJob: {
         findUnique: jest.fn().mockResolvedValue({
           id: 'diet-job-id',
@@ -370,6 +373,12 @@ describe('DietGeneratorService', () => {
         status: DietPlanStatus.ARCHIVED,
       },
     });
+    expect(subject.transaction.nutritionPlanV2.updateMany).toHaveBeenCalledWith(
+      {
+        where: { userId: 'user-id', status: 'ACTIVE' },
+        data: { status: 'ARCHIVED' },
+      },
+    );
     expect(subject.aiService.completeJobInTransaction).toHaveBeenCalledWith(
       subject.transaction,
       expect.objectContaining({

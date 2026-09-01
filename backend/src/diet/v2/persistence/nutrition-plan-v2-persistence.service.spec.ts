@@ -148,6 +148,7 @@ function subject(existing: PersistedNutritionPlanV2 | null = null) {
     }),
     findByAIJobId: jest.fn().mockResolvedValue(existing),
     archiveActive: jest.fn().mockResolvedValue(undefined),
+    archiveActiveLegacy: jest.fn().mockResolvedValue(undefined),
     create: jest.fn().mockResolvedValue(created),
   };
   const auditService = {

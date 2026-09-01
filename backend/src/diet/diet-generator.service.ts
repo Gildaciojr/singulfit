@@ -36,10 +36,16 @@ import {
   AUDIT_ENTITY,
 } from '../observability/observability.constants';
 import { NutritionPlanOwnershipService } from './ownership/nutrition-plan-ownership.service';
+import type { LegacyCurrentNutritionPlan } from './current-nutrition-plan-reader.contract';
 
 const MAX_MEASUREMENTS_IN_CONTEXT = 12;
 const MAX_PROGRESS_SNAPSHOTS_IN_CONTEXT = 12;
 const MAX_MEALS_IN_CONTEXT = 20;
+
+export interface LegacyDietAdaptationInput {
+  readonly requestedChange: string;
+  readonly previousPlan: LegacyCurrentNutritionPlan;
+}
 
 @Injectable()
 export class DietGeneratorService {
@@ -51,7 +57,11 @@ export class DietGeneratorService {
     private readonly nutritionPlanOwnership: NutritionPlanOwnershipService,
   ) {}
 
-  async generate(userId: string, operationKey?: string) {
+  async generate(
+    userId: string,
+    operationKey?: string,
+    adaptation?: LegacyDietAdaptationInput,
+  ) {
     if (operationKey) {
       const completed = await this.prisma.aIJob.findUnique({
         where: { operationKey },
@@ -72,14 +82,17 @@ export class DietGeneratorService {
       }
     }
     const candidate = operationKey
-      ? await this.generateCandidate(userId, operationKey)
-      : await this.generateCandidate(userId);
+      ? await this.generateCandidate(userId, operationKey, adaptation)
+      : adaptation
+        ? await this.generateCandidate(userId, undefined, adaptation)
+        : await this.generateCandidate(userId);
     return this.commitCandidate(candidate);
   }
 
   async generateCandidate(
     userId: string,
     operationKey?: string,
+    adaptation?: LegacyDietAdaptationInput,
   ): Promise<LegacyDietCandidate> {
     await this.subscriptionsService.getProfileSubscription(userId);
     const [profile, nutritionHistory, progressHistory, currentWorkout] =
@@ -250,6 +263,16 @@ export class DietGeneratorService {
                 })),
               }
             : null,
+          ...(adaptation
+            ? {
+                adaptation: {
+                  requestedChange: adaptation.requestedChange,
+                  instruction:
+                    'Adapte o plano atual somente conforme o pedido. Preserve metas, refeições, itens e porções que não precisem mudar, respeitando todas as restrições e regras de segurança.',
+                  previousPlan: adaptation.previousPlan,
+                },
+              }
+            : {}),
         }),
         jsonSchema: {
           name: DIET_JSON_SCHEMA_NAME,
@@ -370,6 +393,15 @@ export class DietGeneratorService {
       },
       data: {
         status: DietPlanStatus.ARCHIVED,
+      },
+    });
+    await transaction.nutritionPlanV2.updateMany({
+      where: {
+        userId: candidate.userId,
+        status: 'ACTIVE',
+      },
+      data: {
+        status: 'ARCHIVED',
       },
     });
     await this.aiService.completeJobInTransaction(transaction, {

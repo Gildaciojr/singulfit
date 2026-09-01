@@ -13,16 +13,15 @@ import type { NutritionPublicResultFormatter } from '../diet/v2/execution/nutrit
 import type { WorkoutApplicationExecutorService } from '../workout/v2/execution/workout-application-executor.service';
 import type { WorkoutPlanV2Formatter } from '../workout/v2/workout-plan-v2.formatter';
 import type { CurrentWorkoutPlanReaderService } from '../workout/v2/current-workout-plan-reader.service';
+import type { CurrentNutritionPlanReaderService } from '../diet/current-nutrition-plan-reader.service';
+import type { CanonicalNutritionPlanPresenterService } from '../diet/canonical-nutrition-plan-presenter.service';
 
 describe('CoachPlanningExecutionDispatcherService', () => {
   const unsupportedGoals: readonly ConversationGoal[] = [
     CONVERSATION_GOAL.ANSWER_MESSAGE,
     CONVERSATION_GOAL.ASK_PROFILE_INFORMATION,
-    CONVERSATION_GOAL.UPDATE_DIET_PLAN,
     CONVERSATION_GOAL.UPDATE_WORKOUT_PLAN,
     CONVERSATION_GOAL.REVIEW_PROGRESS,
-    CONVERSATION_GOAL.SHOW_CURRENT_PLAN,
-    CONVERSATION_GOAL.SHOW_PLAN_STATUS,
     CONVERSATION_GOAL.GENERAL_GUIDANCE,
     CONVERSATION_GOAL.UNKNOWN,
   ];
@@ -94,6 +93,15 @@ describe('CoachPlanningExecutionDispatcherService', () => {
     const currentWorkoutPlanReader = {
       present: jest.fn().mockResolvedValue('Plano atual oficial V2'),
     };
+    const currentNutritionPlanReader = {
+      getCurrent: jest.fn().mockResolvedValue({
+        implementation: 'LEGACY',
+        title: 'Plano alimentar atual',
+      }),
+    };
+    const currentNutritionPresenter = {
+      present: jest.fn().mockReturnValue('Plano nutricional canônico atual'),
+    };
     const dispatcher = new CoachPlanningExecutionDispatcherService(
       dietGenerator as unknown as DietGeneratorService,
       workoutGenerator as unknown as WorkoutGeneratorService,
@@ -103,6 +111,8 @@ describe('CoachPlanningExecutionDispatcherService', () => {
       workoutV2Executor as unknown as WorkoutApplicationExecutorService,
       workoutV2Formatter as unknown as WorkoutPlanV2Formatter,
       currentWorkoutPlanReader as unknown as CurrentWorkoutPlanReaderService,
+      currentNutritionPlanReader as unknown as CurrentNutritionPlanReaderService,
+      currentNutritionPresenter as unknown as CanonicalNutritionPlanPresenterService,
     );
 
     return {
@@ -115,8 +125,71 @@ describe('CoachPlanningExecutionDispatcherService', () => {
       workoutV2Executor,
       workoutV2Formatter,
       currentWorkoutPlanReader,
+      currentNutritionPlanReader,
+      currentNutritionPresenter,
     };
   }
+
+  it.each([
+    [CONVERSATION_GOAL.SHOW_CURRENT_PLAN, 'Plano nutricional canônico atual'],
+    [
+      CONVERSATION_GOAL.SHOW_PLAN_STATUS,
+      'Seu plano alimentar ativo é *Plano alimentar atual*.',
+    ],
+  ] as const)(
+    'reads canonical Nutrition for %s without generation',
+    async (goal, content) => {
+      const subject = createSubject();
+      await expect(
+        subject.dispatcher.dispatchStructured({
+          userId: 'user-id',
+          legacyIntent: 'DIET',
+          decision: { ...decision(goal), targetPlan: 'DIET' },
+        }),
+      ).resolves.toMatchObject({
+        content,
+        executor: 'NUTRITION_CANONICAL_READER',
+        generationCompleted: false,
+      });
+      expect(
+        subject.currentNutritionPlanReader.getCurrent,
+      ).toHaveBeenCalledWith('user-id');
+      expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+      expect(subject.dietGenerator.generateCandidate).not.toHaveBeenCalled();
+      expect(subject.nutritionV2Executor.execute).not.toHaveBeenCalled();
+    },
+  );
+
+  it('adapts the canonical legacy plan with the requested change and one generation', async () => {
+    const subject = createSubject();
+    const previousPlan = await subject.currentNutritionPlanReader.getCurrent();
+    subject.currentNutritionPlanReader.getCurrent.mockClear();
+
+    await expect(
+      subject.dispatcher.dispatchStructured({
+        userId: 'user-id',
+        legacyIntent: 'DIET',
+        decision: {
+          ...decision(CONVERSATION_GOAL.UPDATE_DIET_PLAN),
+          targetPlan: 'DIET',
+        },
+        currentMessage: 'Quero mais proteína',
+        continuationOperationKey: 'operation-key',
+      }),
+    ).resolves.toMatchObject({
+      executor: 'DIET_LEGACY',
+      generationCompleted: true,
+    });
+    expect(subject.dietGenerator.generate).toHaveBeenCalledWith(
+      'user-id',
+      'operation-key',
+      {
+        requestedChange: 'Quero mais proteína',
+        previousPlan,
+      },
+    );
+    expect(subject.dietGenerator.generate).toHaveBeenCalledTimes(1);
+  });
 
   it('reads current Workout V2 without legacy generation or provider execution', async () => {
     const subject = createSubject();
