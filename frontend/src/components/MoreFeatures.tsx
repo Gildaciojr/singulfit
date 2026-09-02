@@ -1,37 +1,23 @@
 "use client";
 
 import {
-  Calendar,
-  History,
-  TrendingUp,
-  Target,
-  PieChart,
-  FileText,
-  Utensils,
-  MessageSquare,
-  Zap,
-  Dumbbell,
   Activity,
   ClipboardCheck,
+  MessageSquare,
+  Shield,
+  Target,
+  TrendingUp,
 } from "lucide-react";
 
-import { motion } from "framer-motion";
-import { useIsMobile } from "@/hooks/use-mobile";
 import { MoreFeaturesData } from "@/engine/landing.types";
 
 const iconMap = {
-  Calendar,
-  History,
-  TrendingUp,
-  Target,
-  PieChart,
-  FileText,
-  Utensils,
-  MessageSquare,
-  Zap,
-  Dumbbell,
   Activity,
   ClipboardCheck,
+  MessageSquare,
+  Shield,
+  Target,
+  TrendingUp,
 };
 
 type Props = {
@@ -39,329 +25,117 @@ type Props = {
 };
 
 export default function MoreFeatures({ data }: Props) {
-  const isMobile = useIsMobile();
-
   return (
-    <section className="relative overflow-hidden py-16 lg:py-20">
-      {/* BACKGROUND */}
-      <div className="absolute inset-0 -z-20 bg-[radial-gradient(700px_450px_at_50%_0%,rgba(34,120,84,0.08),transparent_70%)]" />
+    <section
+      id="features"
+      className="relative overflow-hidden py-16 lg:py-24"
+    >
+      {/* Background */}
+      <div className="absolute inset-0 -z-20 bg-[radial-gradient(900px_520px_at_50%_-5%,rgba(16,185,129,0.09),transparent_68%)]" />
 
-      <div className="absolute inset-0 -z-10 opacity-[0.03] bg-[linear-gradient(to_right,#111_1px,transparent_1px),linear-gradient(to_bottom,#111_1px,transparent_1px)] bg-[size:56px_56px]" />
+      <div className="absolute inset-0 -z-10 bg-[linear-gradient(to_right,rgba(24,24,27,0.025)_1px,transparent_1px),linear-gradient(to_bottom,rgba(24,24,27,0.025)_1px,transparent_1px)] bg-[size:56px_56px]" />
 
-      <div className="container mx-auto max-w-7xl px-6">
-        {/* HEADER */}
-        <div className="mx-auto mb-16 max-w-3xl text-center">
-          <div className="inline-flex items-center rounded-full border border-zinc-200 bg-white/70 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-800">
-            {data.subtitle ?? "Funcionalidades"}
+      <div className="container mx-auto max-w-[1280px] px-6">
+        {/* Header */}
+        <div className="mx-auto max-w-4xl text-center">
+          <div className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50/70 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-900">
+            {data.subtitle ?? "Recursos inteligentes"}
           </div>
 
-          <h2 className="mt-6 text-4xl font-black tracking-[-0.05em] text-zinc-950 md:text-6xl">
+          <h2 className="mt-6 text-4xl font-black tracking-[-0.055em] text-zinc-950 sm:text-5xl md:text-6xl">
             {data.title}
           </h2>
 
-          <p className="mx-auto mt-5 max-w-2xl text-base leading-8 text-zinc-600 md:text-lg">
-            Tudo o que você precisa para transformar uma simples conversa em um
-            acompanhamento nutricional inteligente, contínuo e personalizado.
+          <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-zinc-600 md:text-lg md:leading-8">
+            Um acompanhamento completo no WhatsApp para entender sua rotina,
+            adaptar suas escolhas e ajudar você a evoluir com mais consistência.
           </p>
         </div>
 
-        {/* FEATURES LIST */}
-        <div className="mx-auto mt-20 max-w-[860px]">
-          <div className="grid gap-x-20 gap-y-1 md:grid-cols-2 lg:gap-x-24">
-            {data.items.map((item, index) => {
-              const Icon = iconMap[item.icon as keyof typeof iconMap];
+        {/* Features */}
+        <div className="mt-14 grid gap-4 md:grid-cols-2 lg:mt-16 lg:grid-cols-3 lg:gap-5">
+          {data.items.map((item, index) => {
+            const Icon = iconMap[item.icon as keyof typeof iconMap];
 
-              if (!Icon) return null;
+            if (!Icon) {
+              return null;
+            }
 
-              return (
-                <motion.div
-                  key={index}
-                  initial={isMobile ? false : { opacity: 0, y: 18 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{
-                    duration: 0.4,
-                    delay: index * 0.05,
-                  }}
-                  className="group
-                  cursor-default"
-                >
-                  <div
-                    className="
-                      flex
-                      items-center
-                      gap-4
-                      py-4
-                      transition-all
-                      duration-300
-                      group-hover:translate-x-[3px]
-                    "
-                  >
+            return (
+              <article
+                key={`${item.title}-${index}`}
+                className="
+                  group
+                  relative
+                  overflow-hidden
+                  rounded-[1.75rem]
+                  border
+                  border-zinc-200/90
+                  bg-white
+                  p-6
+                  shadow-[0_14px_40px_-30px_rgba(15,23,42,0.28)]
+                  transition-[transform,border-color,box-shadow]
+                  duration-300
+                  hover:-translate-y-1
+                  hover:border-emerald-200
+                  hover:shadow-[0_24px_55px_-32px_rgba(6,78,59,0.30)]
+                  md:p-7
+                "
+              >
+                {/* Subtle highlight */}
+                <div className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full bg-emerald-50 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+
+                <div className="relative">
+                  <div className="flex items-start justify-between">
                     <div
                       className="
                         flex
-                        h-8
-                        w-8
-                        shrink-0
+                        h-12
+                        w-12
                         items-center
                         justify-center
-                        rounded-full
+                        rounded-2xl
                         border
-                        border-zinc-200
-                        bg-white/70
-                        text-emerald-800
-                        shadow-[0_8px_22px_-18px_rgba(6,78,59,.18)]
-                        transition-all
+                        border-emerald-100
+                        bg-emerald-50
+                        text-emerald-900
+                        transition-transform
                         duration-300
-                        group-hover:border-emerald-200
-                        group-hover:bg-emerald-50
-                        group-hover:shadow-[0_12px_28px_-18px_rgba(6,78,59,.25)]
+                        group-hover:scale-105
                       "
                     >
-                      <Icon className="h-[14px] w-[14px] stroke-[2.2]" />
+                      <Icon className="h-5 w-5 stroke-[2.1]" />
                     </div>
 
-                    <div className="min-w-0 flex-1">
-                      <h3
-                        className="
-                          text-[16px]
-                          font-semibold
-                          tracking-[-0.025em]
-                          text-zinc-900
-                          transition-colors
-                          duration-300
-                          group-hover:text-emerald-900
-                        "
-                      >
-                        {item.title}
-                      </h3>
-                    </div>
+                    <span className="text-xs font-bold tracking-[0.16em] text-zinc-300">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
                   </div>
 
-                  <div
-                    className="
-                      ml-[48px]
-                      h-px
-                      w-auto
-                      bg-gradient-to-r
-                      from-zinc-100
-                      via-zinc-50
-                      to-transparent
-                    "
-                  />
-                </motion.div>
-              );
-            })}
-          </div>
+                  <h3 className="mt-7 text-xl font-black tracking-[-0.035em] text-zinc-950">
+                    {item.title}
+                  </h3>
+
+                  <p className="mt-3 text-sm leading-7 text-zinc-500 md:text-[15px]">
+                    {item.description}
+                  </p>
+
+                  <div className="mt-7 h-px w-10 bg-emerald-200 transition-all duration-300 group-hover:w-16 group-hover:bg-emerald-500" />
+                </div>
+              </article>
+            );
+          })}
         </div>
 
-        {/* TRUST STRIP */}
-        <motion.div
-          initial={{ opacity: 0, y: 18 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.55 }}
-          className="
-    mt-20
-    flex
-    flex-wrap
-    items-center
-    justify-center
-    gap-4
-    lg:gap-5
-  "
-        >
-          <div
-            className="
-    group
-    inline-flex
-    items-center
-    gap-3
-    rounded-full
-    border
-    border-zinc-200
-    bg-white/80
-    px-5
-    py-3
-    backdrop-blur-xl
-    shadow-[0_10px_35px_-24px_rgba(15,23,42,.18)]
-    transition-all
-    duration-300
-    hover:-translate-y-0.5
-    hover:border-emerald-200
-  "
-          >
-            <div
-              className="
-      flex
-      h-8
-      w-8
-      items-center
-      justify-center
-      rounded-full
-      bg-emerald-50
-      text-lg
-    "
-            >
-              🎯
-            </div>
+        {/* Bottom message */}
+        <div className="mx-auto mt-12 flex max-w-3xl items-center justify-center gap-3 text-center text-sm leading-6 text-zinc-500 lg:mt-14">
+          <Shield className="h-4 w-4 shrink-0 text-emerald-800" />
 
-            <div className="text-left">
-              <div className="text-lg font-black text-zinc-950">Clareza</div>
-
-              <div className="text-[13px] text-zinc-500">
-                Entenda sua alimentação.
-              </div>
-            </div>
-          </div>
-
-          <div
-            className="
-    group
-    inline-flex
-    items-center
-    gap-3
-    rounded-full
-    border
-    border-zinc-200
-    bg-white/80
-    px-5
-    py-3
-    backdrop-blur-xl
-    shadow-[0_10px_35px_-24px_rgba(15,23,42,.18)]
-    transition-all
-    duration-300
-    hover:-translate-y-0.5
-    hover:border-emerald-200
-    hover:shadow-[0_16px_40px_-26px_rgba(6,78,59,.18)]
-  "
-          >
-            <div
-              className="
-      flex
-      h-8
-      w-8
-      items-center
-      justify-center
-      rounded-full
-      bg-emerald-50
-      text-emerald-700
-      text-lg
-      font-bold
-    "
-            >
-              🌱
-            </div>
-
-            <div className="text-left">
-              <div className="text-lg font-black tracking-[-0.03em] text-zinc-950">
-                Consistência
-              </div>
-
-              <div className="text-[13px] text-zinc-500">
-                Pequenos hábitos diários
-              </div>
-            </div>
-          </div>
-
-          <div
-            className="
-    group
-    inline-flex
-    items-center
-    gap-3
-    rounded-full
-    border
-    border-zinc-200
-    bg-white/80
-    px-5
-    py-3
-    backdrop-blur-xl
-    shadow-[0_10px_35px_-24px_rgba(15,23,42,.18)]
-    transition-all
-    duration-300
-    hover:-translate-y-0.5
-    hover:border-emerald-200
-    hover:shadow-[0_16px_40px_-26px_rgba(6,78,59,.18)]
-  "
-          >
-            <div
-              className="
-      flex
-      h-8
-      w-8
-      items-center
-      justify-center
-      rounded-full
-      bg-emerald-50
-      text-emerald-700
-      text-lg
-      font-bold
-    "
-            >
-              📈
-            </div>
-
-            <div className="text-left">
-              <div className="text-lg font-black tracking-[-0.03em] text-emerald-800">
-                Evolução
-              </div>
-
-              <div className="text-[13px] text-zinc-500">
-                Coach nutricional que se adapta com você
-              </div>
-            </div>
-          </div>
-
-          <div
-            className="
-    group
-    inline-flex
-    items-center
-    gap-3
-    rounded-full
-    border
-    border-zinc-200
-    bg-white/80
-    px-5
-    py-3
-    backdrop-blur-xl
-    shadow-[0_10px_35px_-24px_rgba(15,23,42,.18)]
-    transition-all
-    duration-300
-    hover:-translate-y-0.5
-    hover:border-emerald-200
-    hover:shadow-[0_16px_40px_-26px_rgba(6,78,59,.18)]
-  "
-          >
-            <div
-              className="
-      flex
-      h-8
-      w-8
-      items-center
-      justify-center
-      rounded-full
-      bg-emerald-50
-      text-emerald-700
-      text-lg
-      font-bold
-    "
-            >
-              🏆
-            </div>
-
-            <div className="text-left">
-              <div className="text-lg font-black tracking-[-0.03em] text-zinc-950">
-                Resultado
-              </div>
-
-              <div className="text-[13px] text-zinc-500">
-                Decisões mais inteligentes
-              </div>
-            </div>
-          </div>
-        </motion.div>
+          <span>
+            Tecnologia para simplificar sua rotina — sem substituir a conversa,
+            o contexto e a personalização.
+          </span>
+        </div>
       </div>
     </section>
   );

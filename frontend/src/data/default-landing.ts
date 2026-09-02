@@ -132,42 +132,48 @@ export const landingData: LandingData = {
     },
   ],
 
-  moreFeatures: {
-    title: "Tudo o que você precisa para evoluir",
-    subtitle: "Recursos inteligentes",
-    items: [
-      {
-        icon: "MessageSquare",
-        title: "Converse naturalmente",
-        description: "Envie refeições como conversa comum.",
-      },
-      {
-        icon: "Activity",
-        title: "Resposta em segundos",
-        description: "Receba feedback em segundos.",
-      },
-      {
-        icon: "Target",
-        title: "Objetivos personalizados",
-        description: "Se adapta as recomendações ao seu perfil.",
-      },
-      {
-        icon: "TrendingUp",
-        title: "Evolução contínua",
-        description: "Visualize sua evolução ao longo do tempo.",
-      },
-      {
-        icon: "ClipboardCheck",
-        title: "Hábitos consistentes",
-        description: "Mais consistência sem complicação.",
-      },
-      {
-        icon: "Shield",
-        title: "Privacidade total",
-        description: "Seus dados protegidos e seguros.",
-      },
-    ],
-  },
+moreFeatures: {
+  title: "Tudo o que você precisa para evoluir",
+  subtitle: "Recursos inteligentes",
+  items: [
+    {
+      icon: "MessageSquare",
+      title: "Converse naturalmente",
+      description:
+        "Fale sobre refeições, dúvidas, rotina e objetivos do mesmo jeito que você já conversa no WhatsApp.",
+    },
+    {
+      icon: "Activity",
+      title: "Respostas rápidas",
+      description:
+        "Receba análises e orientações claras para tomar decisões melhores no seu dia a dia.",
+    },
+    {
+      icon: "Target",
+      title: "Objetivos personalizados",
+      description:
+        "O acompanhamento considera seu perfil, suas preferências e o objetivo que você deseja alcançar.",
+    },
+    {
+      icon: "TrendingUp",
+      title: "Evolução contínua",
+      description:
+        "Seu contexto acompanha sua jornada para que as orientações evoluam junto com seus resultados.",
+    },
+    {
+      icon: "ClipboardCheck",
+      title: "Hábitos consistentes",
+      description:
+        "Acompanhamento e orientação contínua ajudam boas escolhas a se transformarem em rotina.",
+    },
+    {
+      icon: "Shield",
+      title: "Privacidade e segurança",
+      description:
+        "Seus dados são protegidos e utilizados para tornar sua experiência mais personalizada.",
+    },
+  ],
+},
 
   header: {
     logo: singulfitLogo,
