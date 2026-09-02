@@ -51,7 +51,7 @@ describe('PagBankGateway', () => {
     const result = await gateway.createPixPayment({
       idempotencyKey: 'pix-idempotency-key',
       externalReference: 'pay_reference',
-      amountInCents: 1990,
+      amountInCents: 2990,
       expirationDate: new Date('2026-06-06T18:30:00.000Z'),
       customer: {
         name: 'SingulFit',
@@ -106,7 +106,7 @@ describe('PagBankGateway', () => {
     expect(body.notification_urls).toEqual([
       'https://api.singulfit.com.br/api/v1/webhooks/pagbank',
     ]);
-    expect(body.qr_codes[0].amount.value).toBe(1990);
+    expect(body.qr_codes[0].amount.value).toBe(2990);
   });
 
   it('consults a charge and maps the canonical paid status', async () => {
@@ -132,7 +132,7 @@ describe('PagBankGateway', () => {
               status: 'PAID',
               paid_at: '2026-06-06T18:30:00.000Z',
               amount: {
-                value: 1990,
+                value: 2990,
                 currency: 'BRL',
               },
             },
@@ -158,7 +158,7 @@ describe('PagBankGateway', () => {
       externalReference: 'pay_reference',
       status: 'APPROVED',
       statusDetail: undefined,
-      amountInCents: 1990,
+      amountInCents: 2990,
       currency: 'BRL',
       approvedAt: new Date('2026-06-06T18:30:00.000Z'),
     });
@@ -194,7 +194,7 @@ describe('PagBankGateway', () => {
               status: 'PAID',
               paid_at: approvedAt,
               amount: {
-                value: 4990,
+                value: 6990,
                 currency: 'BRL',
               },
               payment_response: {
@@ -225,7 +225,7 @@ describe('PagBankGateway', () => {
     const result = await gateway.createCreditCardPayment({
       idempotencyKey: 'card-idempotency-key',
       externalReference: 'pay_reference',
-      amountInCents: 4990,
+      amountInCents: 6990,
       customer: {
         name: 'SingulFit',
         email: 'lucy@example.com',

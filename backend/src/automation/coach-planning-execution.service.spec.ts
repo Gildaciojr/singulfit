@@ -19,8 +19,45 @@ import type { PrismaService } from '../prisma/prisma.service';
 import { UserGoalEngineService } from './user-goal-engine.service';
 import type { GenerateWorkoutPlanV2InputBuilder } from '../workout/v2/generate-workout-plan-v2-input.builder';
 import type { WorkoutPlanMutationResolverService } from '../workout/v2/workout-plan-mutation-resolver.service';
+import { UsageLimitExceededException } from '../entitlements/usage-limit.exception';
 
 describe('CoachPlanningExecutionService', () => {
+  it('returns a deterministic commercial limit without fallback or shadow', async () => {
+    const dispatcher = {
+      dispatchStructured: jest
+        .fn()
+        .mockRejectedValue(
+          new UsageLimitExceededException(
+            'NUTRITION_PLAN_GENERATION',
+            1,
+            'Ana',
+          ),
+        ),
+    };
+    const service = new CoachPlanningExecutionService(
+      dispatcher as unknown as CoachPlanningExecutionDispatcherService,
+    );
+
+    const result = await service.executeStructured('user-id', 'DIET', {
+      conversationId: 'conversation-id',
+      messageId: 'message-id',
+      correlationId: 'message-id',
+      currentMessage: 'quero outra dieta',
+      referenceDate: new Date('2026-09-02T12:00:00.000Z'),
+    });
+
+    expect(result).toMatchObject({
+      content:
+        'Olá, Ana. Você atingiu seu limite de geração de plano alimentar deste mês. No plano Premium você tem acesso ilimitado a tudo que eu posso te ajudar.',
+      selectedSource: 'COMMERCIAL_LIMIT',
+      dispatch: {
+        executor: 'COMMERCIAL_LIMIT',
+        generationCompleted: false,
+        fallbackApplied: false,
+      },
+    });
+  });
+
   it('fails closed without dispatching legacy when Workout V2 preparation throws', async () => {
     const dispatcher = { dispatchStructured: jest.fn() };
     const service = new CoachPlanningExecutionService(

@@ -41,24 +41,39 @@ describe('SubscriptionAccessService', () => {
     },
   };
 
-  it('moves an overdue active subscription into grace as PAST_DUE', async () => {
+  it('blocks exactly at period end without extending coaching through grace', async () => {
     const subject = createSubject(base);
+
+    await expect(
+      subject.service.requireAccess(
+        'user-id',
+        new Date('2026-06-10T12:00:00.000Z'),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(subject.prisma.subscription.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: SubscriptionStatus.EXPIRED,
+        }),
+      }),
+    );
+  });
+
+  it('blocks PAST_DUE even while gracePeriodEnd is in the future', async () => {
+    const subject = createSubject({
+      ...base,
+      status: SubscriptionStatus.PAST_DUE,
+      currentPeriodEnd: new Date('2026-06-12T12:00:00.000Z'),
+      billingPeriodEnd: new Date('2026-06-12T12:00:00.000Z'),
+    });
 
     await expect(
       subject.service.requireAccess(
         'user-id',
         new Date('2026-06-11T12:00:00.000Z'),
       ),
-    ).resolves.toMatchObject({
-      status: SubscriptionStatus.PAST_DUE,
-    });
-    expect(subject.prisma.subscription.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          status: SubscriptionStatus.PAST_DUE,
-        }),
-      }),
-    );
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(subject.prisma.subscription.updateMany).not.toHaveBeenCalled();
   });
 
   it('expires and blocks access after the grace period', async () => {

@@ -388,6 +388,68 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
     expect(test.eligibility.evaluate).not.toHaveBeenCalled();
   });
 
+  it('isolates simultaneous productive clarification requests for two non-ADMIN users', async () => {
+    const test = subject('INTERNAL');
+    test.prisma.message.findFirst.mockImplementation(
+      ({
+        where,
+      }: {
+        where: { id: string; conversation: { userId: string } };
+      }) =>
+        Promise.resolve({
+          id: where.id,
+          conversationId: `conversation-${where.conversation.userId}`,
+        }),
+    );
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(null);
+
+    const [userA, userB] = await Promise.all([
+      test.service.requestWorkoutClarification({
+        userId: 'user-a',
+        sourceMessageId: 'message-a',
+        referenceDate: sentAt,
+      }),
+      test.service.requestWorkoutClarification({
+        userId: 'user-b',
+        sourceMessageId: 'message-b',
+        referenceDate: sentAt,
+      }),
+    ]);
+
+    expect(userA.questionCreated).toBe(true);
+    expect(userB.questionCreated).toBe(true);
+    expect(test.cycles.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-a',
+        sourceMessageId: 'message-a',
+      }),
+    );
+    expect(test.cycles.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-b',
+        sourceMessageId: 'message-b',
+      }),
+    );
+    expect(test.prisma.message.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'message-a',
+          conversation: { userId: 'user-a' },
+        }),
+      }),
+    );
+    expect(test.prisma.message.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'message-b',
+          conversation: { userId: 'user-b' },
+        }),
+      }),
+    );
+    expect(test.eligibility.evaluate).not.toHaveBeenCalled();
+  });
+
   it('keeps an external user completely outside the rollout', async () => {
     const test = subject();
     test.eligibility.evaluate.mockResolvedValue({

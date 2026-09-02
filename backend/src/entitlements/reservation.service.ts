@@ -6,29 +6,27 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma, UsageEventStatus } from '@prisma/client';
-import dayjs from 'dayjs';
-import timezone from 'dayjs/plugin/timezone';
-import utc from 'dayjs/plugin/utc';
 import { PrismaService } from '../prisma/prisma.service';
 import {
-  IMAGE_ANALYSIS_DAILY,
-  IMAGE_ANALYSIS_ENTITLEMENTS,
-  IMAGE_ANALYSIS_MONTHLY,
-  ImageAnalysisEntitlementCode,
+  IMAGE_ANALYSIS,
+  type CommercialUsageEntitlementCode,
 } from './entitlement.constants';
 import { EntitlementsService } from './entitlements.service';
 import { UsageLimitExceededException } from './usage-limit.exception';
-
-dayjs.extend(utc);
-dayjs.extend(timezone);
-
-const BUSINESS_TIME_ZONE = 'America/Sao_Paulo';
 
 export interface ReserveImageAnalysisInput {
   userId: string;
   aiJobId: string;
   quantity?: number;
   at?: Date;
+}
+
+export interface ReserveCommercialUsageInput {
+  readonly userId: string;
+  readonly aiJobId: string;
+  readonly entitlementCode: CommercialUsageEntitlementCode;
+  readonly quantity?: number;
+  readonly at?: Date;
 }
 
 @Injectable()
@@ -49,6 +47,22 @@ export class ReservationService {
     transaction: Prisma.TransactionClient,
     input: ReserveImageAnalysisInput,
   ) {
+    return this.reserveCommercialUsageInTransaction(transaction, {
+      ...input,
+      entitlementCode: IMAGE_ANALYSIS,
+    });
+  }
+
+  reserveCommercialUsage(input: ReserveCommercialUsageInput) {
+    return this.prisma.$transaction((transaction) =>
+      this.reserveCommercialUsageInTransaction(transaction, input),
+    );
+  }
+
+  async reserveCommercialUsageInTransaction(
+    transaction: Prisma.TransactionClient,
+    input: ReserveCommercialUsageInput,
+  ) {
     const quantity = input.quantity ?? 1;
 
     if (!Number.isInteger(quantity) || quantity <= 0) {
@@ -57,29 +71,21 @@ export class ReservationService {
 
     await this.lockUser(transaction, input.userId);
 
-    const existingEvents = await transaction.usageEvent.findMany({
+    const existingEvent = await transaction.usageEvent.findUnique({
       where: {
-        aiJobId: input.aiJobId,
-        entitlementCode: {
-          in: [...IMAGE_ANALYSIS_ENTITLEMENTS],
+        aiJobId_entitlementCode: {
+          aiJobId: input.aiJobId,
+          entitlementCode: input.entitlementCode,
         },
-      },
-      orderBy: {
-        entitlementCode: 'asc',
       },
     });
 
-    if (existingEvents.length > 0) {
+    if (existingEvent && existingEvent.status !== UsageEventStatus.REVERSED) {
       if (
-        existingEvents.length === IMAGE_ANALYSIS_ENTITLEMENTS.length &&
-        existingEvents.every(
-          (event) =>
-            event.userId === input.userId &&
-            event.quantity === quantity &&
-            event.status !== UsageEventStatus.REVERSED,
-        )
+        existingEvent.userId === input.userId &&
+        existingEvent.quantity === quantity
       ) {
-        return existingEvents;
+        return [existingEvent];
       }
 
       throw new ConflictException('Reserva de uso inconsistente para o job');
@@ -87,86 +93,79 @@ export class ReservationService {
 
     const at = input.at ?? new Date();
     const expiresAt = new Date(at.getTime() + this.getReservationTtlMs());
-    const limits = await this.entitlementsService.getForUserInTransaction(
-      transaction,
-      input.userId,
-      [...IMAGE_ANALYSIS_ENTITLEMENTS],
-      at,
-    );
-    const events: Prisma.UsageEventGetPayload<object>[] = [];
-
-    for (const entitlementCode of IMAGE_ANALYSIS_ENTITLEMENTS) {
-      const limit = limits.get(entitlementCode);
-
-      if (limit === undefined) {
-        throw new ConflictException('Limite do entitlement não encontrado');
-      }
-
-      const period = this.getPeriod(entitlementCode, at);
-      const bucket = await transaction.usageBucket.upsert({
-        where: {
-          userId_entitlementCode_periodStart_periodEnd: {
-            userId: input.userId,
-            entitlementCode,
-            periodStart: period.start,
-            periodEnd: period.end,
-          },
-        },
-        update: {},
-        create: {
+    const grant =
+      await this.entitlementsService.resolveCommercialGrantInTransaction(
+        transaction,
+        input.userId,
+        input.entitlementCode,
+        at,
+      );
+    if (grant.unlimited) return [];
+    const limit = grant.limit;
+    if (limit === null) {
+      throw new ConflictException('Limite do entitlement não encontrado');
+    }
+    const bucket = await transaction.usageBucket.upsert({
+      where: {
+        userId_entitlementCode_periodStart_periodEnd: {
           userId: input.userId,
-          entitlementCode,
-          periodStart: period.start,
-          periodEnd: period.end,
+          entitlementCode: input.entitlementCode,
+          periodStart: grant.periodStart,
+          periodEnd: grant.periodEnd,
         },
+      },
+      update: {},
+      create: {
+        userId: input.userId,
+        entitlementCode: input.entitlementCode,
+        periodStart: grant.periodStart,
+        periodEnd: grant.periodEnd,
+      },
+    });
+
+    if (bucket.used + bucket.reserved + quantity > limit) {
+      const user = await transaction.user.findUnique({
+        where: { id: input.userId },
+        select: { name: true },
       });
+      throw new UsageLimitExceededException(
+        input.entitlementCode,
+        limit,
+        this.firstName(user?.name),
+      );
+    }
 
-      if (bucket.used + bucket.reserved + quantity > limit) {
-        throw new UsageLimitExceededException(entitlementCode, limit);
-      }
-
-      await transaction.usageBucket.update({
-        where: {
-          id: bucket.id,
+    await transaction.usageBucket.update({
+      where: {
+        id: bucket.id,
+      },
+      data: {
+        reserved: {
+          increment: quantity,
         },
-        data: {
-          reserved: {
-            increment: quantity,
+      },
+    });
+    const event = existingEvent
+      ? await transaction.usageEvent.update({
+          where: { id: existingEvent.id },
+          data: {
+            status: UsageEventStatus.RESERVED,
+            expiresAt,
+            createdAt: at,
           },
-        },
-      });
-      events.push(
-        await transaction.usageEvent.create({
+        })
+      : await transaction.usageEvent.create({
           data: {
             userId: input.userId,
             aiJobId: input.aiJobId,
-            entitlementCode,
+            entitlementCode: input.entitlementCode,
             quantity,
             status: UsageEventStatus.RESERVED,
             expiresAt,
           },
-        }),
-      );
-    }
+        });
 
-    return events;
-  }
-
-  private getPeriod(code: ImageAnalysisEntitlementCode, at: Date) {
-    const local = dayjs(at).tz(BUSINESS_TIME_ZONE);
-    const start =
-      code === IMAGE_ANALYSIS_DAILY
-        ? local.startOf('day')
-        : local.startOf('month');
-    const end =
-      code === IMAGE_ANALYSIS_MONTHLY
-        ? start.add(1, 'month')
-        : start.add(1, 'day');
-
-    return {
-      start: start.toDate(),
-      end: end.toDate(),
-    };
+    return [event];
   }
 
   private async lockUser(
@@ -196,5 +195,9 @@ export class ReservationService {
     }
 
     return seconds * 1_000;
+  }
+
+  private firstName(name: string | null | undefined): string | undefined {
+    return name?.trim().split(/\s+/u)[0] || undefined;
   }
 }

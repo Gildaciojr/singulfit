@@ -9,7 +9,7 @@ describe('WebhookProcessorService', () => {
       providerPaymentId: 'CHAR_TEST',
       externalReference: 'pay_reference',
       status: 'APPROVED' as const,
-      amountInCents: 1990,
+      amountInCents: 2990,
       currency: Currency.BRL,
       approvedAt: new Date('2026-06-06T18:30:00.000Z'),
     };

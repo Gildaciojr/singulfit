@@ -835,6 +835,33 @@ describe('CoachCommandService', () => {
     );
   });
 
+  it('persists a deterministic commercial limit without language realization', async () => {
+    const subject = createSubject({ content: 'quero outra dieta' });
+    jest
+      .spyOn(subject.planningExecution, 'executeStructured')
+      .mockResolvedValue({
+        content: 'Olá, Ana. Você atingiu seu limite.',
+        responseRequired: true,
+        selectedSource: 'COMMERCIAL_LIMIT',
+      } as unknown as Awaited<
+        ReturnType<CoachPlanningExecutionService['executeStructured']>
+      >);
+
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+
+    expect(subject.planningConversationResponse.select).not.toHaveBeenCalled();
+    expect(subject.prisma.coachMessage.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          content: 'Olá, Ana. Você atingiu seu limite.',
+        }),
+      }),
+    );
+  });
+
   it('generates legacy content once after the runtime fails', async () => {
     const subject = createSubject({
       content: 'quero uma dieta',

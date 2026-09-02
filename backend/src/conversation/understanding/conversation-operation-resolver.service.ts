@@ -7,6 +7,7 @@ import type {
 } from '../contracts/conversation-understanding-pipeline.contract';
 import type { ConversationOperation } from '../contracts/conversation-intent.contract';
 import { isNutritionCurrentPlanRead } from '../../diet/nutrition-current-plan-read.policy';
+import { isFullPlanReplacementRequest } from './full-plan-replacement.policy';
 
 @Injectable()
 export class ConversationOperationResolverService {
@@ -16,6 +17,7 @@ export class ConversationOperationResolverService {
   ): ConversationOperationResolution {
     const text = message.folded;
     const candidates: ConversationOperation[] = [];
+    const fullReplacement = isFullPlanReplacementRequest(text);
     const add = (operation: ConversationOperation): void => {
       if (!candidates.includes(operation)) candidates.push(operation);
     };
@@ -31,7 +33,7 @@ export class ConversationOperationResolverService {
     ) {
       add(CONVERSATION_OPERATION.PRESENT_CURRENT_PLAN);
     }
-    if (/\b(tro(?:c|qu)\w*|substitu\w*)\b/u.test(text)) {
+    if (!fullReplacement && /\b(tro(?:c|qu)\w*|substitu\w*)\b/u.test(text)) {
       const persistentMutation = this.explicitPersistentMutation(message);
       add(
         persistentMutation &&
@@ -45,6 +47,7 @@ export class ConversationOperationResolverService {
       );
     }
     if (
+      !fullReplacement &&
       /\b(atualiz\w*|ajust\w*|alter\w*|mud\w*|melhor\w*|faz outro|faca outro|quero diferente)\b/u.test(
         text,
       )
@@ -59,9 +62,10 @@ export class ConversationOperationResolverService {
       add(CONVERSATION_OPERATION.REVIEW_PROGRESS);
     }
     if (
-      /\b(ger\w*|cri\w*|mont\w*|elabor\w*|quero|preciso|faca|faz)\b/u.test(
-        text,
-      ) &&
+      (fullReplacement ||
+        /\b(ger\w*|cri\w*|mont\w*|elabor\w*|quero|preciso|faca|faz)\b/u.test(
+          text,
+        )) &&
       !candidates.includes(CONVERSATION_OPERATION.UPDATE_PLAN) &&
       !candidates.includes(CONVERSATION_OPERATION.SUBSTITUTE_ITEM) &&
       /\b(plano|dieta|treino|cardapio|alimentacao)\b/u.test(text)

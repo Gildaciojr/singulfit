@@ -37,6 +37,7 @@ import {
 } from '../observability/observability.constants';
 import { NutritionPlanOwnershipService } from './ownership/nutrition-plan-ownership.service';
 import type { LegacyCurrentNutritionPlan } from './current-nutrition-plan-reader.contract';
+import { NUTRITION_PLAN_GENERATION } from '../entitlements/entitlement.constants';
 
 const MAX_MEASUREMENTS_IN_CONTEXT = 12;
 const MAX_PROGRESS_SNAPSHOTS_IN_CONTEXT = 12;
@@ -191,6 +192,9 @@ export class DietGeneratorService {
       userId,
       type: AIJobType.DIET,
       promptName: DIET_PROMPT_BY_GOAL[profile.goal],
+      ...(adaptation
+        ? {}
+        : { usageEntitlementCode: NUTRITION_PLAN_GENERATION }),
       ...(operationKey ? { operationKey, recoverExpiredOperation: true } : {}),
     });
     if (job.status === AIJobStatus.PROCESSING)

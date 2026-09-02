@@ -14,9 +14,25 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { DIET_PROMPT_BY_GOAL } from './diet.constants';
 import { DietGeneratorService } from './diet-generator.service';
+import { UsageLimitExceededException } from '../entitlements/usage-limit.exception';
 import { AuditService } from '../observability/audit.service';
 
 describe('DietGeneratorService', () => {
+  it('blocks a second BASIC generation before provider and plan mutation', async () => {
+    const subject = createSubject();
+    subject.aiService.createStandaloneJob.mockRejectedValue(
+      new UsageLimitExceededException('NUTRITION_PLAN_GENERATION', 1, 'Ana'),
+    );
+
+    await expect(subject.service.generate('user-id')).rejects.toBeInstanceOf(
+      UsageLimitExceededException,
+    );
+    expect(subject.aiService.runTextJob).not.toHaveBeenCalled();
+    expect(subject.prisma.$transaction).not.toHaveBeenCalled();
+    expect(subject.transaction.dietPlan.create).not.toHaveBeenCalled();
+    expect(subject.transaction.dietPlan.updateMany).not.toHaveBeenCalled();
+  });
+
   function generatedDiet(title = 'Plano brasileiro personalizado') {
     return {
       responseId: `response-${title}`,
@@ -291,6 +307,7 @@ describe('DietGeneratorService', () => {
       userId: 'user-id',
       type: AIJobType.DIET,
       promptName: DIET_PROMPT_BY_GOAL[FitnessGoal.WEIGHT_LOSS],
+      usageEntitlementCode: 'NUTRITION_PLAN_GENERATION',
     });
     expect(subject.aiService.runTextJob).toHaveBeenCalledWith(
       'diet-job-id',
@@ -536,6 +553,7 @@ describe('DietGeneratorService', () => {
       promptName: DIET_PROMPT_BY_GOAL[FitnessGoal.WEIGHT_LOSS],
       operationKey,
       recoverExpiredOperation: true,
+      usageEntitlementCode: 'NUTRITION_PLAN_GENERATION',
     });
   });
 

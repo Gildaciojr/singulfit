@@ -62,7 +62,7 @@ describe('PagBankWebhookService', () => {
       providerPaymentId: 'CHAR_TEST',
       externalReference: 'pay_reference',
       status: 'APPROVED',
-      amountInCents: 1990,
+      amountInCents: 2990,
       currency: 'BRL',
       approvedAt: new Date('2026-06-06T18:30:00.000Z'),
     });

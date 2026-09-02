@@ -7,6 +7,7 @@ import {
 import { AIJobStatus, AIJobType, Prisma } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { AIService } from '../../ai/ai.service';
+import { WORKOUT_PLAN_GENERATION } from '../../entitlements/entitlement.constants';
 import { WorkoutArtifactResolverService } from './workout-artifact-resolver.service';
 import { freezeWorkoutPlanV2 } from './workout-plan-v2.freeze';
 import { WorkoutPlanV2Parser } from './workout-plan-v2.parser';
@@ -122,6 +123,9 @@ export class WorkoutPlanningEngineV2Service {
       type: AIJobType.WORKOUT,
       promptName: WORKOUT_PLANNING_V2_PROMPT.name,
       operationKey,
+      ...(prepared.context.artifactType === 'WEEKLY_PLAN'
+        ? { usageEntitlementCode: WORKOUT_PLAN_GENERATION }
+        : {}),
     });
     if (job.status === AIJobStatus.COMPLETED) {
       const stored = this.stored(job.result);

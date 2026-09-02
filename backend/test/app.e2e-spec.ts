@@ -2052,7 +2052,7 @@ describe('AppController (e2e)', () => {
       providerPaymentId: `CHAR_JOURNEY_${uniqueId}`,
       externalReference: pixResponse.body.externalReference,
       status: 'APPROVED',
-      amountInCents: 1990,
+      amountInCents: 2990,
       currency: 'BRL',
       approvedAt,
     });
@@ -2813,7 +2813,7 @@ describe('AppController (e2e)', () => {
       providerPaymentId: 'CHAR_E2E_TEST',
       externalReference: pixResponse.body.externalReference,
       status: 'APPROVED',
-      amountInCents: 1990,
+      amountInCents: 2990,
       currency: 'BRL',
       approvedAt,
     });

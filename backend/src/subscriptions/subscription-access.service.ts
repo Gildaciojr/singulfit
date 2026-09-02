@@ -57,11 +57,8 @@ export class SubscriptionAccessService {
     const ended =
       (subscription.endedAt !== null && subscription.endedAt <= at) ||
       (subscription.cancelAtPeriodEnd && periodEnd <= at);
-    const accessEnd = subscription.cancelAtPeriodEnd
-      ? periodEnd
-      : (subscription.gracePeriodEnd ?? periodEnd);
 
-    if (ended || accessEnd <= at) {
+    if (ended || periodEnd <= at) {
       await this.expire(
         client,
         subscription.id,
@@ -71,26 +68,8 @@ export class SubscriptionAccessService {
       throw new ForbiddenException('A assinatura do usuário expirou');
     }
 
-    if (subscription.status === SubscriptionStatus.ACTIVE && periodEnd <= at) {
-      const changed = await client.subscription.updateMany({
-        where: {
-          id: subscription.id,
-          status: SubscriptionStatus.ACTIVE,
-        },
-        data: {
-          status: SubscriptionStatus.PAST_DUE,
-          version: {
-            increment: 1,
-          },
-        },
-      });
-
-      if (changed.count === 1) {
-        return {
-          ...subscription,
-          status: SubscriptionStatus.PAST_DUE,
-        };
-      }
+    if (subscription.status !== SubscriptionStatus.ACTIVE) {
+      throw new ForbiddenException('A assinatura do usuário não está ativa');
     }
 
     return subscription;

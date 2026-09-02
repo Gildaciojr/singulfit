@@ -325,7 +325,7 @@ describe('NutritionVisionService', () => {
   it('does not call OpenAI when image quota reservation is rejected', async () => {
     const subject = createSubject('{}');
     subject.aiService.createJob.mockRejectedValue(
-      new UsageLimitExceededException('IMAGE_ANALYSIS_DAILY', 5),
+      new UsageLimitExceededException('IMAGE_ANALYSIS', 5),
     );
 
     await expect(subject.service.analyzeMeal('meal-id')).rejects.toBeInstanceOf(

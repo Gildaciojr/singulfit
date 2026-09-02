@@ -34,6 +34,8 @@ export class CheckoutPlanDto {
   price!: string;
   currency!: Currency;
   imageLimit!: number;
+
+  imageUnlimited!: boolean;
 }
 
 export class CheckoutSubscriptionDto {

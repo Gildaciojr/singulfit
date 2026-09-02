@@ -53,7 +53,7 @@ describe('SubscriptionLifecycleService', () => {
     };
   }
 
-  it('blocks before paid processing and schedules one minimal response', async () => {
+  it('blocks coaching without replying to an expired inbound', async () => {
     const test = subject({ denied: true });
     await expect(
       test.service.authorizeOrNotify(
@@ -62,15 +62,10 @@ describe('SubscriptionLifecycleService', () => {
         new Date('2026-08-14T12:00:00.000Z'),
       ),
     ).resolves.toBe(false);
-    expect(test.automation.scheduleSubscriptionNotice).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: 'user-id',
-        noticeKey: 'access-blocked:message-id',
-      }),
-    );
+    expect(test.automation.scheduleSubscriptionNotice).not.toHaveBeenCalled();
   });
 
-  it('creates the renewal invoice and the seven-day notice', async () => {
+  it('creates the renewal invoice without a D-7 notice', async () => {
     const test = subject();
     await expect(
       test.service.processDue(new Date('2026-08-03T12:00:00.000Z')),
@@ -79,10 +74,28 @@ describe('SubscriptionLifecycleService', () => {
       'user-id',
       new Date('2026-08-03T12:00:00.000Z'),
     );
+    expect(test.automation.scheduleSubscriptionNotice).not.toHaveBeenCalled();
+  });
+
+  it.each([3, 2, 1])('schedules exactly the D-%i reminder', async (days) => {
+    const test = subject();
+    await test.service.processDue(
+      new Date(`2026-08-${String(10 - days).padStart(2, '0')}T12:00:00.000Z`),
+    );
+    expect(test.automation.scheduleSubscriptionNotice).toHaveBeenCalledTimes(1);
     expect(test.automation.scheduleSubscriptionNotice).toHaveBeenCalledWith(
       expect.objectContaining({
-        noticeKey: expect.stringContaining('before-7'),
+        noticeKey: expect.stringContaining(`before-${days}`),
       }),
+    );
+  });
+
+  it('schedules D0 once and no post-expiration grace notices', async () => {
+    const test = subject({ denied: true });
+    await test.service.processDue(new Date('2026-08-10T12:00:00.000Z'));
+    expect(test.automation.scheduleSubscriptionNotice).toHaveBeenCalledTimes(1);
+    expect(test.automation.scheduleSubscriptionNotice).toHaveBeenCalledWith(
+      expect.objectContaining({ noticeKey: expect.stringContaining(':due') }),
     );
   });
 
@@ -116,7 +129,7 @@ describe('SubscriptionLifecycleService', () => {
     expect(test.automation.scheduleSubscriptionNotice).not.toHaveBeenCalled();
   });
 
-  it('creates a missing renewal invoice after due date during grace', async () => {
+  it('creates a missing renewal invoice after due date without restoring access', async () => {
     const test = subject();
     await test.service.processDue(new Date('2026-08-11T12:00:00.000Z'));
     expect(test.billing.getOrCreatePayableInvoice).toHaveBeenCalledWith(

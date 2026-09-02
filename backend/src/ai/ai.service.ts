@@ -8,6 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { AIJobStatus, AIJobType, MessageType, Prisma } from '@prisma/client';
 import { ReservationService } from '../entitlements/reservation.service';
+import type { CommercialUsageEntitlementCode } from '../entitlements/entitlement.constants';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
 import { EventBusService } from '../event-bus/event-bus.service';
@@ -34,6 +35,7 @@ export interface CreateStandaloneAIJobInput {
   readonly promptName: string;
   readonly operationKey?: string;
   readonly recoverExpiredOperation?: boolean;
+  readonly usageEntitlementCode?: CommercialUsageEntitlementCode;
 }
 
 interface RunTextJobInput {
@@ -196,7 +198,7 @@ export class AIService {
         );
       }
 
-      await transaction.aIJob.updateMany({
+      const staleJobs = await transaction.aIJob.findMany({
         where: {
           userId: input.userId,
           type: input.type,
@@ -216,6 +218,10 @@ export class AIService {
             },
           ],
         },
+        select: { id: true },
+      });
+      await transaction.aIJob.updateMany({
+        where: { id: { in: staleJobs.map((job) => job.id) } },
         data: {
           status: AIJobStatus.FAILED,
           failedAt: now,
@@ -223,6 +229,9 @@ export class AIService {
           error: 'Job expirado antes da conclusão',
         },
       });
+      for (const staleJob of staleJobs) {
+        await this.usageService.reverseInTransaction(transaction, staleJob.id);
+      }
 
       if (recoverableJob) {
         const abandonedProcessing =
@@ -233,7 +242,7 @@ export class AIService {
           recoverableJob.status === AIJobStatus.FAILED ||
           abandonedProcessing
         ) {
-          return transaction.aIJob.update({
+          const recovered = await transaction.aIJob.update({
             where: { id: recoverableJob.id },
             data: {
               status: AIJobStatus.PENDING,
@@ -245,6 +254,15 @@ export class AIService {
             },
             include: { promptVersion: true },
           });
+          await this.reserveStandaloneUsage(transaction, input, recovered.id);
+          return recovered;
+        }
+        if (recoverableJob.status !== AIJobStatus.COMPLETED) {
+          await this.reserveStandaloneUsage(
+            transaction,
+            input,
+            recoverableJob.id,
+          );
         }
         return recoverableJob;
       }
@@ -270,6 +288,13 @@ export class AIService {
             );
           }
 
+          if (existingJob.status !== AIJobStatus.COMPLETED) {
+            await this.reserveStandaloneUsage(
+              transaction,
+              input,
+              existingJob.id,
+            );
+          }
           return existingJob;
         }
       }
@@ -291,7 +316,7 @@ export class AIService {
         throw new ConflictException('Já existe uma geração de IA em andamento');
       }
 
-      return transaction.aIJob.create({
+      const created = await transaction.aIJob.create({
         data: {
           userId: input.userId,
           type: input.type,
@@ -302,7 +327,25 @@ export class AIService {
           promptVersion: true,
         },
       });
+      await this.reserveStandaloneUsage(transaction, input, created.id);
+      return created;
     });
+  }
+
+  private async reserveStandaloneUsage(
+    transaction: Prisma.TransactionClient,
+    input: CreateStandaloneAIJobInput,
+    aiJobId: string,
+  ): Promise<void> {
+    if (!input.usageEntitlementCode) return;
+    await this.reservationService.reserveCommercialUsageInTransaction(
+      transaction,
+      {
+        userId: input.userId,
+        aiJobId,
+        entitlementCode: input.usageEntitlementCode,
+      },
+    );
   }
 
   async runTextJob(

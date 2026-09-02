@@ -20,22 +20,24 @@ async function main() {
     update: {
       name: 'Basic',
       description: 'Plano essencial da SingulFit.',
-      price: new Prisma.Decimal('19.90'),
+      price: new Prisma.Decimal('29.90'),
       currency: Currency.BRL,
       billingInterval: BillingInterval.MONTH,
       billingIntervalCount: 1,
       imageLimit: 5,
+      imageUnlimited: false,
       isActive: true,
     },
     create: {
       type: PlanType.BASIC,
       name: 'Basic',
       description: 'Plano essencial da SingulFit.',
-      price: new Prisma.Decimal('19.90'),
+      price: new Prisma.Decimal('29.90'),
       currency: Currency.BRL,
       billingInterval: BillingInterval.MONTH,
       billingIntervalCount: 1,
       imageLimit: 5,
+      imageUnlimited: false,
       isActive: true,
     },
   });
@@ -45,22 +47,24 @@ async function main() {
     update: {
       name: 'Premium',
       description: 'Plano completo da SingulFit.',
-      price: new Prisma.Decimal('49.90'),
+      price: new Prisma.Decimal('69.90'),
       currency: Currency.BRL,
       billingInterval: BillingInterval.MONTH,
       billingIntervalCount: 1,
-      imageLimit: 999999,
+      imageLimit: 0,
+      imageUnlimited: true,
       isActive: true,
     },
     create: {
       type: PlanType.PREMIUM,
       name: 'Premium',
       description: 'Plano completo da SingulFit.',
-      price: new Prisma.Decimal('49.90'),
+      price: new Prisma.Decimal('69.90'),
       currency: Currency.BRL,
       billingInterval: BillingInterval.MONTH,
       billingIntervalCount: 1,
-      imageLimit: 999999,
+      imageLimit: 0,
+      imageUnlimited: true,
       isActive: true,
     },
   });
@@ -93,12 +97,52 @@ async function main() {
         'Quantidade máxima mensal de análises nutricionais por imagem.',
     },
   });
+  const commercialEntitlements = await Promise.all(
+    [
+      {
+        code: 'NUTRITION_PLAN_GENERATION',
+        name: 'Geração de plano alimentar por ciclo',
+        description:
+          'Quantidade de novos planos alimentares por ciclo da assinatura.',
+      },
+      {
+        code: 'WORKOUT_PLAN_GENERATION',
+        name: 'Geração de plano de treino por ciclo',
+        description:
+          'Quantidade de novos planos de treino por ciclo da assinatura.',
+      },
+      {
+        code: 'IMAGE_ANALYSIS',
+        name: 'Análises de alimentos e bebidas por ciclo',
+        description:
+          'Quantidade de análises de alimentos e bebidas por ciclo da assinatura.',
+      },
+    ].map((entitlement) =>
+      prisma.entitlementDefinition.upsert({
+        where: { code: entitlement.code },
+        update: {
+          name: entitlement.name,
+          description: entitlement.description,
+        },
+        create: entitlement,
+      }),
+    ),
+  );
 
   await Promise.all([
     upsertPlanEntitlement(basicPlan.id, dailyEntitlement.id, 5),
     upsertPlanEntitlement(basicPlan.id, monthlyEntitlement.id, 100),
     upsertPlanEntitlement(premiumPlan.id, dailyEntitlement.id, 50),
     upsertPlanEntitlement(premiumPlan.id, monthlyEntitlement.id, 1500),
+    ...commercialEntitlements.flatMap((entitlement) => [
+      upsertPlanEntitlement(
+        basicPlan.id,
+        entitlement.id,
+        entitlement.code === 'IMAGE_ANALYSIS' ? 5 : 1,
+        false,
+      ),
+      upsertPlanEntitlement(premiumPlan.id, entitlement.id, 0, true),
+    ]),
   ]);
 
   await Promise.all([
@@ -248,6 +292,7 @@ function upsertPlanEntitlement(
   planId: string,
   entitlementId: string,
   value: number,
+  unlimited = false,
 ) {
   return prisma.planEntitlement.upsert({
     where: {
@@ -258,11 +303,13 @@ function upsertPlanEntitlement(
     },
     update: {
       value,
+      unlimited,
     },
     create: {
       planId,
       entitlementId,
       value,
+      unlimited,
     },
   });
 }

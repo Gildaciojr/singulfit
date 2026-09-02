@@ -15,7 +15,7 @@ describe('PaymentsService', () => {
       invoiceId: '70315d98-8433-43e6-82b6-47b9c6725906',
       provider: PaymentProvider.MANUAL,
       method: PaymentMethod.MANUAL,
-      amount: new Prisma.Decimal('49.90'),
+      amount: new Prisma.Decimal('69.90'),
     };
     const prisma = {
       payment: {
@@ -32,7 +32,7 @@ describe('PaymentsService', () => {
       invoiceId: existingPayment.invoiceId,
       provider: PaymentProvider.MANUAL,
       method: PaymentMethod.MANUAL,
-      amount: '49.90',
+      amount: '69.90',
       currency: Currency.BRL,
       idempotencyKey: 'billing-test-idempotency-key',
     });
@@ -63,7 +63,7 @@ describe('PaymentsService', () => {
       invoice: {
         findUnique: jest.fn().mockResolvedValue({
           id: 'invoice-id',
-          total: new Prisma.Decimal('19.90'),
+          total: new Prisma.Decimal('29.90'),
           currency: Currency.BRL,
         }),
       },
@@ -75,7 +75,7 @@ describe('PaymentsService', () => {
         invoiceId: 'invoice-id',
         provider: PaymentProvider.PAGBANK,
         method: PaymentMethod.PIX,
-        amount: '19.90',
+        amount: '29.90',
         currency: Currency.BRL,
         idempotencyKey: 'new-key',
       }),

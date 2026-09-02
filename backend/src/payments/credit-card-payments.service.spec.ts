@@ -35,7 +35,7 @@ describe('CreditCardPaymentsService', () => {
         },
         invoice: {
           id: 'invoice-id',
-          total: new Prisma.Decimal('49.90'),
+          total: new Prisma.Decimal('69.90'),
           currency: Currency.BRL,
         },
       }),
@@ -46,7 +46,7 @@ describe('CreditCardPaymentsService', () => {
       provider: PaymentProvider.PAGBANK,
       method: PaymentMethod.CREDIT_CARD,
       status: PaymentStatus.CREATED,
-      amount: new Prisma.Decimal('49.90'),
+      amount: new Prisma.Decimal('69.90'),
       currency: Currency.BRL,
       idempotencyKey: 'card-idempotency-key',
       externalReference: 'pay_reference',
@@ -115,7 +115,7 @@ describe('CreditCardPaymentsService', () => {
     );
     expect(createCreditCardPayment).toHaveBeenCalledWith(
       expect.objectContaining({
-        amountInCents: 4990,
+        amountInCents: 6990,
         encryptedCard,
         holder: {
           name: 'Usuário de Teste',
@@ -130,7 +130,7 @@ describe('CreditCardPaymentsService', () => {
       externalReference: 'pay_reference',
       status: 'APPROVED',
       statusDetail: 'SUCESSO',
-      amountInCents: 4990,
+      amountInCents: 6990,
       currency: Currency.BRL,
       approvedAt,
       cardBrand: 'visa',
@@ -157,7 +157,7 @@ describe('CreditCardPaymentsService', () => {
         },
         invoice: {
           id: 'invoice-id',
-          total: new Prisma.Decimal('19.90'),
+          total: new Prisma.Decimal('29.90'),
           currency: Currency.BRL,
         },
       }),

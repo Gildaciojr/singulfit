@@ -1594,6 +1594,7 @@ model Plan {
   billingInterval      BillingInterval @default(MONTH)
   billingIntervalCount Int             @default(1)
   imageLimit           Int
+  imageUnlimited       Boolean         @default(false)
   isActive             Boolean         @default(true)
   createdAt            DateTime        @default(now())
   updatedAt            DateTime        @updatedAt
@@ -1620,10 +1621,11 @@ model EntitlementDefinition {
 }
 
 model PlanEntitlement {
-  id            String @id @default(uuid())
+  id            String  @id @default(uuid())
   planId        String
   entitlementId String
   value         Int
+  unlimited     Boolean @default(false)
 
   plan        Plan                  @relation(fields: [planId], references: [id], onDelete: Cascade)
   entitlement EntitlementDefinition @relation(fields: [entitlementId], references: [id], onDelete: Cascade)

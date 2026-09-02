@@ -12,9 +12,25 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { WORKOUT_PROMPT_BY_GOAL } from './workout.constants';
 import { WorkoutGeneratorService } from './workout-generator.service';
+import { UsageLimitExceededException } from '../entitlements/usage-limit.exception';
 import { AuditService } from '../observability/audit.service';
 
 describe('WorkoutGeneratorService', () => {
+  it('blocks a second BASIC generation before provider and plan mutation', async () => {
+    const subject = createSubject();
+    subject.aiService.createStandaloneJob.mockRejectedValue(
+      new UsageLimitExceededException('WORKOUT_PLAN_GENERATION', 1, 'Ana'),
+    );
+
+    await expect(subject.service.generate('user-id')).rejects.toBeInstanceOf(
+      UsageLimitExceededException,
+    );
+    expect(subject.aiService.runTextJob).not.toHaveBeenCalled();
+    expect(subject.prisma.$transaction).not.toHaveBeenCalled();
+    expect(subject.transaction.workoutPlan.create).not.toHaveBeenCalled();
+    expect(subject.transaction.workoutPlan.updateMany).not.toHaveBeenCalled();
+  });
+
   function createSubject(goal: FitnessGoal = FitnessGoal.WEIGHT_LOSS) {
     const profile = {
       id: 'profile-id',
@@ -181,6 +197,7 @@ describe('WorkoutGeneratorService', () => {
         userId: 'user-id',
         type: AIJobType.WORKOUT,
         promptName: WORKOUT_PROMPT_BY_GOAL[goal],
+        usageEntitlementCode: 'WORKOUT_PLAN_GENERATION',
       });
     },
   );

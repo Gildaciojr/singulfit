@@ -23,6 +23,7 @@ import {
 } from './workout.constants';
 import { WORKOUT_PLAN_INCLUDE } from './workout.service';
 import { AuditService } from '../observability/audit.service';
+import { WORKOUT_PLAN_GENERATION } from '../entitlements/entitlement.constants';
 import {
   AUDIT_ACTION,
   AUDIT_ENTITY,
@@ -80,6 +81,7 @@ export class WorkoutGeneratorService {
       userId,
       type: AIJobType.WORKOUT,
       promptName: WORKOUT_PROMPT_BY_GOAL[profile.goal],
+      usageEntitlementCode: WORKOUT_PLAN_GENERATION,
     });
     if (job.status === AIJobStatus.PROCESSING)
       throw new ServiceUnavailableException(

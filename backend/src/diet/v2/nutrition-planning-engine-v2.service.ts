@@ -1,6 +1,7 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { AIJobStatus, AIJobType, Prisma } from '@prisma/client';
 import { AIService } from '../../ai/ai.service';
+import { NUTRITION_PLAN_GENERATION } from '../../entitlements/entitlement.constants';
 import { NutritionGenerationExecutionMode } from './nutrition-generation-runner-v2.contract';
 import { NutritionGenerationRunnerV2Service } from './nutrition-generation-runner-v2.service';
 import type {
@@ -55,6 +56,10 @@ export class NutritionPlanningEngineV2Service {
       promptName: descriptor.promptName,
       operationKey: descriptor.operationKey,
       recoverExpiredOperation: identity?.recoverExpiredOperation,
+      ...(prepared.resolution.artifactType === 'DAILY_STRUCTURE' ||
+      prepared.resolution.artifactType === 'WEEKLY_PLAN'
+        ? { usageEntitlementCode: NUTRITION_PLAN_GENERATION }
+        : {}),
     });
 
     if (job.status === AIJobStatus.COMPLETED) {

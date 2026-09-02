@@ -130,6 +130,19 @@ describe('WorkoutPlanMutationResolverService', () => {
     });
   });
 
+  it('routes a disguised full replacement away from maintenance semantics', async () => {
+    const { resolver, read } = setup();
+
+    await expect(
+      resolver.resolve(
+        'user-id',
+        'Adapte meu treino, mas substitua todo o plano por um totalmente diferente',
+        {},
+      ),
+    ).resolves.toEqual({ status: 'NOT_A_MUTATION' });
+    expect(read).not.toHaveBeenCalled();
+  });
+
   it('applies a declared modality change while preserving undeclared plan properties', async () => {
     const { resolver } = setup();
 

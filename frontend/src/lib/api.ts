@@ -5,8 +5,7 @@ const DEFAULT_API_BASE_URL = import.meta.env.DEV
   : "https://api.singulfit.com.br/api/v1";
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ??
-  DEFAULT_API_BASE_URL;
+  import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? DEFAULT_API_BASE_URL;
 
 export type CheckoutStatus =
   | "NO_PENDING_CHECKOUT"
@@ -130,6 +129,7 @@ export type CheckoutStatusResponse = {
       price: string;
       currency: "BRL";
       imageLimit: number;
+      imageUnlimited: boolean;
     };
     paidAt: string | null;
     currentPeriodStart: string | null;
@@ -276,10 +276,7 @@ async function request<TResponse>(
   });
 
   if (!response.ok) {
-    throw new ApiError(
-      await extractErrorMessage(response),
-      response.status,
-    );
+    throw new ApiError(await extractErrorMessage(response), response.status);
   }
 
   return (await response.json()) as TResponse;

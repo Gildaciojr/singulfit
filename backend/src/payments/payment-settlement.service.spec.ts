@@ -23,7 +23,7 @@ describe('PaymentSettlementService', () => {
     const payment = {
       id: 'payment-id',
       invoiceId: 'invoice-id',
-      amount: new Prisma.Decimal('19.90'),
+      amount: new Prisma.Decimal('29.90'),
       currency: Currency.BRL,
       externalReference: 'pay_reference',
       method: PaymentMethod.PIX,
@@ -85,7 +85,7 @@ describe('PaymentSettlementService', () => {
         providerPaymentId: 'CHAR_TEST',
         externalReference: 'pay_reference',
         status: 'APPROVED',
-        amountInCents: 1990,
+        amountInCents: 2990,
         currency: Currency.BRL,
         approvedAt: new Date('2026-06-06T18:30:00.000Z'),
       }),
@@ -132,7 +132,7 @@ describe('PaymentSettlementService', () => {
       findPagBankPayment: jest.fn().mockResolvedValue({
         id: 'payment-id',
         invoiceId: 'invoice-id',
-        amount: new Prisma.Decimal('19.90'),
+        amount: new Prisma.Decimal('29.90'),
         currency: Currency.BRL,
         externalReference: 'pay_reference',
         method: PaymentMethod.PIX,
@@ -179,7 +179,7 @@ describe('PaymentSettlementService', () => {
       providerPaymentId: 'CHAR_TEST',
       externalReference: 'pay_reference',
       status: 'APPROVED',
-      amountInCents: 1990,
+      amountInCents: 2990,
       currency: Currency.BRL,
       approvedAt: new Date('2026-06-06T18:30:00.000Z'),
     });
@@ -216,7 +216,7 @@ describe('PaymentSettlementService', () => {
       providerPaymentId: 'CHAR_UNKNOWN',
       externalReference: 'pay_unknown',
       status: 'APPROVED',
-      amountInCents: 1990,
+      amountInCents: 2990,
       currency: Currency.BRL,
       approvedAt: new Date('2026-06-06T18:30:00.000Z'),
     });
@@ -247,7 +247,7 @@ describe('PaymentSettlementService', () => {
       providerPaymentId: 'CHAR_PENDING',
       externalReference: 'pay_pending',
       status: 'PENDING',
-      amountInCents: 1990,
+      amountInCents: 2990,
       currency: Currency.BRL,
     });
 

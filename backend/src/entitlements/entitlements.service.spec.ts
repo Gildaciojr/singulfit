@@ -3,6 +3,53 @@ import { SubscriptionAccessService } from '../subscriptions/subscription-access.
 import { EntitlementsService } from './entitlements.service';
 
 describe('EntitlementsService', () => {
+  it.each([
+    ['basic-plan', false, 1],
+    ['premium-plan', true, null],
+  ] as const)(
+    'resolves %s from the persisted subscription cycle without role checks',
+    async (planId, unlimited, limit) => {
+      const periodStart = new Date('2026-08-17T15:00:00.000Z');
+      const periodEnd = new Date('2026-09-17T15:00:00.000Z');
+      const accessService = {
+        requireAccessInTransaction: jest.fn().mockResolvedValue({
+          planId,
+          currentPeriodStart: periodStart,
+          currentPeriodEnd: periodEnd,
+        }),
+      };
+      const prisma = {
+        planEntitlement: {
+          findFirst: jest.fn().mockResolvedValue({
+            value: unlimited ? 0 : 1,
+            unlimited,
+          }),
+        },
+      };
+      const service = new EntitlementsService(
+        prisma as unknown as PrismaService,
+        accessService as unknown as SubscriptionAccessService,
+      );
+
+      await expect(
+        service.resolveCommercialGrant(
+          'normal-user-id',
+          'WORKOUT_PLAN_GENERATION',
+          new Date('2026-09-02T12:00:00.000Z'),
+        ),
+      ).resolves.toEqual({
+        code: 'WORKOUT_PLAN_GENERATION',
+        unlimited,
+        limit,
+        periodStart,
+        periodEnd,
+      });
+      expect(prisma.planEntitlement.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ planId }) }),
+      );
+    },
+  );
+
   it('uses the current plan values after a future upgrade', async () => {
     const accessService = {
       requireAccessInTransaction: jest

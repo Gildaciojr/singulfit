@@ -46,6 +46,7 @@ describe('AIService', () => {
     const transaction = {
       $queryRaw: jest.fn().mockResolvedValue([]),
       aIJob: {
+        findMany: jest.fn().mockResolvedValue([]),
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue(createdJob),
@@ -93,6 +94,7 @@ describe('AIService', () => {
     const transaction = {
       $queryRaw: jest.fn().mockResolvedValue([]),
       aIJob: {
+        findMany: jest.fn().mockResolvedValue([]),
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue(createdJob),

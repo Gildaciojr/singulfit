@@ -28,6 +28,8 @@ describe('AutomationService', () => {
     recentSentAt?: Date;
     inFlight?: boolean;
     isActive?: boolean;
+    subscriptionLifecycleNotice?: boolean;
+    subscriptionPeriodEnd?: Date;
   }) {
     const preferences = {
       id: 'preferences-id',
@@ -40,7 +42,9 @@ describe('AutomationService', () => {
     };
     const rule = {
       id: 'rule-id',
-      code: AUTOMATION_RULE_CODES.DAILY_WORKOUT,
+      code: options?.subscriptionLifecycleNotice
+        ? AUTOMATION_RULE_CODES.SUBSCRIPTION_LIFECYCLE
+        : AUTOMATION_RULE_CODES.DAILY_WORKOUT,
       name: 'Treino do dia',
       enabled: true,
     };
@@ -51,7 +55,14 @@ describe('AutomationService', () => {
       scheduledFor: new Date('2026-06-10T12:00:00.000Z'),
       status: ScheduledMessageStatus.PENDING,
       content: 'Treino personalizado',
-      context: options?.outreach ? { source: COACH_RETENTION_SOURCE } : {},
+      context: options?.subscriptionLifecycleNotice
+        ? {
+            source: 'SUBSCRIPTION_LIFECYCLE',
+            noticeKey: 'subscription-id:2026-06-13T12:00:00.000Z:before-3',
+          }
+        : options?.outreach
+          ? { source: COACH_RETENTION_SOURCE }
+          : {},
       automationRule: rule,
     };
     const transaction = {
@@ -128,8 +139,13 @@ describe('AutomationService', () => {
           options?.subscriptionStatus === null
             ? null
             : {
+                id: 'subscription-id',
                 status:
                   options?.subscriptionStatus ?? SubscriptionStatus.ACTIVE,
+                currentPeriodEnd:
+                  options?.subscriptionPeriodEnd ??
+                  new Date('2026-06-13T12:00:00.000Z'),
+                cancelAtPeriodEnd: false,
               },
         ),
       },
@@ -437,6 +453,23 @@ describe('AutomationService', () => {
         }),
       }),
     );
+  });
+
+  it('cancels a stale renewal reminder after a new billing period is active', async () => {
+    const subject = createSubject({
+      subscriptionLifecycleNotice: true,
+      subscriptionPeriodEnd: new Date('2026-07-13T12:00:00.000Z'),
+    });
+
+    await expect(
+      subject.service.sendScheduledMessage(
+        'scheduled-id',
+        new Date('2026-06-10T13:00:00.000Z'),
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({ status: ScheduledMessageStatus.CANCELED }),
+    );
+    expect(subject.evolutionGateway.sendText).not.toHaveBeenCalled();
   });
 
   it('defers controlled outreach until the user wake window', async () => {

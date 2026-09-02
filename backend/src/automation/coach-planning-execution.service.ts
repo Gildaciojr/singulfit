@@ -77,6 +77,7 @@ import type { PendingGoalConfirmationContext } from './pending-conversation-acti
 import type { PendingGoalConsumptionResult } from './pending-conversation-action.contract';
 import { PendingConversationActionService } from './pending-conversation-action.service';
 import { isNutritionCurrentPlanRead } from '../diet/nutrition-current-plan-read.policy';
+import { UsageLimitExceededException } from '../entitlements/usage-limit.exception';
 
 export interface CoachPlanningRuntimeContext {
   readonly conversationId: string;
@@ -278,7 +279,11 @@ export class CoachPlanningExecutionService {
               }
             : undefined,
       });
-      if (pendingExecutionClaimToken && !dispatch.generationCompleted) {
+      if (
+        pendingExecutionClaimToken &&
+        !dispatch.generationCompleted &&
+        dispatch.executor !== 'COMMERCIAL_LIMIT'
+      ) {
         throw new Error('PENDING_GOAL_CONTINUATION_GENERATION_INCOMPLETE');
       }
     } catch (error: unknown) {
@@ -293,7 +298,12 @@ export class CoachPlanningExecutionService {
           failure: this.safeMessage(error),
         })}`,
       );
-      if (pendingExecutionClaimToken && runtime?.pendingGoalConfirmation) {
+      const commercialLimit = error instanceof UsageLimitExceededException;
+      if (
+        pendingExecutionClaimToken &&
+        runtime?.pendingGoalConfirmation &&
+        !commercialLimit
+      ) {
         await this.releasePendingExecution(
           userId,
           runtime,
@@ -302,22 +312,30 @@ export class CoachPlanningExecutionService {
         throw error;
       }
       dispatch = Object.freeze({
-        content: this.failureMessage(error),
-        executor: 'FAILURE_FALLBACK' as const,
+        content: commercialLimit
+          ? error.friendlyMessage
+          : this.failureMessage(error),
+        executor: commercialLimit
+          ? ('COMMERCIAL_LIMIT' as const)
+          : ('FAILURE_FALLBACK' as const),
         generationCompleted: false,
-        fallbackApplied: true,
+        fallbackApplied: !commercialLimit,
       });
     }
 
     const legacyContent = dispatch.content;
     const selectedContent = legacyContent;
     const selectedSource: CoachPlanningExecutionResult['selectedSource'] =
-      routeSelection.nutrition === 'V2'
-        ? 'NUTRITION_V2'
-        : routeSelection.workout === 'V2'
-          ? 'WORKOUT_V2'
-          : 'LEGACY';
-    const suppressShadow = routeSelection.suppressNutritionShadow;
+      dispatch.executor === 'COMMERCIAL_LIMIT'
+        ? 'COMMERCIAL_LIMIT'
+        : routeSelection.nutrition === 'V2'
+          ? 'NUTRITION_V2'
+          : routeSelection.workout === 'V2'
+            ? 'WORKOUT_V2'
+            : 'LEGACY';
+    const suppressShadow =
+      routeSelection.suppressNutritionShadow ||
+      dispatch.executor === 'COMMERCIAL_LIMIT';
 
     this.logger.log(
       `Planning route completed: ${JSON.stringify({

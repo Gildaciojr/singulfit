@@ -41,7 +41,7 @@ describe('BillingService subscription cycles', () => {
         isActive: true,
         billingIntervalCount: 1,
         currency: 'BRL',
-        price: { toFixed: () => '49.90' },
+        price: { toFixed: () => '69.90' },
       },
       user: { id: 'user-id' },
     };

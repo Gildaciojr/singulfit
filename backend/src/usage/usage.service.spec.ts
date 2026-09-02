@@ -4,6 +4,30 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UsageService } from './usage.service';
 
 describe('UsageService', () => {
+  it('reports unlimited image access without a bucket for PREMIUM', async () => {
+    const entitlements = {
+      resolveCommercialGrant: jest.fn().mockResolvedValue({
+        code: 'IMAGE_ANALYSIS',
+        unlimited: true,
+        limit: null,
+        periodStart: new Date('2026-09-01T00:00:00.000Z'),
+        periodEnd: new Date('2026-10-01T00:00:00.000Z'),
+      }),
+    };
+    const prisma = { usageBucket: { findUnique: jest.fn() } };
+    const service = new UsageService(
+      prisma as unknown as PrismaService,
+      entitlements as unknown as EntitlementsService,
+    );
+
+    await expect(service.checkAvailability('premium-user')).resolves.toEqual({
+      allowed: true,
+      remaining: null,
+      unlimited: true,
+    });
+    expect(prisma.usageBucket.findUnique).not.toHaveBeenCalled();
+  });
+
   function createSubject() {
     const event = {
       id: 'event-id',

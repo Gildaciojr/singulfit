@@ -6,7 +6,12 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { ChurnRiskLevel, Prisma, ScheduledMessageStatus } from '@prisma/client';
+import {
+  ChurnRiskLevel,
+  Prisma,
+  ScheduledMessageStatus,
+  SubscriptionStatus,
+} from '@prisma/client';
 import { EvolutionGateway } from '../evolution/evolution.gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
@@ -453,6 +458,10 @@ export class AutomationService {
           automationRuleId: rule.id,
           scheduledFor: input.scheduledFor,
           content: coachMessage.content,
+          context: {
+            source: 'SUBSCRIPTION_LIFECYCLE',
+            noticeKey: input.noticeKey,
+          },
         },
         include: { automationRule: true },
       });
@@ -610,10 +619,21 @@ export class AutomationService {
           current.automationRule.code ===
           AUTOMATION_RULE_CODES.SUBSCRIPTION_LIFECYCLE;
 
+        const lifecycleNoticeIsCurrent = subscriptionLifecycleNotice
+          ? await this.isSubscriptionLifecycleNoticeCurrent(
+              transaction,
+              current.userId,
+              current.scheduledFor,
+              current.context,
+              at,
+            )
+          : true;
+
         if (
           !current.user.isActive ||
           !current.automationRule.enabled ||
           !preferences ||
+          !lifecycleNoticeIsCurrent ||
           (!subscriptionLifecycleNotice &&
             !this.isRuleEnabled(
               current.automationRule.code as AutomationRuleCode,
@@ -1098,6 +1118,60 @@ export class AutomationService {
       typeof source === 'string' &&
       CONTROLLED_OUTREACH_SOURCES.some((candidate) => candidate === source)
     );
+  }
+
+  private async isSubscriptionLifecycleNoticeCurrent(
+    transaction: Prisma.TransactionClient,
+    userId: string,
+    scheduledFor: Date,
+    context: Prisma.JsonValue,
+    at: Date,
+  ): Promise<boolean> {
+    const rawNoticeKey =
+      typeof context === 'object' && context !== null && !Array.isArray(context)
+        ? Reflect.get(context, 'noticeKey')
+        : null;
+    const noticeKey = typeof rawNoticeKey === 'string' ? rawNoticeKey : null;
+
+    if (noticeKey?.startsWith('activated:cycle-')) {
+      return true;
+    }
+
+    const subscription = await transaction.subscription.findFirst({
+      where: {
+        userId,
+        status: {
+          in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE],
+        },
+      },
+      select: {
+        id: true,
+        currentPeriodEnd: true,
+        cancelAtPeriodEnd: true,
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+    if (
+      !subscription?.currentPeriodEnd ||
+      subscription.cancelAtPeriodEnd ||
+      at.getTime() >= scheduledFor.getTime() + 86_400_000
+    ) {
+      return false;
+    }
+
+    const allowedTimes = [3, 2, 1, 0].map(
+      (days) => subscription.currentPeriodEnd!.getTime() - days * 86_400_000,
+    );
+    if (!allowedTimes.includes(scheduledFor.getTime())) {
+      return false;
+    }
+
+    if (!noticeKey) {
+      return true;
+    }
+
+    const expectedPrefix = `${subscription.id}:${subscription.currentPeriodEnd.toISOString()}:`;
+    return noticeKey.startsWith(expectedPrefix);
   }
 
   private isRuleEnabled(

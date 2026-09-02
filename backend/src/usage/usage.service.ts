@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, UsageEventStatus } from '@prisma/client';
-import { IMAGE_ANALYSIS_ENTITLEMENTS } from '../entitlements/entitlement.constants';
+import { IMAGE_ANALYSIS } from '../entitlements/entitlement.constants';
 import { EntitlementsService } from '../entitlements/entitlements.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -12,39 +12,31 @@ export class UsageService {
   ) {}
 
   async checkAvailability(userId: string, at = new Date()) {
-    const limits = await this.entitlementsService.getForUser(
+    const grant = await this.entitlementsService.resolveCommercialGrant(
       userId,
-      [...IMAGE_ANALYSIS_ENTITLEMENTS],
+      IMAGE_ANALYSIS,
       at,
     );
-    const buckets = await this.prisma.usageBucket.findMany({
+    if (grant.unlimited) {
+      return { allowed: true, remaining: null, unlimited: true };
+    }
+    const bucket = await this.prisma.usageBucket.findUnique({
       where: {
-        userId,
-        entitlementCode: {
-          in: [...IMAGE_ANALYSIS_ENTITLEMENTS],
-        },
-        periodStart: {
-          lte: at,
-        },
-        periodEnd: {
-          gt: at,
+        userId_entitlementCode_periodStart_periodEnd: {
+          userId,
+          entitlementCode: IMAGE_ANALYSIS,
+          periodStart: grant.periodStart,
+          periodEnd: grant.periodEnd,
         },
       },
     });
-    const remaining = IMAGE_ANALYSIS_ENTITLEMENTS.map((code) => {
-      const bucket = buckets.find(
-        (currentBucket) => currentBucket.entitlementCode === code,
-      );
-
-      return (
-        (limits.get(code) ?? 0) - (bucket?.used ?? 0) - (bucket?.reserved ?? 0)
-      );
-    });
-    const available = Math.min(...remaining);
+    const available =
+      (grant.limit ?? 0) - (bucket?.used ?? 0) - (bucket?.reserved ?? 0);
 
     return {
       allowed: available > 0,
       remaining: Math.max(available, 0),
+      unlimited: false,
     };
   }
 

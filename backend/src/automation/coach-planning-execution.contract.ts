@@ -15,6 +15,7 @@ export type CoachPlanningExecutor =
   | 'WORKOUT_V2_READER'
   | 'COMBINED_LEGACY'
   | 'UNKNOWN_LEGACY'
+  | 'COMMERCIAL_LIMIT'
   | 'FAILURE_FALLBACK';
 
 export interface CoachPlanningDispatchResult {
@@ -28,6 +29,7 @@ export interface CoachPlanningDispatchResult {
 export type CoachPlanningSelectedSource =
   | 'LEGACY'
   | 'NUTRITION_CANONICAL'
+  | 'COMMERCIAL_LIMIT'
   | 'NUTRITION_V2'
   | 'WORKOUT_V2';
 

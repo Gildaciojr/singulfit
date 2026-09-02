@@ -2,8 +2,17 @@ import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SubscriptionAccessService } from '../subscriptions/subscription-access.service';
+import type { CommercialUsageEntitlementCode } from './entitlement.constants';
 
 type DatabaseClient = PrismaService | Prisma.TransactionClient;
+
+export interface CommercialEntitlementGrant {
+  readonly code: CommercialUsageEntitlementCode;
+  readonly unlimited: boolean;
+  readonly limit: number | null;
+  readonly periodStart: Date;
+  readonly periodEnd: Date;
+}
 
 @Injectable()
 export class EntitlementsService {
@@ -12,14 +21,14 @@ export class EntitlementsService {
     private readonly subscriptionAccessService: SubscriptionAccessService,
   ) {}
 
-  getForUser(userId: string, codes: string[], at = new Date()) {
+  getForUser(userId: string, codes: readonly string[], at = new Date()) {
     return this.getForUserInTransaction(this.prisma, userId, codes, at);
   }
 
   async getForUserInTransaction(
     transaction: DatabaseClient,
     userId: string,
-    codes: string[],
+    codes: readonly string[],
     at = new Date(),
   ): Promise<Map<string, number>> {
     const subscription =
@@ -37,7 +46,7 @@ export class EntitlementsService {
           where: {
             entitlement: {
               code: {
-                in: codes,
+                in: [...codes],
               },
             },
           },
@@ -69,5 +78,58 @@ export class EntitlementsService {
     }
 
     return values;
+  }
+
+  resolveCommercialGrant(
+    userId: string,
+    code: CommercialUsageEntitlementCode,
+    at = new Date(),
+  ) {
+    return this.resolveCommercialGrantInTransaction(
+      this.prisma,
+      userId,
+      code,
+      at,
+    );
+  }
+
+  async resolveCommercialGrantInTransaction(
+    transaction: DatabaseClient,
+    userId: string,
+    code: CommercialUsageEntitlementCode,
+    at = new Date(),
+  ): Promise<CommercialEntitlementGrant> {
+    const subscription =
+      await this.subscriptionAccessService.requireAccessInTransaction(
+        transaction,
+        userId,
+        at,
+      );
+    const periodStart = subscription.currentPeriodStart;
+    const periodEnd = subscription.currentPeriodEnd;
+    if (!periodStart || !periodEnd || periodStart > at || periodEnd <= at) {
+      throw new ServiceUnavailableException(
+        'Ciclo comercial da assinatura não está disponível',
+      );
+    }
+    const entitlement = await transaction.planEntitlement.findFirst({
+      where: {
+        planId: subscription.planId,
+        entitlement: { code },
+      },
+      select: { value: true, unlimited: true },
+    });
+    if (!entitlement) {
+      throw new ServiceUnavailableException(
+        `Entitlement comercial não configurado para o plano: ${code}`,
+      );
+    }
+    return Object.freeze({
+      code,
+      unlimited: entitlement.unlimited,
+      limit: entitlement.unlimited ? null : entitlement.value,
+      periodStart,
+      periodEnd,
+    });
   }
 }

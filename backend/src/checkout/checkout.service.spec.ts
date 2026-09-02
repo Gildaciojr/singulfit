@@ -115,7 +115,8 @@ describe('CheckoutService', () => {
         name: 'Basic',
         price: new Prisma.Decimal('29.90'),
         currency: Currency.BRL,
-        imageLimit: 30,
+        imageLimit: 5,
+        imageUnlimited: false,
       },
       invoices: invoice ? [invoice] : [],
     };

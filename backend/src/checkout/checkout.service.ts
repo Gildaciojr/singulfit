@@ -224,6 +224,7 @@ export class CheckoutService {
       price: plan.price.toFixed(2),
       currency: plan.currency,
       imageLimit: plan.imageLimit,
+      imageUnlimited: plan.imageUnlimited,
     };
   }
 

@@ -30,32 +30,7 @@ export class SubscriptionLifecycleService {
         throw error;
       }
 
-      const user = await this.prisma.user.findUnique({
-        where: { id: userId },
-        select: {
-          name: true,
-          subscriptions: {
-            select: { status: true },
-            orderBy: { updatedAt: 'desc' },
-            take: 1,
-          },
-        },
-      });
-      if (user) {
-        const status = user.subscriptions[0]?.status;
-        const content =
-          status === SubscriptionStatus.PENDING_PAYMENT
-            ? `${this.firstName(user.name)}, seu pagamento ainda não foi confirmado. Assim que a cobrança for aprovada, seu acompanhamento será liberado automaticamente.`
-            : `${this.firstName(user.name)}, seu plano terminou. Todo o seu histórico continua salvo. Assim que renovar, retomaremos exatamente de onde paramos. Quando quiser continuar sua evolução, posso ajudar com a renovação.`;
-        await this.automation.scheduleSubscriptionNotice({
-          userId,
-          noticeKey: `access-blocked:${referenceKey}`,
-          content,
-          scheduledFor: at,
-          availableAt: at,
-        });
-      }
-
+      void referenceKey;
       return false;
     }
   }
@@ -84,14 +59,16 @@ export class SubscriptionLifecycleService {
 
       try {
         const period = dayjs(periodEnd);
-        const graceEnd = dayjs(subscription.gracePeriodEnd ?? periodEnd);
         const name = this.firstName(subscription.user.name);
 
         if (!dayjs(at).isBefore(period.subtract(7, 'day'))) {
           await this.billing.getOrCreatePayableInvoice(subscription.userId, at);
         }
 
-        if (dayjs(at).isBefore(periodEnd) || dayjs(at).isSame(periodEnd)) {
+        if (
+          !subscription.cancelAtPeriodEnd &&
+          (dayjs(at).isBefore(periodEnd) || dayjs(at).isSame(periodEnd))
+        ) {
           await this.schedulePreDueNotices(
             subscription.userId,
             subscription.id,
@@ -110,14 +87,15 @@ export class SubscriptionLifecycleService {
             }
           }
 
-          await this.scheduleElapsedNotices(
-            subscription.userId,
-            subscription.id,
-            name,
-            period,
-            graceEnd,
-            at,
-          );
+          if (!subscription.cancelAtPeriodEnd) {
+            await this.scheduleDueNotice(
+              subscription.userId,
+              subscription.id,
+              name,
+              period,
+              at,
+            );
+          }
         }
         processed += 1;
       } catch (error: unknown) {
@@ -170,9 +148,12 @@ export class SubscriptionLifecycleService {
     periodEnd: dayjs.Dayjs,
     at: Date,
   ): Promise<void> {
-    for (const days of [7, 3, 1] as const) {
+    for (const days of [3, 2, 1] as const) {
       const scheduledFor = periodEnd.subtract(days, 'day');
-      if (dayjs(at).isBefore(scheduledFor)) {
+      if (
+        dayjs(at).isBefore(scheduledFor) ||
+        !dayjs(at).isBefore(scheduledFor.add(1, 'day'))
+      ) {
         continue;
       }
       await this.automation.scheduleSubscriptionNotice({
@@ -185,49 +166,26 @@ export class SubscriptionLifecycleService {
     }
   }
 
-  private async scheduleElapsedNotices(
+  private async scheduleDueNotice(
     userId: string,
     subscriptionId: string,
     name: string,
     periodEnd: dayjs.Dayjs,
-    graceEnd: dayjs.Dayjs,
     at: Date,
   ): Promise<void> {
-    const notices = [
-      {
-        key: 'due',
-        when: periodEnd,
-        content: `${name}, seu ciclo termina hoje. Seu histórico está seguro e você ainda pode renovar para manter o acompanhamento sem interrupções.`,
-      },
-      {
-        key: 'after-1',
-        when: periodEnd.add(1, 'day'),
-        content: `${name}, seu plano venceu ontem, mas seu histórico continua salvo. Você ainda está no período de tolerância e pode renovar para seguir normalmente.`,
-      },
-      {
-        key: 'last-grace-day',
-        when: graceEnd.subtract(1, 'day'),
-        content: `${name}, este é o último dia do período de tolerância. Se renovar, todo o acompanhamento continua do ponto em que você parou.`,
-      },
-      {
-        key: 'expired',
-        when: graceEnd,
-        content: `${name}, seu plano terminou. Todo o seu histórico continua salvo. Assim que renovar, retomaremos exatamente de onde paramos.`,
-      },
-    ];
-
-    for (const notice of notices) {
-      if (dayjs(at).isBefore(notice.when)) {
-        continue;
-      }
-      await this.automation.scheduleSubscriptionNotice({
-        userId,
-        noticeKey: `${subscriptionId}:${periodEnd.toISOString()}:${notice.key}`,
-        content: notice.content,
-        scheduledFor: notice.when.toDate(),
-        availableAt: notice.when.toDate(),
-      });
+    if (
+      dayjs(at).isBefore(periodEnd) ||
+      !dayjs(at).isBefore(periodEnd.add(1, 'day'))
+    ) {
+      return;
     }
+    await this.automation.scheduleSubscriptionNotice({
+      userId,
+      noticeKey: `${subscriptionId}:${periodEnd.toISOString()}:due`,
+      content: `${name}, seu ciclo termina hoje. Seu histórico está seguro e você ainda pode renovar para manter o acompanhamento sem interrupções.`,
+      scheduledFor: periodEnd.toDate(),
+      availableAt: periodEnd.toDate(),
+    });
   }
 
   private firstName(name: string | null): string {

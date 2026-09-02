@@ -24,6 +24,7 @@ describe('AIService standalone operation key', () => {
     const transaction = {
       $queryRaw: jest.fn().mockResolvedValue([{ locked: true }]),
       aIJob: {
+        findMany: jest.fn().mockResolvedValue([]),
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         findUnique: jest.fn().mockResolvedValue(existing),
         findFirst: jest.fn(),
@@ -89,6 +90,7 @@ describe('AIService standalone operation key', () => {
     const transaction = {
       $queryRaw: jest.fn().mockResolvedValue([{ locked: true }]),
       aIJob: {
+        findMany: jest.fn().mockResolvedValue([]),
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         update: jest.fn().mockResolvedValue(recovered),
         findUnique: jest.fn().mockResolvedValue(abandoned),

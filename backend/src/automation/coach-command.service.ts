@@ -440,15 +440,16 @@ export class CoachCommandService {
 
   classify(text: string): CoachCommandIntent {
     const normalized = this.normalize(text);
-    const wantsDiet = this.includesAny(normalized, [
-      'quero uma dieta',
-      'preciso de uma dieta',
-      'monta uma dieta',
-      'monte uma dieta',
-      'plano alimentar',
-      'alimentacao',
-      'me ajuda com alimentacao',
-    ]);
+    const wantsDiet =
+      this.includesAny(normalized, [
+        'quero uma dieta',
+        'preciso de uma dieta',
+        'monta uma dieta',
+        'monte uma dieta',
+        'plano alimentar',
+        'alimentacao',
+        'me ajuda com alimentacao',
+      ]) || /\b(?:outra|nova) dieta\b/u.test(normalized);
     const wantsWorkout =
       this.includesAny(normalized, [
         'quero treino',
@@ -469,7 +470,9 @@ export class CoachCommandService {
         'cardio',
         'aerobico',
         'calistenia',
-      ]) || /\bprova de \d+ km\b/u.test(normalized);
+      ]) ||
+      /\bprova de \d+ km\b/u.test(normalized) ||
+      /\b(?:outro|novo) (?:plano de )?treino\b/u.test(normalized);
     const wantsBoth = this.includesAny(normalized, [
       'quero os dois',
       'dieta e treino',

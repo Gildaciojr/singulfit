@@ -9,6 +9,7 @@ import {
   type WorkoutModality,
 } from './workout-planning-artifact.contract';
 import type { WorkoutRecognizedContext } from './workout-planning-context.contract';
+import { isFullPlanReplacementRequest } from '../../conversation/understanding/full-plan-replacement.policy';
 
 export type WorkoutPlanMutationResolution =
   | Readonly<{ status: 'NOT_A_MUTATION' }>
@@ -130,7 +131,7 @@ export class WorkoutPlanMutationResolverService {
     | 'SUBSTITUTION_CANDIDATE'
     | 'AMBIGUOUS_MODALITY'
     | null {
-    if (/\bnovo plano\b/u.test(text)) return null;
+    if (isFullPlanReplacementRequest(text)) return null;
     if (
       /\b(vou comecar a correr|quero comecar a correr)\b/u.test(text) &&
       !/\b(adapte|adapta|ajuste|ajusta|inclua|incluir)\b/u.test(text)
