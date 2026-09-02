@@ -12,6 +12,7 @@ export type PlanningImplementationRoute = 'LEGACY' | 'V2';
 
 export type PlanningRouteSelectionReason =
   | 'NUTRITION_V2_ELIGIBLE'
+  | 'NUTRITION_CANONICAL_READ'
   | 'NUTRITION_PILOT_NOT_ELIGIBLE'
   | 'WORKOUT_V2_PRODUCTIVE_GENERATION'
   | 'WORKOUT_V2_CANONICAL_READ'

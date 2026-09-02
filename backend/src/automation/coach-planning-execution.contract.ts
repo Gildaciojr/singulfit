@@ -27,6 +27,7 @@ export interface CoachPlanningDispatchResult {
 
 export type CoachPlanningSelectedSource =
   | 'LEGACY'
+  | 'NUTRITION_CANONICAL'
   | 'NUTRITION_V2'
   | 'WORKOUT_V2';
 

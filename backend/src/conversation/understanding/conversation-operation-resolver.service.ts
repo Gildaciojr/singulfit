@@ -6,6 +6,7 @@ import type {
   NormalizedConversationMessage,
 } from '../contracts/conversation-understanding-pipeline.contract';
 import type { ConversationOperation } from '../contracts/conversation-intent.contract';
+import { isNutritionCurrentPlanRead } from '../../diet/nutrition-current-plan-read.policy';
 
 @Injectable()
 export class ConversationOperationResolverService {
@@ -23,6 +24,7 @@ export class ConversationOperationResolverService {
       add(CONVERSATION_OPERATION.PRESENT_PLAN_STATUS);
     }
     if (
+      isNutritionCurrentPlanRead(message.folded) ||
       /\b(plano atual|dieta atual|treino atual|mostr\w*|ver meu|qual e meu)\b/u.test(
         text,
       )
