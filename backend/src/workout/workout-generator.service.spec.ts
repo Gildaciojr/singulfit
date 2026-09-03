@@ -398,6 +398,7 @@ describe('WorkoutGeneratorService', () => {
         aiJobId: candidate.aiJobId,
         jobType: AIJobType.WORKOUT,
         response: candidate.completion.response,
+        result: candidate.completion.result,
       },
     );
   });

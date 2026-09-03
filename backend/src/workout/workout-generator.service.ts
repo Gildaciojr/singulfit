@@ -220,6 +220,7 @@ export class WorkoutGeneratorService {
       aiJobId: candidate.completion.aiJobId,
       jobType: candidate.completion.jobType,
       response: candidate.completion.response,
+      result: candidate.completion.result,
     });
 
     const workoutPlan = await transaction.workoutPlan.create({
