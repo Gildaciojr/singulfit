@@ -12,8 +12,18 @@ import { CoachPlanningConversationResponseService } from './coach-planning-conve
 
 describe('CoachPlanningConversationResponseService', () => {
   const decision = Object.freeze({
-    marker: 'planner',
-  }) as unknown as ConversationGoalDecision;
+    recognizedIntent: 'DIET_PLAN_REQUEST',
+    goal: 'GENERATE_DIET_PLAN',
+    reason: 'DIET_PROFILE_READY',
+    targetPlan: 'DIET',
+    profileCompletionState: 'COMPLETE',
+    canExecute: true,
+    confidence: 'HIGH',
+    selectedProfileField: null,
+    metPreconditions: Object.freeze([]),
+    missingPreconditions: Object.freeze([]),
+    pendingDependencies: Object.freeze([]),
+  }) satisfies ConversationGoalDecision;
   const nutrition = Object.freeze({
     marker: 'nutrition',
   }) as unknown as NutritionReasoningResult;
@@ -224,4 +234,29 @@ describe('CoachPlanningConversationResponseService', () => {
     );
     expect(test.selector.select).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['UNKNOWN_LEGACY', null],
+    ['WORKOUT_LEGACY', 'WORKOUT'],
+    ['COMBINED_LEGACY', 'BOTH'],
+    ['DIET_LEGACY', 'BOTH'],
+  ] as const)(
+    'does not invoke the Nutrition realizer for %s outside the Diet domain',
+    async (executor, targetPlan) => {
+      const test = subject();
+      const unauthorizedExecution = {
+        ...execution(),
+        decision: { ...decision, targetPlan },
+        dispatch: { ...execution().dispatch, executor },
+      } as unknown as CoachPlanningExecutionResult;
+
+      await expect(
+        test.service.select({ ...input(), execution: unauthorizedExecution }),
+      ).resolves.toBe('resposta oficial legada');
+      expect(test.bridge.build).not.toHaveBeenCalled();
+      expect(test.realizer.execute).not.toHaveBeenCalled();
+      expect(test.selector.select).not.toHaveBeenCalled();
+      expect(test.audit.record).not.toHaveBeenCalled();
+    },
+  );
 });

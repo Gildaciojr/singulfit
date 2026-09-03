@@ -835,6 +835,86 @@ describe('CoachCommandService', () => {
     );
   });
 
+  it('persists one canonical Workout read without Nutrition realization or generation', async () => {
+    const subject = createSubject({
+      content: 'Qual é meu treino atual?',
+      planningConversationContent: 'Resposta de segunda geração',
+    });
+    jest
+      .spyOn(subject.planningExecution, 'executeStructured')
+      .mockResolvedValue({
+        content: 'Plano Workout canônico preexistente',
+        responseRequired: true,
+        selectedSource: 'WORKOUT_V2',
+        dispatch: {
+          content: 'Plano Workout canônico preexistente',
+          executor: 'WORKOUT_V2_READER',
+          generationCompleted: false,
+          fallbackApplied: false,
+        },
+      } as unknown as Awaited<
+        ReturnType<CoachPlanningExecutionService['executeStructured']>
+      >);
+
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+
+    expect(subject.planningConversationResponse.select).not.toHaveBeenCalled();
+    expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.prisma.coachMessage.create).toHaveBeenCalledTimes(1);
+    expect(subject.transaction.scheduledMessage.upsert).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(subject.eventBus.publish).toHaveBeenCalledTimes(1);
+    expect(subject.prisma.coachMessage.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          content: 'Plano Workout canônico preexistente',
+        }),
+      }),
+    );
+  });
+
+  it('does not send a non-nutrition LEGACY/UNKNOWN response to the Nutrition realizer', async () => {
+    const subject = createSubject({
+      content: 'mensagem desconhecida',
+      planningConversationContent: 'Resposta de segunda geração',
+    });
+    jest
+      .spyOn(subject.planningExecution, 'executeStructured')
+      .mockResolvedValue({
+        content: 'Resposta oficial desconhecida',
+        responseRequired: true,
+        selectedSource: 'LEGACY',
+        decision: null,
+        dispatch: {
+          content: 'Resposta oficial desconhecida',
+          executor: 'UNKNOWN_LEGACY',
+          generationCompleted: false,
+          fallbackApplied: false,
+        },
+      } as unknown as Awaited<
+        ReturnType<CoachPlanningExecutionService['executeStructured']>
+      >);
+
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+
+    expect(subject.planningConversationResponse.select).not.toHaveBeenCalled();
+    expect(subject.prisma.coachMessage.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          content: 'Resposta oficial desconhecida',
+        }),
+      }),
+    );
+  });
+
   it('persists a deterministic commercial limit without language realization', async () => {
     const subject = createSubject({ content: 'quero outra dieta' });
     jest
@@ -903,7 +983,11 @@ describe('CoachCommandService', () => {
   });
 
   it('keeps idempotency by messageId for repeated events', async () => {
-    const subject = createSubject({ existingContent: 'Resposta existente' });
+    const subject = createSubject({
+      content: 'Qual é meu treino atual?',
+      existingContent: 'Resposta existente',
+      planningConversationContent: 'Resposta de segunda geração',
+    });
 
     await expect(
       subject.service.processTextMessage({
@@ -917,6 +1001,8 @@ describe('CoachCommandService', () => {
       }),
     );
     expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.planningConversationResponse.select).not.toHaveBeenCalled();
     expect(subject.prisma.coachMessage.create).not.toHaveBeenCalled();
     expect(subject.conversationGoalShadow.execute).not.toHaveBeenCalled();
     expect(subject.transaction.scheduledMessage.upsert).toHaveBeenCalledWith(

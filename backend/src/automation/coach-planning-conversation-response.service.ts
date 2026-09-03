@@ -13,6 +13,7 @@ import { NutritionConversationRealizationExecutorService } from '../responses/nu
 import { CoachPlanningConversationPayloadBuilder } from '../responses/reasoning-bridge/coach-planning-conversation-payload.builder';
 import { ConversationReasoningBridgeService } from '../responses/reasoning-bridge/conversation-reasoning-bridge.service';
 import type { CoachPlanningExecutionResult } from './coach-planning-execution.contract';
+import { isNutritionPlanningRealizerEligible } from './nutrition-planning-realizer-eligibility.policy';
 
 export interface CoachPlanningConversationResponseInput {
   readonly userId: string;
@@ -41,6 +42,7 @@ export class CoachPlanningConversationResponseService {
 
   async select(input: CoachPlanningConversationResponseInput): Promise<string> {
     const official = input.execution.content;
+    if (!isNutritionPlanningRealizerEligible(input.execution)) return official;
     try {
       const bridge = this.bridge.build({
         planner: input.execution.decision,

@@ -8,6 +8,7 @@ import { AUTOMATION_RULE_CODES } from './automation.constants';
 import { ConversationGoalShadowPipelineService } from './conversation-goal-shadow-pipeline.service';
 import { ConversationRuntimeIntegrationService } from '../conversation/runtime/conversation-runtime-integration.service';
 import { CoachPlanningConversationResponseService } from './coach-planning-conversation-response.service';
+import { isNutritionPlanningRealizerEligible } from './nutrition-planning-realizer-eligibility.policy';
 import { PendingConversationActionService } from './pending-conversation-action.service';
 import type {
   PendingGoalConfirmationContext,
@@ -360,7 +361,8 @@ export class CoachCommandService {
       return this.blockedWorkoutClarification();
     }
     const content =
-      execution.selectedSource === 'LEGACY' && this.planningConversationResponse
+      isNutritionPlanningRealizerEligible(execution) &&
+      this.planningConversationResponse
         ? await this.planningConversationResponse.select({
             userId: input.userId,
             conversationId: input.conversationId,

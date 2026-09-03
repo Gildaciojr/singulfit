@@ -22,6 +22,98 @@ import type { WorkoutPlanMutationResolverService } from '../workout/v2/workout-p
 import { UsageLimitExceededException } from '../entitlements/usage-limit.exception';
 
 describe('CoachPlanningExecutionService', () => {
+  it.each([
+    ['Qual é meu treino atual?', 'UNKNOWN'],
+    ['Qual é meu treino de hoje?', 'UNKNOWN'],
+  ] as const)(
+    'routes "%s" to the canonical Workout reader before preparation',
+    async (currentMessage, intent) => {
+      const dispatcher = {
+        dispatchStructured: jest.fn().mockResolvedValue({
+          content: 'Plano Workout canônico preexistente',
+          executor: 'WORKOUT_V2_READER',
+          generationCompleted: false,
+          fallbackApplied: false,
+        }),
+      };
+      const snapshotBuilder = { build: jest.fn() };
+      const service = new CoachPlanningExecutionService(
+        dispatcher as unknown as CoachPlanningExecutionDispatcherService,
+        snapshotBuilder as unknown as CoachProfileSnapshotBuilder,
+      );
+      const referenceDate = new Date('2026-09-02T12:00:00.000Z');
+
+      const result = await service.executeStructured('user-id', intent, {
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+        correlationId: 'message-id',
+        currentMessage,
+        referenceDate,
+      });
+
+      expect(result).toMatchObject({
+        content: 'Plano Workout canônico preexistente',
+        responseRequired: true,
+        selectedSource: 'WORKOUT_V2',
+        decision: {
+          recognizedIntent: 'CURRENT_PLAN_REQUEST',
+          goal: 'SHOW_CURRENT_PLAN',
+          targetPlan: 'WORKOUT',
+        },
+        dispatch: {
+          executor: 'WORKOUT_V2_READER',
+          generationCompleted: false,
+        },
+        metadata: {
+          routeSelection: {
+            nutrition: null,
+            workout: 'V2',
+            reason: 'WORKOUT_V2_CANONICAL_READ',
+          },
+        },
+      });
+      expect(dispatcher.dispatchStructured).toHaveBeenCalledWith({
+        userId: 'user-id',
+        legacyIntent: intent,
+        decision: expect.objectContaining({ targetPlan: 'WORKOUT' }),
+        routeSelection: expect.objectContaining({ workout: 'V2' }),
+        currentMessage,
+        referenceDate,
+      });
+      expect(snapshotBuilder.build).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['quero um novo treino', 'adapte meu treino', 'substitua o supino'])(
+    'does not route "%s" through the current Workout read fence',
+    async (currentMessage) => {
+      const dispatcher = { dispatchStructured: jest.fn() };
+      const snapshotBuilder = {
+        build: jest.fn().mockRejectedValue(new Error('preparation reached')),
+      };
+      const service = new CoachPlanningExecutionService(
+        dispatcher as unknown as CoachPlanningExecutionDispatcherService,
+        snapshotBuilder as unknown as CoachProfileSnapshotBuilder,
+        { adapt: jest.fn() } as unknown as LegacyCoachIntentAdapter,
+        {
+          decide: jest.fn(),
+        } as unknown as CoachAdaptiveProfileCollectorService,
+        { plan: jest.fn() } as unknown as ConversationGoalPlannerService,
+      );
+
+      const result = await service.executeStructured('user-id', 'WORKOUT', {
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+        correlationId: 'message-id',
+        currentMessage,
+        referenceDate: new Date('2026-09-02T12:00:00.000Z'),
+      });
+
+      expect(snapshotBuilder.build).toHaveBeenCalledTimes(1);
+      expect(result.dispatch.executor).toBe('FAILURE_FALLBACK');
+    },
+  );
+
   it('returns a deterministic commercial limit without fallback or shadow', async () => {
     const dispatcher = {
       dispatchStructured: jest

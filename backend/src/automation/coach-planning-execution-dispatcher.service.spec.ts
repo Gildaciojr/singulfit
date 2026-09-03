@@ -15,6 +15,7 @@ import type { WorkoutPlanV2Formatter } from '../workout/v2/workout-plan-v2.forma
 import type { CurrentWorkoutPlanReaderService } from '../workout/v2/current-workout-plan-reader.service';
 import type { CurrentNutritionPlanReaderService } from '../diet/current-nutrition-plan-reader.service';
 import type { CanonicalNutritionPlanPresenterService } from '../diet/canonical-nutrition-plan-presenter.service';
+import { CoachPlanningExecutionService } from './coach-planning-execution.service';
 
 describe('CoachPlanningExecutionDispatcherService', () => {
   const unsupportedGoals: readonly ConversationGoal[] = [
@@ -217,9 +218,54 @@ describe('CoachPlanningExecutionDispatcherService', () => {
       generationCompleted: false,
     });
     expect(subject.currentWorkoutPlanReader.present).toHaveBeenCalledTimes(1);
+    expect(subject.currentWorkoutPlanReader.present).toHaveBeenCalledWith(
+      'user-id',
+      'O que treino hoje?',
+      new Date('2026-08-17T02:30:00.000Z'),
+    );
     expect(subject.workoutV2Executor.execute).not.toHaveBeenCalled();
     expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
     expect(subject.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
+    expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.dietGenerator.generateCandidate).not.toHaveBeenCalled();
+    expect(subject.nutritionV2Executor.execute).not.toHaveBeenCalled();
+    expect(subject.bothExecutor.execute).not.toHaveBeenCalled();
+  });
+
+  it('takes the real UNKNOWN Workout read phrase through the canonical reader chain', async () => {
+    const subject = createSubject();
+    const execution = new CoachPlanningExecutionService(subject.dispatcher);
+    const referenceDate = new Date('2026-09-02T12:00:00.000Z');
+
+    await expect(
+      execution.executeStructured('user-id', 'UNKNOWN', {
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+        correlationId: 'message-id',
+        currentMessage: 'Qual é meu treino atual?',
+        referenceDate,
+      }),
+    ).resolves.toMatchObject({
+      content: 'Plano atual oficial V2',
+      responseRequired: true,
+      selectedSource: 'WORKOUT_V2',
+      dispatch: {
+        executor: 'WORKOUT_V2_READER',
+        generationCompleted: false,
+      },
+    });
+    expect(subject.currentWorkoutPlanReader.present).toHaveBeenCalledWith(
+      'user-id',
+      'Qual é meu treino atual?',
+      referenceDate,
+    );
+    expect(subject.workoutV2Executor.execute).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
+    expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.dietGenerator.generateCandidate).not.toHaveBeenCalled();
+    expect(subject.nutritionV2Executor.execute).not.toHaveBeenCalled();
+    expect(subject.bothExecutor.execute).not.toHaveBeenCalled();
   });
 
   it('returns a mutation clarification without invoking V2 generation or Legacy', async () => {

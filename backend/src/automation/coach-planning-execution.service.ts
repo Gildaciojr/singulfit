@@ -78,6 +78,7 @@ import type { PendingGoalConsumptionResult } from './pending-conversation-action
 import { PendingConversationActionService } from './pending-conversation-action.service';
 import { isNutritionCurrentPlanRead } from '../diet/nutrition-current-plan-read.policy';
 import { UsageLimitExceededException } from '../entitlements/usage-limit.exception';
+import { isWorkoutCurrentPlanRead } from '../workout/v2/workout-current-plan-read.policy';
 
 export interface CoachPlanningRuntimeContext {
   readonly conversationId: string;
@@ -157,6 +158,9 @@ export class CoachPlanningExecutionService {
   ): Promise<CoachPlanningExecutionResult> {
     if (isNutritionCurrentPlanRead(runtime?.currentMessage)) {
       return this.executeCanonicalNutritionRead(userId, intent, runtime);
+    }
+    if (isWorkoutCurrentPlanRead(runtime?.currentMessage)) {
+      return this.executeCanonicalWorkoutRead(userId, intent, runtime);
     }
     let preparation: PreparedV2PlanningContext | null = null;
     let pendingExecutionClaimToken: string | undefined;
@@ -571,6 +575,69 @@ export class CoachPlanningExecutionService {
       content: dispatch.content,
       responseRequired: true,
       selectedSource: 'NUTRITION_CANONICAL' as const,
+      decision,
+      nutritionReasoning: null,
+      workoutReasoning: null,
+      longitudinalDecision: null,
+      humanContext: null,
+      reasoning: Object.freeze({
+        nutrition: unavailable,
+        workout: unavailable,
+        longitudinal: unavailable,
+      }),
+      dispatch,
+      metadata: Object.freeze({
+        correlationId: runtime?.correlationId ?? null,
+        operationKey: runtime?.messageId ?? null,
+        executor: dispatch.executor,
+        fallbackApplied: dispatch.fallbackApplied,
+        generationCompleted: dispatch.generationCompleted,
+        routeSelection,
+      }),
+    });
+  }
+
+  private async executeCanonicalWorkoutRead(
+    userId: string,
+    intent: CoachCommandIntent,
+    runtime: CoachPlanningRuntimeContext | undefined,
+  ): Promise<CoachPlanningExecutionResult> {
+    const decision = Object.freeze({
+      recognizedIntent: CONVERSATION_RECOGNIZED_INTENT.CURRENT_PLAN_REQUEST,
+      goal: CONVERSATION_GOAL.SHOW_CURRENT_PLAN,
+      reason: 'CURRENT_PLAN_AVAILABLE' as const,
+      targetPlan: 'WORKOUT' as const,
+      profileCompletionState: 'COMPLETE' as const,
+      canExecute: true,
+      confidence: 'HIGH' as const,
+      selectedProfileField: null,
+      metPreconditions: Object.freeze([]),
+      missingPreconditions: Object.freeze([]),
+      pendingDependencies: Object.freeze([]),
+    });
+    const routeSelection = Object.freeze({
+      nutrition: null,
+      workout: 'V2' as const,
+      reason: 'WORKOUT_V2_CANONICAL_READ' as const,
+      nutritionPilotStatus: null,
+      suppressNutritionShadow: true,
+    });
+    const dispatch = await this.dispatcher.dispatchStructured({
+      userId,
+      legacyIntent: intent,
+      decision,
+      routeSelection,
+      currentMessage: runtime?.currentMessage,
+      referenceDate: runtime?.referenceDate,
+    });
+    const unavailable = this.unavailableReasoning(
+      'CANONICAL_INPUT_UNAVAILABLE',
+    ).state;
+
+    return Object.freeze({
+      content: dispatch.content,
+      responseRequired: true,
+      selectedSource: 'WORKOUT_V2' as const,
       decision,
       nutritionReasoning: null,
       workoutReasoning: null,

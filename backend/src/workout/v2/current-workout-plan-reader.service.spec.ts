@@ -108,12 +108,30 @@ function record(options?: {
 describe('CurrentWorkoutPlanReaderService', () => {
   function setup(value: ReturnType<typeof record> | null = record()) {
     const findFirst = jest.fn().mockResolvedValue(value);
-    const prisma = { workoutPlan: { findFirst } };
+    const mutations = {
+      workoutPlanCreate: jest.fn(),
+      workoutPlanUpdate: jest.fn(),
+      workoutPlanUpdateMany: jest.fn(),
+      usageBucketUpsert: jest.fn(),
+      usageEventCreate: jest.fn(),
+      aiJobCreate: jest.fn(),
+    };
+    const prisma = {
+      workoutPlan: {
+        findFirst,
+        create: mutations.workoutPlanCreate,
+        update: mutations.workoutPlanUpdate,
+        updateMany: mutations.workoutPlanUpdateMany,
+      },
+      usageBucket: { upsert: mutations.usageBucketUpsert },
+      usageEvent: { create: mutations.usageEventCreate },
+      aIJob: { create: mutations.aiJobCreate },
+    };
     const service = new CurrentWorkoutPlanReaderService(
       prisma as never,
       new WorkoutPlanV2StoredDocumentParser(),
     );
-    return { service, findFirst };
+    return { service, findFirst, mutations };
   }
 
   it('reads only the active plan owned by the requested user', async () => {
@@ -146,14 +164,17 @@ describe('CurrentWorkoutPlanReaderService', () => {
   });
 
   it('returns a human no-plan response without generating anything', async () => {
-    const { service } = setup(null);
+    const { service, mutations } = setup(null);
     await expect(
       service.present('user-id', 'Qual meu treino?', new Date()),
     ).resolves.toContain('ainda não tem um plano');
+    Object.values(mutations).forEach((mutation) => {
+      expect(mutation).not.toHaveBeenCalled();
+    });
   });
 
   it('presents the current V2 plan', async () => {
-    const { service } = setup();
+    const { service, mutations } = setup();
     const content = await service.present(
       'user-id',
       'Qual meu treino?',
@@ -161,6 +182,9 @@ describe('CurrentWorkoutPlanReaderService', () => {
     );
     expect(content).toContain('Plano V2 atual');
     expect(content).toContain('Sessão 1 — segunda-feira');
+    Object.values(mutations).forEach((mutation) => {
+      expect(mutation).not.toHaveBeenCalled();
+    });
   });
 
   it('resolves today using the user timezone at a UTC boundary', async () => {
