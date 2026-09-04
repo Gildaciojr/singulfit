@@ -17,6 +17,7 @@ import { ConversationGoalShadowPipelineService } from './conversation-goal-shado
 import { ConversationRuntimeIntegrationService } from '../conversation/runtime/conversation-runtime-integration.service';
 import type { CoachPlanningConversationResponseService } from './coach-planning-conversation-response.service';
 import type { ProfileAcquisitionInternalRolloutService } from '../context/profile-acquisition/profile-acquisition-internal-rollout.service';
+import type { CurrentWorkoutPlanReaderService } from '../workout/v2/current-workout-plan-reader.service';
 
 describe('CoachCommandService', () => {
   function dietPlan(): Parameters<
@@ -117,6 +118,17 @@ describe('CoachCommandService', () => {
     runtimeLegacy?: boolean;
     planningConversationContent?: string;
     workoutClarification?: boolean;
+    workoutSelection?: boolean;
+    selectionExpired?: boolean;
+    replyToExternalMessageId?: string | null;
+    latestSelectionAction?: string;
+    activeProfileAskedAt?: Date | null;
+    currentWorkoutStatus?:
+      | 'AVAILABLE'
+      | 'LEGACY_RELATIONAL'
+      | 'NO_PLAN'
+      | 'INVALID_V2_PLAN';
+    currentWorkoutPlanId?: string;
   }) {
     const at = new Date('2026-06-10T12:00:00.000Z');
     const rule = {
@@ -148,6 +160,8 @@ describe('CoachCommandService', () => {
           id: 'message-id',
           content: options?.content ?? 'quero uma dieta',
           timestamp: at,
+          replyToExternalMessageId: options?.replyToExternalMessageId ?? null,
+          conversationId: 'conversation-id',
           conversation: {
             id: 'conversation-id',
             user: {
@@ -168,6 +182,35 @@ describe('CoachCommandService', () => {
         create: jest.fn().mockResolvedValue({
           id: 'coach-message-id',
         }),
+      },
+      scheduledMessage: {
+        findFirst: jest.fn().mockResolvedValue(
+          options?.workoutSelection
+            ? {
+                context: {
+                  action:
+                    options?.latestSelectionAction ??
+                    'WORKOUT_SESSION_SELECTION',
+                  workoutPlanId: 'workout-id',
+                  allowedSessionSequences: [1, 2],
+                },
+                responseExpiresAt: options?.selectionExpired
+                  ? new Date('2026-06-10T11:59:00.000Z')
+                  : new Date('2026-06-11T12:00:00.000Z'),
+                scheduledFor: new Date('2026-06-10T11:55:00.000Z'),
+                sentAt: new Date('2026-06-10T11:55:01.000Z'),
+              }
+            : null,
+        ),
+      },
+      coachProfileAcquisitionCycle: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(
+            options?.activeProfileAskedAt
+              ? { askedAt: options.activeProfileAskedAt }
+              : null,
+          ),
       },
       automationRule: {
         findUnique: jest.fn().mockResolvedValue(rule),
@@ -251,6 +294,28 @@ describe('CoachCommandService', () => {
         field: 'TRAINING_EXPERIENCE' as const,
       }),
     };
+    const currentWorkoutPlanReader = {
+      read: jest.fn().mockResolvedValue(
+        options?.currentWorkoutStatus === 'NO_PLAN' ||
+          options?.currentWorkoutStatus === 'INVALID_V2_PLAN'
+          ? { status: options.currentWorkoutStatus, plan: null }
+          : options?.currentWorkoutStatus === 'LEGACY_RELATIONAL'
+            ? {
+                status: 'LEGACY_RELATIONAL',
+                plan: {
+                  aggregateId: options.currentWorkoutPlanId ?? 'workout-id',
+                  sessions: [{ sequence: 1 }, { sequence: 2 }],
+                },
+              }
+            : {
+                status: 'AVAILABLE',
+                plan: {
+                  aggregateId: options?.currentWorkoutPlanId ?? 'workout-id',
+                  document: { sessions: [{ sequence: 1 }, { sequence: 2 }] },
+                },
+              },
+      ),
+    };
     const service = new CoachCommandService(
       prisma as unknown as PrismaService,
       planningExecution,
@@ -268,6 +333,7 @@ describe('CoachCommandService', () => {
       options?.workoutClarification
         ? (profileAcquisitionRollout as unknown as ProfileAcquisitionInternalRolloutService)
         : undefined,
+      currentWorkoutPlanReader as unknown as CurrentWorkoutPlanReaderService,
     );
 
     return {
@@ -283,6 +349,7 @@ describe('CoachCommandService', () => {
       conversationRuntime,
       planningConversationResponse,
       profileAcquisitionRollout,
+      currentWorkoutPlanReader,
     };
   }
 
@@ -969,9 +1036,181 @@ describe('CoachCommandService', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           content: 'Plano Workout canônico preexistente',
+          context: expect.objectContaining({
+            action: 'WORKOUT_SESSION_SELECTION',
+            workoutPlanId: 'workout-id',
+            allowedSessionSequences: [1, 2],
+          }),
         }),
       }),
     );
+    expect(subject.transaction.scheduledMessage.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          responseExpiresAt: expect.any(Date),
+          context: expect.objectContaining({
+            action: 'WORKOUT_SESSION_SELECTION',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it.each(['1', '2'])(
+    'resolves a contextual session %s through the canonical workout reader path',
+    async (sequence) => {
+      const subject = createSubject({
+        content: sequence,
+        workoutSelection: true,
+      });
+      const executeStructured = jest
+        .spyOn(subject.planningExecution, 'executeStructured')
+        .mockResolvedValue({
+          content: `*Sessão ${sequence}*\nAgachamento\n3 × 10`,
+          responseRequired: true,
+          selectedSource: 'WORKOUT_V2',
+        } as unknown as Awaited<
+          ReturnType<CoachPlanningExecutionService['executeStructured']>
+        >);
+
+      await subject.service.processTextMessage({
+        userId: 'user-id',
+        messageId: 'message-id',
+      });
+
+      expect(executeStructured).toHaveBeenCalledWith(
+        'user-id',
+        'WORKOUT',
+        expect.objectContaining({ currentMessage: `sessão ${sequence}` }),
+      );
+      expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+      expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+      expect(subject.prisma.coachMessage.create).toHaveBeenCalledTimes(1);
+      expect(subject.transaction.scheduledMessage.upsert).toHaveBeenCalledTimes(
+        1,
+      );
+    },
+  );
+
+  it('does not steal a standalone numeric answer without valid workout context', async () => {
+    const subject = createSubject({ content: '1' });
+
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+
+    expect(subject.prisma.scheduledMessage.findFirst).toHaveBeenCalled();
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.currentWorkoutPlanReader.read).not.toHaveBeenCalled();
+  });
+
+  it('does not use an expired workout selection context', async () => {
+    const subject = createSubject({
+      content: '1',
+      workoutSelection: true,
+      selectionExpired: true,
+    });
+
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.currentWorkoutPlanReader.read).not.toHaveBeenCalled();
+  });
+
+  it('claims a valid numeric workout continuation before profile acquisition', async () => {
+    const subject = createSubject({ content: '1', workoutSelection: true });
+
+    await expect(
+      subject.service.shouldHandleBeforeProfileAcquisition({
+        userId: 'user-id',
+        messageId: 'message-id',
+      }),
+    ).resolves.toBe(true);
+    expect(subject.currentWorkoutPlanReader.read).toHaveBeenCalledWith(
+      'user-id',
+    );
+  });
+
+  it('rejects a workout selection created for a stale plan', async () => {
+    const subject = createSubject({
+      content: '1',
+      workoutSelection: true,
+      currentWorkoutPlanId: 'new-workout-id',
+    });
+
+    await expect(
+      subject.service.shouldHandleBeforeProfileAcquisition({
+        userId: 'user-id',
+        messageId: 'message-id',
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it.each(['NO_PLAN', 'INVALID_V2_PLAN'] as const)(
+    'rejects workout selection when current reader returns %s',
+    async (currentWorkoutStatus) => {
+      const subject = createSubject({
+        content: '1',
+        workoutSelection: true,
+        currentWorkoutStatus,
+      });
+
+      await expect(
+        subject.service.shouldHandleBeforeProfileAcquisition({
+          userId: 'user-id',
+          messageId: 'message-id',
+        }),
+      ).resolves.toBe(false);
+    },
+  );
+
+  it('accepts a matching legacy relational current workout plan', async () => {
+    const subject = createSubject({
+      content: '2',
+      workoutSelection: true,
+      currentWorkoutStatus: 'LEGACY_RELATIONAL',
+    });
+
+    await expect(
+      subject.service.shouldHandleBeforeProfileAcquisition({
+        userId: 'user-id',
+        messageId: 'message-id',
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it('does not steal a numeric answer from a newer profile question', async () => {
+    const subject = createSubject({
+      content: '1',
+      workoutSelection: true,
+      activeProfileAskedAt: new Date('2026-06-10T11:56:00.000Z'),
+    });
+
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+
+    expect(subject.currentWorkoutPlanReader.read).not.toHaveBeenCalled();
+  });
+
+  it('does not skip a newer unrelated actionable outbound to reuse an older workout selection', async () => {
+    const subject = createSubject({
+      content: '1',
+      workoutSelection: true,
+      latestSelectionAction: 'HYDRATION_CHECK',
+    });
+
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+
+    expect(subject.currentWorkoutPlanReader.read).not.toHaveBeenCalled();
   });
 
   it('does not send a non-nutrition LEGACY/UNKNOWN response to the Nutrition realizer', async () => {

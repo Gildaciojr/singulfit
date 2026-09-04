@@ -7,7 +7,6 @@ import { SubscriptionAccessService } from '../subscriptions/subscription-access.
 import { AUTOMATION_RULE_CODES } from './automation.constants';
 import {
   AutomationService,
-  COACH_PROACTIVE_MIN_GAP_MINUTES,
   COACH_RETENTION_SOURCE,
 } from './automation.service';
 import { CoachService } from './coach.service';
@@ -15,6 +14,7 @@ import { EventBusService } from '../event-bus/event-bus.service';
 import { CoachIntelligenceService } from './coach-intelligence.service';
 import { BehavioralIntelligenceService } from '../behavior/behavioral-intelligence.service';
 import { CoachProactiveSchedulePolicy } from './coach-proactive-schedule.policy';
+import { COACH_PROACTIVE_MIN_GAP_MINUTES } from './coach-proactive.contract';
 
 describe('AutomationService', () => {
   function createSubject(options?: {
@@ -719,7 +719,7 @@ describe('AutomationService', () => {
       ...subject.rule,
       code: AUTOMATION_RULE_CODES.HYDRATION_REMINDER,
     });
-    const at = new Date('2026-08-18T13:00:00.000Z');
+    const at = new Date('2026-08-18T11:00:00.000Z');
 
     await expect(subject.service.materializeDueMessages(at)).resolves.toEqual({
       scanned: 1,
@@ -761,7 +761,7 @@ describe('AutomationService', () => {
         data: expect.objectContaining({
           conversationId: 'conversation-id',
           coachMessageId: 'coach-message-id',
-          responseExpiresAt: new Date('2026-08-19T13:30:00.000Z'),
+          responseExpiresAt: new Date('2026-08-19T11:30:00.000Z'),
           context: expect.objectContaining({
             source: 'COACH_PROACTIVE_V1',
             workoutPlanId: 'workout-plan-id',
@@ -923,6 +923,44 @@ describe('AutomationService', () => {
     },
   );
 
+  it('keeps GOOD_MORNING materializable when hydration reminders are disabled', async () => {
+    const subject = createSubject();
+    subject.prisma.user.findMany.mockResolvedValue([
+      {
+        id: 'user-id',
+        preferences: {
+          timezone: 'America/Sao_Paulo',
+          preferredWakeUpTime: '08:00',
+          preferredSleepTime: '23:00',
+        },
+        automationPreference: {
+          ...subject.preferences,
+          hydrationReminderEnabled: false,
+        },
+      },
+    ]);
+
+    await expect(
+      subject.service.materializeDueMessages(
+        new Date('2026-08-16T11:00:00.000Z'),
+      ),
+    ).resolves.toEqual({ scanned: 1, materialized: 1 });
+
+    expect(subject.coachService.generateProactiveContent).toHaveBeenCalledWith(
+      'user-id',
+      expect.objectContaining({
+        intent: 'GOOD_MORNING',
+        ruleCode: AUTOMATION_RULE_CODES.GOOD_MORNING,
+      }),
+    );
+    expect(subject.eventBus.publish).toHaveBeenCalledTimes(1);
+    expect(
+      subject.coachService.generateProactiveContent.mock.calls.some(
+        ([, slot]) => slot.intent === 'HYDRATION_CHECK',
+      ),
+    ).toBe(false);
+  });
+
   it.each([
     ['master', { remindersEnabled: false }],
     ['hydration', { hydrationReminderEnabled: false }],
@@ -939,7 +977,7 @@ describe('AutomationService', () => {
       ]);
 
       await subject.service.materializeDueMessages(
-        new Date('2026-08-18T13:00:00.000Z'),
+        new Date('2026-08-18T11:00:00.000Z'),
       );
 
       expect(
@@ -969,7 +1007,7 @@ describe('AutomationService', () => {
 
     await expect(
       subject.service.materializeDueMessages(
-        new Date('2026-08-18T13:00:00.000Z'),
+        new Date('2026-08-18T14:00:00.000Z'),
       ),
     ).resolves.toEqual({ scanned: 100, materialized: 0 });
 
@@ -1003,7 +1041,7 @@ describe('AutomationService', () => {
 
     await expect(
       subject.service.materializeDueMessages(
-        new Date('2026-08-18T13:00:00.000Z'),
+        new Date('2026-08-18T11:00:00.000Z'),
       ),
     ).resolves.toEqual({ scanned: 1, materialized: 1 });
   });
@@ -1020,13 +1058,13 @@ describe('AutomationService', () => {
     subject.prisma.coachMessage.findMany.mockResolvedValue([
       {
         context: { source: 'COACH_PROACTIVE_V1' },
-        scheduledFor: new Date('2026-08-18T10:31:00.000Z'),
+        scheduledFor: new Date('2026-08-18T08:31:00.000Z'),
       },
     ]);
 
     await expect(
       subject.service.materializeDueMessages(
-        new Date('2026-08-18T13:00:00.000Z'),
+        new Date('2026-08-18T11:00:00.000Z'),
       ),
     ).resolves.toEqual({ scanned: 1, materialized: 0 });
     expect(
@@ -1046,13 +1084,13 @@ describe('AutomationService', () => {
     subject.prisma.coachMessage.findMany.mockResolvedValue([
       {
         context: { source: 'COACH_PROACTIVE_V1' },
-        scheduledFor: new Date('2026-08-18T10:30:00.000Z'),
+        scheduledFor: new Date('2026-08-18T08:30:00.000Z'),
       },
     ]);
 
     await expect(
       subject.service.materializeDueMessages(
-        new Date('2026-08-18T13:00:00.000Z'),
+        new Date('2026-08-18T11:00:00.000Z'),
       ),
     ).resolves.toEqual({ scanned: 1, materialized: 1 });
     expect(COACH_PROACTIVE_MIN_GAP_MINUTES).toBe(180);
@@ -1070,7 +1108,7 @@ describe('AutomationService', () => {
 
     await expect(
       subject.service.materializeDueMessages(
-        new Date('2026-08-18T13:00:00.000Z'),
+        new Date('2026-08-18T14:00:00.000Z'),
       ),
     ).resolves.toEqual({ scanned: 1, materialized: 0 });
     expect(

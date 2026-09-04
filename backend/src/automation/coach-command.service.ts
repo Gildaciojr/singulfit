@@ -1,6 +1,10 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { CoachPlanningExecutionService } from './coach-planning-execution.service';
-import { CoachMessageType, ScheduledMessageStatus } from '@prisma/client';
+import {
+  CoachMessageType,
+  Prisma,
+  ScheduledMessageStatus,
+} from '@prisma/client';
 import { EventBusService } from '../event-bus/event-bus.service';
 import { INTERNAL_EVENT } from '../event-bus/event-bus.constants';
 import { PrismaService } from '../prisma/prisma.service';
@@ -16,6 +20,10 @@ import type {
 } from './pending-conversation-action.contract';
 import { ProfileAcquisitionInternalRolloutService } from '../context/profile-acquisition/profile-acquisition-internal-rollout.service';
 import { isWorkoutCurrentPlanRead } from '../workout/v2/workout-current-plan-read.policy';
+import { CurrentWorkoutPlanReaderService } from '../workout/v2/current-workout-plan-reader.service';
+
+const WORKOUT_SESSION_SELECTION_ACTION = 'WORKOUT_SESSION_SELECTION';
+const WORKOUT_SESSION_SELECTION_WINDOW_MS = 24 * 60 * 60 * 1_000;
 
 export type CoachCommandIntent = 'DIET' | 'WORKOUT' | 'BOTH' | 'UNKNOWN';
 
@@ -47,12 +55,13 @@ export class CoachCommandService {
     private readonly pendingActions?: PendingConversationActionService,
     @Optional()
     private readonly profileAcquisitionRollout?: ProfileAcquisitionInternalRolloutService,
+    @Optional()
+    private readonly currentWorkoutPlanReader?: CurrentWorkoutPlanReaderService,
   ) {}
 
   async shouldHandleBeforeProfileAcquisition(
     input: ProcessCoachCommandInput,
   ): Promise<boolean> {
-    if (!this.pendingActions) return false;
     const message = await this.prisma.message.findFirst({
       where: {
         id: input.messageId,
@@ -67,6 +76,18 @@ export class CoachCommandService {
       },
     });
     if (!message) return false;
+    if (
+      await this.resolveWorkoutSessionContinuation({
+        userId: input.userId,
+        conversationId: message.conversationId,
+        text: message.content,
+        receivedAt: message.timestamp,
+        replyToExternalMessageId: message.replyToExternalMessageId,
+      })
+    ) {
+      return true;
+    }
+    if (!this.pendingActions) return false;
     const pending = await this.pendingActions.findPendingForInbound({
       userId: input.userId,
       conversationId: message.conversationId,
@@ -131,7 +152,20 @@ export class CoachCommandService {
           select: { content: true },
         })
       : null;
-    const commandText = workoutOriginal?.content ?? message.content;
+    const workoutContinuation = workoutOriginal
+      ? null
+      : await this.resolveWorkoutSessionContinuation({
+          userId: input.userId,
+          conversationId: message.conversation.id,
+          text: message.content,
+          receivedAt: message.timestamp,
+          replyToExternalMessageId: message.replyToExternalMessageId,
+        });
+    const commandText =
+      workoutOriginal?.content ??
+      (workoutContinuation
+        ? `sessão ${workoutContinuation.sequence}`
+        : message.content);
 
     if (!message.conversation.user.onboardingCompleted) {
       return {
@@ -156,9 +190,13 @@ export class CoachCommandService {
           ? pending.intent
           : pending.status === 'ALREADY_CONSUMED'
             ? pending.intent
-            : input.workoutContinuationMessageId
+            : input.workoutContinuationMessageId || workoutContinuation
               ? 'WORKOUT'
               : this.classify(commandText);
+    const selectionContext = await this.workoutSelectionContext(
+      input.userId,
+      commandText,
+    );
     const idempotencyKey = this.idempotencyKey(input.userId, message.id);
     const existing = await this.prisma.coachMessage.findUnique({
       where: {
@@ -175,6 +213,7 @@ export class CoachCommandService {
         content: existing.content,
         scheduledFor: this.scheduledFor(message.timestamp, message.id),
         intent,
+        selectionContext,
       });
       await this.activatePendingPrompt(
         input.userId,
@@ -286,6 +325,7 @@ export class CoachCommandService {
             source: 'WHATSAPP_COMMAND',
             messageId: message.id,
             intent,
+            ...selectionContext,
           },
           generatedAt: new Date(),
           scheduledFor: message.timestamp,
@@ -309,6 +349,7 @@ export class CoachCommandService {
       content,
       scheduledFor: this.scheduledFor(message.timestamp, message.id),
       intent,
+      selectionContext,
     });
     await this.activatePendingPrompt(input.userId, message, message.timestamp);
     this.conversationGoalShadow.execute({
@@ -544,6 +585,7 @@ export class CoachCommandService {
     content: string;
     scheduledFor: Date;
     intent: CoachCommandIntent;
+    selectionContext: Prisma.InputJsonObject;
   }): Promise<void> {
     const rule = await this.prisma.automationRule.findUnique({
       where: {
@@ -593,7 +635,15 @@ export class CoachCommandService {
               actionable: input.intent === 'WORKOUT',
               partIndex,
               partCount: parts.length,
+              ...input.selectionContext,
             },
+            responseExpiresAt:
+              input.selectionContext.action === WORKOUT_SESSION_SELECTION_ACTION
+                ? new Date(
+                    input.scheduledFor.getTime() +
+                      WORKOUT_SESSION_SELECTION_WINDOW_MS,
+                  )
+                : undefined,
           },
           include: {
             automationRule: true,
@@ -620,6 +670,160 @@ export class CoachCommandService {
         );
       }
     });
+  }
+
+  private async workoutSelectionContext(
+    userId: string,
+    message: string,
+  ): Promise<Prisma.InputJsonObject> {
+    if (
+      !this.currentWorkoutPlanReader ||
+      !isWorkoutCurrentPlanRead(message) ||
+      this.sessionOrdinal(message) !== null
+    ) {
+      return {};
+    }
+    const current = await this.currentWorkoutPlanReader.read(userId);
+    if (
+      current.status !== 'AVAILABLE' &&
+      current.status !== 'LEGACY_RELATIONAL'
+    ) {
+      return {};
+    }
+    const allowedSessionSequences =
+      current.status === 'AVAILABLE'
+        ? current.plan.document.sessions.map((session) => session.sequence)
+        : current.plan.sessions.map((session) => session.sequence);
+    return {
+      action: WORKOUT_SESSION_SELECTION_ACTION,
+      workoutPlanId: current.plan.aggregateId,
+      allowedSessionSequences,
+    };
+  }
+
+  private async resolveWorkoutSessionContinuation(input: {
+    readonly userId: string;
+    readonly conversationId: string;
+    readonly text: string;
+    readonly receivedAt: Date;
+    readonly replyToExternalMessageId?: string | null;
+  }): Promise<{ readonly sequence: number } | null> {
+    const sequence = this.sessionOrdinal(input.text);
+    if (sequence === null) return null;
+    const quoted = Boolean(input.replyToExternalMessageId);
+    const candidate = await this.prisma.scheduledMessage.findFirst({
+      where: {
+        userId: input.userId,
+        conversationId: input.conversationId,
+        status: ScheduledMessageStatus.SENT,
+        ...(quoted
+          ? { externalMessageId: input.replyToExternalMessageId }
+          : {
+              scheduledFor: { lte: input.receivedAt },
+              responseExpiresAt: { gte: input.receivedAt },
+            }),
+      },
+      select: {
+        context: true,
+        responseExpiresAt: true,
+        scheduledFor: true,
+        sentAt: true,
+      },
+      orderBy: [{ scheduledFor: 'desc' }, { id: 'desc' }],
+    });
+    if (
+      !candidate?.responseExpiresAt ||
+      candidate.responseExpiresAt < input.receivedAt ||
+      !this.isRecord(candidate.context) ||
+      candidate.context.action !== WORKOUT_SESSION_SELECTION_ACTION
+    ) {
+      return null;
+    }
+    if (!quoted) {
+      const activeProfile =
+        await this.prisma.coachProfileAcquisitionCycle.findFirst({
+          where: {
+            userId: input.userId,
+            active: true,
+            expiresAt: { gt: input.receivedAt },
+            askedAt: { not: null },
+          },
+          select: { askedAt: true },
+          orderBy: [{ askedAt: 'desc' }, { id: 'desc' }],
+        });
+      const selectionAt = candidate.sentAt ?? candidate.scheduledFor;
+      if (activeProfile?.askedAt && activeProfile.askedAt > selectionAt) {
+        return null;
+      }
+    }
+    const allowed = candidate.context.allowedSessionSequences;
+    const workoutPlanId = candidate.context.workoutPlanId;
+    if (
+      !this.currentWorkoutPlanReader ||
+      typeof workoutPlanId !== 'string' ||
+      !workoutPlanId.trim() ||
+      !Array.isArray(allowed) ||
+      !allowed.every(
+        (value) => Number.isInteger(value) && Number(value) >= 1,
+      ) ||
+      !allowed.includes(sequence)
+    ) {
+      return null;
+    }
+    const current = await this.currentWorkoutPlanReader.read(input.userId);
+    if (
+      (current.status !== 'AVAILABLE' &&
+        current.status !== 'LEGACY_RELATIONAL') ||
+      current.plan.aggregateId !== workoutPlanId
+    ) {
+      return null;
+    }
+    const currentSequences =
+      current.status === 'AVAILABLE'
+        ? current.plan.document.sessions.map((session) => session.sequence)
+        : current.plan.sessions.map((session) => session.sequence);
+    if (!currentSequences.includes(sequence)) return null;
+    return Object.freeze({ sequence });
+  }
+
+  private sessionOrdinal(value: string): number | null {
+    const text = this.normalize(value);
+    const match =
+      /^(?:(?:mostra|mostre)\s+)?(?:(?:sessao|treino)\s*)?(?:a\s+)?(1|2|3|4|5|6|7|um|dois|tres|quatro|cinco|seis|sete|primeira|primeiro|segundo|terceira|terceiro|quarto|quinto|sexto|setima|setimo)$/u.exec(
+        text,
+      );
+    if (!match) return null;
+    const values: Readonly<Record<string, number>> = Object.freeze({
+      '1': 1,
+      um: 1,
+      primeira: 1,
+      primeiro: 1,
+      '2': 2,
+      dois: 2,
+      segundo: 2,
+      '3': 3,
+      tres: 3,
+      terceira: 3,
+      terceiro: 3,
+      '4': 4,
+      quatro: 4,
+      quarto: 4,
+      '5': 5,
+      cinco: 5,
+      quinto: 5,
+      '6': 6,
+      seis: 6,
+      sexto: 6,
+      '7': 7,
+      sete: 7,
+      setima: 7,
+      setimo: 7,
+    });
+    return values[match[1]] ?? null;
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
   private messageParts(

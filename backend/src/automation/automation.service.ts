@@ -31,13 +31,13 @@ import {
   CoachProactiveSchedulePolicy,
 } from './coach-proactive-schedule.policy';
 import {
+  COACH_PROACTIVE_MIN_GAP_MINUTES,
   COACH_PROACTIVE_SOURCE,
   type CoachProactivePreferences,
   type CoachProactiveSlot,
 } from './coach-proactive.contract';
 
 const AUTOMATION_CODES = new Set<string>(Object.values(AUTOMATION_RULE_CODES));
-export const COACH_PROACTIVE_MIN_GAP_MINUTES = 180;
 export const COACH_PROACTIVE_RESPONSE_WINDOW_HOURS = 24;
 export const COACH_RETENTION_SOURCE = 'COACH_RETENTION_V1';
 

@@ -434,7 +434,7 @@ describe('IntegrationEventHandlersService', () => {
     expect(proactiveResponse.capture).not.toHaveBeenCalled();
   });
 
-  it('lets an explicit proactive reply run after acquisition and onboarding', async () => {
+  it('lets an eligible proactive reply run before acquisition and onboarding', async () => {
     const registry = new EventHandlerRegistry();
     const acquisition = acquisitionRollout();
     const activationOnboarding = {
@@ -478,8 +478,8 @@ describe('IntegrationEventHandlersService', () => {
       }),
     );
 
-    expect(acquisition.captureActiveResponse).toHaveBeenCalledTimes(1);
-    expect(activationOnboarding.processTextMessage).toHaveBeenCalledTimes(1);
+    expect(acquisition.captureActiveResponse).not.toHaveBeenCalled();
+    expect(activationOnboarding.processTextMessage).not.toHaveBeenCalled();
     expect(proactiveResponse.capture).toHaveBeenCalledWith({
       userId: 'ordinary-user-id',
       messageId: 'proactive-reply-id',

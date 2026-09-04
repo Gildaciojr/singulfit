@@ -5,6 +5,7 @@ import {
 } from './automation.constants';
 import {
   COACH_PROACTIVE_INTENTS,
+  COACH_PROACTIVE_MIN_GAP_MINUTES,
   type CoachProactiveIntent,
   type CoachProactivePreferences,
   type CoachProactiveSlot,
@@ -65,12 +66,8 @@ export class CoachProactiveSchedulePolicy {
     });
 
     return Object.freeze(
-      definitions
-        .filter((definition) =>
-          this.outsideSleep(definition.minute, wake, sleep),
-        )
-        .slice(0, COACH_PROACTIVE_DAILY_CAP)
-        .map((definition) => {
+      this.cooldownCompatibleDefinitions(definitions, wake, sleep).map(
+        (definition) => {
           const dayOffset = Math.floor(definition.minute / (24 * 60));
           const minute = definition.minute % (24 * 60);
           const scheduledFor = this.localToUtc(
@@ -86,7 +83,8 @@ export class CoachProactiveSchedulePolicy {
             scheduledFor,
             localTime: `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`,
           });
-        }),
+        },
+      ),
     );
   }
 
@@ -165,18 +163,6 @@ export class CoachProactiveSchedulePolicy {
       AUTOMATION_RULE_CODES.GOOD_MORNING,
       times.wake + 30,
     );
-    const hydrationMorning = this.slot(
-      COACH_PROACTIVE_INTENTS.HYDRATION_CHECK,
-      'HYDRATION_MORNING',
-      AUTOMATION_RULE_CODES.HYDRATION_REMINDER,
-      Math.max(times.wake + 150, 10 * 60 + 30),
-    );
-    const hydrationAfternoon = this.slot(
-      COACH_PROACTIVE_INTENTS.HYDRATION_CHECK,
-      'HYDRATION_AFTERNOON',
-      AUTOMATION_RULE_CODES.HYDRATION_REMINDER,
-      15 * 60 + 30,
-    );
     const lunch = this.slot(
       COACH_PROACTIVE_INTENTS.LUNCH_CHECK,
       'LUNCH',
@@ -207,16 +193,30 @@ export class CoachProactiveSchedulePolicy {
       AUTOMATION_RULE_CODES.DAILY_CHECK_IN,
       Math.min(19 * 60, times.sleep - 90),
     );
-    const schedule: Readonly<Record<number, readonly SlotDefinition[]>> = {
-      0: [goodMorning, mealPlan, checkIn],
-      1: [goodMorning, lunch, workout],
-      2: [hydrationMorning, hydrationAfternoon, dinner],
-      3: [goodMorning, mealPlan, workout],
-      4: [hydrationMorning, lunch, checkIn],
-      5: [goodMorning, dinner, workout],
-      6: [hydrationMorning, lunch, checkIn],
+    const rotation: Readonly<Record<number, readonly SlotDefinition[]>> = {
+      0: [goodMorning, mealPlan],
+      1: [lunch, workout],
+      2: [dinner, checkIn],
+      3: [goodMorning, workout],
+      4: [lunch, checkIn],
+      5: [dinner, workout],
+      6: [lunch, checkIn],
     };
-    return schedule[weekday] ?? schedule[0];
+    const dailyRotation = rotation[weekday] ?? rotation[0];
+    const hydrationFollowsGoodMorning = dailyRotation.some(
+      (definition) =>
+        definition.intent === COACH_PROACTIVE_INTENTS.GOOD_MORNING,
+    );
+    const hydration = this.slot(
+      COACH_PROACTIVE_INTENTS.HYDRATION_CHECK,
+      'HYDRATION_MORNING',
+      AUTOMATION_RULE_CODES.HYDRATION_REMINDER,
+      Math.min(
+        times.wake + (hydrationFollowsGoodMorning ? 210 : 30),
+        times.sleep - 60,
+      ),
+    );
+    return Object.freeze([hydration, ...dailyRotation]);
   }
 
   private slot(
@@ -228,9 +228,59 @@ export class CoachProactiveSchedulePolicy {
     return Object.freeze({ intent, slotKey, ruleCode, minute });
   }
 
+  private cooldownCompatibleDefinitions(
+    definitions: readonly SlotDefinition[],
+    wake: number,
+    sleep: number,
+  ): readonly SlotDefinition[] {
+    const candidates = definitions
+      .map((definition) =>
+        this.slot(
+          definition.intent,
+          definition.slotKey,
+          definition.ruleCode,
+          this.awakeMinute(definition.minute, wake),
+        ),
+      )
+      .filter((definition) =>
+        this.outsideSleep(definition.minute, wake, sleep),
+      );
+    const hydration = candidates.find(
+      (definition) =>
+        definition.intent === COACH_PROACTIVE_INTENTS.HYDRATION_CHECK,
+    );
+    if (!hydration) return Object.freeze([]);
+
+    const selected: SlotDefinition[] = [hydration];
+    for (const candidate of candidates) {
+      if (
+        candidate === hydration ||
+        selected.length >= COACH_PROACTIVE_DAILY_CAP
+      ) {
+        continue;
+      }
+      if (
+        selected.every(
+          (current) =>
+            Math.abs(candidate.minute - current.minute) >=
+            COACH_PROACTIVE_MIN_GAP_MINUTES,
+        )
+      ) {
+        selected.push(candidate);
+      }
+    }
+    return Object.freeze(
+      selected.sort((left, right) => left.minute - right.minute),
+    );
+  }
+
   private outsideSleep(minute: number, wake: number, sleep: number): boolean {
-    const comparable = minute < wake ? minute + 24 * 60 : minute;
+    const comparable = this.awakeMinute(minute, wake);
     return comparable >= wake + 30 && comparable <= sleep - 60;
+  }
+
+  private awakeMinute(minute: number, wake: number): number {
+    return minute < wake ? minute + 24 * 60 : minute;
   }
 
   private time(value: string | null | undefined, fallback: number): number {

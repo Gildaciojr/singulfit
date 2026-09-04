@@ -114,6 +114,11 @@ export class IntegrationEventHandlersService implements OnModuleInit {
       return;
     }
 
+    if (this.proactiveResponse) {
+      const proactive = await this.proactiveResponse.capture(input);
+      if (proactive.handled) return;
+    }
+
     const acquisition =
       await this.profileAcquisitionRollout.captureActiveResponse(input);
 
@@ -132,10 +137,6 @@ export class IntegrationEventHandlersService implements OnModuleInit {
       await this.activationOnboardingService.processTextMessage(input);
 
     if (result.handled) return;
-    if (this.proactiveResponse) {
-      const proactive = await this.proactiveResponse.capture(input);
-      if (proactive.handled) return;
-    }
     await this.coachCommandService.processTextMessage(input);
   }
 

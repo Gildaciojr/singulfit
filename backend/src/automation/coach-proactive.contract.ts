@@ -1,6 +1,7 @@
 import type { AutomationRuleCode } from './automation.constants';
 
 export const COACH_PROACTIVE_SOURCE = 'COACH_PROACTIVE_V1' as const;
+export const COACH_PROACTIVE_MIN_GAP_MINUTES = 180;
 
 export const COACH_PROACTIVE_INTENTS = {
   GOOD_MORNING: 'GOOD_MORNING',
