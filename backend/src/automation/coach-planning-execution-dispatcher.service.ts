@@ -369,7 +369,6 @@ export class CoachPlanningExecutionDispatcherService {
     const content = this.workoutV2Formatter
       .format(result.document)
       .join('\n\n')
-      .slice(0, 3_500)
       .trimEnd();
     return this.result(content, 'WORKOUT_V2', true, 'PLAN');
   }

@@ -20,6 +20,12 @@ export interface ConversationHistoryEntry {
   readonly direction: 'INBOUND' | 'OUTBOUND';
   readonly text: string;
   readonly occurredAt: string;
+  readonly externalMessageId?: string | null;
+  readonly replyToExternalMessageId?: string | null;
+  readonly scheduledMessageId?: string | null;
+  readonly source?: string | null;
+  readonly automationRuleCode?: string | null;
+  readonly structuredContext?: Readonly<Record<string, unknown>> | null;
 }
 
 export interface ConversationProfileContext {

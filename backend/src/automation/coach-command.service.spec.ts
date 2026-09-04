@@ -286,6 +286,102 @@ describe('CoachCommandService', () => {
     };
   }
 
+  function installPersistentEffectHarness(
+    subject: ReturnType<typeof createSubject>,
+    options?: { concurrentInitialLookups?: number },
+  ) {
+    let coachMessage: { id: string; content: string } | null = null;
+    let lookupCount = 0;
+    const scheduledMessages = new Map<
+      string,
+      {
+        id: string;
+        scheduledFor: Date;
+        content: string;
+        conversationId: string;
+        context: Record<string, unknown>;
+      }
+    >();
+    const outboxEvents = new Map<
+      string,
+      { aggregateId: string; availableAt: Date }
+    >();
+    const publishedEvents: Array<{
+      eventType: string;
+      aggregateType: string;
+      aggregateId: string;
+      availableAt: Date;
+      payload: Record<string, unknown>;
+    }> = [];
+
+    subject.prisma.coachMessage.findUnique.mockImplementation(() => {
+      lookupCount += 1;
+      return Promise.resolve(
+        lookupCount <= (options?.concurrentInitialLookups ?? 0)
+          ? null
+          : coachMessage,
+      );
+    });
+    subject.prisma.coachMessage.create.mockImplementation(
+      (input: { data: { content: string } }) => {
+        if (coachMessage) {
+          return Promise.reject(
+            Object.assign(new Error('Unique constraint conflict'), {
+              code: 'P2002',
+            }),
+          );
+        }
+        coachMessage = {
+          id: 'coach-message-persisted',
+          content: input.data.content,
+        };
+        return Promise.resolve(coachMessage);
+      },
+    );
+    subject.transaction.scheduledMessage.upsert.mockImplementation(
+      (input: {
+        create: {
+          scheduledFor: Date;
+          content: string;
+          conversationId: string;
+          context: Record<string, unknown>;
+        };
+      }) => {
+        const key = input.create.scheduledFor.toISOString();
+        const existing = scheduledMessages.get(key);
+        if (existing) return Promise.resolve(existing);
+        const created = {
+          id: `scheduled-${scheduledMessages.size}`,
+          ...input.create,
+        };
+        scheduledMessages.set(key, created);
+        return Promise.resolve(created);
+      },
+    );
+    subject.eventBus.publish.mockImplementation(
+      (input: {
+        eventType: string;
+        aggregateType: string;
+        aggregateId: string;
+        availableAt: Date;
+        payload: Record<string, unknown>;
+      }) => {
+        publishedEvents.push(input);
+        const key = `${input.eventType}:${input.aggregateType}:${input.aggregateId}`;
+        const existing = outboxEvents.get(key);
+        if (existing) return Promise.resolve(existing);
+        const created = {
+          aggregateId: input.aggregateId,
+          availableAt: input.availableAt,
+        };
+        outboxEvents.set(key, created);
+        return Promise.resolve(created);
+      },
+    );
+
+    return { scheduledMessages, outboxEvents, publishedEvents };
+  }
+
   it.each([
     ['quero uma dieta', 'DIET'],
     ['Me ajuda com alimentação', 'DIET'],
@@ -1082,5 +1178,150 @@ describe('CoachCommandService', () => {
     expect(subject.planningDispatcher.formatWorkout(workoutPlan())).toContain(
       'divisão semanal',
     );
+  });
+
+  it('persists one ordered multipart sequence and reuses it on replay', async () => {
+    const content = Array.from(
+      { length: 420 },
+      (_, index) => `Bloco ${index + 1}: progressão técnica controlada.`,
+    ).join('\n');
+    const subject = createSubject({ runtimeContent: content });
+    const effects = installPersistentEffectHarness(subject);
+    const service = subject.service as unknown as {
+      messageParts(value: string): readonly string[];
+    };
+    const expectedParts = service.messageParts(content);
+
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+
+    const firstSequence = [...effects.scheduledMessages.values()];
+    const firstEvents = effects.publishedEvents.slice();
+    expect(expectedParts.length).toBeGreaterThan(1);
+    expect(subject.prisma.coachMessage.create).toHaveBeenCalledTimes(1);
+    expect(firstSequence).toHaveLength(expectedParts.length);
+    expect(firstSequence.map((part) => part.content)).toEqual(expectedParts);
+    expect(firstSequence.every((part) => part.content.length <= 3_400)).toBe(
+      true,
+    );
+    expect(firstSequence.map((part) => part.context.partIndex)).toEqual(
+      expectedParts.map((_, index) => index),
+    );
+    expect(firstSequence.map((part) => part.context.partCount)).toEqual(
+      expectedParts.map(() => expectedParts.length),
+    );
+    expect(firstSequence.map((part) => part.context.sourceMessageId)).toEqual(
+      expectedParts.map(() => 'message-id'),
+    );
+    expect(firstSequence.map((part) => part.conversationId)).toEqual(
+      expectedParts.map(() => 'conversation-id'),
+    );
+    expect(firstEvents).toHaveLength(expectedParts.length);
+    expect(firstEvents.map((event) => event.eventType)).toEqual(
+      expectedParts.map(() => 'AUTOMATION_TRIGGERED'),
+    );
+    expect(firstEvents.map((event) => event.aggregateId)).toEqual(
+      firstSequence.map((part) => part.id),
+    );
+    expect(firstEvents.map((event) => event.payload.sourceMessageId)).toEqual(
+      expectedParts.map(() => 'message-id'),
+    );
+    expect(firstEvents.map((event) => event.availableAt.getTime())).toEqual(
+      firstSequence.map((part) => part.scheduledFor.getTime()),
+    );
+    expect(firstSequence.map((part) => part.scheduledFor.getTime())).toEqual(
+      firstSequence.map(
+        (_, index) => firstSequence[0].scheduledFor.getTime() + index,
+      ),
+    );
+    const persistedSnapshot = firstSequence.map((part) => ({
+      id: part.id,
+      scheduledFor: part.scheduledFor.toISOString(),
+      content: part.content,
+      context: part.context,
+    }));
+
+    await expect(
+      subject.service.processTextMessage({
+        userId: 'user-id',
+        messageId: 'message-id',
+      }),
+    ).resolves.toEqual(expect.objectContaining({ duplicated: true }));
+
+    expect(subject.prisma.coachMessage.create).toHaveBeenCalledTimes(1);
+    expect(effects.scheduledMessages.size).toBe(expectedParts.length);
+    expect(
+      [...effects.scheduledMessages.values()].map((part) => ({
+        id: part.id,
+        scheduledFor: part.scheduledFor.toISOString(),
+        content: part.content,
+        context: part.context,
+      })),
+    ).toEqual(persistedSnapshot);
+    expect(subject.transaction.scheduledMessage.upsert).toHaveBeenCalledTimes(
+      expectedParts.length * 2,
+    );
+    expect(subject.eventBus.publish).toHaveBeenCalledTimes(
+      expectedParts.length * 2,
+    );
+    expect(effects.outboxEvents.size).toBe(expectedParts.length);
+  });
+
+  it('converges concurrent executions to one logical multipart sequence', async () => {
+    const content = Array.from(
+      { length: 420 },
+      (_, index) => `Sessão ${index + 1}: execução estável e segura.`,
+    ).join('\n');
+    const subject = createSubject({ runtimeContent: content });
+    const effects = installPersistentEffectHarness(subject, {
+      concurrentInitialLookups: 2,
+    });
+    const service = subject.service as unknown as {
+      messageParts(value: string): readonly string[];
+    };
+    const expectedParts = service.messageParts(content);
+
+    const results = await Promise.all([
+      subject.service.processTextMessage({
+        userId: 'user-id',
+        messageId: 'message-id',
+      }),
+      subject.service.processTextMessage({
+        userId: 'user-id',
+        messageId: 'message-id',
+      }),
+    ]);
+
+    expect(results.map((result) => result.duplicated).sort()).toEqual([
+      false,
+      true,
+    ]);
+    expect(subject.prisma.coachMessage.create).toHaveBeenCalledTimes(2);
+    expect(effects.scheduledMessages.size).toBe(expectedParts.length);
+    expect(
+      [...effects.scheduledMessages.values()].map(({ content }) => content),
+    ).toEqual(expectedParts);
+    expect(effects.outboxEvents.size).toBe(expectedParts.length);
+    expect(subject.eventBus.publish).toHaveBeenCalledTimes(
+      expectedParts.length * 2,
+    );
+  });
+
+  it('splits long outbound content deterministically without losing text', () => {
+    const service = createSubject().service as unknown as {
+      messageParts(content: string, maximumLength?: number): readonly string[];
+    };
+    const content = Array.from(
+      { length: 120 },
+      (_, index) => `Exercício ${index + 1}: 4 × 8–12.`,
+    ).join('\n');
+    const first = service.messageParts(content, 180);
+    const replay = service.messageParts(content, 180);
+    expect(first).toEqual(replay);
+    expect(first.length).toBeGreaterThan(1);
+    expect(first.every((part) => part.length <= 180)).toBe(true);
+    expect(first.join('\n')).toBe(content);
   });
 });

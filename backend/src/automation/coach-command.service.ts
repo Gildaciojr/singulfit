@@ -15,6 +15,7 @@ import type {
   PendingInboundResolution,
 } from './pending-conversation-action.contract';
 import { ProfileAcquisitionInternalRolloutService } from '../context/profile-acquisition/profile-acquisition-internal-rollout.service';
+import { isWorkoutCurrentPlanRead } from '../workout/v2/workout-current-plan-read.policy';
 
 export type CoachCommandIntent = 'DIET' | 'WORKOUT' | 'BOTH' | 'UNKNOWN';
 
@@ -61,6 +62,7 @@ export class CoachCommandService {
         id: true,
         content: true,
         timestamp: true,
+        replyToExternalMessageId: true,
         conversationId: true,
       },
     });
@@ -93,6 +95,7 @@ export class CoachCommandService {
         id: true,
         content: true,
         timestamp: true,
+        replyToExternalMessageId: true,
         conversation: {
           select: {
             id: true,
@@ -166,7 +169,9 @@ export class CoachCommandService {
     if (existing) {
       await this.scheduleResponse({
         userId: input.userId,
+        conversationId: message.conversation.id,
         messageId: message.id,
+        coachMessageId: existing.id,
         content: existing.content,
         scheduledFor: this.scheduledFor(message.timestamp, message.id),
         intent,
@@ -196,15 +201,22 @@ export class CoachCommandService {
     const bypassRuntime =
       pending.status === 'ACTIONABLE' ||
       pending.status === 'EXPIRED' ||
-      pending.status === 'COMPLETED';
+      pending.status === 'COMPLETED' ||
+      isWorkoutCurrentPlanRead(commandText);
     const runtimeDecision = bypassRuntime
-      ? { source: 'LEGACY' as const, reason: 'PENDING_ACTION' as const }
+      ? {
+          source: 'LEGACY' as const,
+          reason: isWorkoutCurrentPlanRead(commandText)
+            ? ('CANONICAL_WORKOUT_READ' as const)
+            : ('PENDING_ACTION' as const),
+        }
       : await this.decideOfficialExecution({
           userId: input.userId,
           conversationId: message.conversation.id,
           messageId: message.id,
           text: commandText,
           receivedAt: message.timestamp.toISOString(),
+          replyToExternalMessageId: message.replyToExternalMessageId,
           legacyIntent: intent,
         });
     const planningResult =
@@ -261,24 +273,39 @@ export class CoachCommandService {
       }
       content = completed.content;
     }
-    await this.prisma.coachMessage.create({
-      data: {
-        userId: input.userId,
-        type: CoachMessageType.FOLLOW_UP,
-        idempotencyKey,
-        content,
-        context: {
-          source: 'WHATSAPP_COMMAND',
-          messageId: message.id,
-          intent,
+    let duplicatedAfterRace = false;
+    let coachMessage: { id: string; content: string };
+    try {
+      coachMessage = await this.prisma.coachMessage.create({
+        data: {
+          userId: input.userId,
+          type: CoachMessageType.FOLLOW_UP,
+          idempotencyKey,
+          content,
+          context: {
+            source: 'WHATSAPP_COMMAND',
+            messageId: message.id,
+            intent,
+          },
+          generatedAt: new Date(),
+          scheduledFor: message.timestamp,
         },
-        generatedAt: new Date(),
-        scheduledFor: message.timestamp,
-      },
-    });
+      });
+    } catch (error) {
+      if (!this.isUniqueConstraintViolation(error)) throw error;
+      const concurrent = await this.prisma.coachMessage.findUnique({
+        where: { idempotencyKey },
+      });
+      if (!concurrent) throw error;
+      coachMessage = concurrent;
+      content = concurrent.content;
+      duplicatedAfterRace = true;
+    }
     await this.scheduleResponse({
       userId: input.userId,
+      conversationId: message.conversation.id,
       messageId: message.id,
+      coachMessageId: coachMessage.id,
       content,
       scheduledFor: this.scheduledFor(message.timestamp, message.id),
       intent,
@@ -295,9 +322,18 @@ export class CoachCommandService {
 
     return {
       handled: true,
-      duplicated: false,
+      duplicated: duplicatedAfterRace,
       intent,
     };
+  }
+
+  private isUniqueConstraintViolation(error: unknown): boolean {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 'P2002'
+    );
   }
 
   private async executePlanning(input: {
@@ -428,6 +464,7 @@ export class CoachCommandService {
     messageId: string;
     text: string;
     receivedAt: string;
+    replyToExternalMessageId?: string | null;
     legacyIntent: CoachCommandIntent;
   }) {
     if (!this.conversationRuntime) {
@@ -501,7 +538,9 @@ export class CoachCommandService {
 
   private async scheduleResponse(input: {
     userId: string;
+    conversationId: string;
     messageId: string;
+    coachMessageId: string;
     content: string;
     scheduledFor: Date;
     intent: CoachCommandIntent;
@@ -526,47 +565,90 @@ export class CoachCommandService {
       },
     });
 
+    const parts = this.messageParts(input.content);
     await this.prisma.$transaction(async (transaction) => {
-      const scheduledMessage = await transaction.scheduledMessage.upsert({
-        where: {
-          userId_automationRuleId_scheduledFor: {
+      for (const [partIndex, content] of parts.entries()) {
+        const scheduledFor = new Date(input.scheduledFor.getTime() + partIndex);
+        const scheduledMessage = await transaction.scheduledMessage.upsert({
+          where: {
+            userId_automationRuleId_scheduledFor: {
+              userId: input.userId,
+              automationRuleId: rule.id,
+              scheduledFor,
+            },
+          },
+          update: {},
+          create: {
             userId: input.userId,
             automationRuleId: rule.id,
-            scheduledFor: input.scheduledFor,
+            conversationId: input.conversationId,
+            coachMessageId: partIndex === 0 ? input.coachMessageId : undefined,
+            scheduledFor,
+            status: ScheduledMessageStatus.PENDING,
+            content,
+            context: {
+              source: 'WHATSAPP_COACH_COMMAND',
+              sourceMessageId: input.messageId,
+              intent: input.intent,
+              actionable: input.intent === 'WORKOUT',
+              partIndex,
+              partCount: parts.length,
+            },
           },
-        },
-        update: {},
-        create: {
-          userId: input.userId,
-          automationRuleId: rule.id,
-          scheduledFor: input.scheduledFor,
-          status: ScheduledMessageStatus.PENDING,
-          content: input.content,
-        },
-        include: {
-          automationRule: true,
-        },
-      });
+          include: {
+            automationRule: true,
+          },
+        });
 
-      await this.eventBus.publish(
-        {
-          eventType: INTERNAL_EVENT.AUTOMATION_TRIGGERED,
-          aggregateType: 'SCHEDULED_MESSAGE',
-          aggregateId: scheduledMessage.id,
-          payload: {
-            scheduledMessageId: scheduledMessage.id,
-            userId: input.userId,
-            automationRuleId: rule.id,
-            ruleCode: AUTOMATION_RULE_CODES.DAILY_COACH,
-            source: 'WHATSAPP_COACH_COMMAND',
-            sourceMessageId: input.messageId,
-            intent: input.intent,
+        await this.eventBus.publish(
+          {
+            eventType: INTERNAL_EVENT.AUTOMATION_TRIGGERED,
+            aggregateType: 'SCHEDULED_MESSAGE',
+            aggregateId: scheduledMessage.id,
+            payload: {
+              scheduledMessageId: scheduledMessage.id,
+              userId: input.userId,
+              automationRuleId: rule.id,
+              ruleCode: AUTOMATION_RULE_CODES.DAILY_COACH,
+              source: 'WHATSAPP_COACH_COMMAND',
+              sourceMessageId: input.messageId,
+              intent: input.intent,
+            },
+            availableAt: scheduledFor,
           },
-          availableAt: input.scheduledFor,
-        },
-        transaction,
-      );
+          transaction,
+        );
+      }
     });
+  }
+
+  private messageParts(
+    content: string,
+    maximumLength = 3_400,
+  ): readonly string[] {
+    const remaining = content.trim();
+    if (remaining.length <= maximumLength) return Object.freeze([remaining]);
+    const parts: string[] = [];
+    let cursor = remaining;
+    while (cursor.length > maximumLength) {
+      const window = cursor.slice(0, maximumLength + 1);
+      const paragraph = window.lastIndexOf('\n\n');
+      const line = window.lastIndexOf('\n');
+      const space = window.lastIndexOf(' ');
+      const boundary =
+        paragraph >= maximumLength / 2
+          ? paragraph
+          : line >= maximumLength / 2
+            ? line
+            : space >= maximumLength / 2
+              ? space
+              : -1;
+      const cut = boundary > 0 ? boundary : maximumLength;
+      parts.push(cursor.slice(0, cut).trimEnd());
+      cursor = cursor.slice(cut).trimStart();
+    }
+    if (cursor) parts.push(cursor);
+    return Object.freeze(parts);
   }
 
   private idempotencyKey(userId: string, messageId: string): string {

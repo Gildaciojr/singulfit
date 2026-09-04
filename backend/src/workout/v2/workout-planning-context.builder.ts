@@ -49,6 +49,9 @@ export class WorkoutPlanningContextBuilder {
         objective:
           recognized.objective ??
           this.objectiveFromGoal(input.snapshot.nutrition.primaryGoal),
+        secondaryObjectives: this.orderedArrayValue(
+          recognized.secondaryObjectives,
+        ),
         experience:
           recognized.experience ??
           this.experience(input.snapshot.training.experienceLevel),
@@ -80,9 +83,11 @@ export class WorkoutPlanningContextBuilder {
         returningAfterBreak: this.optionalSnapshotValue(
           input.snapshot.training.returningAfterBreak,
         ),
-        availableTrainingDays: this.optionalArraySnapshotValue(
-          input.snapshot.routine.availableTrainingDays,
-        ),
+        availableTrainingDays: recognized.availableTrainingDays
+          ? this.orderedArrayValue(recognized.availableTrainingDays)
+          : this.optionalArraySnapshotValue(
+              input.snapshot.routine.availableTrainingDays,
+            ),
         dailyTrainingWindows: this.optionalArraySnapshotValue(
           input.snapshot.routine.dailyTrainingWindows,
         ),

@@ -27,6 +27,9 @@ export class ConversationOperationResolverService {
     }
     if (
       isNutritionCurrentPlanRead(message.folded) ||
+      /^(?:e\s+)?(?:hoje|amanha|segunda(?:-feira)?|terca(?:-feira)?|quarta(?:-feira)?|quinta(?:-feira)?|sexta(?:-feira)?|sabado|domingo)$/u.test(
+        text,
+      ) ||
       /\b(plano atual|dieta atual|treino atual|mostr\w*|ver meu|qual e meu)\b/u.test(
         text,
       )

@@ -10,6 +10,9 @@ describe('isWorkoutCurrentPlanRead', () => {
     'Como está meu plano de treino ativo?',
     'Status do meu treino',
     'Meu treino',
+    'Sessão 1',
+    'Mostre a sessão 7',
+    'E a sessão três',
   ])('recognizes the side-effect-free current Workout read: %s', (message) => {
     expect(isWorkoutCurrentPlanRead(message)).toBe(true);
   });

@@ -232,6 +232,10 @@ export class WorkoutPlanningEngineV2Service {
       artifactType: candidate.artifactType,
       modality: candidate.modality,
       objective: candidate.objective,
+      secondaryObjectives: Object.freeze([
+        ...(candidate.secondaryObjectives ??
+          prepared.strategy.secondaryObjectives),
+      ]),
       lifecycleReason: prepared.context.lifecyclePurpose,
       replacesPlanReference: reference,
       title: candidate.title,

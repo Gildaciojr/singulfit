@@ -6,6 +6,7 @@ import type {
   WorkoutApplicationExecutionInputV2,
   WorkoutApplicationExecutionResultV2,
 } from './workout-application-execution.contract';
+import type { WorkoutPlanningValue } from '../workout-planning-context.contract';
 
 @Injectable()
 export class WorkoutApplicationExecutorService {
@@ -75,7 +76,10 @@ export class WorkoutApplicationExecutorService {
       generation,
       ownership: input.ownership,
       executionContext: input.executionContext,
-      calendarWeekdays: this.calendarWeekdays(input),
+      calendarWeekdays: this.calendarWeekdays(
+        prepared.context.training?.availableTrainingDays ??
+          this.snapshotTrainingDays(input),
+      ),
     });
     return Object.freeze({
       kind: 'PLAN' as const,
@@ -89,10 +93,10 @@ export class WorkoutApplicationExecutorService {
   }
 
   private calendarWeekdays(
-    input: WorkoutApplicationExecutionInputV2,
+    datum: WorkoutPlanningValue<readonly string[]>,
   ): readonly WorkoutWeekday[] | undefined {
-    const datum = input.generationInput.snapshot?.routine.availableTrainingDays;
-    if (!datum || !('value' in datum)) return undefined;
+    if (datum.status === 'NOT_SET' || datum.status !== 'CONFIRMED')
+      return undefined;
     const valid = new Set<string>(Object.values(WorkoutWeekday));
     const weekdays = datum.value.filter((value): value is WorkoutWeekday =>
       valid.has(value),
@@ -104,5 +108,17 @@ export class WorkoutApplicationExecutorService {
       return undefined;
     }
     return Object.freeze([...weekdays]);
+  }
+
+  private snapshotTrainingDays(
+    input: WorkoutApplicationExecutionInputV2,
+  ): WorkoutPlanningValue<readonly string[]> {
+    const datum = input.generationInput.snapshot?.routine.availableTrainingDays;
+    return datum && 'value' in datum && datum.status === 'KNOWN'
+      ? Object.freeze({
+          status: 'CONFIRMED' as const,
+          value: Object.freeze([...datum.value]),
+        })
+      : Object.freeze({ status: 'NOT_SET' as const });
   }
 }

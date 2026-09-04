@@ -86,9 +86,13 @@ export interface WorkoutRecognizedContext {
   readonly artifactType?: WorkoutArtifactType;
   readonly modality?: WorkoutPlanningValue<WorkoutModality>;
   readonly objective?: WorkoutPlanningValue<WorkoutObjective>;
+  readonly secondaryObjectives?: WorkoutPlanningValue<
+    readonly WorkoutObjective[]
+  >;
   readonly experience?: WorkoutPlanningValue<WorkoutExperienceLevel>;
   readonly weeklyFrequency?: WorkoutPlanningValue<number>;
   readonly sessionDurationMinutes?: WorkoutPlanningValue<number>;
+  readonly availableTrainingDays?: WorkoutPlanningValue<readonly string[]>;
   readonly environment?: WorkoutPlanningValue<WorkoutEnvironment>;
   readonly equipment?: WorkoutPlanningValue<readonly WorkoutEquipment[]>;
   readonly perceivedConditioning?: WorkoutPlanningValue<
@@ -165,6 +169,9 @@ export interface WorkoutPlanningContext {
   };
   readonly training: {
     readonly objective: WorkoutPlanningValue<WorkoutObjective>;
+    readonly secondaryObjectives: WorkoutPlanningValue<
+      readonly WorkoutObjective[]
+    >;
     readonly experience: WorkoutPlanningValue<WorkoutExperienceLevel>;
     readonly weeklyFrequency: WorkoutPlanningValue<number>;
     readonly sessionDurationMinutes: WorkoutPlanningValue<number>;

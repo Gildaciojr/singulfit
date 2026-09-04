@@ -62,6 +62,42 @@ describe('Conversation Understanding deterministic pipeline components', () => {
     },
   );
 
+  it.each([
+    'mostre',
+    'pode mostrar',
+    'me mostra',
+    'quero ver',
+    'manda',
+    'continue',
+    'continua',
+    'essa',
+    'esse',
+    'isso',
+    'essa sessão',
+    'esse treino',
+    'e a próxima?',
+    'e o próximo?',
+    'e hoje?',
+    'e amanhã?',
+    'e segunda?',
+    'qual deles?',
+  ])('resolves the required contextual form %s', (text) => {
+    const message = normalize(text);
+    expect(
+      references.resolve(
+        understandingInput(text, { targetPlan: 'WORKOUT' }),
+        message,
+        tokenizer.tokenize(message),
+      ).references,
+    ).toContainEqual(
+      expect.objectContaining({
+        kind: 'PLAN',
+        domain: 'WORKOUT',
+        resolution: 'RESOLVED',
+      }),
+    );
+  });
+
   it('resolves ordinal and previous plan references explicitly', () => {
     const second = normalize('o segundo plano de treino');
     const previous = normalize('minha dieta anterior');
@@ -87,6 +123,82 @@ describe('Conversation Understanding deterministic pipeline components', () => {
     ).toContainEqual(
       expect.objectContaining({ target: 'PREVIOUS', domain: 'NUTRITION' }),
     );
+  });
+
+  it.each([
+    ['sessão 1', 1],
+    ['e a 3?', 3],
+    ['mostre o treino sete', 7],
+  ])('resolves workout ordinals from %s', (text, ordinal) => {
+    const message = normalize(text);
+    const result = references.resolve(
+      understandingInput(text, { workoutAvailable: true }),
+      message,
+      tokenizer.tokenize(message),
+    );
+    expect(result.references).toContainEqual(
+      expect.objectContaining({
+        kind: 'PLAN',
+        domain: 'WORKOUT',
+        target: 'ORDINAL',
+        ordinal,
+        resolution: 'RESOLVED',
+      }),
+    );
+  });
+
+  it('prioritizes an explicit quoted workout outbound', () => {
+    const message = normalize('mostre');
+    const base = understandingInput('mostre');
+    const input = {
+      ...base,
+      replyToExternalMessageId: 'wa-workout',
+      recentHistory: [
+        {
+          ...historyEntry('Peça pela sessão para ver os exercícios'),
+          externalMessageId: 'wa-workout',
+          structuredContext: { intent: 'WORKOUT' },
+        },
+      ],
+    };
+    expect(
+      references.resolve(input, message, tokenizer.tokenize(message)),
+    ).toMatchObject({
+      usedRecentHistory: true,
+      references: expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'PLAN',
+          domain: 'WORKOUT',
+          resolution: 'RESOLVED',
+        }),
+      ]),
+    });
+  });
+
+  it('does not revive an older Workout topic after a newer Nutrition switch', () => {
+    const message = normalize('mostre');
+    const input = understandingInput('mostre', {
+      recentHistory: [
+        historyEntry('Seu treino atual tem cinco sessões'),
+        {
+          ...historyEntry('Vamos falar do seu plano alimentar', 3),
+          logicalTurn: 3,
+        },
+      ],
+    });
+
+    expect(
+      references.resolve(input, message, tokenizer.tokenize(message)),
+    ).toMatchObject({
+      usedRecentHistory: true,
+      references: expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'PLAN',
+          domain: 'NUTRITION',
+          resolution: 'RESOLVED',
+        }),
+      ]),
+    });
   });
 
   it('uses recent history and profile plans only as explicit contextual evidence', () => {

@@ -63,6 +63,52 @@ describe('EventBusService', () => {
     });
   });
 
+  it('returns the persisted outbox event when the same publication is replayed', async () => {
+    const availableAt = new Date('2026-06-10T15:00:00.000Z');
+    const event = {
+      id: 'outbox-id',
+      eventType: 'AUTOMATION_TRIGGERED',
+      aggregateType: 'SCHEDULED_MESSAGE',
+      aggregateId: 'scheduled-id',
+      payload: { scheduledMessageId: 'scheduled-id' },
+      availableAt,
+    };
+    let persisted: typeof event | null = null;
+    const transaction = {
+      $queryRaw: jest.fn().mockResolvedValue([{ locked: true }]),
+      outboxEvent: {
+        findUnique: jest.fn().mockImplementation(() => persisted),
+        create: jest.fn().mockImplementation(() => {
+          persisted = event;
+          return event;
+        }),
+      },
+    };
+    const prisma = {
+      $transaction: jest.fn(
+        (operation: (client: typeof transaction) => unknown) =>
+          operation(transaction),
+      ),
+    };
+    const service = new EventBusService(prisma as unknown as PrismaService);
+    const publication = {
+      eventType: event.eventType,
+      aggregateType: event.aggregateType,
+      aggregateId: event.aggregateId,
+      payload: event.payload,
+      availableAt,
+    };
+
+    const first = await service.publish(publication);
+    const replay = await service.publish(publication);
+
+    expect(first).toBe(event);
+    expect(replay).toBe(event);
+    expect(transaction.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(transaction.outboxEvent.findUnique).toHaveBeenCalledTimes(2);
+    expect(transaction.outboxEvent.create).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects reuse of an event identity with another payload', async () => {
     const transaction = {
       $queryRaw: jest.fn().mockResolvedValue([{ locked: true }]),

@@ -121,6 +121,64 @@ describe('ConversationTurnContextBuilderService', () => {
     },
   );
 
+  it('preserves structured reminder identity in understanding and human context', async () => {
+    const subject = createSubject({ messages: [] });
+    subject.prisma.scheduledMessage.findMany.mockResolvedValueOnce([
+      {
+        id: 'scheduled-hydration-id',
+        content: 'Já conseguiu tomar água hoje?',
+        context: {
+          source: 'AUTOMATION',
+          ruleCode: 'HYDRATION_REMINDER',
+          reminderType: 'HYDRATION',
+        },
+        externalMessageId: 'outbound-provider-id',
+        scheduledFor: new Date('2026-08-01T11:59:00.000Z'),
+        automationRule: null,
+        coachMessage: {
+          context: {
+            source: 'AUTOMATION',
+            ruleCode: 'HYDRATION_REMINDER',
+            reminderType: 'HYDRATION',
+          },
+        },
+      },
+    ]);
+
+    const result = await subject.service.build({ ...input, text: 'sim' });
+
+    expect(subject.prisma.scheduledMessage.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          userId: 'user-id',
+          conversationId: 'conversation-id',
+        }),
+      }),
+    );
+    expect(result.understandingInput.recentHistory).toEqual([
+      expect.objectContaining({
+        scheduledMessageId: 'scheduled-hydration-id',
+        externalMessageId: 'outbound-provider-id',
+        source: 'AUTOMATION',
+        automationRuleCode: 'HYDRATION_REMINDER',
+        structuredContext: expect.objectContaining({
+          ruleCode: 'HYDRATION_REMINDER',
+          reminderType: 'HYDRATION',
+        }),
+      }),
+    ]);
+    expect(result.humanContext.recentConversation).toEqual([
+      {
+        direction: 'COACH',
+        text: 'Já conseguiu tomar água hoje?',
+        origin: {
+          source: 'AUTOMATION',
+          automationRuleCode: 'HYDRATION_REMINDER',
+        },
+      },
+    ]);
+  });
+
   it('bounds and sanitizes recent conversation without operational fields', async () => {
     const messages = Array.from({ length: 8 }, (_, index) => ({
       direction:

@@ -120,6 +120,7 @@ export interface WorkoutPlanValidationIssue {
   readonly code:
     | 'ARTIFACT_MISMATCH'
     | 'MODALITY_MISMATCH'
+    | 'OBJECTIVE_MISMATCH'
     | 'SESSION_COUNT_MISMATCH'
     | 'SESSION_DURATION_EXCEEDED'
     | 'EMPTY_BLOCK'
@@ -149,6 +150,7 @@ export interface WorkoutPlanV2 {
   readonly artifactType: WorkoutArtifactType;
   readonly modality: WorkoutModality;
   readonly objective: WorkoutObjective;
+  readonly secondaryObjectives?: readonly WorkoutObjective[];
   readonly lifecycleReason:
     | 'CREATION'
     | 'REPLACEMENT'
@@ -182,6 +184,7 @@ export interface GeneratedWorkoutPlanV2Candidate {
   readonly artifactType: WorkoutArtifactType;
   readonly modality: WorkoutModality;
   readonly objective: WorkoutObjective;
+  readonly secondaryObjectives?: readonly WorkoutObjective[];
   readonly title: string;
   readonly sessions: readonly WorkoutSessionV2[];
   readonly progression: readonly WorkoutProgressionRule[];

@@ -77,8 +77,11 @@ export interface WorkoutPlanningStrategy {
   readonly artifactType: WorkoutArtifactType;
   readonly modality: WorkoutModality;
   readonly objective: WorkoutPlanningValue<WorkoutObjective>;
+  readonly secondaryObjectives: readonly WorkoutObjective[];
   readonly experience: WorkoutPlanningValue<WorkoutExperienceLevel>;
   readonly sessionCount: number;
+  readonly sessionFocuses: readonly string[];
+  readonly recoveryGuidance: string;
   readonly sessionDurationMinutes: WorkoutPlanningValue<number>;
   readonly environment: WorkoutPlanningValue<WorkoutEnvironment>;
   readonly authorizedEquipment: readonly WorkoutEquipment[];

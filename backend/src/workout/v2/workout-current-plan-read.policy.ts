@@ -40,9 +40,20 @@ export function isWorkoutCurrentPlanRead(message: string | undefined): boolean {
   const todayQuestion = /\bo que (?:eu )?treino (?:hoje|amanha)\b/u.test(text);
   const onlyOwnedReference =
     /^(?:meu treino|minha ficha|meu plano de treino)$/u.test(text);
+  const explicitSession =
+    /^(?:(?:mostre|mostrar|mostra|quero ver|manda|envie)\s+)?(?:a\s+)?(?:sessao|treino)\s*(?:numero\s*)?(?:[1-7]|um|dois|tres|quatro|cinco|seis|sete)$/u.test(
+      text,
+    ) ||
+    /^e\s+(?:a\s+)?(?:sessao\s*)?(?:[1-7]|um|dois|tres|quatro|cinco|seis|sete)$/u.test(
+      text,
+    ) ||
+    /\b(?:exercicios?\s+(?:da|do)|mostre\s+(?:a|o)|ver\s+(?:a|o))\s+(?:sessao|treino)\s*(?:[1-7]|um|dois|tres|quatro|cinco|seis|sete)\b/u.test(
+      text,
+    );
 
   return (
     todayQuestion ||
+    explicitSession ||
     (workoutDomain && readCue && (currentCue || ownedWorkout)) ||
     onlyOwnedReference
   );

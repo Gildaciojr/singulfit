@@ -26,6 +26,26 @@ export class ConversationReferenceResolverService {
       'aquela',
       'isso',
       'aquilo',
+      'mostre',
+      'me mostra',
+      'pode mostrar',
+      'quero ver',
+      'manda',
+      'continue',
+      'continua',
+      'qual deles',
+      'qual delas',
+      'proxima',
+      'proximo',
+      'hoje',
+      'amanha',
+      'segunda',
+      'terca',
+      'quarta',
+      'quinta',
+      'sexta',
+      'sabado',
+      'domingo',
       'meu plano',
       'minha dieta',
       'meu treino',
@@ -46,10 +66,21 @@ export class ConversationReferenceResolverService {
     let usedRecentHistory = false;
     let usedContinuity = false;
     let usedProfile = false;
-    let domain = explicitDomain;
+    const quoted = input.replyToExternalMessageId
+      ? input.recentHistory.find(
+          (entry) => entry.externalMessageId === input.replyToExternalMessageId,
+        )
+      : undefined;
+    let domain = explicitDomain ?? (quoted ? this.entryDomain(quoted) : null);
     let source: ConversationReference['source'] = 'CURRENT_TURN';
 
-    if (domain === null && (deictic || planMention || ordinal !== null)) {
+    if (quoted) {
+      source = 'RECENT_HISTORY';
+      usedRecentHistory = true;
+    } else if (
+      domain === null &&
+      (deictic || planMention || ordinal !== null)
+    ) {
       if (input.continuity.targetPlan !== null) {
         domain = this.fromTarget(input.continuity.targetPlan);
         source = 'PROFILE_CONTEXT';
@@ -121,6 +152,8 @@ export class ConversationReferenceResolverService {
     input: ConversationUnderstandingInput,
   ): ReferenceDomain | null {
     for (const entry of [...input.recentHistory].reverse()) {
+      const structured = this.entryDomain(entry);
+      if (structured !== null) return structured;
       const text = entry.text
         .normalize('NFD')
         .replace(/\p{Diacritic}/gu, '')
@@ -128,6 +161,18 @@ export class ConversationReferenceResolverService {
       const domain = this.explicitDomain(text);
       if (domain !== null) return domain;
     }
+    return null;
+  }
+
+  private entryDomain(
+    entry: ConversationUnderstandingInput['recentHistory'][number],
+  ): ReferenceDomain | null {
+    const intent = entry.structuredContext?.intent;
+    if (intent === 'WORKOUT') return 'WORKOUT';
+    if (intent === 'DIET') return 'NUTRITION';
+    if (intent === 'BOTH') return 'BOTH';
+    if (entry.automationRuleCode === 'DAILY_WORKOUT') return 'WORKOUT';
+    if (entry.automationRuleCode === 'MEAL_REMINDER') return 'NUTRITION';
     return null;
   }
 
@@ -147,9 +192,39 @@ export class ConversationReferenceResolverService {
   }
 
   private ordinal(text: string): number | null {
-    if (/\b(primeiro|primeira|1o|1)\b/u.test(text)) return 1;
-    if (/\b(segundo|segunda|2o|2)\b/u.test(text)) return 2;
-    return null;
+    const values: Readonly<Record<string, number>> = Object.freeze({
+      '1': 1,
+      '1o': 1,
+      primeiro: 1,
+      primeira: 1,
+      um: 1,
+      '2': 2,
+      '2o': 2,
+      segundo: 2,
+      dois: 2,
+      '3': 3,
+      terceiro: 3,
+      terceira: 3,
+      tres: 3,
+      '4': 4,
+      quarto: 4,
+      quatro: 4,
+      '5': 5,
+      quinto: 5,
+      cinco: 5,
+      '6': 6,
+      sexto: 6,
+      seis: 6,
+      '7': 7,
+      setimo: 7,
+      setima: 7,
+      sete: 7,
+    });
+    const match =
+      /\b(1o|2o|[1-7]|primeir[oa]|segundo|terceir[oa]|quarto|quinto|sexto|setim[oa]|um|dois|tres|quatro|cinco|seis|sete)\b/u.exec(
+        text,
+      );
+    return match ? values[match[1]] : null;
   }
 
   private includesAny(text: string, phrases: readonly string[]): boolean {

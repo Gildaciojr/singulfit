@@ -2,12 +2,21 @@ import type { CoachProfileSnapshotBuilder } from '../../context/coach-profile-sn
 import type { CoachProfileSnapshot } from '../../context/coach-profile-snapshot.contract';
 import type { PrismaService } from '../../prisma/prisma.service';
 import { GenerateWorkoutPlanV2InputBuilder } from './generate-workout-plan-v2-input.builder';
+import { WorkoutPlanningReadinessService } from './workout-planning-readiness.service';
 
 describe('GenerateWorkoutPlanV2InputBuilder', () => {
   const snapshot = Object.freeze({
     training: Object.freeze({
       preferredModality: Object.freeze({ status: 'UNKNOWN', sources: [] }),
     }),
+    restrictions: Object.freeze({
+      physicalLimitations: Object.freeze({
+        status: 'KNOWN',
+        value: Object.freeze([]),
+        sources: Object.freeze([]),
+      }),
+    }),
+    conflicts: Object.freeze([]),
     completion: Object.freeze({ overall: 'PARTIAL', sections: [] }),
   }) as unknown as CoachProfileSnapshot;
   const builder = new GenerateWorkoutPlanV2InputBuilder(
@@ -223,7 +232,7 @@ describe('GenerateWorkoutPlanV2InputBuilder', () => {
         modality: { status: 'CONFIRMED', value: 'CARDIO_CONDITIONING' },
         objective: { status: 'CONFIRMED', value: 'CONDITIONING' },
         environment: { status: 'CONFIRMED', value: 'HOME' },
-        equipment: { status: 'CONFIRMED', value: [] },
+        equipment: { status: 'CONFIRMED', value: ['BODYWEIGHT'] },
         sessionDurationMinutes: { status: 'CONFIRMED', value: 30 },
       }),
     );
@@ -247,6 +256,212 @@ describe('GenerateWorkoutPlanV2InputBuilder', () => {
     expect(result.generationInput.recognizedContext.muscleFocus).toEqual({
       status: 'CONFIRMED',
       value: ['GLUTES'],
+    });
+  });
+
+  it('preserves recomposition as primary and secondary objectives', () => {
+    expect(
+      builder.recognizeDeclaredContext(
+        'Quero ganhar massa magra e perder gordura.',
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        objective: { status: 'CONFIRMED', value: 'HYPERTROPHY' },
+        secondaryObjectives: {
+          status: 'CONFIRMED',
+          value: ['WEIGHT_LOSS'],
+        },
+      }),
+    );
+  });
+
+  it('recognizes the complete Gym 5x launch request', () => {
+    expect(
+      builder.recognizeDeclaredContext(
+        'Monte um treino para eu fazer na academia, 5 vezes por semana, para ganho de massa magra.',
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        modality: { status: 'CONFIRMED', value: 'GYM_STRENGTH' },
+        environment: { status: 'CONFIRMED', value: 'FULL_GYM' },
+        objective: { status: 'CONFIRMED', value: 'HYPERTROPHY' },
+        weeklyFrequency: { status: 'CONFIRMED', value: 5 },
+      }),
+    );
+  });
+
+  it('recognizes health, bodyweight and a valid explicit event date', () => {
+    expect(
+      builder.recognizeDeclaredContext(
+        'Quero treino com peso corporal para saúde e uma prova em 20/10/2026.',
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        modality: { status: 'CONFIRMED', value: 'HOME_WORKOUT' },
+        objective: { status: 'CONFIRMED', value: 'GENERAL_HEALTH' },
+        equipment: { status: 'CONFIRMED', value: ['BODYWEIGHT'] },
+        targetEventDate: { status: 'CONFIRMED', value: '2026-10-20' },
+      }),
+    );
+  });
+
+  it.each([
+    ['3x', 3],
+    ['quatro vezes por semana', 4],
+    ['5 dias', 5],
+    ['seis vezes na semana', 6],
+  ])('recognizes weekly frequency from %s', (message, frequency) => {
+    expect(builder.recognizeDeclaredContext(message).weeklyFrequency).toEqual({
+      status: 'CONFIRMED',
+      value: frequency,
+    });
+  });
+
+  it('preserves explicitly available home equipment and weekdays', () => {
+    expect(
+      builder.recognizeDeclaredContext(
+        'Em casa tenho dois halteres e elástico; posso segunda, quarta e sábado.',
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        environment: { status: 'CONFIRMED', value: 'HOME' },
+        equipment: {
+          status: 'CONFIRMED',
+          value: ['DUMBBELL', 'RESISTANCE_BAND', 'BODYWEIGHT'],
+        },
+        availableTrainingDays: {
+          status: 'CONFIRMED',
+          value: ['MONDAY', 'WEDNESDAY', 'SATURDAY'],
+        },
+      }),
+    );
+  });
+
+  it.each([
+    ['Tenho halteres e elástico.', ['DUMBBELL', 'RESISTANCE_BAND']],
+    ['Não tenho halteres, só elástico.', ['RESISTANCE_BAND']],
+    ['Tenho halteres, mas não tenho barra.', ['DUMBBELL']],
+    ['Não tenho nenhum aparelho.', ['BODYWEIGHT']],
+    ['Treino em casa sem equipamentos.', ['BODYWEIGHT']],
+    ['Não tenho máquina, mas tenho dois halteres.', ['DUMBBELL']],
+    ['Não tenho nenhum aparelho, mas tenho um elástico.', ['RESISTANCE_BAND']],
+    ['Não tenho aparelhos de academia, só tenho dois halteres.', ['DUMBBELL']],
+    [
+      'Em casa não tenho aparelhos, só halteres e elástico.',
+      ['DUMBBELL', 'RESISTANCE_BAND', 'BODYWEIGHT'],
+    ],
+  ] as const)(
+    'keeps only positively declared equipment from %s',
+    (message, equipment) => {
+      expect(builder.recognizeDeclaredContext(message).equipment).toEqual({
+        status: 'CONFIRMED',
+        value: equipment,
+      });
+    },
+  );
+
+  it('does not promote ambiguous or exclusively denied equipment', () => {
+    expect(
+      builder.recognizeDeclaredContext('Talvez eu tenha halteres.').equipment,
+    ).toEqual({ status: 'REQUIRES_CONFIRMATION', value: [] });
+    expect(
+      builder.recognizeDeclaredContext('Não tenho halteres.').equipment,
+    ).toEqual({ status: 'REQUIRES_CONFIRMATION', value: [] });
+  });
+
+  it.each([
+    ['Posso segunda, quarta e sábado.', ['MONDAY', 'WEDNESDAY', 'SATURDAY']],
+    ['Não posso segunda. Posso terça e quinta.', ['TUESDAY', 'THURSDAY']],
+    [
+      'Consigo treinar quarta e sexta, menos sexta nesta semana.',
+      ['WEDNESDAY'],
+    ],
+  ] as const)(
+    'confirms only positive weekday availability from %s',
+    (message, weekdays) => {
+      expect(
+        builder.recognizeDeclaredContext(message).availableTrainingDays,
+      ).toEqual({ status: 'CONFIRMED', value: weekdays });
+    },
+  );
+
+  it('does not infer six available days from one denied weekday', () => {
+    expect(
+      builder.recognizeDeclaredContext('Não treino domingo.')
+        .availableTrainingDays,
+    ).toEqual({ status: 'REQUIRES_CONFIRMATION', value: [] });
+  });
+
+  it('requires clarification when confirmed frequency exceeds confirmed days', () => {
+    const declared = builder.recognizeDeclaredContext(
+      'Quero 5 vezes por semana; posso segunda, quarta e sexta.',
+    );
+    const readiness = new WorkoutPlanningReadinessService().evaluate(
+      snapshot,
+      'WEEKLY_PLAN',
+      'GYM_STRENGTH',
+      {
+        ...declared,
+        artifactType: 'WEEKLY_PLAN',
+        modality: { status: 'CONFIRMED', value: 'GYM_STRENGTH' },
+        objective: { status: 'CONFIRMED', value: 'HYPERTROPHY' },
+        experience: { status: 'CONFIRMED', value: 'INTERMEDIATE' },
+        sessionDurationMinutes: { status: 'CONFIRMED', value: 60 },
+        environment: { status: 'CONFIRMED', value: 'FULL_GYM' },
+        equipment: { status: 'CONFIRMED', value: ['DUMBBELL'] },
+      },
+      false,
+    );
+
+    expect(declared.weeklyFrequency).toEqual({
+      status: 'REQUIRES_CONFIRMATION',
+      value: 5,
+    });
+    expect(declared.availableTrainingDays).toEqual({
+      status: 'CONFIRMED',
+      value: ['MONDAY', 'WEDNESDAY', 'FRIDAY'],
+    });
+    expect(readiness.status).toBe('REQUIRES_CONFIRMATION');
+    expect(readiness.executionLevel).toBe('CLARIFICATION_ONLY');
+    expect(readiness.confirmationRequiredFields).toContain('WEEKLY_FREQUENCY');
+  });
+
+  it('keeps matching frequency and available days confirmed', () => {
+    const declared = builder.recognizeDeclaredContext(
+      'Quero 3 vezes por semana; posso segunda, quarta e sexta.',
+    );
+
+    expect(declared.weeklyFrequency).toEqual({
+      status: 'CONFIRMED',
+      value: 3,
+    });
+    expect(declared.availableTrainingDays).toEqual({
+      status: 'CONFIRMED',
+      value: ['MONDAY', 'WEDNESDAY', 'FRIDAY'],
+    });
+  });
+
+  it('does not create a frequency conflict when days were not declared', () => {
+    const declared = builder.recognizeDeclaredContext(
+      'Quero 5 vezes por semana.',
+    );
+
+    expect(declared.weeklyFrequency).toEqual({
+      status: 'CONFIRMED',
+      value: 5,
+    });
+    expect(declared.availableTrainingDays).toBeUndefined();
+  });
+
+  it('does not infer frequency from declared available days', () => {
+    const declared = builder.recognizeDeclaredContext(
+      'Posso segunda, quarta e sexta.',
+    );
+
+    expect(declared.weeklyFrequency).toBeUndefined();
+    expect(declared.availableTrainingDays).toEqual({
+      status: 'CONFIRMED',
+      value: ['MONDAY', 'WEDNESDAY', 'FRIDAY'],
     });
   });
 });

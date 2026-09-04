@@ -9,12 +9,14 @@ import { ConversationResponseValidatorService } from './conversation-response-va
 import { ConversationQAExecutorService } from './conversation-qa-executor.service';
 import { ConversationQAFollowUpContextService } from './conversation-qa-follow-up-context.service';
 import type { ConversationQAFollowUpContext } from './conversation-qa-follow-up-context.service';
+import { CurrentWorkoutPlanReaderService } from '../../workout/v2/current-workout-plan-reader.service';
 
 export interface ConversationBridgeExecutionContext {
   readonly userId: string;
   readonly conversationId: string;
   readonly messageId: string;
   readonly deadlineAtMs?: number;
+  readonly referenceDate?: Date;
 }
 
 @Injectable()
@@ -26,6 +28,7 @@ export class ConversationExecutionBridgeService {
     private readonly validator: ConversationResponseValidatorService,
     private readonly qa?: ConversationQAExecutorService,
     private readonly qaFollowUp?: ConversationQAFollowUpContextService,
+    private readonly currentWorkout?: CurrentWorkoutPlanReaderService,
   ) {}
 
   async execute(
@@ -34,6 +37,23 @@ export class ConversationExecutionBridgeService {
     executionContext?: ConversationBridgeExecutionContext,
   ): Promise<ConversationBridgeResult> {
     const route = decision.executionRoute;
+    if (
+      route.kind === 'CURRENT_PLAN_PRESENTATION' &&
+      route.targetPlan === 'WORKOUT' &&
+      executionContext &&
+      this.currentWorkout
+    ) {
+      const content = await this.currentWorkout.present(
+        executionContext.userId,
+        this.workoutReadMessage(humanContext),
+        executionContext.referenceDate ?? new Date(),
+      );
+      return Object.freeze({
+        status: 'COMPLETED' as const,
+        content,
+        routeKind: route.kind,
+      });
+    }
     const payload = this.payloadBuilder.build(route, humanContext);
     if (!payload) {
       return Object.freeze({
@@ -49,9 +69,18 @@ export class ConversationExecutionBridgeService {
       executionContext &&
       this.qa
     ) {
+      const reminder = this.reminderResponse(humanContext);
+      if (reminder) {
+        return Object.freeze({
+          status: 'COMPLETED' as const,
+          content: reminder,
+          routeKind: route.kind,
+        });
+      }
       const directlyEligible = this.qaEligible(
         payload.cue,
         payload.currentMessage,
+        humanContext,
       );
       const previousFollowUp = directlyEligible
         ? null
@@ -169,7 +198,13 @@ export class ConversationExecutionBridgeService {
   private qaEligible(
     cue: CoachConversationHumanContext['turnCue'],
     message: string,
+    context: CoachConversationHumanContext,
   ): boolean {
+    if (
+      context.recentConversation?.at(-1)?.direction === 'COACH' &&
+      context.recentConversation.at(-1)?.origin?.automationRuleCode
+    )
+      return true;
     const trivialCues = new Set<CoachConversationHumanContext['turnCue']>([
       'GREETING',
       'THANKS',
@@ -184,6 +219,54 @@ export class ConversationExecutionBridgeService {
       .split(/[^a-zA-Z0-9]+/u)
       .filter(Boolean);
     return lexicalParts.length > 3;
+  }
+
+  private reminderResponse(
+    context: CoachConversationHumanContext,
+  ): string | null {
+    const latest = context.recentConversation?.at(-1);
+    if (
+      latest?.direction !== 'COACH' ||
+      latest.origin?.automationRuleCode !== 'HYDRATION_REMINDER'
+    )
+      return null;
+    const message = context.currentMessage
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .toLocaleLowerCase('pt-BR')
+      .replace(/[?!.,]+$/u, '')
+      .trim();
+    if (/^(sim|ja|bebi|consegui|feito)[!,. ]*$/u.test(message))
+      return 'Ótimo! Continue distribuindo a hidratação ao longo do dia 💧';
+    if (/^(nao|ainda nao|nao consegui)[!,. ]*$/u.test(message))
+      return 'Tudo bem. Comece com alguns goles agora e deixe a garrafa por perto; constância costuma funcionar melhor que beber muito de uma vez.';
+    return null;
+  }
+
+  private workoutReadMessage(
+    context: CoachConversationHumanContext | null,
+  ): string {
+    const current = context?.currentMessage ?? '';
+    const folded = current
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .toLocaleLowerCase('pt-BR')
+      .replace(/[?!.,]+$/u, '')
+      .trim();
+    if (
+      !/^(?:mostre|pode mostrar|me mostra|manda|continue|continua|e a proxima|e o proximo)$/u.test(
+        folded,
+      )
+    )
+      return current;
+    const latest = context?.recentConversation?.at(-1);
+    if (latest?.direction !== 'COACH') return current;
+    const ordinals = [...latest.text.matchAll(/Sessão\s+([1-7])\b/giu)].map(
+      (match) => Number(match[1]),
+    );
+    if (ordinals.length !== 1) return current;
+    const ordinal = /proxim/u.test(folded) ? ordinals[0] + 1 : ordinals[0];
+    return ordinal <= 7 ? `sessão ${ordinal}` : current;
   }
 
   private unsupportedReason(

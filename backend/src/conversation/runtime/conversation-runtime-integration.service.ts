@@ -93,6 +93,7 @@ export class ConversationRuntimeIntegrationService {
             conversationId: input.conversationId,
             messageId: input.messageId,
             deadlineAtMs,
+            referenceDate: new Date(input.receivedAt),
           },
         )
       : Object.freeze({

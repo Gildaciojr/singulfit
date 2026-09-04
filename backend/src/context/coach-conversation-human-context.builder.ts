@@ -264,6 +264,14 @@ export class CoachConversationHumanContextBuilder {
                       ? ('USER' as const)
                       : ('COACH' as const),
                   text,
+                  ...(entry.source || entry.automationRuleCode
+                    ? {
+                        origin: Object.freeze({
+                          source: entry.source ?? null,
+                          automationRuleCode: entry.automationRuleCode ?? null,
+                        }),
+                      }
+                    : {}),
                 }),
               ]
             : [];

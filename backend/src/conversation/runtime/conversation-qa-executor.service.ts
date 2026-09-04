@@ -295,6 +295,7 @@ export class ConversationQAExecutorService {
           Object.freeze({
             direction: turn.direction,
             text: turn.text,
+            origin: turn.origin ? Object.freeze({ ...turn.origin }) : null,
           }),
         ),
       ),

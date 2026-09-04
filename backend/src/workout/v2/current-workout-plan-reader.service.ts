@@ -293,14 +293,13 @@ export class CurrentWorkoutPlanReaderService {
     session: CurrentWorkoutPlanLegacySession,
   ): string {
     return [
-      `Sessão ${session.sequence}: ${session.title}`,
+      `*Sessão ${session.sequence}: ${session.title}*`,
       ...session.exercises.map((exercise) => {
-        const notes = exercise.notes ? ` — ${exercise.notes}` : '';
-        return `• ${exercise.exerciseName}: ${exercise.sets} séries de ${exercise.reps}, descanso de ${exercise.restSeconds}s${notes}`;
+        const notes = exercise.notes ? `\n${exercise.notes}` : '';
+        return `\n*${exercise.exerciseName}*\n${exercise.sets} × ${exercise.reps}\nDescanso: ${exercise.restSeconds} s${notes}`;
       }),
     ]
       .join('\n')
-      .slice(0, 3_500)
       .trimEnd();
   }
 
@@ -424,7 +423,9 @@ export class CurrentWorkoutPlanReaderService {
   }
 
   private ordinal(message: string): number | null {
-    const digit = message.match(/\b(?:treino|sessao)\s*(?:numero\s*)?(\d)\b/u);
+    const digit = message.match(
+      /(?:\b(?:treino|sessao)\s*(?:numero\s*)?|^e?\s*(?:a\s+)?)([1-7])\b/u,
+    );
     if (digit) return Number(digit[1]);
     const words: Readonly<Record<string, number>> = Object.freeze({
       um: 1,
@@ -436,7 +437,7 @@ export class CurrentWorkoutPlanReaderService {
       sete: 7,
     });
     const word = message.match(
-      /\b(?:treino|sessao)\s+(um|dois|tres|quatro|cinco|seis|sete)\b/u,
+      /(?:\b(?:treino|sessao)\s+|^e?\s*(?:a\s+)?)(um|dois|tres|quatro|cinco|seis|sete)\b/u,
     );
     return word ? words[word[1]] : null;
   }
@@ -467,17 +468,35 @@ export class CurrentWorkoutPlanReaderService {
 
   private formatSession(session: WorkoutSessionV2): string {
     return [
-      `Sessão ${session.sequence}: ${session.label} (${session.estimatedDurationMinutes} min)`,
+      `*Sessão ${session.sequence}: ${session.label}*\n${session.estimatedDurationMinutes} min`,
       ...session.blocks.flatMap((block) => [
-        block.title,
-        ...block.activities.map(
-          (activity) => `• ${activity.name}: ${activity.instruction}`,
-        ),
+        `\n*${block.title}*`,
+        ...block.activities.map((activity) => this.formatActivity(activity)),
       ]),
     ]
       .join('\n')
-      .slice(0, 3_500)
       .trimEnd();
+  }
+
+  private formatActivity(
+    activity: WorkoutSessionV2['blocks'][number]['activities'][number],
+  ): string {
+    const equipment = activity.equipment.length
+      ? activity.equipment.join(' + ')
+      : 'nenhum';
+    const parameters =
+      activity.kind === 'STRENGTH'
+        ? `${activity.sets} × ${activity.repetitions}\nDescanso: ${activity.restSeconds} s\nEquipamento: ${equipment}\nIntensidade: ${activity.intensity}`
+        : activity.kind === 'TIMED'
+          ? `${activity.rounds} rodada(s) · ${activity.durationSeconds} s${activity.workSeconds === null ? '' : `\nTrabalho: ${activity.workSeconds} s`}${activity.recoverySeconds === null ? '' : ` · Recuperação: ${activity.recoverySeconds} s`}\nIntensidade: ${activity.intensity}`
+          : activity.kind === 'ENDURANCE'
+            ? `${activity.durationMinutes} min${activity.distanceKm === null ? '' : ` · ${activity.distanceKm} km`}\nIntensidade: ${activity.intensity}`
+            : activity.durationSeconds !== null
+              ? `${activity.durationSeconds} s`
+              : activity.holdSeconds !== null
+                ? `Sustentar ${activity.holdSeconds} s`
+                : (activity.repetitions ?? 'Movimento controlado');
+    return `\n*${activity.name}*\n${parameters}\n${activity.instruction}`;
   }
 
   private weekdayLabel(weekday: WorkoutWeekday): string {

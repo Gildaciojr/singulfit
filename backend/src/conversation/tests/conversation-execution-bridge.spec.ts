@@ -196,6 +196,228 @@ describe('ConversationExecutionBridgeService', () => {
     },
   );
 
+  it('routes a contextual Workout read to the canonical reader without Q&A', async () => {
+    const qa = { execute: jest.fn() };
+    const currentWorkout = {
+      present: jest
+        .fn()
+        .mockResolvedValue('*Sessão 1: Força geral*\n\nAgachamento — 3 x 10'),
+    };
+    const subject = new ConversationExecutionBridgeService(
+      new ConversationResponsePayloadBuilder(),
+      new ConversationLanguageRealizerService(),
+      new ConversationResponseFormatterService(),
+      new ConversationResponseValidatorService(),
+      qa as never,
+      undefined,
+      currentWorkout as never,
+    );
+
+    const result = await subject.execute(
+      decision(
+        understanding(
+          'CURRENT_PLAN_REQUEST',
+          'PRESENT_CURRENT_PLAN',
+          'WORKOUT',
+        ),
+        goalDecision('SHOW_CURRENT_PLAN', 'CURRENT_PLAN_REQUEST', {
+          targetPlan: 'WORKOUT',
+          currentPlanAvailable: 'WORKOUT',
+        }),
+      ),
+      human('Sessão 1'),
+      {
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+        referenceDate: new Date('2026-08-01T12:00:00.000Z'),
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: 'COMPLETED',
+      routeKind: 'CURRENT_PLAN_PRESENTATION',
+      content: expect.stringContaining('Agachamento'),
+    });
+    expect(currentWorkout.present).toHaveBeenCalledWith(
+      'user-id',
+      'Sessão 1',
+      new Date('2026-08-01T12:00:00.000Z'),
+    );
+
+    await subject.execute(
+      decision(
+        understanding(
+          'CURRENT_PLAN_REQUEST',
+          'PRESENT_CURRENT_PLAN',
+          'WORKOUT',
+        ),
+        goalDecision('SHOW_CURRENT_PLAN', 'CURRENT_PLAN_REQUEST', {
+          targetPlan: 'WORKOUT',
+          currentPlanAvailable: 'WORKOUT',
+        }),
+      ),
+      human('Mostre', 'COMMON', [
+        {
+          direction: 'COACH',
+          text: 'Posso mostrar a Sessão 1 completa.',
+        },
+      ]),
+      {
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'message-id-2',
+      },
+    );
+    expect(currentWorkout.present).toHaveBeenLastCalledWith(
+      'user-id',
+      'sessão 1',
+      expect.any(Date),
+    );
+
+    await subject.execute(
+      decision(
+        understanding(
+          'CURRENT_PLAN_REQUEST',
+          'PRESENT_CURRENT_PLAN',
+          'WORKOUT',
+        ),
+        goalDecision('SHOW_CURRENT_PLAN', 'CURRENT_PLAN_REQUEST', {
+          targetPlan: 'WORKOUT',
+          currentPlanAvailable: 'WORKOUT',
+        }),
+      ),
+      human('E a próxima?', 'COMMON', [
+        { direction: 'COACH', text: '*Sessão 2: Inferiores*' },
+      ]),
+      {
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'message-id-3',
+      },
+    );
+    expect(currentWorkout.present).toHaveBeenLastCalledWith(
+      'user-id',
+      'sessão 3',
+      expect.any(Date),
+    );
+    expect(qa.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'sim',
+      'AFFIRMATION',
+      'Ótimo! Continue distribuindo a hidratação ao longo do dia 💧',
+    ],
+    [
+      'ainda não',
+      'NEGATION',
+      'Tudo bem. Comece com alguns goles agora e deixe a garrafa por perto; constância costuma funcionar melhor que beber muito de uma vez.',
+    ],
+  ] as const)(
+    'answers %s deterministically after a structured hydration reminder',
+    async (message, cue, expected) => {
+      const qa = { execute: jest.fn() };
+      const subject = new ConversationExecutionBridgeService(
+        new ConversationResponsePayloadBuilder(),
+        new ConversationLanguageRealizerService(),
+        new ConversationResponseFormatterService(),
+        new ConversationResponseValidatorService(),
+        qa as never,
+      );
+      const context = human(message, cue, [
+        {
+          direction: 'COACH',
+          text: 'Já conseguiu tomar água hoje?',
+          origin: {
+            source: 'AUTOMATION',
+            automationRuleCode: 'HYDRATION_REMINDER',
+          },
+        },
+      ]);
+
+      await expect(
+        subject.execute(
+          decision(
+            understanding('COMMON_MESSAGE', 'ANSWER', 'GENERAL'),
+            goalDecision('ANSWER_MESSAGE', 'COMMON_MESSAGE'),
+          ),
+          context,
+          {
+            userId: 'user-id',
+            conversationId: 'conversation-id',
+            messageId: 'message-id',
+          },
+        ),
+      ).resolves.toMatchObject({ status: 'COMPLETED', content: expected });
+      expect(qa.execute).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps a contextual hydration question eligible for generic Q&A', async () => {
+    const qa = {
+      execute: jest.fn().mockResolvedValue({
+        status: 'COMPLETED',
+        content: 'Distribua a sua meta de água ao longo do dia.',
+        observability: {
+          answerSource: 'AI',
+          disposition: 'ANSWER',
+          domain: 'GENERAL',
+          grounding: 'RECENT_CONTEXT',
+          providerDurationMs: 10,
+          promptTokens: 5,
+          completionTokens: 5,
+          totalTokens: 10,
+          fallbackReason: null,
+        },
+      }),
+    };
+    const subject = new ConversationExecutionBridgeService(
+      new ConversationResponsePayloadBuilder(),
+      new ConversationLanguageRealizerService(),
+      new ConversationResponseFormatterService(),
+      new ConversationResponseValidatorService(),
+      qa as never,
+    );
+    const context = human('quanto?', 'COMMON', [
+      {
+        direction: 'COACH',
+        text: 'Já conseguiu tomar água hoje?',
+        origin: {
+          source: 'AUTOMATION',
+          automationRuleCode: 'HYDRATION_REMINDER',
+        },
+      },
+    ]);
+
+    await expect(
+      subject.execute(
+        decision(
+          understanding(
+            'GENERAL_GUIDANCE_REQUEST',
+            'PROVIDE_GUIDANCE',
+            'GENERAL',
+          ),
+          goalDecision('GENERAL_GUIDANCE', 'GENERAL_GUIDANCE_REQUEST'),
+        ),
+        context,
+        {
+          userId: 'user-id',
+          conversationId: 'conversation-id',
+          messageId: 'message-id',
+        },
+      ),
+    ).resolves.toMatchObject({
+      status: 'COMPLETED',
+      content: 'Distribua a sua meta de água ao longo do dia.',
+    });
+    expect(qa.execute).toHaveBeenCalledTimes(1);
+    expect(qa.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ humanContext: context }),
+    );
+  });
+
   it('continues Q&A when a standalone affirmation answers the latest coach follow-up', async () => {
     const qa = {
       execute: jest.fn().mockResolvedValue({

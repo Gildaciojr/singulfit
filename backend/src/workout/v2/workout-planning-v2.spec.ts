@@ -177,6 +177,10 @@ describe('Workout Planning Engine V2', () => {
         WorkoutRecognizedContext['environment']
       >['value'];
       objective?: NonNullable<WorkoutRecognizedContext['objective']>['value'];
+      secondaryObjectives?: readonly NonNullable<
+        WorkoutRecognizedContext['objective']
+      >['value'][];
+      conditioning?: 'LOW' | 'MODERATE' | 'HIGH';
       muscleFocus?: NonNullable<
         WorkoutRecognizedContext['muscleFocus']
       >['value'];
@@ -192,6 +196,12 @@ describe('Workout Planning Engine V2', () => {
         status: 'CONFIRMED',
         value: options.objective ?? 'GENERAL_HEALTH',
       }),
+      secondaryObjectives: options.secondaryObjectives
+        ? Object.freeze({
+            status: 'CONFIRMED',
+            value: Object.freeze([...options.secondaryObjectives]),
+          })
+        : undefined,
       experience: Object.freeze({
         status: 'CONFIRMED',
         value: options.experience ?? 'BEGINNER',
@@ -214,7 +224,7 @@ describe('Workout Planning Engine V2', () => {
       }),
       perceivedConditioning: Object.freeze({
         status: 'CONFIRMED',
-        value: 'MODERATE',
+        value: options.conditioning ?? 'MODERATE',
       }),
       intensityPreference: Object.freeze({
         status: 'CONFIRMED',
@@ -1274,7 +1284,7 @@ describe('Workout Planning Engine V2', () => {
   it('publishes prompt V2 with explicit personalization and stereotype guards', () => {
     expect(WORKOUT_PLANNING_V2_PROMPT).toMatchObject({
       name: 'workout_planning_v2',
-      version: 2,
+      version: 3,
       capability: 'WORKOUT_PLANNING_V2',
     });
     expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(
@@ -1285,6 +1295,204 @@ describe('Workout Planning Engine V2', () => {
     );
     expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(
       'não repita full-body indiscriminadamente',
+    );
+    const schema = WORKOUT_PLANNING_V2_PROMPT.schema.schema as {
+      properties: {
+        sessions: {
+          items: {
+            properties: {
+              blocks: {
+                items: {
+                  properties: { activities: { items: { anyOf: unknown[] } } };
+                };
+              };
+            };
+          };
+        };
+      };
+    };
+    expect(
+      schema.properties.sessions.items.properties.blocks.items.properties
+        .activities.items.anyOf,
+    ).toHaveLength(4);
+  });
+
+  it.each([3, 4, 5, 6])(
+    'creates a differentiated gym structure for %i sessions',
+    (frequency) => {
+      const strategy = new WorkoutPlanningStrategyService().build(
+        context(
+          recognized('GYM_STRENGTH', ['BODYWEIGHT'], {
+            frequency,
+            objective: 'HYPERTROPHY',
+            environment: 'FULL_GYM',
+          }),
+        ),
+      );
+      expect(strategy.sessionCount).toBe(frequency);
+      expect(strategy.sessionFocuses).toHaveLength(frequency);
+      expect(new Set(strategy.sessionFocuses).size).toBe(frequency);
+      if (frequency === 6)
+        expect(strategy.recoveryGuidance).toContain(
+          'janela completa de descanso',
+        );
+    },
+  );
+
+  it('differentiates gym 5x by objective and experience', () => {
+    const strategy = new WorkoutPlanningStrategyService();
+    const beginnerHypertrophy = strategy.build(
+      context(
+        recognized('GYM_STRENGTH', ['BARBELL', 'DUMBBELL'], {
+          frequency: 5,
+          objective: 'HYPERTROPHY',
+          experience: 'BEGINNER',
+          environment: 'FULL_GYM',
+        }),
+      ),
+    );
+    const advancedStrength = strategy.build(
+      context(
+        recognized('GYM_STRENGTH', ['BARBELL', 'DUMBBELL'], {
+          frequency: 5,
+          objective: 'STRENGTH',
+          experience: 'ADVANCED',
+          environment: 'FULL_GYM',
+        }),
+      ),
+    );
+    const advancedHypertrophy = strategy.build(
+      context(
+        recognized('GYM_STRENGTH', ['BARBELL', 'DUMBBELL'], {
+          frequency: 5,
+          objective: 'HYPERTROPHY',
+          experience: 'ADVANCED',
+          environment: 'FULL_GYM',
+        }),
+      ),
+    );
+
+    expect(beginnerHypertrophy.sessionFocuses).not.toEqual(
+      advancedStrength.sessionFocuses,
+    );
+    expect(advancedHypertrophy.sessionFocuses).not.toEqual(
+      advancedStrength.sessionFocuses,
+    );
+    expect(beginnerHypertrophy.sessionFocuses).not.toEqual(
+      advancedHypertrophy.sessionFocuses,
+    );
+  });
+
+  it.each([
+    ['GLUTES', 'Glúteos'],
+    ['CHEST', 'Peito'],
+  ] as const)('preserves recoverable %s priority in gym 5x', (focus, label) => {
+    const strategy = new WorkoutPlanningStrategyService().build(
+      context(
+        recognized('GYM_STRENGTH', ['BARBELL', 'DUMBBELL'], {
+          frequency: 5,
+          objective: 'HYPERTROPHY',
+          experience: 'INTERMEDIATE',
+          muscleFocus: [focus],
+          environment: 'FULL_GYM',
+        }),
+      ),
+    );
+    const prioritySessions = strategy.sessionFocuses
+      .map((session, index) => (session.includes(label) ? index : -1))
+      .filter((index) => index >= 0);
+
+    expect(prioritySessions).toHaveLength(2);
+    expect(prioritySessions[1] - prioritySessions[0]).toBeGreaterThan(1);
+  });
+
+  it('uses a conservative distribution when returning after a break', () => {
+    const base = context(
+      recognized('GYM_STRENGTH', ['BARBELL'], {
+        frequency: 5,
+        objective: 'STRENGTH',
+        experience: 'ADVANCED',
+      }),
+    );
+    const returning: WorkoutPlanningContext = Object.freeze({
+      ...base,
+      training: Object.freeze({
+        ...base.training,
+        returningAfterBreak: Object.freeze({
+          status: 'CONFIRMED',
+          value: true,
+        }),
+      }),
+    });
+    const service = new WorkoutPlanningStrategyService();
+
+    expect(service.build(returning).sessionFocuses).not.toEqual(
+      service.build(base).sessionFocuses,
+    );
+    expect(service.build(returning).recoveryGuidance).toContain(
+      'distribuição conservadora',
+    );
+  });
+
+  it('differentiates CrossFit readiness at the same frequency', () => {
+    const service = new WorkoutPlanningStrategyService();
+    const beginner = service.build(
+      context(
+        recognized('CROSSFIT', ['BARBELL'], {
+          frequency: 4,
+          experience: 'BEGINNER',
+          conditioning: 'LOW',
+          environment: 'CROSSFIT_BOX',
+        }),
+      ),
+    );
+    const advanced = service.build(
+      context(
+        recognized('CROSSFIT', ['BARBELL'], {
+          frequency: 4,
+          experience: 'ADVANCED',
+          conditioning: 'HIGH',
+          environment: 'CROSSFIT_BOX',
+        }),
+      ),
+    );
+
+    expect(beginner.sessionFocuses).not.toEqual(advanced.sessionFocuses);
+    expect(beginner.sessionFocuses[0]).toContain('Fundamentos');
+    expect(advanced.sessionFocuses[0]).toContain('Levantamento técnico');
+  });
+
+  it('differentiates beginner and experienced running strategies', () => {
+    const service = new WorkoutPlanningStrategyService();
+    const beginner = service.build(
+      context(
+        recognized('RUNNING', ['BODYWEIGHT'], {
+          frequency: 4,
+          experience: 'BEGINNER',
+          conditioning: 'LOW',
+          objective: 'CONDITIONING',
+          environment: 'STREET',
+        }),
+      ),
+    );
+    const experienced = service.build(
+      context(
+        recognized('RUNNING', ['BODYWEIGHT'], {
+          frequency: 4,
+          experience: 'ADVANCED',
+          conditioning: 'HIGH',
+          objective: 'COMPLETE_DISTANCE',
+          currentRunningDistanceKm: 10,
+          targetDistanceKm: 21,
+          environment: 'STREET',
+        }),
+      ),
+    );
+
+    expect(beginner.sessionFocuses).not.toEqual(experienced.sessionFocuses);
+    expect(beginner.sessionFocuses[0]).toContain('Run/walk');
+    expect(experienced.sessionFocuses).toContain(
+      'Ritmo sustentável para progressão até 21 km',
     );
   });
 

@@ -18,6 +18,7 @@ import {
 } from './workout-planning-artifact.contract';
 import type {
   WorkoutEnvironment,
+  WorkoutEquipment,
   WorkoutExperienceLevel,
   WorkoutMovementConstraint,
   WorkoutMuscleFocus,
@@ -132,7 +133,7 @@ export class GenerateWorkoutPlanV2InputBuilder {
     snapshot: CoachProfileSnapshot,
     declared: WorkoutRecognizedContext,
   ): WorkoutRecognizedContext {
-    return Object.freeze({
+    return this.resolveFrequencyAvailabilityConflict({
       ...current,
       ...declared,
       artifactType:
@@ -166,14 +167,11 @@ export class GenerateWorkoutPlanV2InputBuilder {
     const environment = this.declaredEnvironment(text);
     const experience = this.declaredExperience(text);
     const objective = this.declaredObjective(text);
+    const objectives = this.declaredObjectives(text);
     const muscleFocus = this.declaredMuscleFocus(text);
     const distances = this.runningDistances(text);
-    const frequency = this.integer(
-      text,
-      /\b(\d)\s*(?:x|vezes?|dias?)\s*(?:por|na|esta)?\s*semana\b/u,
-      1,
-      7,
-    );
+    const targetEventDate = this.declaredEventDate(text);
+    const frequency = this.declaredFrequency(text);
     const duration = this.integer(
       text,
       /\b(\d{1,3})\s*(?:minutos?|min)\b/u,
@@ -183,7 +181,7 @@ export class GenerateWorkoutPlanV2InputBuilder {
     const safetySignals = this.safetySignals(text);
     const movementConstraints = this.movementConstraints(text);
 
-    return Object.freeze({
+    return this.resolveFrequencyAvailabilityConflict({
       modality: modality
         ? Object.freeze({ status: 'CONFIRMED' as const, value: modality })
         : undefined,
@@ -196,6 +194,13 @@ export class GenerateWorkoutPlanV2InputBuilder {
       objective: objective
         ? Object.freeze({ status: 'CONFIRMED' as const, value: objective })
         : undefined,
+      secondaryObjectives:
+        objectives.length > 1
+          ? Object.freeze({
+              status: 'CONFIRMED' as const,
+              value: Object.freeze(objectives.slice(1)),
+            })
+          : undefined,
       weeklyFrequency:
         frequency === null
           ? undefined
@@ -207,12 +212,8 @@ export class GenerateWorkoutPlanV2InputBuilder {
         duration === null
           ? undefined
           : Object.freeze({ status: 'CONFIRMED' as const, value: duration }),
-      equipment: /\b(sem equipamento|nenhum equipamento)\b/u.test(text)
-        ? Object.freeze({
-            status: 'CONFIRMED' as const,
-            value: Object.freeze([]),
-          })
-        : undefined,
+      availableTrainingDays: this.declaredTrainingDays(text),
+      equipment: this.declaredEquipment(text),
       muscleFocus:
         muscleFocus.length > 0
           ? Object.freeze({
@@ -234,9 +235,36 @@ export class GenerateWorkoutPlanV2InputBuilder {
               status: 'CONFIRMED' as const,
               value: distances.current,
             }),
+      targetEventDate: targetEventDate
+        ? Object.freeze({
+            status: 'CONFIRMED' as const,
+            value: targetEventDate,
+          })
+        : undefined,
       movementConstraints,
       safetySignals,
     });
+  }
+
+  private resolveFrequencyAvailabilityConflict(
+    context: WorkoutRecognizedContext,
+  ): WorkoutRecognizedContext {
+    const frequency = context.weeklyFrequency;
+    const days = context.availableTrainingDays;
+    if (
+      frequency?.status === 'CONFIRMED' &&
+      days?.status === 'CONFIRMED' &&
+      days.value.length < frequency.value
+    ) {
+      return Object.freeze({
+        ...context,
+        weeklyFrequency: Object.freeze({
+          status: 'REQUIRES_CONFIRMATION' as const,
+          value: frequency.value,
+        }),
+      });
+    }
+    return Object.freeze(context);
   }
 
   private modality(
@@ -268,7 +296,7 @@ export class GenerateWorkoutPlanV2InputBuilder {
       return WORKOUT_MODALITY.FUNCTIONAL;
     if (/\bcalistenia\b/u.test(text)) return WORKOUT_MODALITY.CALISTHENICS;
     if (/\bmobilidade\b/u.test(text)) return WORKOUT_MODALITY.MOBILITY;
-    if (/\b(em casa|treino em casa|home workout)\b/u.test(text))
+    if (/\b(em casa|treino em casa|home workout|peso corporal)\b/u.test(text))
       return WORKOUT_MODALITY.HOME_WORKOUT;
     return undefined;
   }
@@ -294,10 +322,19 @@ export class GenerateWorkoutPlanV2InputBuilder {
   }
 
   private declaredObjective(text: string): WorkoutObjective | undefined {
-    if (/\b(hipertrofia|ganhar massa|massa muscular)\b/u.test(text))
+    if (
+      /\b(hipertrofia|ganhar massa|ganho de massa|massa magra|massa muscular)\b/u.test(
+        text,
+      )
+    )
       return 'HYPERTROPHY';
     if (/\b(forca|ficar mais forte)\b/u.test(text)) return 'STRENGTH';
-    if (/\b(emagrecer|perder peso)\b/u.test(text)) return 'WEIGHT_LOSS';
+    if (
+      /\b(emagrecer|perder peso|perder gordura|reducao de gordura)\b/u.test(
+        text,
+      )
+    )
+      return 'WEIGHT_LOSS';
     if (
       /\b(cardio|aerobico|aerobica|condicionamento|comecar a correr)\b/u.test(
         text,
@@ -305,9 +342,189 @@ export class GenerateWorkoutPlanV2InputBuilder {
     )
       return 'CONDITIONING';
     if (/\b(mobilidade)\b/u.test(text)) return 'MOBILITY';
+    if (/\b(recuperacao ativa)\b/u.test(text)) return 'ACTIVE_RECOVERY';
+    if (/\b(saude|qualidade de vida|bem-estar|bem estar)\b/u.test(text))
+      return 'GENERAL_HEALTH';
     return this.runningDistances(text).target === null
       ? undefined
       : 'COMPLETE_DISTANCE';
+  }
+
+  private declaredObjectives(text: string): readonly WorkoutObjective[] {
+    const objectives: WorkoutObjective[] = [];
+    const add = (objective: WorkoutObjective): void => {
+      if (!objectives.includes(objective)) objectives.push(objective);
+    };
+    if (
+      /\b(hipertrofia|ganhar massa|ganho de massa|massa magra|massa muscular)\b/u.test(
+        text,
+      )
+    )
+      add('HYPERTROPHY');
+    if (
+      /\b(emagrecer|perder peso|perder gordura|reducao de gordura)\b/u.test(
+        text,
+      )
+    )
+      add('WEIGHT_LOSS');
+    if (/\b(forca|ficar mais forte)\b/u.test(text)) add('STRENGTH');
+    if (/\b(condicionamento|melhorar o cardio)\b/u.test(text))
+      add('CONDITIONING');
+    if (/\brecuperacao ativa\b/u.test(text)) add('ACTIVE_RECOVERY');
+    if (/\b(saude|qualidade de vida|bem-estar|bem estar)\b/u.test(text))
+      add('GENERAL_HEALTH');
+    return Object.freeze(objectives);
+  }
+
+  private declaredFrequency(text: string): number | null {
+    const numeric = this.integer(
+      text,
+      /\b([1-7])\s*(?:x|vezes?|dias?)(?:\s*(?:por|na|esta)?\s*semana)?\b/u,
+      1,
+      7,
+    );
+    if (numeric !== null) return numeric;
+    const words: Readonly<Record<string, number>> = Object.freeze({
+      uma: 1,
+      duas: 2,
+      tres: 3,
+      quatro: 4,
+      cinco: 5,
+      seis: 6,
+      sete: 7,
+    });
+    const word =
+      /\b(uma|duas|tres|quatro|cinco|seis|sete)\s+(?:vezes?|dias?)(?:\s*(?:por|na|esta)?\s*semana)?\b/u.exec(
+        text,
+      )?.[1];
+    return word ? words[word] : null;
+  }
+
+  private declaredTrainingDays(
+    text: string,
+  ): WorkoutPlanningValue<readonly string[]> | undefined {
+    const weekdays: Array<readonly [string, RegExp]> = [
+      ['MONDAY', /\bsegunda(?:-feira)?\b/u],
+      ['TUESDAY', /\bterca(?:-feira)?\b/u],
+      ['WEDNESDAY', /\bquarta(?:-feira)?\b/u],
+      ['THURSDAY', /\bquinta(?:-feira)?\b/u],
+      ['FRIDAY', /\bsexta(?:-feira)?\b/u],
+      ['SATURDAY', /\bsabado\b/u],
+      ['SUNDAY', /\bdomingo\b/u],
+    ];
+    const positive = new Set<string>();
+    const denied = new Set<string>();
+    let mentioned = false;
+    for (const clause of this.declarationClauses(text)) {
+      const uncertain =
+        /\b(talvez|acho que|nao sei se|possivelmente|provavelmente|depende|ou)\b/u.test(
+          clause,
+        );
+      const negative =
+        /\b(nao posso|nao consigo|nao treino|indisponivel|sem disponibilidade|menos|exceto)\b/u.test(
+          clause,
+        );
+      const available =
+        /\b(posso|consigo treinar|treino|disponivel|tenho disponibilidade|da para treinar)\b/u.test(
+          clause,
+        );
+      for (const [weekday, pattern] of weekdays) {
+        if (!pattern.test(clause)) continue;
+        mentioned = true;
+        if (negative) denied.add(weekday);
+        else if (available && !uncertain) positive.add(weekday);
+      }
+    }
+    const values = weekdays
+      .map(([weekday]) => weekday)
+      .filter((weekday) => positive.has(weekday) && !denied.has(weekday));
+    if (values.length > 0) {
+      return Object.freeze({
+        status: 'CONFIRMED' as const,
+        value: Object.freeze(values),
+      });
+    }
+    return mentioned
+      ? Object.freeze({
+          status: 'REQUIRES_CONFIRMATION' as const,
+          value: Object.freeze([]),
+        })
+      : undefined;
+  }
+
+  private declaredEquipment(
+    text: string,
+  ): WorkoutPlanningValue<readonly WorkoutEquipment[]> | undefined {
+    const terms: Array<readonly [WorkoutEquipment, RegExp]> = [
+      ['DUMBBELL', /\b(halteres?|dumbbells?)\b/u],
+      ['RESISTANCE_BAND', /\b(elastico|faixa elastica|resistance band)\b/u],
+      ['KETTLEBELL', /\bkettlebell\b/u],
+      ['PULL_UP_BAR', /\bbarra fixa\b/u],
+      ['BARBELL', /\bbarra(?! fixa)(?: olimpica)?\b/u],
+      ['MACHINE', /\b(maquinas?|aparelhos?)\b/u],
+      ['CABLE', /\b(cabos?|polia)\b/u],
+      ['BENCH', /\bbanco\b/u],
+      ['BODYWEIGHT', /\b(peso corporal|sem carga)\b/u],
+    ];
+    const positive = new Set<WorkoutEquipment>();
+    const denied = new Set<WorkoutEquipment>();
+    const noEquipment =
+      /\b(?:sem (?:equipamentos?|aparelhos?)|(?:nao tenho )?nenhum (?:equipamento|aparelho)|nao tenho aparelhos?(?: de academia)?)\b/u.test(
+        text,
+      );
+    let mentioned = false;
+    for (const clause of this.declarationClauses(text)) {
+      const uncertain =
+        /\b(talvez|acho que|nao sei se|possivelmente|provavelmente)\b/u.test(
+          clause,
+        );
+      const negative =
+        /\b(nao tenho|nao uso|nao ha|indisponivel|sem|falta)\b/u.test(clause);
+      const available =
+        /\b(tenho|temos|uso|utilizo|com|disponivel|disponiveis|acesso a|conto com|so)\b/u.test(
+          clause,
+        );
+      for (const [equipment, pattern] of terms) {
+        if (!pattern.test(clause)) continue;
+        mentioned = true;
+        if (negative) denied.add(equipment);
+        else if (available && !uncertain) positive.add(equipment);
+      }
+    }
+    const equipment = terms
+      .map(([value]) => value)
+      .filter((value) => positive.has(value) && !denied.has(value));
+    if (equipment.length === 0) {
+      if (noEquipment) {
+        return Object.freeze({
+          status: 'CONFIRMED' as const,
+          value: Object.freeze(['BODYWEIGHT' as const]),
+        });
+      }
+      return mentioned
+        ? Object.freeze({
+            status: 'REQUIRES_CONFIRMATION' as const,
+            value: Object.freeze([]),
+          })
+        : undefined;
+    }
+    if (/\b(em casa|casa)\b/u.test(text) && !denied.has('BODYWEIGHT'))
+      equipment.push('BODYWEIGHT');
+    return Object.freeze({
+      status: 'CONFIRMED' as const,
+      value: Object.freeze([...new Set(equipment)]),
+    });
+  }
+
+  private declarationClauses(text: string): readonly string[] {
+    return Object.freeze(
+      text
+        .split(
+          /[.;!?]+|\bmas\b|\bporem\b|\be\s+(?=nao\b)|,\s*(?=(?:nao|so(?: tenho)?|tenho|menos|exceto|posso|consigo)\b)|(?=\bmenos\b)|(?=\bexceto\b)|(?=\bsem\b)/u,
+        )
+        .map((clause) => clause.trim())
+        .filter(Boolean),
+    );
   }
 
   private declaredMuscleFocus(text: string): readonly WorkoutMuscleFocus[] {
@@ -350,6 +567,24 @@ export class GenerateWorkoutPlanV2InputBuilder {
       /\b(?:chegar a|prova de|correr)\s*(\d+(?:[.,]\d+)?)\s*km\b/u,
     );
     return Object.freeze({ current, target });
+  }
+
+  private declaredEventDate(text: string): string | null {
+    const iso = /\b(20\d{2})-(0[1-9]|1[0-2])-([0-2]\d|3[01])\b/u.exec(text);
+    const brazilian =
+      /\b(?:prova|evento)?\s*(?:em|no dia|dia)?\s*([0-2]?\d|3[01])[/-](0?\d|1[0-2])[/-](20\d{2})\b/u.exec(
+        text,
+      );
+    const year = Number(iso?.[1] ?? brazilian?.[3]);
+    const month = Number(iso?.[2] ?? brazilian?.[2]);
+    const day = Number(iso?.[3] ?? brazilian?.[1]);
+    if (!year || !month || !day) return null;
+    const value = new Date(Date.UTC(year, month - 1, day));
+    return value.getUTCFullYear() === year &&
+      value.getUTCMonth() === month - 1 &&
+      value.getUTCDate() === day
+      ? `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+      : null;
   }
 
   private decimal(text: string, pattern: RegExp): number | null {

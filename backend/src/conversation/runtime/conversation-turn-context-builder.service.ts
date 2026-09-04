@@ -66,7 +66,11 @@ export class ConversationTurnContextBuilderService {
           select: {
             messages: {
               where: { id: { not: input.messageId }, type: MessageType.TEXT },
-              select: { direction: true, content: true, timestamp: true },
+              select: {
+                direction: true,
+                content: true,
+                timestamp: true,
+              },
               orderBy: [{ timestamp: 'desc' }, { id: 'desc' }],
               take: 8,
             },
@@ -75,13 +79,22 @@ export class ConversationTurnContextBuilderService {
         this.prisma.scheduledMessage.findMany({
           where: {
             userId: input.userId,
+            conversationId: input.conversationId,
             status: ScheduledMessageStatus.SENT,
             scheduledFor: {
               gte: new Date(referenceDate.getTime() - 48 * 60 * 60 * 1_000),
               lt: referenceDate,
             },
           },
-          select: { content: true, scheduledFor: true },
+          select: {
+            id: true,
+            content: true,
+            context: true,
+            externalMessageId: true,
+            scheduledFor: true,
+            automationRule: { select: { code: true } },
+            coachMessage: { select: { context: true } },
+          },
           orderBy: [{ scheduledFor: 'desc' }, { id: 'desc' }],
           take: 8,
         }),
@@ -104,12 +117,27 @@ export class ConversationTurnContextBuilderService {
         content: message.content,
         timestamp: message.timestamp,
         priority: 0,
+        externalMessageId: null,
+        replyToExternalMessageId: null,
+        scheduledMessageId: null,
+        source: null,
+        automationRuleCode: null,
+        structuredContext: null,
       })),
       ...scheduledMessages.map((message) => ({
         direction: MessageDirection.OUTBOUND,
         content: message.content,
         timestamp: message.scheduledFor,
         priority: 1,
+        externalMessageId: message.externalMessageId,
+        replyToExternalMessageId: null,
+        scheduledMessageId: message.id,
+        source: this.contextSource(message.context),
+        automationRuleCode:
+          message.automationRule?.code ?? this.contextRuleCode(message.context),
+        structuredContext: this.contextRecord(
+          message.coachMessage?.context ?? message.context,
+        ),
       })),
     ]
       .sort(
@@ -134,6 +162,12 @@ export class ConversationTurnContextBuilderService {
         direction: message.direction,
         text: message.content,
         occurredAt: message.timestamp.toISOString(),
+        externalMessageId: message.externalMessageId,
+        replyToExternalMessageId: message.replyToExternalMessageId,
+        scheduledMessageId: message.scheduledMessageId,
+        source: message.source,
+        automationRuleCode: message.automationRuleCode,
+        structuredContext: message.structuredContext,
       }),
     );
     const currentLogicalTurn = Math.max(
@@ -168,6 +202,7 @@ export class ConversationTurnContextBuilderService {
       channel: 'WHATSAPP' as const,
       text: input.text,
       receivedAt: input.receivedAt,
+      replyToExternalMessageId: input.replyToExternalMessageId ?? null,
       profile,
       collector: this.collectorAdapter.adapt(adaptiveDecision),
       recentHistory: Object.freeze(history),
@@ -213,5 +248,23 @@ export class ConversationTurnContextBuilderService {
     intent: ConversationLegacyIntent,
   ): 'DIET' | 'WORKOUT' | 'BOTH' | null {
     return intent === 'UNKNOWN' ? null : intent;
+  }
+
+  private contextRecord(
+    value: unknown,
+  ): Readonly<Record<string, unknown>> | null {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? Object.freeze({ ...(value as Record<string, unknown>) })
+      : null;
+  }
+
+  private contextSource(value: unknown): string | null {
+    const context = this.contextRecord(value);
+    return typeof context?.source === 'string' ? context.source : null;
+  }
+
+  private contextRuleCode(value: unknown): string | null {
+    const context = this.contextRecord(value);
+    return typeof context?.ruleCode === 'string' ? context.ruleCode : null;
   }
 }

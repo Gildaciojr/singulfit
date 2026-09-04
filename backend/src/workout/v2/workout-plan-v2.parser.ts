@@ -17,6 +17,7 @@ import type {
 import type {
   WorkoutEquipment,
   WorkoutMovementConstraint,
+  WorkoutObjective,
 } from './workout-planning-context.contract';
 import type { WorkoutBlockType } from './workout-planning-strategy.contract';
 
@@ -47,6 +48,16 @@ const BLOCKS: readonly WorkoutBlockType[] = [
   'CORE',
   'COOLDOWN',
   'RECOVERY',
+];
+const OBJECTIVES: readonly WorkoutObjective[] = [
+  'WEIGHT_LOSS',
+  'HYPERTROPHY',
+  'STRENGTH',
+  'CONDITIONING',
+  'GENERAL_HEALTH',
+  'MOBILITY',
+  'ACTIVE_RECOVERY',
+  'COMPLETE_DISTANCE',
 ];
 const ARTIFACTS: readonly WorkoutArtifactType[] = Object.values(
   WORKOUT_ARTIFACT_TYPE,
@@ -93,6 +104,7 @@ export class WorkoutPlanV2Parser {
         'artifactType',
         'modality',
         'objective',
+        'secondaryObjectives',
         'title',
         'sessions',
         'progression',
@@ -118,6 +130,12 @@ export class WorkoutPlanV2Parser {
           'COMPLETE_DISTANCE',
         ],
         'objective',
+      ),
+      secondaryObjectives: Object.freeze(
+        this.array(root.secondaryObjectives ?? [], 'secondaryObjectives').map(
+          (objective) =>
+            this.oneOf(objective, OBJECTIVES, 'secondaryObjectives'),
+        ),
       ),
       title: this.text(root.title, 'title'),
       sessions: Object.freeze(

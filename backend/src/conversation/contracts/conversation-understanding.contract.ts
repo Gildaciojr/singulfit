@@ -28,6 +28,7 @@ export interface ConversationUnderstandingInput {
   readonly channel: ConversationChannel;
   readonly text: string;
   readonly receivedAt: string;
+  readonly replyToExternalMessageId?: string | null;
   readonly profile: ConversationProfileContext;
   readonly collector: ConversationCollectorContext | null;
   readonly recentHistory: readonly ConversationHistoryEntry[];

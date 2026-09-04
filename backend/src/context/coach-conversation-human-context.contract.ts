@@ -13,6 +13,10 @@ export interface CoachConversationHumanMemory {
 export interface CoachConversationRecentTurn {
   readonly direction: 'USER' | 'COACH';
   readonly text: string;
+  readonly origin?: Readonly<{
+    source: string | null;
+    automationRuleCode: string | null;
+  }>;
 }
 
 export type CoachConversationTurnCue =
@@ -74,5 +78,7 @@ export interface CoachConversationHumanContextBuildInput {
   readonly recentHistory?: readonly {
     readonly direction: 'INBOUND' | 'OUTBOUND';
     readonly text: string;
+    readonly source?: string | null;
+    readonly automationRuleCode?: string | null;
   }[];
 }

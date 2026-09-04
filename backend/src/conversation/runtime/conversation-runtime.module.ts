@@ -22,6 +22,7 @@ import { ConversationPublicAnswerBoundaryService } from './conversation-public-a
 import { ConversationQAExecutorService } from './conversation-qa-executor.service';
 import { ConversationQAFollowUpContextService } from './conversation-qa-follow-up-context.service';
 import { ConversationNutritionDeterministicAnswerService } from './conversation-nutrition-deterministic-answer.service';
+import { WorkoutModule } from '../../workout/workout.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { ConversationNutritionDeterministicAnswerService } from './conversation-
     ConversationModule,
     AIModule,
     DietModule,
+    WorkoutModule,
   ],
   providers: [
     ConversationRuntimeOperationalConfigService,

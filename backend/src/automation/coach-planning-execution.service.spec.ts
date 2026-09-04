@@ -25,6 +25,8 @@ describe('CoachPlanningExecutionService', () => {
   it.each([
     ['Qual é meu treino atual?', 'UNKNOWN'],
     ['Qual é meu treino de hoje?', 'UNKNOWN'],
+    ['Sessão 1', 'UNKNOWN'],
+    ['Quero os exercícios da sessão 3', 'UNKNOWN'],
   ] as const)(
     'routes "%s" to the canonical Workout reader before preparation',
     async (currentMessage, intent) => {

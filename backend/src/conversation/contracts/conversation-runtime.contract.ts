@@ -31,6 +31,7 @@ export interface ConversationRuntimeInput {
   readonly messageId: string;
   readonly text: string;
   readonly receivedAt: string;
+  readonly replyToExternalMessageId?: string | null;
   readonly legacyIntent: ConversationLegacyIntent;
   readonly profileId?: string;
 }

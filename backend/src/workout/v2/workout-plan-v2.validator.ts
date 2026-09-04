@@ -21,6 +21,14 @@ export class WorkoutPlanV2Validator {
       this.add(issues, 'ARTIFACT_MISMATCH', 'ERROR', 'artifactType');
     if (candidate.modality !== strategy.modality)
       this.add(issues, 'MODALITY_MISMATCH', 'ERROR', 'modality');
+    if (
+      (strategy.objective.status !== 'NOT_SET' &&
+        candidate.objective !== strategy.objective.value) ||
+      strategy.secondaryObjectives.some(
+        (objective) => !candidate.secondaryObjectives?.includes(objective),
+      )
+    )
+      this.add(issues, 'OBJECTIVE_MISMATCH', 'ERROR', 'objective');
     if (candidate.sessions.length !== strategy.sessionCount)
       this.add(issues, 'SESSION_COUNT_MISMATCH', 'ERROR', 'sessions');
     const keys = new Set<string>();

@@ -536,6 +536,9 @@ describe('CurrentWorkoutPlanReaderService', () => {
       service.present('user-id', 'Me mostra o treino 3', new Date()),
     ).resolves.toContain('Sessão 3: Costas');
     await expect(
+      service.present('user-id', 'Me mostra o treino 3', new Date()),
+    ).resolves.toMatch(/3 × 10[\s\S]*Descanso: 60 s[\s\S]*Equipamento:/u);
+    await expect(
       service.present('user-id', 'Qual meu treino de peito?', new Date()),
     ).resolves.toContain('Sessão 2: Peito');
   });

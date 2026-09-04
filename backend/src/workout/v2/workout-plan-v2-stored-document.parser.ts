@@ -48,6 +48,7 @@ export class WorkoutPlanV2StoredDocumentParser {
           artifactType: value.artifactType,
           modality: value.modality,
           objective: value.objective,
+          secondaryObjectives: value.secondaryObjectives ?? [],
           title: value.title,
           sessions: value.sessions,
           progression: value.progression,

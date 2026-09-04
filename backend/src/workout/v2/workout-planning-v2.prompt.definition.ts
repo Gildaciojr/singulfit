@@ -1,17 +1,194 @@
 import type { Prisma } from '@prisma/client';
 import type { OpenAIJsonSchema } from '../../ai/interfaces/openai.interface';
 
+const objectiveValues = [
+  'WEIGHT_LOSS',
+  'HYPERTROPHY',
+  'STRENGTH',
+  'CONDITIONING',
+  'GENERAL_HEALTH',
+  'MOBILITY',
+  'ACTIVE_RECOVERY',
+  'COMPLETE_DISTANCE',
+] as const;
+
+const activityBase = {
+  activityKey: { type: 'string' },
+  name: { type: 'string' },
+  source: { type: 'string', enum: ['MODEL_GENERATED'] },
+  movementPattern: {
+    type: 'string',
+    enum: [
+      'SQUAT',
+      'HINGE',
+      'PUSH',
+      'PULL',
+      'CARRY',
+      'LOCOMOTION',
+      'ROTATION',
+      'CORE',
+      'MOBILITY',
+      'OTHER',
+    ],
+  },
+  equipment: {
+    type: 'array',
+    items: {
+      type: 'string',
+      enum: [
+        'BARBELL',
+        'DUMBBELL',
+        'KETTLEBELL',
+        'MACHINE',
+        'CABLE',
+        'BENCH',
+        'PULL_UP_BAR',
+        'RESISTANCE_BAND',
+        'BODYWEIGHT',
+        'BIKE',
+        'TREADMILL',
+        'ROW_ERGOMETER',
+      ],
+    },
+  },
+  instruction: { type: 'string' },
+  alerts: { type: 'array', items: { type: 'string' } },
+  appliedConstraintCodes: {
+    type: 'array',
+    items: {
+      type: 'string',
+      enum: [
+        'KNEE_LOAD',
+        'HIP_HINGE',
+        'OVERHEAD',
+        'IMPACT',
+        'SPINAL_LOAD',
+        'CUSTOM',
+      ],
+    },
+  },
+} as const;
+
+const activityBaseRequired = [
+  'activityKey',
+  'name',
+  'source',
+  'movementPattern',
+  'equipment',
+  'instruction',
+  'alerts',
+  'appliedConstraintCodes',
+] as const;
+
+const activitySchema = {
+  anyOf: [
+    {
+      type: 'object',
+      properties: {
+        ...activityBase,
+        kind: { type: 'string', enum: ['STRENGTH'] },
+        sets: { type: 'integer', minimum: 1, maximum: 20 },
+        repetitions: { type: 'string' },
+        restSeconds: { type: 'integer', minimum: 0, maximum: 600 },
+        intensity: { type: 'string', enum: ['LIGHT', 'MODERATE', 'HIGH'] },
+      },
+      required: [
+        ...activityBaseRequired,
+        'kind',
+        'sets',
+        'repetitions',
+        'restSeconds',
+        'intensity',
+      ],
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      properties: {
+        ...activityBase,
+        kind: { type: 'string', enum: ['TIMED'] },
+        durationSeconds: { type: 'integer', minimum: 1, maximum: 7200 },
+        workSeconds: { type: ['integer', 'null'], minimum: 1, maximum: 3600 },
+        recoverySeconds: {
+          type: ['integer', 'null'],
+          minimum: 0,
+          maximum: 3600,
+        },
+        rounds: { type: 'integer', minimum: 1, maximum: 50 },
+        intensity: { type: 'string', enum: ['LIGHT', 'MODERATE', 'HIGH'] },
+      },
+      required: [
+        ...activityBaseRequired,
+        'kind',
+        'durationSeconds',
+        'workSeconds',
+        'recoverySeconds',
+        'rounds',
+        'intensity',
+      ],
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      properties: {
+        ...activityBase,
+        kind: { type: 'string', enum: ['ENDURANCE'] },
+        mode: { type: 'string', enum: ['RUN', 'WALK', 'CYCLE'] },
+        durationMinutes: { type: 'integer', minimum: 1, maximum: 300 },
+        distanceKm: { type: ['number', 'null'], minimum: 0, maximum: 500 },
+        intensity: {
+          type: 'string',
+          enum: ['LIGHT', 'MODERATE', 'HIGH', 'CONVERSATIONAL'],
+        },
+      },
+      required: [
+        ...activityBaseRequired,
+        'kind',
+        'mode',
+        'durationMinutes',
+        'distanceKm',
+        'intensity',
+      ],
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      properties: {
+        ...activityBase,
+        kind: { type: 'string', enum: ['MOBILITY'] },
+        repetitions: { type: ['string', 'null'] },
+        holdSeconds: { type: ['integer', 'null'], minimum: 1, maximum: 600 },
+        durationSeconds: {
+          type: ['integer', 'null'],
+          minimum: 1,
+          maximum: 3600,
+        },
+      },
+      required: [
+        ...activityBaseRequired,
+        'kind',
+        'repetitions',
+        'holdSeconds',
+        'durationSeconds',
+      ],
+      additionalProperties: false,
+    },
+  ],
+} as const;
+
 export const WORKOUT_PLANNING_V2_PROMPT = Object.freeze({
   name: 'workout_planning_v2',
-  version: 2,
+  version: 3,
   capability: 'WORKOUT_PLANNING_V2',
   model: 'TEXT' as const,
   instructions: `Você preenche um artefato estruturado de treino usando exclusivamente o contexto e a estratégia autorizados.
 Não altere artefato, modalidade, objetivo, frequência, duração, ambiente, equipamentos, limitações, intensidade ou progressão definidos na estratégia.
+Preserve todos os secondaryObjectives. O objetivo primário define a prioridade, mas objetivos secundários precisam influenciar a distribuição sem desaparecer.
 Use sexo somente como um fator contextual quando estiver disponível. Nunca derive foco muscular, divisão semanal ou seleção de exercícios de estereótipos de gênero.
 Preferências e foco muscular explicitamente confirmados prevalecem sobre inferências antigas, sempre subordinados à segurança. Não presuma gravidez, pós-parto, ciclo menstrual, menopausa, uso hormonal ou qualquer condição fisiológica ou clínica.
 Especialize cada sessão pela modalidade, objetivo e experiência. Distribua volume, recuperação e foco entre as sessões conforme a frequência e os dias disponíveis; não repita full-body indiscriminadamente quando uma divisão mais coerente estiver autorizada.
 Em musculação, respeite foco muscular, equipamento e duração sem inventar carga. Em cardio doméstico, produza condicionamento executável e não transforme STRENGTH ou HYPERTROPHY em bloco obrigatório.
+Uma sessão de musculação deve ser executável e detalhada: cada atividade STRENGTH precisa de séries, repetições, descanso, equipamento autorizado, intensidade e instrução curta e útil. Use nomes comuns em português.
 Em CrossFit, preserve WARM_UP, TECHNIQUE, CONDITIONING e COOLDOWN; iniciantes recebem movimentos simples e scaling, e movimentos técnicos avançados exigem autorização da estratégia.
 Em corrida, respeite distância atual e alvo confirmados. Para iniciantes, use progressão conservadora e run/walk quando apropriado, sem inventar capacidade, pace ou data de prova.
 Todo exercício deve declarar source MODEL_GENERATED. Não alegue catálogo canônico.
@@ -62,28 +239,173 @@ Retorne somente JSON válido no schema solicitado.`,
         },
         objective: {
           type: 'string',
-          enum: [
-            'WEIGHT_LOSS',
-            'HYPERTROPHY',
-            'STRENGTH',
-            'CONDITIONING',
-            'GENERAL_HEALTH',
-            'MOBILITY',
-            'ACTIVE_RECOVERY',
-            'COMPLETE_DISTANCE',
-          ],
+          enum: objectiveValues,
+        },
+        secondaryObjectives: {
+          type: 'array',
+          items: { type: 'string', enum: objectiveValues },
         },
         title: { type: 'string' },
-        sessions: { type: 'array', items: { type: 'object' } },
-        progression: { type: 'array', items: { type: 'object' } },
-        substitutions: { type: 'array', items: { type: 'object' } },
+        sessions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              sessionKey: { type: 'string' },
+              sequence: { type: 'integer', minimum: 1, maximum: 7 },
+              label: { type: 'string' },
+              estimatedDurationMinutes: {
+                type: 'integer',
+                minimum: 1,
+                maximum: 300,
+              },
+              blocks: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    blockKey: { type: 'string' },
+                    type: {
+                      type: 'string',
+                      enum: [
+                        'WARM_UP',
+                        'MOBILITY',
+                        'TECHNIQUE',
+                        'STRENGTH',
+                        'HYPERTROPHY',
+                        'SKILL',
+                        'CONDITIONING',
+                        'INTERVAL',
+                        'ENDURANCE',
+                        'CORE',
+                        'COOLDOWN',
+                        'RECOVERY',
+                      ],
+                    },
+                    title: { type: 'string' },
+                    estimatedDurationMinutes: {
+                      type: 'integer',
+                      minimum: 1,
+                      maximum: 180,
+                    },
+                    activities: { type: 'array', items: activitySchema },
+                  },
+                  required: [
+                    'blockKey',
+                    'type',
+                    'title',
+                    'estimatedDurationMinutes',
+                    'activities',
+                  ],
+                  additionalProperties: false,
+                },
+              },
+            },
+            required: [
+              'sessionKey',
+              'sequence',
+              'label',
+              'estimatedDurationMinutes',
+              'blocks',
+            ],
+            additionalProperties: false,
+          },
+        },
+        progression: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              ruleKey: { type: 'string' },
+              state: {
+                type: 'string',
+                enum: [
+                  'MAINTAIN',
+                  'PROGRESS',
+                  'REGRESS',
+                  'DELOAD',
+                  'REASSESS',
+                  'PAUSE',
+                ],
+              },
+              conditionCode: { type: 'string' },
+              actionCode: { type: 'string' },
+              maximumChangePercent: {
+                type: 'integer',
+                minimum: 0,
+                maximum: 100,
+              },
+            },
+            required: [
+              'ruleKey',
+              'state',
+              'conditionCode',
+              'actionCode',
+              'maximumChangePercent',
+            ],
+            additionalProperties: false,
+          },
+        },
+        substitutions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              substitutionKey: { type: 'string' },
+              sourceActivityKey: { type: 'string' },
+              alternativeActivityKey: { type: 'string' },
+              reason: {
+                type: 'string',
+                enum: [
+                  'EQUIPMENT',
+                  'LIMITATION',
+                  'ENVIRONMENT',
+                  'REGRESSION',
+                  'PREFERENCE',
+                ],
+              },
+              functionPreserved: { type: 'boolean' },
+              confirmationRequired: { type: 'boolean' },
+            },
+            required: [
+              'substitutionKey',
+              'sourceActivityKey',
+              'alternativeActivityKey',
+              'reason',
+              'functionPreserved',
+              'confirmationRequired',
+            ],
+            additionalProperties: false,
+          },
+        },
         adaptationRules: { type: 'array', items: { type: 'string' } },
-        safetyFlags: { type: 'array', items: { type: 'string' } },
+        safetyFlags: {
+          type: 'array',
+          items: {
+            type: 'string',
+            enum: [
+              'ACUTE_PAIN',
+              'FEVER',
+              'SIGNIFICANT_MALAISE',
+              'RECENT_INJURY',
+              'REPORTED_INCAPACITY',
+              'INSUFFICIENT_RECOVERY',
+              'CLINICAL_CONTEXT',
+              'PROFILE_CONFLICT',
+              'UNCONFIRMED_LIMITATION',
+              'EXTREME_REQUEST',
+              'REHABILITATION_REQUEST',
+              'RETURN_AFTER_LONG_PAUSE',
+              'TECHNICAL_MODALITY_WITHOUT_READINESS',
+            ],
+          },
+        },
       },
       required: [
         'artifactType',
         'modality',
         'objective',
+        'secondaryObjectives',
         'title',
         'sessions',
         'progression',
