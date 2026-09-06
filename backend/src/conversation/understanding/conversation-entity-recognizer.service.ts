@@ -232,7 +232,10 @@ export class ConversationEntityRecognizerService {
   }
 
   private hasPhrase(text: string, phrase: string): boolean {
-    return ` ${text} `.includes(` ${phrase} `);
+    const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+    return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, 'u').test(
+      text,
+    );
   }
 
   private unique(

@@ -324,6 +324,21 @@ export class ProfileAnswerRecognizerService {
     ) {
       return Object.freeze(['BODYWEIGHT']);
     }
+    if (
+      /(?:todos os equipamentos|todos os aparelhos|todos) (?:de|da|em) uma academia(?: comum| completa)?|academia completa/u.test(
+        value,
+      )
+    ) {
+      return Object.freeze([
+        'BARBELL',
+        'BENCH',
+        'CABLE',
+        'DUMBBELL',
+        'MACHINE',
+        'PULL_UP_BAR',
+        'TREADMILL',
+      ]);
+    }
     const matches: string[] = [];
     const options: readonly (readonly [string, RegExp])[] = [
       ['DUMBBELL', /halter/],

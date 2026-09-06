@@ -83,7 +83,18 @@ describe('GenerateWorkoutPlanV2InputBuilder', () => {
       }),
     );
     expect(declared.experience).toBeUndefined();
-    expect(declared.equipment).toBeUndefined();
+    expect(declared.equipment).toEqual({
+      status: 'INFERRED',
+      value: [
+        'BARBELL',
+        'BENCH',
+        'CABLE',
+        'DUMBBELL',
+        'MACHINE',
+        'PULL_UP_BAR',
+        'TREADMILL',
+      ],
+    });
     expect(declared.movementConstraints).toEqual([]);
     expect(declared.safetySignals).toEqual([]);
 
@@ -103,6 +114,84 @@ describe('GenerateWorkoutPlanV2InputBuilder', () => {
         sessionDurationMinutes: declared.sessionDurationMinutes,
       }),
     );
+  });
+
+  it.each([
+    ['Monte um treino para academia', 'GYM_STRENGTH', 'FULL_GYM'],
+    ['Quero musculação', 'GYM_STRENGTH', 'FULL_GYM'],
+    ['Academia 5 vezes por semana', 'GYM_STRENGTH', 'FULL_GYM'],
+    ['Treino em academia completa', 'GYM_STRENGTH', 'FULL_GYM'],
+    ['Monte um treino de CrossFit', 'CROSSFIT', 'CROSSFIT_BOX'],
+    ['Quero treinar CrossFit 4 vezes por semana', 'CROSSFIT', 'CROSSFIT_BOX'],
+    ['Quero treinar em casa', 'HOME_WORKOUT', 'HOME'],
+  ])('infers supported equipment for %s', (message, modality, environment) => {
+    const declared = builder.recognizeDeclaredContext(message);
+    expect(declared.modality?.value).toBe(modality);
+    expect(declared.environment?.value).toBe(environment);
+    expect(declared.equipment?.status).toBe('INFERRED');
+    expect(declared.equipment?.value.length).toBeGreaterThan(0);
+    if (environment === 'HOME')
+      expect(declared.equipment?.value).toEqual(['BODYWEIGHT']);
+  });
+
+  it.each([
+    ['Monte um treino de corrida', undefined],
+    ['Quero começar a correr', undefined],
+    ['Quero correr na rua', 'STREET'],
+    ['Quero me preparar para 5 km', undefined],
+    ['Corrida de rua 3 vezes por semana', 'STREET'],
+    ['Quero correr na estrada', 'ROAD'],
+    ['Quero correr na pista', 'TRACK'],
+  ])('recognizes running without equipment for %s', (message, environment) => {
+    const declared = builder.recognizeDeclaredContext(message);
+    expect(declared.modality?.value).toBe('RUNNING');
+    expect(declared.environment?.value).toBe(environment);
+    expect(declared.equipment).toBeUndefined();
+    if (message.includes('5 km'))
+      expect(declared.targetDistanceKm?.value).toBe(5);
+  });
+
+  it.each([
+    'academia pequena',
+    'academia do condomínio',
+    'academia do hotel',
+    'academia, não tem barra',
+    'academia, não tem máquina',
+    'academia, só tenho halteres',
+  ])('preserves limited equipment: %s', (message) => {
+    const declared = builder.recognizeDeclaredContext(message);
+    expect(declared.environment?.value).toBe('LIMITED_GYM');
+    expect(declared.equipment?.status).not.toBe('INFERRED');
+    expect(declared.equipment?.value ?? []).not.toContain('BARBELL');
+    expect(declared.equipment?.value ?? []).not.toContain('MACHINE');
+  });
+
+  it('preserves stored limited gym and equipment instead of widening to defaults', async () => {
+    const result = await builder.build({
+      userId: 'limited-user',
+      profileId: 'limited-profile',
+      referenceDate: new Date('2026-08-19T12:00:00Z'),
+      currentMessage: 'Monte um treino para academia',
+      snapshot: {
+        ...snapshot,
+        training: {
+          ...snapshot.training,
+          environment: { status: 'KNOWN', value: 'LIMITED_GYM', sources: [] },
+          availableEquipment: {
+            status: 'KNOWN',
+            value: ['DUMBBELL'],
+            sources: [],
+          },
+        },
+      },
+    });
+    expect(result.generationInput.recognizedContext.equipment).toBeUndefined();
+    expect(
+      result.generationInput.recognizedContext.environment,
+    ).toBeUndefined();
+    expect(
+      result.generationInput.snapshot.training.availableEquipment,
+    ).toMatchObject({ value: ['DUMBBELL'] });
   });
 
   it('does not invent an unavailable modality', async () => {
@@ -285,6 +374,20 @@ describe('GenerateWorkoutPlanV2InputBuilder', () => {
         modality: { status: 'CONFIRMED', value: 'GYM_STRENGTH' },
         environment: { status: 'CONFIRMED', value: 'FULL_GYM' },
         objective: { status: 'CONFIRMED', value: 'HYPERTROPHY' },
+        weeklyFrequency: { status: 'CONFIRMED', value: 5 },
+      }),
+    );
+  });
+
+  it('extracts Gym, full environment and frequency from the production phrase', () => {
+    expect(
+      builder.recognizeDeclaredContext(
+        'Treino em academia, monte um treino de 5 vezes na semana',
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        modality: { status: 'CONFIRMED', value: 'GYM_STRENGTH' },
+        environment: { status: 'CONFIRMED', value: 'FULL_GYM' },
         weeklyFrequency: { status: 'CONFIRMED', value: 5 },
       }),
     );

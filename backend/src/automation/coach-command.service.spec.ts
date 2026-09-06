@@ -1,3 +1,25 @@
+import { Test } from '@nestjs/testing';
+import { AIJobStatus, AIJobType } from '@prisma/client';
+import { AIService } from '../ai/ai.service';
+import { ConversationModule } from '../conversation/conversation.module';
+import { CoachConversationHumanContextBuilder } from '../context/coach-conversation-human-context.builder';
+import { goalPreparationInput } from '../conversation/tests/conversation-routing.fixtures';
+import { understandingInput } from '../conversation/tests/conversation-understanding.fixtures';
+import type { ConversationRuntimeInput } from '../conversation/contracts/conversation-runtime.contract';
+import { ConversationRuntimeService } from '../conversation/runtime/conversation-runtime.service';
+import { ConversationExecutionBridgeService } from '../conversation/runtime/conversation-execution-bridge.service';
+import { ConversationResponsePayloadBuilder } from '../conversation/runtime/conversation-response-payload.builder';
+import { ConversationLanguageRealizerService } from '../conversation/runtime/conversation-language-realizer.service';
+import { ConversationResponseFormatterService } from '../conversation/runtime/conversation-response-formatter.service';
+import { ConversationResponseValidatorService } from '../conversation/runtime/conversation-response-validator.service';
+import { ConversationOfficialSelectionService } from '../conversation/runtime/conversation-official-selection.service';
+import { ConversationShadowComparatorService } from '../conversation/runtime/conversation-shadow-comparator.service';
+import { ConversationRuntimeOperationalConfigService } from '../conversation/runtime/conversation-runtime-operational-config.service';
+import { ConversationRuntimeAuditService } from '../conversation/runtime/conversation-runtime-audit.service';
+import { ConversationTurnContextBuilderService } from '../conversation/runtime/conversation-turn-context-builder.service';
+import { ConversationQAExecutorService } from '../conversation/runtime/conversation-qa-executor.service';
+import { ConversationCurrentNutritionContextService } from '../conversation/runtime/conversation-current-nutrition-context.service';
+import { ConversationPublicAnswerBoundaryService } from '../conversation/runtime/conversation-public-answer-boundary.service';
 import {
   BadGatewayException,
   ForbiddenException,
@@ -293,6 +315,14 @@ describe('CoachCommandService', () => {
         cycleId: 'cycle-id',
         field: 'TRAINING_EXPERIENCE' as const,
       }),
+      requestProductiveClarification: jest.fn().mockResolvedValue({
+        executed: true,
+        questionCreated: true,
+        reason: 'QUESTION_PREPARED' as const,
+        mode: 'INTERNAL' as const,
+        cycleId: 'cycle-id',
+        field: 'DESIRED_MEAL_COUNT' as const,
+      }),
     };
     const currentWorkoutPlanReader = {
       read: jest.fn().mockResolvedValue(
@@ -467,7 +497,7 @@ describe('CoachCommandService', () => {
     expect(subject.service.classify(text)).toBe(intent);
   });
 
-  it('generates and schedules a diet command response', async () => {
+  it('never schedules a legacy diet generation when modern preparation is unavailable', async () => {
     const subject = createSubject({ content: 'quero uma dieta' });
 
     await expect(
@@ -482,13 +512,13 @@ describe('CoachCommandService', () => {
         intent: 'DIET',
       }),
     );
-    expect(subject.dietGenerator.generate).toHaveBeenCalledWith('user-id');
+    expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
     expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
     expect(subject.prisma.coachMessage.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           idempotencyKey: 'user-id:WHATSAPP_COACH_COMMAND:message-id',
-          content: expect.stringContaining('Plano alimentar'),
+          content: expect.stringContaining('Nenhum plano foi criado'),
         }),
       }),
     );
@@ -612,6 +642,48 @@ describe('CoachCommandService', () => {
     expect(subject.prisma.coachMessage.create).not.toHaveBeenCalled();
     expect(subject.eventBus.publish).not.toHaveBeenCalled();
     expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+  });
+
+  it('sends productive Nutrition acquisition for a public user without legacy generation', async () => {
+    const subject = createSubject({
+      content: 'monte um plano alimentar para mim',
+      workoutClarification: true,
+    });
+    jest
+      .spyOn(subject.planningExecution, 'executeStructured')
+      .mockResolvedValueOnce({
+        content: '',
+        responseRequired: true,
+        selectedSource: 'NUTRITION_V2',
+        decision: {
+          goal: 'ASK_PROFILE_INFORMATION',
+          targetPlan: 'DIET',
+        },
+        dispatch: {
+          content: '',
+          executor: 'PROFILE_ACQUISITION',
+          generationCompleted: false,
+          fallbackApplied: false,
+          workoutDisposition: 'CLARIFICATION',
+        },
+      } as never);
+
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+
+    expect(
+      subject.profileAcquisitionRollout.requestProductiveClarification,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-id',
+        sourceMessageId: 'message-id',
+        intent: 'DIET',
+      }),
+    );
+    expect(subject.prisma.coachMessage.create).not.toHaveBeenCalled();
+    expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
   });
 
   it('fails closed without sending an untracked Workout V2 clarification when acquisition is OFF', async () => {
@@ -789,7 +861,10 @@ describe('CoachCommandService', () => {
       subject.service.processTextMessage({
         userId: 'user-id',
         messageId: 'answer-message-id',
-        workoutContinuationMessageId: 'original-request-id',
+        planningContinuation: {
+          originalRequestMessageId: 'original-request-id',
+          intent: 'WORKOUT',
+        },
       }),
     ).resolves.toMatchObject({ intent: 'WORKOUT' });
 
@@ -809,7 +884,7 @@ describe('CoachCommandService', () => {
     expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
   });
 
-  it('generates both plans for a combined command', async () => {
+  it('does not invoke legacy candidates for a combined command', async () => {
     const subject = createSubject({ content: 'quero os dois' });
 
     await subject.service.processTextMessage({
@@ -817,18 +892,14 @@ describe('CoachCommandService', () => {
       messageId: 'message-id',
     });
 
-    expect(subject.dietGenerator.generateCandidate).toHaveBeenCalledWith(
-      'user-id',
-    );
-    expect(subject.workoutGenerator.generateCandidate).toHaveBeenCalledWith(
-      'user-id',
-    );
+    expect(subject.dietGenerator.generateCandidate).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
     expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
     expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
     expect(subject.prisma.coachMessage.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          content: expect.stringContaining('Plano alimentar'),
+          content: expect.any(String),
         }),
       }),
     );
@@ -884,7 +955,174 @@ describe('CoachCommandService', () => {
     expect(subject.eventBus.publish).toHaveBeenCalledTimes(1);
   });
 
-  it('executes the legacy branch exactly once after the runtime decides fallback', async () => {
+  it.each([
+    'O que posso comer no jantar hoje?',
+    'Qual meu jantar de hoje',
+    'Monte meu jantar de hoje',
+    'Monte uma refeição para meu jantar de hoje',
+    'Me indique um almoço para hoje',
+    'O que você sugere para o almoço?',
+    'Tenho treino à noite, o que posso jantar?',
+    'Posso trocar o arroz hoje só nessa refeição?',
+  ])(
+    'routes meal QA through real command/runtime/QA with no plan usage: %s',
+    async (content) => {
+      const answer =
+        'Para essa refeição, combine arroz, feijão, legumes e uma fonte de proteína conforme suas preferências.';
+      const subject = createSubject({ content, runtimeContent: 'enabled' });
+      const effects = installPersistentEffectHarness(subject);
+      const planning = jest.spyOn(subject.planningExecution, 'execute');
+      const base = goalPreparationInput({} as never);
+      const human = new CoachConversationHumanContextBuilder().build(
+        base.snapshot,
+        {
+          currentMessage: content,
+          recentConversation: [
+            { direction: 'COACH', text: 'Já conseguiu almoçar hoje?' },
+          ],
+        },
+      );
+      const ai = {
+        createJob: jest
+          .fn()
+          .mockResolvedValue({ id: 'fake-qa', status: AIJobStatus.PENDING }),
+        runTextJob: jest.fn().mockResolvedValue({
+          outputText: JSON.stringify({
+            disposition: 'ANSWER',
+            domain: 'NUTRITION',
+            answer,
+            followUpQuestion: null,
+            grounding: 'GENERAL_KNOWLEDGE',
+            confidence: 'HIGH',
+          }),
+          model: 'fake',
+          totalTokens: 0,
+        }),
+        completeJobInTransaction: jest.fn(),
+        failJob: jest.fn(),
+      };
+      const config = {
+        get: () => ({
+          valid: true,
+          mode: 'PRIMARY',
+          killSwitch: false,
+          timeoutMs: 25000,
+        }),
+        isOfficiallyEligible: () => true,
+      };
+      const audit = { record: jest.fn() };
+      const module = await Test.createTestingModule({
+        imports: [ConversationModule],
+        providers: [
+          ConversationRuntimeIntegrationService,
+          ConversationRuntimeService,
+          {
+            provide: ConversationExecutionBridgeService,
+            inject: [ConversationQAExecutorService],
+            useFactory: (qa: ConversationQAExecutorService) =>
+              new ConversationExecutionBridgeService(
+                new ConversationResponsePayloadBuilder(),
+                new ConversationLanguageRealizerService(),
+                new ConversationResponseFormatterService(),
+                new ConversationResponseValidatorService(),
+                qa,
+              ),
+          },
+          ConversationResponsePayloadBuilder,
+          ConversationLanguageRealizerService,
+          ConversationResponseFormatterService,
+          ConversationResponseValidatorService,
+          ConversationOfficialSelectionService,
+          ConversationShadowComparatorService,
+          ConversationQAExecutorService,
+          ConversationPublicAnswerBoundaryService,
+          {
+            provide: ConversationRuntimeOperationalConfigService,
+            useValue: config,
+          },
+          { provide: ConversationRuntimeAuditService, useValue: audit },
+          { provide: AIService, useValue: ai },
+          { provide: PrismaService, useValue: subject.prisma },
+          {
+            provide: ConversationCurrentNutritionContextService,
+            useValue: {
+              read: jest
+                .fn()
+                .mockResolvedValue({ status: 'NO_PLAN', plan: null }),
+            },
+          },
+          {
+            provide: ConversationTurnContextBuilderService,
+            useValue: {
+              build: jest.fn().mockResolvedValue({
+                understandingInput: understandingInput(content),
+                snapshot: base.snapshot,
+                adaptiveDecision: base.adaptiveDecision,
+                humanContext: human,
+                preparationBase: {
+                  snapshot: base.snapshot,
+                  adaptiveDecision: base.adaptiveDecision,
+                  progressContextAvailable: base.progressContextAvailable,
+                  confirmationPending: base.confirmationPending,
+                  recentHistory: base.recentHistory,
+                  continuity: base.continuity,
+                  referenceDate: base.referenceDate,
+                },
+              }),
+            },
+          },
+        ],
+      }).compile();
+      try {
+        const runtime = module.get(ConversationRuntimeIntegrationService);
+        const evaluate = jest.spyOn(
+          module.get(ConversationRuntimeService),
+          'evaluate',
+        );
+        const bridge = jest.spyOn(
+          module.get(ConversationExecutionBridgeService),
+          'execute',
+        );
+        subject.conversationRuntime.decide.mockImplementation(
+          (request: ConversationRuntimeInput) => runtime.decide(request),
+        );
+        const request = {
+          userId: 'user-id',
+          messageId: 'message-id',
+          proactiveReply: true,
+        };
+        await subject.service.processTextMessage(request);
+        await subject.service.processTextMessage(request);
+        expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+        expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+        expect(planning).not.toHaveBeenCalled();
+        await expect(evaluate.mock.results[0]?.value).resolves.toMatchObject({
+          summary: { routeKind: 'NUTRITION_GUIDANCE' },
+        });
+        await expect(bridge.mock.results[0]?.value).resolves.toMatchObject({
+          status: 'COMPLETED',
+        });
+        expect(ai.createJob).toHaveBeenCalledTimes(1);
+        expect(ai.createJob).toHaveBeenCalledWith(
+          expect.objectContaining({ type: AIJobType.TEXT }),
+        );
+        expect(JSON.stringify(ai.createJob.mock.calls)).not.toMatch(
+          /DIET_PLAN_GENERATION|WORKOUT_PLAN_GENERATION/,
+        );
+        expect(ai.runTextJob).toHaveBeenCalledTimes(1);
+        expect(JSON.stringify(ai.runTextJob.mock.calls)).toContain(content);
+        expect(effects.scheduledMessages.size).toBe(1);
+        expect(effects.outboxEvents.size).toBe(1);
+        expect(
+          JSON.stringify([...effects.scheduledMessages.values()]),
+        ).toContain(answer);
+      } finally {
+        await module.close();
+      }
+    },
+  );
+
+  it('fails closed after the runtime decides fallback without legacy generation', async () => {
     const subject = createSubject({
       content: 'quero uma dieta',
       runtimeLegacy: true,
@@ -896,11 +1134,8 @@ describe('CoachCommandService', () => {
     });
 
     expect(subject.conversationRuntime.decide).toHaveBeenCalledTimes(1);
-    expect(subject.dietGenerator.generate).toHaveBeenCalledTimes(1);
+    expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
     expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
-    expect(
-      subject.conversationRuntime.decide.mock.invocationCallOrder[0],
-    ).toBeLessThan(subject.dietGenerator.generate.mock.invocationCallOrder[0]);
   });
 
   it('persists only the content selected after one structured planning execution', async () => {
@@ -921,10 +1156,8 @@ describe('CoachCommandService', () => {
 
     expect(structured).toHaveBeenCalledTimes(1);
     expect(adapter).not.toHaveBeenCalled();
-    expect(subject.dietGenerator.generate).toHaveBeenCalledTimes(1);
-    expect(subject.planningConversationResponse.select).toHaveBeenCalledTimes(
-      1,
-    );
+    expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.planningConversationResponse.select).not.toHaveBeenCalled();
     expect(subject.prisma.coachMessage.create).toHaveBeenCalledTimes(1);
     expect(subject.transaction.scheduledMessage.upsert).toHaveBeenCalledTimes(
       1,
@@ -932,7 +1165,9 @@ describe('CoachCommandService', () => {
     expect(subject.eventBus.publish).toHaveBeenCalledTimes(1);
     expect(subject.prisma.coachMessage.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ content: 'Resposta selecionada' }),
+        data: expect.objectContaining({
+          content: expect.stringContaining('Nenhum plano foi criado'),
+        }),
       }),
     );
   });
@@ -1277,7 +1512,7 @@ describe('CoachCommandService', () => {
     );
   });
 
-  it('generates legacy content once after the runtime fails', async () => {
+  it('does not generate legacy content after the runtime fails', async () => {
     const subject = createSubject({
       content: 'quero uma dieta',
       runtimeFailure: new Error('runtime unavailable'),
@@ -1288,12 +1523,12 @@ describe('CoachCommandService', () => {
       messageId: 'message-id',
     });
 
-    expect(subject.dietGenerator.generate).toHaveBeenCalledTimes(1);
+    expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
     expect(subject.prisma.coachMessage.create).toHaveBeenCalledTimes(1);
     expect(subject.prisma.coachMessage.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          content: expect.stringContaining('Plano alimentar'),
+          content: expect.stringContaining('Nenhum plano foi criado'),
         }),
       }),
     );
@@ -1364,7 +1599,7 @@ describe('CoachCommandService', () => {
     expect(subject.prisma.coachMessage.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          content: expect.stringContaining('perfil completo'),
+          content: expect.stringContaining('Nenhum plano foi criado'),
         }),
       }),
     );
@@ -1383,7 +1618,7 @@ describe('CoachCommandService', () => {
     expect(subject.prisma.coachMessage.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          content: expect.stringContaining('assinatura precisa estar ativa'),
+          content: expect.stringContaining('Nenhum plano foi criado'),
         }),
       }),
     );
@@ -1402,7 +1637,7 @@ describe('CoachCommandService', () => {
     expect(subject.prisma.coachMessage.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          content: expect.stringContaining('falha ao gerar'),
+          content: expect.stringContaining('Nenhum plano foi criado'),
         }),
       }),
     );

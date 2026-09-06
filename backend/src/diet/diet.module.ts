@@ -3,7 +3,6 @@ import { AIModule } from '../ai/ai.module';
 import { AuthModule } from '../auth/auth.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { DietGeneratorService } from './diet-generator.service';
-import { DietController } from './diet.controller';
 import { DietService } from './diet.service';
 import { GenerateNutritionPlanV2InputBuilder } from './v2/generate-nutrition-plan-v2-input.builder';
 import { NutritionArtifactResolverService } from './v2/nutrition-artifact-resolver.service';
@@ -29,7 +28,7 @@ import { CanonicalNutritionPlanPresenterService } from './canonical-nutrition-pl
     SubscriptionsModule,
     NutritionPlanOwnershipModule,
   ],
-  controllers: [DietController, CanonicalNutritionController],
+  controllers: [CanonicalNutritionController],
   providers: [
     DietService,
     DietGeneratorService,

@@ -814,6 +814,11 @@ export class ActivationOnboardingService {
       currentState === ACTIVATION_ONBOARDING_STATE.ASK_DESIRED_RESULT
     ) {
       answers.desiredResultText = text.trim();
+      const latestExplicitGoal = this.parseGoal(normalized);
+      if (latestExplicitGoal) {
+        answers.commercialGoal = latestExplicitGoal.commercialGoal;
+        answers.fitnessGoal = latestExplicitGoal.fitnessGoal;
+      }
       const target = this.parseTargetWeightKg(text, answers);
       answers.targetWeightKg = target.targetWeightKg;
       answers.targetWeightSource = target.source;

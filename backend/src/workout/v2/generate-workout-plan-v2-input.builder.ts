@@ -1,3 +1,4 @@
+import { workoutEquipmentBaseline } from './workout-equipment-defaults';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { CoachProfileSnapshotBuilder } from '../../context/coach-profile-snapshot.builder';
 import type {
@@ -133,9 +134,37 @@ export class GenerateWorkoutPlanV2InputBuilder {
     snapshot: CoachProfileSnapshot,
     declared: WorkoutRecognizedContext,
   ): WorkoutRecognizedContext {
+    const storedEquipment = snapshot.training.availableEquipment;
+    const storedEnvironment = snapshot.training.environment;
+    const declaredEnvironment =
+      declared.environment && 'value' in declared.environment
+        ? declared.environment.value
+        : undefined;
+    const currentEnvironment =
+      current?.environment && 'value' in current.environment
+        ? current.environment.value
+        : undefined;
+    const preserveLimitedGym =
+      declaredEnvironment === 'FULL_GYM' &&
+      ((storedEnvironment &&
+        'value' in storedEnvironment &&
+        storedEnvironment.value === 'LIMITED_GYM') ||
+        currentEnvironment === 'LIMITED_GYM');
+    const equipment =
+      declared.equipment?.status === 'INFERRED'
+        ? (current?.equipment ??
+          (preserveLimitedGym ||
+          (storedEquipment && storedEquipment.status !== 'UNKNOWN')
+            ? undefined
+            : declared.equipment))
+        : (declared.equipment ?? current?.equipment);
     return this.resolveFrequencyAvailabilityConflict({
       ...current,
       ...declared,
+      equipment,
+      environment: preserveLimitedGym
+        ? current?.environment
+        : (declared.environment ?? current?.environment),
       artifactType:
         declared.artifactType ??
         current?.artifactType ??
@@ -213,7 +242,8 @@ export class GenerateWorkoutPlanV2InputBuilder {
           ? undefined
           : Object.freeze({ status: 'CONFIRMED' as const, value: duration }),
       availableTrainingDays: this.declaredTrainingDays(text),
-      equipment: this.declaredEquipment(text),
+      equipment:
+        this.declaredEquipment(text) ?? workoutEquipmentBaseline(environment),
       muscleFocus:
         muscleFocus.length > 0
           ? Object.freeze({
@@ -279,12 +309,12 @@ export class GenerateWorkoutPlanV2InputBuilder {
   }
 
   private declaredModality(text: string): WorkoutModality | undefined {
+    if (/\bcrossfit\b/u.test(text)) return WORKOUT_MODALITY.CROSSFIT;
     if (/\b(musculacao|academia)\b/u.test(text))
       return WORKOUT_MODALITY.GYM_STRENGTH;
-    if (/\bcrossfit\b/u.test(text)) return WORKOUT_MODALITY.CROSSFIT;
     if (
       /\b(corrida|correr|corro|comecar a correr)\b/u.test(text) ||
-      /\bprova de\s*\d+(?:[.,]\d+)?\s*km\b/u.test(text)
+      /\b(?:prova de|preparar para)\s*\d+(?:[.,]\d+)?\s*km\b/u.test(text)
     )
       return WORKOUT_MODALITY.RUNNING;
     if (/\b(caminhada|caminhar)\b/u.test(text)) return WORKOUT_MODALITY.WALKING;
@@ -303,8 +333,14 @@ export class GenerateWorkoutPlanV2InputBuilder {
 
   private declaredEnvironment(text: string): WorkoutEnvironment | undefined {
     if (/\b(em casa|treino em casa)\b/u.test(text)) return 'HOME';
-    if (/\bacademia\b/u.test(text)) return 'FULL_GYM';
     if (/\bcrossfit\b/u.test(text)) return 'CROSSFIT_BOX';
+    if (/\b(academia|musculacao)\b/u.test(text)) {
+      return /\b(limitada|pequena|condominio|hotel|so tenho|nao tem|sem|falta)\b/u.test(
+        text,
+      )
+        ? 'LIMITED_GYM'
+        : 'FULL_GYM';
+    }
     if (/\btrilha\b/u.test(text)) return 'TRAIL';
     if (/\bpista\b/u.test(text)) return 'TRACK';
     if (/\bestrada\b/u.test(text)) return 'ROAD';
@@ -465,6 +501,8 @@ export class GenerateWorkoutPlanV2InputBuilder {
       ['CABLE', /\b(cabos?|polia)\b/u],
       ['BENCH', /\bbanco\b/u],
       ['BODYWEIGHT', /\b(peso corporal|sem carga)\b/u],
+      ['TREADMILL', /\besteira\b/u],
+      ['ROW_ERGOMETER', /\b(remo|ergometro)\b/u],
     ];
     const positive = new Set<WorkoutEquipment>();
     const denied = new Set<WorkoutEquipment>();
@@ -479,7 +517,9 @@ export class GenerateWorkoutPlanV2InputBuilder {
           clause,
         );
       const negative =
-        /\b(nao tenho|nao uso|nao ha|indisponivel|sem|falta)\b/u.test(clause);
+        /\b(nao tenho|nao tem|nao uso|nao ha|indisponivel|sem|falta)\b/u.test(
+          clause,
+        );
       const available =
         /\b(tenho|temos|uso|utilizo|com|disponivel|disponiveis|acesso a|conto com|so)\b/u.test(
           clause,
@@ -564,7 +604,7 @@ export class GenerateWorkoutPlanV2InputBuilder {
     );
     const target = this.decimal(
       text,
-      /\b(?:chegar a|prova de|correr)\s*(\d+(?:[.,]\d+)?)\s*km\b/u,
+      /\b(?:chegar a|prova de|preparar para|correr)\s*(\d+(?:[.,]\d+)?)\s*km\b/u,
     );
     return Object.freeze({ current, target });
   }

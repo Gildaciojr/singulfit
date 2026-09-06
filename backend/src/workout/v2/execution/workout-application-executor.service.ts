@@ -5,6 +5,7 @@ import { WorkoutPlanV2PersistenceService } from '../persistence/workout-plan-v2-
 import type {
   WorkoutApplicationExecutionInputV2,
   WorkoutApplicationExecutionResultV2,
+  WorkoutApplicationPreflightResultV2,
 } from './workout-application-execution.contract';
 import type { WorkoutPlanningValue } from '../workout-planning-context.contract';
 
@@ -15,15 +16,10 @@ export class WorkoutApplicationExecutorService {
     private readonly persistence: WorkoutPlanV2PersistenceService,
   ) {}
 
-  async execute(
-    input: WorkoutApplicationExecutionInputV2,
-  ): Promise<WorkoutApplicationExecutionResultV2> {
-    if (input.ownership.userId !== input.generationInput.userId) {
-      throw new ConflictException(
-        'Ownership da execução de treino V2 inconsistente',
-      );
-    }
-    const prepared = this.engine.prepare(input.generationInput);
+  preflight(
+    generationInput: WorkoutApplicationExecutionInputV2['generationInput'],
+  ): WorkoutApplicationPreflightResultV2 {
+    const prepared = this.engine.prepare(generationInput);
     if (!prepared.context || !prepared.strategy || !prepared.safety) {
       return Object.freeze({
         kind: 'CLARIFICATION' as const,
@@ -69,6 +65,20 @@ export class WorkoutApplicationExecutorService {
       });
     }
 
+    return Object.freeze({ kind: 'READY' as const, prepared });
+  }
+
+  async execute(
+    input: WorkoutApplicationExecutionInputV2,
+  ): Promise<WorkoutApplicationExecutionResultV2> {
+    if (input.ownership.userId !== input.generationInput.userId) {
+      throw new ConflictException(
+        'Ownership da execução de treino V2 inconsistente',
+      );
+    }
+    const preflight = this.preflight(input.generationInput);
+    if (preflight.kind !== 'READY') return preflight;
+    const prepared = preflight.prepared;
     const generation = await this.engine.generateCandidate(
       input.generationInput,
     );
@@ -77,7 +87,7 @@ export class WorkoutApplicationExecutorService {
       ownership: input.ownership,
       executionContext: input.executionContext,
       calendarWeekdays: this.calendarWeekdays(
-        prepared.context.training?.availableTrainingDays ??
+        prepared.context?.training?.availableTrainingDays ??
           this.snapshotTrainingDays(input),
       ),
     });

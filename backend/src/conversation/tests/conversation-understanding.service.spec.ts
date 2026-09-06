@@ -146,6 +146,30 @@ describe('ConversationUnderstandingService', () => {
     });
   });
 
+  it.each([
+    'O que posso comer no jantar hoje?',
+    'Qual meu jantar de hoje?',
+    'Monte meu jantar de hoje',
+    'Me indique um almoço para hoje',
+    'Monte uma refeição para meu jantar de hoje',
+    'O que você sugere para o almoço?',
+    'Posso trocar o arroz hoje só nessa refeição?',
+    'Tenho treino à noite, o que posso jantar?',
+  ])(
+    'routes a meal-scoped request to modern Nutrition QA: %s',
+    async (text) => {
+      await expect(
+        service.understand(understandingInput(text, { dietAvailable: true })),
+      ).resolves.toMatchObject({
+        status: 'UNDERSTOOD',
+        intent: 'NUTRITION_QUESTION',
+        operation: 'PROVIDE_GUIDANCE',
+        domain: 'NUTRITION',
+        ambiguity: { present: false },
+      });
+    },
+  );
+
   it('keeps an imperative persistent substitution on the update operation', async () => {
     await expect(
       service.understand(

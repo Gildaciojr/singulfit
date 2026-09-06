@@ -265,6 +265,7 @@ describe('IntegrationEventHandlersService', () => {
       field: 'WEEKLY_FREQUENCY',
       continuationMessageId: 'original-workout-message-id',
       originalRequestMessageId: 'root-workout-message-id',
+      originalIntent: 'WORKOUT',
     });
     const handlers = new IntegrationEventHandlersService(
       registry,
@@ -296,7 +297,10 @@ describe('IntegrationEventHandlersService', () => {
     expect(coachCommand.processTextMessage).toHaveBeenCalledWith({
       userId: 'user-id',
       messageId: 'original-workout-message-id',
-      workoutContinuationMessageId: 'root-workout-message-id',
+      planningContinuation: {
+        originalRequestMessageId: 'root-workout-message-id',
+        intent: 'WORKOUT',
+      },
     });
   });
 
@@ -434,58 +438,72 @@ describe('IntegrationEventHandlersService', () => {
     expect(proactiveResponse.capture).not.toHaveBeenCalled();
   });
 
-  it('lets an eligible proactive reply run before acquisition and onboarding', async () => {
-    const registry = new EventHandlerRegistry();
-    const acquisition = acquisitionRollout();
-    const activationOnboarding = {
-      processTextMessage: jest.fn().mockResolvedValue({ handled: false }),
-    };
-    const coachCommand = {
-      shouldHandleBeforeProfileAcquisition: jest.fn().mockResolvedValue(false),
-      processTextMessage: jest.fn(),
-    };
-    const proactiveResponse = {
-      capture: jest.fn().mockResolvedValue({
-        handled: true,
-        duplicated: false,
-        outcome: 'COMPLETED',
-      }),
-    };
-    const handlers = new IntegrationEventHandlersService(
-      registry,
-      {} as PagBankWebhookService,
-      {} as EvolutionWebhookService,
-      {} as NutritionService,
-      {} as NutritionVisionService,
-      {} as ResponseBuilderService,
-      {} as EvolutionSendService,
-      coachCommand as unknown as CoachCommandService,
-      {} as AutomationService,
-      {} as ActivationJourneyService,
-      activationOnboarding as unknown as ActivationOnboardingService,
-      acquisition as unknown as ProfileAcquisitionInternalRolloutService,
-      subscriptionLifecycle() as unknown as SubscriptionLifecycleService,
-      proactiveResponse as unknown as CoachProactiveResponseService,
-    );
-    handlers.onModuleInit();
-    const handler = registry.get(INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED);
-    if (!handler) throw new Error('Handler de texto não registrado');
+  it.each([false, true])(
+    'routes proactive reply before acquisition and onboarding (freeform=%s)',
+    async (freeform) => {
+      const registry = new EventHandlerRegistry();
+      const acquisition = acquisitionRollout();
+      const activationOnboarding = {
+        processTextMessage: jest.fn().mockResolvedValue({ handled: false }),
+      };
+      const coachCommand = {
+        shouldHandleBeforeProfileAcquisition: jest
+          .fn()
+          .mockResolvedValue(false),
+        processTextMessage: jest.fn(),
+      };
+      const proactiveResponse = {
+        capture: jest.fn().mockResolvedValue({
+          handled: !freeform,
+          continueInRuntime: freeform,
+          duplicated: false,
+          outcome: 'COMPLETED',
+        }),
+      };
+      const handlers = new IntegrationEventHandlersService(
+        registry,
+        {} as PagBankWebhookService,
+        {} as EvolutionWebhookService,
+        {} as NutritionService,
+        {} as NutritionVisionService,
+        {} as ResponseBuilderService,
+        {} as EvolutionSendService,
+        coachCommand as unknown as CoachCommandService,
+        {} as AutomationService,
+        {} as ActivationJourneyService,
+        activationOnboarding as unknown as ActivationOnboardingService,
+        acquisition as unknown as ProfileAcquisitionInternalRolloutService,
+        subscriptionLifecycle() as unknown as SubscriptionLifecycleService,
+        proactiveResponse as unknown as CoachProactiveResponseService,
+      );
+      handlers.onModuleInit();
+      const handler = registry.get(
+        INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED,
+      );
+      if (!handler) throw new Error('Handler de texto não registrado');
 
-    await handler(
-      outboxEvent(INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED, {
+      await handler(
+        outboxEvent(INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED, {
+          userId: 'ordinary-user-id',
+          messageId: 'proactive-reply-id',
+        }),
+      );
+
+      expect(acquisition.captureActiveResponse).not.toHaveBeenCalled();
+      expect(activationOnboarding.processTextMessage).not.toHaveBeenCalled();
+      expect(proactiveResponse.capture).toHaveBeenCalledWith({
         userId: 'ordinary-user-id',
         messageId: 'proactive-reply-id',
-      }),
-    );
-
-    expect(acquisition.captureActiveResponse).not.toHaveBeenCalled();
-    expect(activationOnboarding.processTextMessage).not.toHaveBeenCalled();
-    expect(proactiveResponse.capture).toHaveBeenCalledWith({
-      userId: 'ordinary-user-id',
-      messageId: 'proactive-reply-id',
-    });
-    expect(coachCommand.processTextMessage).not.toHaveBeenCalled();
-  });
+      });
+      if (freeform)
+        expect(coachCommand.processTextMessage).toHaveBeenCalledWith({
+          userId: 'ordinary-user-id',
+          messageId: 'proactive-reply-id',
+          proactiveReply: true,
+        });
+      else expect(coachCommand.processTextMessage).not.toHaveBeenCalled();
+    },
+  );
 
   it('runs acquisition only after the official outbound completes sending', async () => {
     const registry = new EventHandlerRegistry();

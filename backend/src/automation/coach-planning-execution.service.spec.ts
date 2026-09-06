@@ -22,6 +22,69 @@ import type { WorkoutPlanMutationResolverService } from '../workout/v2/workout-p
 import { UsageLimitExceededException } from '../entitlements/usage-limit.exception';
 
 describe('CoachPlanningExecutionService', () => {
+  it('keeps combined root identity across acquisition turns and isolates independent requests', async () => {
+    const dispatcher = {
+      dispatchStructured: jest.fn().mockResolvedValue({
+        content: '',
+        executor: 'V2_DECOMPOSITION',
+        generationCompleted: false,
+        fallbackApplied: false,
+      }),
+    };
+    const service = new CoachPlanningExecutionService(
+      dispatcher as unknown as CoachPlanningExecutionDispatcherService,
+    );
+    const referenceDate = new Date('2026-09-05T12:00:00Z');
+    for (const messageId of ['answer-one', 'answer-two']) {
+      await service.executeStructured('user-id', 'BOTH', {
+        conversationId: 'conversation-id',
+        messageId,
+        originalRequestMessageId: 'root-id',
+        correlationId: messageId,
+        referenceDate,
+      });
+      expect(dispatcher.dispatchStructured).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          continuationOperationKey:
+            'combined-continuation:conversation-id:root-id:nutrition',
+        }),
+      );
+    }
+    await service.executeStructured('user-id', 'BOTH', {
+      conversationId: 'conversation-id',
+      messageId: 'independent-id',
+      correlationId: 'independent-id',
+      referenceDate,
+    });
+    expect(dispatcher.dispatchStructured).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        continuationOperationKey:
+          'combined-continuation:conversation-id:independent-id:nutrition',
+      }),
+    );
+  });
+  it.each([
+    ['DIET', 'plano alimentar'],
+    ['WORKOUT', 'treino'],
+    ['BOTH', 'planos'],
+  ] as const)(
+    'reports a %s execution failure in the correct domain',
+    async (intent, expectedDomain) => {
+      const dispatcher = {
+        dispatchStructured: jest
+          .fn()
+          .mockRejectedValue(new Error('execution failed')),
+      };
+      const service = new CoachPlanningExecutionService(
+        dispatcher as unknown as CoachPlanningExecutionDispatcherService,
+      );
+      const result = await service.executeStructured('user-id', intent);
+      expect(result.content).toContain(expectedDomain);
+      if (intent !== 'WORKOUT') expect(result.content).not.toContain('treino');
+      expect(result.metadata.executor).toBe('FAILURE_FALLBACK');
+    },
+  );
+
   it.each([
     ['Qual é meu treino atual?', 'UNKNOWN'],
     ['Qual é meu treino de hoje?', 'UNKNOWN'],
@@ -774,6 +837,12 @@ describe('CoachPlanningExecutionService', () => {
       referenceDate: new Date('2026-08-02T12:00:00.000Z'),
     });
 
+    expect(dispatcher.dispatchStructured).toHaveBeenCalledWith(
+      expect.objectContaining({
+        continuationOperationKey:
+          'combined-continuation:conversation-id:message-id:nutrition',
+      }),
+    );
     expect(result.content).toBe('resposta combinada');
     expect(result.decision).toBe(decision);
     expect(result.nutritionReasoning).toBe(nutritionResult);

@@ -422,6 +422,58 @@ describe('ActivationOnboardingService', () => {
     );
   });
 
+  it('reconciles the latest explicit desired-result goal before projection', async () => {
+    const setup = subject();
+    await setup.service.start({
+      userId: 'user-id',
+      activationId: 'activation-id',
+      userFirstName: 'Maria',
+      startedAt: new Date('2026-06-23T11:59:00.000Z'),
+    });
+    const answers = [
+      '32',
+      '1,78',
+      '82',
+      'FEMININO',
+      'Definição',
+      'moderado',
+      'nenhuma',
+      'Ganhar massa muscular',
+    ];
+    for (const [index, content] of answers.entries()) {
+      const messageId = `goal-reconciliation-${index}`;
+      setup.setMessage(messageId, content);
+      await setup.service.processTextMessage({ userId: 'user-id', messageId });
+    }
+
+    const session = await setup.service.get('user-id');
+    expect(session?.content.answers).toEqual(
+      expect.objectContaining({
+        commercialGoal: 'MUSCLE_GAIN',
+        fitnessGoal: 'MUSCLE_GAIN',
+        desiredResultText: 'Ganhar massa muscular',
+        targetWeightSource: 'ESTIMATED_FROM_GOAL',
+      }),
+    );
+    expect(setup.transaction.fitnessProfile.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ goal: 'MUSCLE_GAIN' }),
+      }),
+    );
+    expect(setup.transaction.nutritionProfile.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ goal: 'MUSCLE_GAIN' }),
+      }),
+    );
+    expect(
+      setup.transaction.userGoalClassification.upsert,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ goal: 'HYPERTROPHY' }),
+      }),
+    );
+  });
+
   it.each([
     ['preciso emagrecer e perder gordura', 'WEIGHT_LOSS', 'WEIGHT_LOSS'],
     ['quero ganhar músculos e crescer', 'MUSCLE_GAIN', 'MUSCLE_GAIN'],

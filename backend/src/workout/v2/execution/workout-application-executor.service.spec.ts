@@ -69,6 +69,12 @@ describe('WorkoutApplicationExecutorService', () => {
 
   it('prepares before one generation and persists a pending candidate once', async () => {
     const subject = setup();
+    expect(subject.executor.preflight(input().generationInput)).toMatchObject({
+      kind: 'READY',
+    });
+    expect(subject.engine.generateCandidate).not.toHaveBeenCalled();
+    expect(subject.persistence.persist).not.toHaveBeenCalled();
+    subject.engine.prepare.mockClear();
     await expect(subject.executor.execute(input())).resolves.toMatchObject({
       kind: 'PLAN',
       aggregateId: 'plan-id',
@@ -127,6 +133,17 @@ describe('WorkoutApplicationExecutorService', () => {
                 reasonCodes: ['PROFILE_CONFIRMATION_REQUIRED'],
               },
       });
+      const preflight = subject.executor.preflight(input().generationInput);
+      expect(preflight).toMatchObject({
+        kind: 'CLARIFICATION',
+        missingFields,
+        confirmationRequiredFields,
+      });
+      expect(subject.engine.generateCandidate).not.toHaveBeenCalled();
+      expect(subject.persistence.persist).not.toHaveBeenCalled();
+      await expect(subject.executor.execute(input())).resolves.toEqual(
+        preflight,
+      );
       await expect(subject.executor.execute(input())).resolves.toMatchObject({
         kind: 'CLARIFICATION',
         missingFields,
@@ -142,6 +159,14 @@ describe('WorkoutApplicationExecutorService', () => {
       ...ready(),
       safety: { outcome: 'BLOCKED', reasonCodes: ['ACUTE_PAIN'] },
     });
+    const preflight = subject.executor.preflight(input().generationInput);
+    expect(preflight).toMatchObject({
+      kind: 'BLOCKED',
+      reasonCodes: ['ACUTE_PAIN'],
+    });
+    expect(subject.engine.generateCandidate).not.toHaveBeenCalled();
+    expect(subject.persistence.persist).not.toHaveBeenCalled();
+    await expect(subject.executor.execute(input())).resolves.toEqual(preflight);
     await expect(subject.executor.execute(input())).resolves.toMatchObject({
       kind: 'BLOCKED',
       reasonCodes: ['ACUTE_PAIN'],

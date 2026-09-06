@@ -51,6 +51,7 @@ export interface ProfileAcquisitionCaptureResult {
   readonly field: CoachProfileAcquisitionField | null;
   readonly continuationMessageId?: string;
   readonly originalRequestMessageId?: string;
+  readonly originalIntent?: 'DIET' | 'WORKOUT' | 'BOTH';
 }
 
 export interface ProfileAcquisitionRuntimeEvaluation {

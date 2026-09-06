@@ -285,6 +285,34 @@ describe('ConversationTurnContextBuilderService', () => {
     },
   );
 
+  it('keeps reminder history while fencing unrelated profile confirmation for a free-form reply', async () => {
+    const subject = createSubject({ messages: [] });
+    subject.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue({
+      status: 'CONFIRMATION_PENDING',
+      field: 'TRAINING_EQUIPMENT',
+      logicalTurn: 20,
+    });
+    subject.prisma.scheduledMessage.findMany.mockResolvedValue([
+      {
+        content: 'Como foi o treino de hoje?',
+        scheduledFor: new Date('2026-08-01T11:59:00Z'),
+      },
+    ]);
+    const result = await subject.service.build({
+      ...input,
+      text: 'Fiquei cansado na parte final',
+      proactiveReply: true,
+    });
+    expect(result.understandingInput.continuity).toMatchObject({
+      activeProfileField: null,
+      pendingConfirmation: false,
+    });
+    expect(result.humanContext.recentConversation).toContainEqual({
+      direction: 'COACH',
+      text: 'Como foi o treino de hoje?',
+    });
+  });
+
   it('keeps a new explicit question dominant over older proactive context', async () => {
     const subject = createSubject({ messages: [] });
     subject.prisma.scheduledMessage.findMany.mockResolvedValueOnce([

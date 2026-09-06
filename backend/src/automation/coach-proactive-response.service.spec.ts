@@ -4,6 +4,91 @@ import type { PrismaService } from '../prisma/prisma.service';
 import { CoachProactiveResponseService } from './coach-proactive-response.service';
 
 describe('CoachProactiveResponseService', () => {
+  it.each([
+    ['HYDRATION_CHECK', 'sim, já bebi água', 'COMPLETED'],
+    ['HYDRATION_CHECK', 'já bebi 1 litro', 'COMPLETED'],
+    ['HYDRATION_CHECK', 'acho que tomei uns 900ml', 'COMPLETED'],
+    ['HYDRATION_CHECK', 'ainda bebi pouca água', 'PARTIAL'],
+    ['HYDRATION_CHECK', 'acabei de encher minha garrafa', 'DEFERRED'],
+    ['LUNCH_CHECK', 'já almocei', 'COMPLETED'],
+    ['LUNCH_CHECK', 'ainda não, vou almoçar mais tarde', 'DEFERRED'],
+    ['LUNCH_CHECK', 'almocei arroz, feijão e frango', 'COMPLETED'],
+    ['DINNER_CHECK', 'já jantei', 'COMPLETED'],
+    ['DINNER_CHECK', 'ainda não jantei', 'SKIPPED'],
+    ['DINNER_CHECK', 'jantei frango com arroz', 'COMPLETED'],
+    ['WORKOUT_CHECK', 'já treinei', 'COMPLETED'],
+    ['WORKOUT_CHECK', 'não consegui treinar hoje', 'SKIPPED'],
+    ['WORKOUT_CHECK', 'treinei mas senti dor no joelho', 'ISSUE_REPORTED'],
+    ['GOOD_MORNING', 'estou bem', 'COMPLETED'],
+    ['GOOD_MORNING', 'acordei cansada hoje', 'PARTIAL'],
+    ['DAILY_CHECK_IN', 'hoje está corrido', 'PARTIAL'],
+    ['MEAL_PLAN_CHECK', 'sim, segui o plano', 'COMPLETED'],
+  ] as const)(
+    'handles natural %s reply: %s',
+    async (intent, content, outcome) => {
+      const subject = createSubject({ intent, content });
+      await expect(
+        subject.service.capture({
+          userId: 'ordinary-user-id',
+          messageId: 'inbound-message-id',
+        }),
+      ).resolves.toMatchObject({ handled: true, outcome });
+      expect(subject.transaction.scheduledMessage.upsert).toHaveBeenCalledTimes(
+        1,
+      );
+      expect(subject.eventBus.publish).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    'Hoje minha rotina virou de cabeça para baixo',
+    'Monte meu jantar de hoje',
+    'Monte um treino para academia 5 vezes na semana',
+  ])('preserves a reminder context for modern runtime: %s', async (content) => {
+    const subject = createSubject({ intent: 'HYDRATION_CHECK', content });
+    await expect(
+      subject.service.capture({
+        userId: 'ordinary-user-id',
+        messageId: 'inbound-message-id',
+      }),
+    ).resolves.toMatchObject({ handled: false, continueInRuntime: true });
+    expect(subject.transaction.scheduledMessage.upsert).not.toHaveBeenCalled();
+  });
+
+  it.each(['outbound', 'scheduled'] as const)(
+    'fences unquoted ambiguous replies after a newer %s turn',
+    async (kind) => {
+      const subject = createSubject({ replyId: null, content: 'sim' });
+      if (kind === 'outbound')
+        subject.prisma.outboundMessage.findFirst.mockResolvedValue({
+          id: 'newer-id',
+        });
+      else
+        subject.prisma.scheduledMessage.findFirst
+          .mockResolvedValueOnce({
+            id: 'intervention-id',
+            sentAt: new Date('2026-08-19T22:00:00Z'),
+            scheduledFor: new Date('2026-08-19T22:00:00Z'),
+            responseExpiresAt: new Date('2026-08-20T22:00:00Z'),
+            responseMessageId: null,
+            context: {
+              source: 'COACH_PROACTIVE_V1',
+              intent: 'HYDRATION_CHECK',
+            },
+          })
+          .mockResolvedValueOnce({ id: 'newer-id' });
+      await expect(
+        subject.service.capture({
+          userId: 'ordinary-user-id',
+          messageId: 'inbound-message-id',
+        }),
+      ).resolves.toMatchObject({ handled: false });
+      expect(
+        subject.transaction.scheduledMessage.upsert,
+      ).not.toHaveBeenCalled();
+    },
+  );
+
   function createSubject(options?: {
     replyId?: string | null;
     content?: string;
@@ -69,11 +154,18 @@ describe('CoachProactiveResponseService', () => {
     };
     const prisma = {
       message: { findFirst: jest.fn().mockResolvedValue(message) },
+      outboundMessage: { findFirst: jest.fn().mockResolvedValue(null) },
       scheduledMessage: {
         findFirst: jest
           .fn()
-          .mockResolvedValue(
-            options?.intervention === false ? null : intervention,
+          .mockImplementation((query: { where: { id?: unknown } }) =>
+            Promise.resolve(
+              query.where.id
+                ? null
+                : options?.intervention === false
+                  ? null
+                  : intervention,
+            ),
           ),
       },
       coachProfileAcquisitionCycle: {
@@ -174,7 +266,12 @@ describe('CoachProactiveResponseService', () => {
         userId: 'ordinary-user-id',
         messageId: 'inbound-message-id',
       }),
-    ).resolves.toEqual({ handled: false, duplicated: false, outcome: null });
+    ).resolves.toEqual({
+      handled: false,
+      duplicated: false,
+      outcome: null,
+      ...('content' in options ? { continueInRuntime: true } : {}),
+    });
     expect(subject.transaction.scheduledMessage.update).not.toHaveBeenCalled();
     expect(subject.eventBus.publish).not.toHaveBeenCalled();
   });

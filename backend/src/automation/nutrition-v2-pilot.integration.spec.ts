@@ -360,7 +360,7 @@ describe('Nutrition V2 internal pilot integration', () => {
     expect(test.shadowRuntime.execute).not.toHaveBeenCalled();
   });
 
-  it('does not call any V2 provider when the global pilot switch is disabled', async () => {
+  it('uses official V2 when the historical pilot switch is disabled', async () => {
     const test = setup({ enabled: 'false' });
 
     await test.command.processTextMessage({
@@ -368,12 +368,12 @@ describe('Nutrition V2 internal pilot integration', () => {
       messageId: 'message-id',
     });
 
-    expect(test.order).toEqual(['legacy']);
-    expect(test.engine.generateCandidate).not.toHaveBeenCalled();
-    expect(test.shadowRuntime.execute).toHaveBeenCalledTimes(1);
+    expect(test.order).toEqual(['v2']);
+    expect(test.engine.generateCandidate).toHaveBeenCalledTimes(1);
+    expect(test.shadowRuntime.execute).not.toHaveBeenCalled();
   });
 
-  it('does not call any V2 provider when the user is outside the existing allowlist', async () => {
+  it('uses official V2 when the user is outside the historical allowlist', async () => {
     const test = setup({
       allowed: '223e4567-e89b-42d3-a456-426614174000',
     });
@@ -383,13 +383,13 @@ describe('Nutrition V2 internal pilot integration', () => {
       messageId: 'message-id',
     });
 
-    expect(test.order).toEqual(['legacy']);
-    expect(test.engine.generateCandidate).not.toHaveBeenCalled();
-    expect(test.planPersistence.persist).not.toHaveBeenCalled();
-    expect(test.shadowRuntime.execute).toHaveBeenCalledTimes(1);
+    expect(test.order).toEqual(['v2']);
+    expect(test.engine.generateCandidate).toHaveBeenCalledTimes(1);
+    expect(test.planPersistence.persist).toHaveBeenCalledTimes(1);
+    expect(test.shadowRuntime.execute).not.toHaveBeenCalled();
   });
 
-  it('preserves legacy and Shadow for an ineligible goal', async () => {
+  it('does not select legacy generation for a combined goal', async () => {
     const test = setup({ goal: 'GENERATE_COMBINED_PLANS' });
 
     await test.command.processTextMessage({
@@ -397,8 +397,8 @@ describe('Nutrition V2 internal pilot integration', () => {
       messageId: 'message-id',
     });
 
-    expect(test.order).toEqual(['legacy']);
-    expect(test.engine.generateCandidate).not.toHaveBeenCalled();
-    expect(test.shadowRuntime.execute).toHaveBeenCalledTimes(1);
+    expect(test.order).toEqual(['v2']);
+    expect(test.engine.generateCandidate).toHaveBeenCalledTimes(1);
+    expect(test.shadowRuntime.execute).not.toHaveBeenCalled();
   });
 });

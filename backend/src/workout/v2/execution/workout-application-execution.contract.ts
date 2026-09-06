@@ -4,7 +4,10 @@ import type {
   WorkoutReadinessField,
   WorkoutSafetyFlag,
 } from '../workout-planning-artifact.contract';
-import type { GenerateWorkoutPlanV2Input } from '../workout-planning-generation.contract';
+import type {
+  PreparedWorkoutPlanningV2,
+  GenerateWorkoutPlanV2Input,
+} from '../workout-planning-generation.contract';
 import type { WorkoutPlanV2 } from '../workout-plan-v2.contract';
 import type {
   PersistedWorkoutPlanV2Aggregate,
@@ -45,6 +48,11 @@ export interface WorkoutApplicationBlockedResultV2 {
   readonly safetyFlags: readonly WorkoutSafetyFlag[];
   readonly aiJobCompleted: false;
 }
+
+export type WorkoutApplicationPreflightResultV2 =
+  | { readonly kind: 'READY'; readonly prepared: PreparedWorkoutPlanningV2 }
+  | WorkoutApplicationClarificationResultV2
+  | WorkoutApplicationBlockedResultV2;
 
 export type WorkoutApplicationExecutionResultV2 =
   | WorkoutApplicationPlanExecutionResultV2

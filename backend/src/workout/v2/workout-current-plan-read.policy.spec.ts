@@ -27,6 +27,9 @@ describe('isWorkoutCurrentPlanRead', () => {
     'preciso mudar a duração do treino para 45 minutos',
     'altere a modalidade para corrida',
     'monte um treino para academia',
+    'Treino em academia, monte um treino de 5 vezes na semana',
+    'Monte meu treino 5 vezes por semana',
+    'Quero treinar 4 dias na semana',
   ])('rejects Workout creation or mutation: %s', (message) => {
     expect(isWorkoutCurrentPlanRead(message)).toBe(false);
   });

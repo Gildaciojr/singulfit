@@ -12,12 +12,15 @@ export type PlanningImplementationRoute = 'LEGACY' | 'V2';
 
 export type PlanningRouteSelectionReason =
   | 'NUTRITION_V2_ELIGIBLE'
+  | 'NUTRITION_V2_OFFICIAL_ROUTE'
   | 'NUTRITION_CANONICAL_READ'
   | 'NUTRITION_PILOT_NOT_ELIGIBLE'
   | 'WORKOUT_V2_PRODUCTIVE_GENERATION'
   | 'WORKOUT_V2_CANONICAL_READ'
   | 'WORKOUT_V2_PLAN_MUTATION'
-  | 'CROSS_DOMAIN_ATOMICITY_PENDING'
+  | 'CROSS_DOMAIN_V2_DECOMPOSITION_REQUIRED'
+  | 'NUTRITION_V2_PROFILE_ACQUISITION'
+  | 'COMBINED_V2_PROFILE_ACQUISITION'
   | 'LEGACY_INTENT_OR_UNSUPPORTED_GOAL';
 
 export interface PlanningExecutionRoutePolicyInput {
@@ -48,9 +51,9 @@ export class PlanningExecutionRoutePolicyService {
     const goal = decision?.goal;
     if (goal === CONVERSATION_GOAL.GENERATE_COMBINED_PLANS) {
       return this.selection(
-        'LEGACY',
-        'LEGACY',
-        'CROSS_DOMAIN_ATOMICITY_PENDING',
+        'V2',
+        'V2',
+        'CROSS_DOMAIN_V2_DECOMPOSITION_REQUIRED',
       );
     }
     if (
@@ -69,6 +72,18 @@ export class PlanningExecutionRoutePolicyService {
     ) {
       return this.selection(null, 'V2', 'WORKOUT_V2_PRODUCTIVE_GENERATION');
     }
+    if (
+      decision?.targetPlan === 'BOTH' &&
+      goal === CONVERSATION_GOAL.ASK_PROFILE_INFORMATION
+    ) {
+      return this.selection('V2', 'V2', 'COMBINED_V2_PROFILE_ACQUISITION');
+    }
+    if (
+      decision?.targetPlan === 'DIET' &&
+      goal === CONVERSATION_GOAL.ASK_PROFILE_INFORMATION
+    ) {
+      return this.selection('V2', null, 'NUTRITION_V2_PROFILE_ACQUISITION');
+    }
     if (decision && goal === CONVERSATION_GOAL.GENERATE_DIET_PLAN) {
       const pilot = this.nutritionPilot.evaluate({
         userId: input.userId,
@@ -77,13 +92,11 @@ export class PlanningExecutionRoutePolicyService {
         generationInput: input.generationInput,
       });
       return this.selection(
-        pilot.eligible ? 'V2' : 'LEGACY',
+        'V2',
         null,
-        pilot.eligible
-          ? 'NUTRITION_V2_ELIGIBLE'
-          : 'NUTRITION_PILOT_NOT_ELIGIBLE',
+        'NUTRITION_V2_OFFICIAL_ROUTE',
         pilot.status,
-        pilot.eligible,
+        true,
       );
     }
     return this.selection('LEGACY', null, 'LEGACY_INTENT_OR_UNSUPPORTED_GOAL');

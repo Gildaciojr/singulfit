@@ -6,6 +6,7 @@ import {
   ResponseType,
   UserRole,
 } from '@prisma/client';
+import { createHash } from 'crypto';
 import { EventBusService } from '../../event-bus/event-bus.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PROFILE_ACQUISITION_INTENT } from '../coach-adaptive-profile-collector.contract';
@@ -39,6 +40,9 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
     templateCode: 'PROFILE_QUESTION_DESIRED_MEAL_COUNT_V1',
   });
 
+  const responseToken = (messageId: string) =>
+    createHash('sha256').update(messageId).digest('hex');
+
   function activeCycle(
     overrides: Partial<{
       status: CoachProfileAcquisitionCycleStatus;
@@ -50,6 +54,7 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
       confirmationState: CoachProfileConfirmationState;
       origin: string;
       userId: string;
+      answeredAt: Date | null;
     }> = {},
   ) {
     return {
@@ -69,7 +74,7 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
         CoachProfileConfirmationState.NOT_REQUIRED,
       referenceDate: sentAt,
       askedAt: overrides.askedAt === undefined ? sentAt : overrides.askedAt,
-      answeredAt: null,
+      answeredAt: overrides.answeredAt ?? null,
       expiresAt: overrides.expiresAt ?? new Date('2026-07-18T12:00:00.000Z'),
       cooldownUntil: null,
       completedAt: null,
@@ -94,9 +99,15 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
           }),
         ),
         updateMany: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      scheduledMessage: {
+        findFirst: jest.fn().mockResolvedValue(null),
       },
       coachProfileAcquisitionCycle: {
         updateMany: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue(null),
       },
     };
     const prisma = {
@@ -111,6 +122,11 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
           sentAt,
         }),
         updateMany: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      scheduledMessage: {
+        findFirst: jest.fn().mockResolvedValue(null),
       },
       message: {
         findFirst: jest.fn().mockResolvedValue({
@@ -118,6 +134,7 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
           content: 'quatro refeições',
           timestamp: answerAt,
           conversationId: 'conversation-id',
+          replyToExternalMessageId: null,
         }),
       },
       coachProfileAcquisitionCycle: {
@@ -388,6 +405,35 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
     expect(test.eligibility.evaluate).not.toHaveBeenCalled();
   });
 
+  it('prepares productive Nutrition acquisition for a non-ADMIN user', async () => {
+    const test = subject('INTERNAL');
+    test.prisma.message.findFirst.mockResolvedValue({
+      id: 'nutrition-request-id',
+      conversationId: 'conversation-id',
+    });
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(null);
+
+    await expect(
+      test.service.requestProductiveClarification({
+        userId: 'common-user-id',
+        sourceMessageId: 'nutrition-request-id',
+        referenceDate: sentAt,
+        intent: 'DIET',
+      }),
+    ).resolves.toMatchObject({
+      questionCreated: true,
+      reason: 'QUESTION_PREPARED',
+    });
+    expect(test.cycles.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'common-user-id',
+        origin: 'NUTRITION_V2_PRODUCTIVE_GENERATION:nutrition-request-id',
+      }),
+    );
+    expect(test.eligibility.evaluate).not.toHaveBeenCalled();
+  });
+
   it('isolates simultaneous productive clarification requests for two non-ADMIN users', async () => {
     const test = subject('INTERNAL');
     test.prisma.message.findFirst.mockImplementation(
@@ -595,6 +641,30 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
     );
   });
 
+  it('does not authorize a profile outbound using another productive cycle', async () => {
+    const test = subject('OFF');
+    test.prisma.outboundMessage.findUnique.mockResolvedValue({
+      id: 'foreign-cycle-outbound-id',
+      userId: 'common-user-id',
+      conversationId: 'conversation-id',
+      sourceMessageId: 'second-request-message-id',
+      responseType: ResponseType.PROFILE_ACQUISITION,
+    });
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+      activeCycle({
+        userId: 'common-user-id',
+        sourceMessageId: 'first-request-message-id',
+        origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:first-request-message-id',
+      }),
+    );
+
+    await expect(
+      test.service.authorizeQuestionSend('foreign-cycle-outbound-id'),
+    ).resolves.toBe(false);
+    expect(test.eligibility.evaluate).not.toHaveBeenCalled();
+  });
+
   it('persists a valid answer, closes the cycle and immediately refreshes runtime state', async () => {
     const test = subject();
     test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
@@ -708,6 +778,176 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
     );
   });
 
+  it('does not consume a confirmation that was never sent', async () => {
+    const test = subject();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+      activeCycle({
+        status: CoachProfileAcquisitionCycleStatus.CONFIRMATION_PENDING,
+        field: CoachProfileAcquisitionField.FOOD_INTOLERANCES,
+        confirmationState: CoachProfileConfirmationState.PENDING,
+        answeredAt: new Date('2026-07-16T12:03:00.000Z'),
+        resultCode: `ANSWERED:${responseToken('answer-message-id')}`,
+      }),
+    );
+    test.prisma.message.findFirst.mockResolvedValue({
+      id: 'confirmation-message-id',
+      content: 'sim',
+      timestamp: answerAt,
+      conversationId: 'conversation-id',
+      replyToExternalMessageId: null,
+    });
+
+    await expect(
+      test.service.captureActiveResponse({
+        userId: 'admin-id',
+        messageId: 'confirmation-message-id',
+      }),
+    ).resolves.toMatchObject({
+      handled: false,
+      persisted: false,
+      reason: 'QUESTION_NOT_SENT',
+    });
+    expect(
+      test.mutationService.resolvePendingConfirmation,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('fences an unquoted confirmation after a newer scheduled coach turn', async () => {
+    const test = subject();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+      activeCycle({
+        status: CoachProfileAcquisitionCycleStatus.CONFIRMATION_PENDING,
+        field: CoachProfileAcquisitionField.FOOD_INTOLERANCES,
+        confirmationState: CoachProfileConfirmationState.PENDING,
+        answeredAt: new Date('2026-07-16T12:03:00.000Z'),
+        resultCode: `ANSWERED:${responseToken('answer-message-id')}`,
+      }),
+    );
+    test.prisma.message.findFirst.mockResolvedValue({
+      id: 'confirmation-message-id',
+      content: 'sim',
+      timestamp: answerAt,
+      conversationId: 'conversation-id',
+      replyToExternalMessageId: null,
+    });
+    test.prisma.outboundMessage.findMany.mockResolvedValue([
+      {
+        id: 'confirmation-outbound-id',
+        externalMessageId: 'external-confirmation-id',
+        sentAt: new Date('2026-07-16T12:04:00.000Z'),
+        sourceMessageId: 'answer-message-id',
+      },
+    ]);
+    test.prisma.scheduledMessage.findFirst.mockResolvedValue({
+      id: 'newer-scheduled-turn-id',
+    });
+
+    await expect(
+      test.service.captureActiveResponse({
+        userId: 'admin-id',
+        messageId: 'confirmation-message-id',
+      }),
+    ).resolves.toMatchObject({ handled: false, reason: 'QUESTION_NOT_SENT' });
+    expect(
+      test.mutationService.resolvePendingConfirmation,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('fences an unquoted confirmation after a newer outbound coach turn', async () => {
+    const test = subject();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+      activeCycle({
+        status: CoachProfileAcquisitionCycleStatus.CONFIRMATION_PENDING,
+        field: CoachProfileAcquisitionField.FOOD_INTOLERANCES,
+        confirmationState: CoachProfileConfirmationState.PENDING,
+        answeredAt: new Date('2026-07-16T12:03:00.000Z'),
+        resultCode: `ANSWERED:${responseToken('answer-message-id')}`,
+      }),
+    );
+    test.prisma.message.findFirst.mockResolvedValue({
+      id: 'confirmation-message-id',
+      content: 'sim',
+      timestamp: answerAt,
+      conversationId: 'conversation-id',
+      replyToExternalMessageId: null,
+    });
+    test.prisma.outboundMessage.findMany.mockResolvedValue([
+      {
+        id: 'confirmation-outbound-id',
+        externalMessageId: 'external-confirmation-id',
+        sentAt: new Date('2026-07-16T12:04:00.000Z'),
+        sourceMessageId: 'answer-message-id',
+      },
+    ]);
+    test.prisma.outboundMessage.findFirst.mockResolvedValue({
+      id: 'newer-outbound-turn-id',
+    });
+
+    await expect(
+      test.service.captureActiveResponse({
+        userId: 'admin-id',
+        messageId: 'confirmation-message-id',
+      }),
+    ).resolves.toMatchObject({ handled: false, reason: 'QUESTION_NOT_SENT' });
+    expect(
+      test.mutationService.resolvePendingConfirmation,
+    ).not.toHaveBeenCalled();
+  });
+
+  it.each(['external-confirmation-id', 'external-unrelated-id'])(
+    'only consumes a quoted confirmation addressed to the exact outbound: %s',
+    async (replyToExternalMessageId) => {
+      const test = subject();
+      test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+      test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+        activeCycle({
+          status: CoachProfileAcquisitionCycleStatus.CONFIRMATION_PENDING,
+          field: CoachProfileAcquisitionField.FOOD_INTOLERANCES,
+          confirmationState: CoachProfileConfirmationState.PENDING,
+          answeredAt: new Date('2026-07-16T12:03:00.000Z'),
+          resultCode: `ANSWERED:${responseToken('answer-message-id')}`,
+        }),
+      );
+      test.prisma.message.findFirst.mockResolvedValue({
+        id: 'confirmation-message-id',
+        content: 'sim',
+        timestamp: answerAt,
+        conversationId: 'conversation-id',
+        replyToExternalMessageId,
+      });
+      test.prisma.outboundMessage.findMany.mockResolvedValue([
+        {
+          id: 'confirmation-outbound-id',
+          externalMessageId: 'external-confirmation-id',
+          sentAt: new Date('2026-07-16T12:04:00.000Z'),
+          sourceMessageId: 'answer-message-id',
+        },
+      ]);
+
+      await expect(
+        test.service.captureActiveResponse({
+          userId: 'admin-id',
+          messageId: 'confirmation-message-id',
+        }),
+      ).resolves.toMatchObject({
+        reason:
+          replyToExternalMessageId === 'external-confirmation-id'
+            ? 'CONFIRMATION_COMPLETED'
+            : 'QUESTION_NOT_SENT',
+        handled: replyToExternalMessageId === 'external-confirmation-id',
+        persisted: replyToExternalMessageId === 'external-confirmation-id',
+      });
+      expect(
+        test.mutationService.resolvePendingConfirmation,
+      ).toHaveBeenCalledTimes(
+        replyToExternalMessageId === 'external-confirmation-id' ? 1 : 0,
+      );
+    },
+  );
+
   it('requests and completes explicit confirmation without storing free text', async () => {
     const test = subject();
     test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
@@ -745,7 +985,8 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
         status: CoachProfileAcquisitionCycleStatus.CONFIRMATION_PENDING,
         field: CoachProfileAcquisitionField.FOOD_INTOLERANCES,
         confirmationState: CoachProfileConfirmationState.PENDING,
-        resultCode: 'ANSWERED:previous-token',
+        resultCode: `ANSWERED:${responseToken('answer-message-id')}`,
+        answeredAt: new Date('2026-07-16T12:03:00.000Z'),
       }),
     );
     confirmation.prisma.message.findFirst.mockResolvedValue({
@@ -753,7 +994,16 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
       content: 'sim',
       timestamp: answerAt,
       conversationId: 'conversation-id',
+      replyToExternalMessageId: null,
     });
+    confirmation.prisma.outboundMessage.findMany.mockResolvedValue([
+      {
+        id: 'confirmation-outbound-id',
+        externalMessageId: 'external-confirmation-id',
+        sentAt: new Date('2026-07-16T12:04:00.000Z'),
+        sourceMessageId: 'answer-message-id',
+      },
+    ]);
 
     await expect(
       confirmation.service.captureActiveResponse({

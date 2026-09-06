@@ -1,3 +1,5 @@
+import { GenerateWorkoutPlanV2InputBuilder } from './generate-workout-plan-v2-input.builder';
+import type { CoachProfileSnapshotBuilder } from '../../context/coach-profile-snapshot.builder';
 import { Test } from '@nestjs/testing';
 import { BadGatewayException } from '@nestjs/common';
 import {
@@ -396,6 +398,140 @@ describe('Workout Planning Engine V2', () => {
 
     return module.get(WorkoutPlanningEngineV2Service);
   }
+
+  it('sends individualized canonical payloads with deterministic user-isolated identities', async () => {
+    const ai = {
+      createStandaloneJob: jest
+        .fn()
+        .mockResolvedValue({ id: 'fake-job', status: AIJobStatus.PENDING }),
+      runTextJob: jest
+        .fn()
+        .mockRejectedValue(new Error('mock payload captured')),
+      failJob: jest.fn(),
+    };
+    const engine = await engineWith(ai);
+    const builder = new GenerateWorkoutPlanV2InputBuilder(
+      {} as CoachProfileSnapshotBuilder,
+      {} as PrismaService,
+    );
+    const makeProfile = (advanced: boolean): CoachProfileSnapshot => {
+      const base = snapshot(advanced ? [] : ['evitar sobrecarga no joelho']);
+      return {
+        ...base,
+        identity: {
+          ...base.identity,
+          userId: known(advanced ? 'fictional-b' : 'fictional-a'),
+        },
+        physical: {
+          ...base.physical,
+          activityLevel: known(
+            advanced ? ActivityLevel.HIGH : ActivityLevel.SEDENTARY,
+          ),
+        },
+        nutrition: {
+          ...base.nutrition,
+          primaryGoal: known(
+            advanced ? FitnessGoal.MUSCLE_GAIN : FitnessGoal.WEIGHT_LOSS,
+          ),
+        },
+        training: {
+          ...base.training,
+          experienceLevel: known(advanced ? 'ADVANCED' : 'BEGINNER'),
+          weeklyFrequency: known(advanced ? 5 : 3),
+          sessionDurationMinutes: known(45),
+          perceivedConditioning: known(advanced ? 'HIGH' : 'LOW'),
+        },
+      };
+    };
+    const input = async (
+      userId: string,
+      profile: CoachProfileSnapshot,
+      message = 'Monte um treino para academia',
+    ) =>
+      (
+        await builder.build({
+          userId,
+          profileId: userId + '-profile',
+          snapshot: profile,
+          currentMessage: message,
+          referenceDate,
+        })
+      ).generationInput;
+    const a = await input('fictional-a', makeProfile(false));
+    const b = await input('fictional-b', makeProfile(true));
+    const before = JSON.stringify(a);
+    const pa = engine.prepare(a);
+    const pb = engine.prepare(b);
+    expect(pa.readiness?.status).toBe('READY');
+    expect(pb.readiness?.status).toBe('READY');
+    expect(pa.context).not.toEqual(pb.context);
+    expect(pa.strategy).not.toEqual(pb.strategy);
+    expect(pa.context?.training).toMatchObject({
+      experience: { value: 'BEGINNER' },
+      weeklyFrequency: { value: 3 },
+      perceivedConditioning: { value: 'LOW' },
+    });
+    expect(pb.context?.training).toMatchObject({
+      experience: { value: 'ADVANCED' },
+      weeklyFrequency: { value: 5 },
+      perceivedConditioning: { value: 'HIGH' },
+    });
+    expect(pa.context?.movementConstraints.length).toBeGreaterThan(0);
+    expect(pb.context?.movementConstraints).toEqual([]);
+    for (const generationInput of [a, b, a, { ...a, userId: 'fictional-c' }]) {
+      await expect(engine.generateCandidate(generationInput)).rejects.toThrow(
+        'mock payload captured',
+      );
+    }
+    const payloads = ai.runTextJob.mock.calls.map(
+      (call) =>
+        JSON.parse(call[1].input as string) as {
+          context: WorkoutPlanningContext;
+          strategy: unknown;
+        },
+    );
+    expect(payloads[0].context).toEqual(pa.context);
+    expect(payloads[1].context).toEqual(pb.context);
+    expect(payloads[0].strategy).not.toEqual(payloads[1].strategy);
+    expect(payloads[2]).toEqual(payloads[0]);
+    expect(payloads[3]).toEqual(payloads[0]);
+    const keys = ai.createStandaloneJob.mock.calls.map(
+      (call) => (call[0] as { operationKey: string }).operationKey,
+    );
+    expect(keys[0]).toBe(keys[2]);
+    expect(new Set([keys[0], keys[1], keys[3]]).size).toBe(3);
+    expect(JSON.stringify(a)).toBe(before);
+
+    for (const message of [
+      'Monte um treino de CrossFit',
+      'Quero correr na rua',
+    ]) {
+      await expect(
+        engine.generateCandidate(
+          await input('fictional-a', makeProfile(false), message),
+        ),
+      ).rejects.toThrow('mock payload captured');
+    }
+    const modalityPayloads = [0, 4, 5].map(
+      (index) =>
+        JSON.parse(ai.runTextJob.mock.calls[index][1].input as string) as {
+          context: WorkoutPlanningContext;
+          strategy: unknown;
+        },
+    );
+    expect(
+      modalityPayloads.map((payload) =>
+        payload.context.modality.status === 'NOT_SET'
+          ? null
+          : payload.context.modality.value,
+      ),
+    ).toEqual(['GYM_STRENGTH', 'CROSSFIT', 'RUNNING']);
+    expect(
+      new Set(
+        modalityPayloads.map((payload) => JSON.stringify(payload.strategy)),
+      ).size,
+    ).toBe(3);
+  });
 
   it('prepares Workout V2 without AIJob or provider side effects', async () => {
     const aiService = {

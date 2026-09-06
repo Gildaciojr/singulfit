@@ -59,7 +59,7 @@ export class ConversationTurnContextBuilderService {
     if (Number.isNaN(referenceDate.getTime())) {
       throw new Error('CONVERSATION_RUNTIME_INVALID_REFERENCE_DATE');
     }
-    const [conversation, scheduledMessages, activeCycle, snapshot] =
+    const [conversation, scheduledMessages, foundActiveCycle, snapshot] =
       await Promise.all([
         this.prisma.conversation.findFirst({
           where: { id: input.conversationId, userId: input.userId },
@@ -170,6 +170,7 @@ export class ConversationTurnContextBuilderService {
         structuredContext: message.structuredContext,
       }),
     );
+    const activeCycle = input.proactiveReply ? null : foundActiveCycle;
     const currentLogicalTurn = Math.max(
       history.length + 1,
       (activeCycle?.logicalTurn ?? 0) + 1,

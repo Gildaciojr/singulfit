@@ -1,3 +1,4 @@
+import { isWorkoutEquipmentBaseline } from '../workout/v2/workout-equipment-defaults';
 import { Injectable } from '@nestjs/common';
 import {
   COACH_PROFILE_KNOWLEDGE_STATUS,
@@ -571,6 +572,17 @@ export class CoachAdaptiveProfileCollectorService {
     const result = this.state({
       active: active && !dependencyNotApplicable,
       contextualValue,
+      canonicalEquipmentBaseline:
+        definition.field === PROFILE_ACQUISITION_FIELD.TRAINING_EQUIPMENT &&
+        datum.status === 'UNKNOWN' &&
+        !(
+          input.snapshot.training.environment.status === 'KNOWN' &&
+          input.snapshot.training.environment.value === 'LIMITED_GYM'
+        ) &&
+        isWorkoutEquipmentBaseline(
+          input.conversationContext?.environment?.value,
+          input.conversationContext?.equipment?.value,
+        ),
       datum,
       definition,
       interaction,
@@ -594,6 +606,7 @@ export class CoachAdaptiveProfileCollectorService {
 
   private state(input: {
     readonly active: boolean;
+    readonly canonicalEquipmentBaseline: boolean;
     readonly contextualValue?: {
       readonly evidence: 'EXPLICIT' | 'INFERRED';
     };
@@ -652,6 +665,13 @@ export class CoachAdaptiveProfileCollectorService {
       return this.stateResult('WAITING_DEPENDENCY', 'DEPENDENCY_NOT_MET');
     }
 
+    if (
+      input.contextualValue?.evidence === 'INFERRED' &&
+      (input.canonicalEquipmentBaseline ||
+        input.definition.confirmationPolicy === 'INFERENCE_ALLOWED')
+    ) {
+      return this.stateResult('ALREADY_KNOWN', 'INFERRED_VALUE_ACCEPTED');
+    }
     if (input.contextualValue?.evidence === 'INFERRED') {
       return this.stateResult(
         'WAITING_CONFIRMATION',

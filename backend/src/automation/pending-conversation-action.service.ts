@@ -745,9 +745,16 @@ export class PendingConversationActionService {
   private isRouteReason(value: unknown): boolean {
     return (
       value === 'NUTRITION_V2_ELIGIBLE' ||
+      value === 'NUTRITION_V2_OFFICIAL_ROUTE' ||
       value === 'NUTRITION_PILOT_NOT_ELIGIBLE' ||
+      value === 'NUTRITION_CANONICAL_READ' ||
+      value === 'NUTRITION_V2_PROFILE_ACQUISITION' ||
+      value === 'COMBINED_V2_PROFILE_ACQUISITION' ||
       value === 'WORKOUT_V2_PRODUCTIVE_GENERATION' ||
+      value === 'WORKOUT_V2_CANONICAL_READ' ||
+      value === 'WORKOUT_V2_PLAN_MUTATION' ||
       value === 'CROSS_DOMAIN_ATOMICITY_PENDING' ||
+      value === 'CROSS_DOMAIN_V2_DECOMPOSITION_REQUIRED' ||
       value === 'LEGACY_INTENT_OR_UNSUPPORTED_GOAL'
     );
   }

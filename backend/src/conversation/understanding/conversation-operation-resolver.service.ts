@@ -65,6 +65,14 @@ export class ConversationOperationResolverService {
       add(CONVERSATION_OPERATION.REVIEW_PROGRESS);
     }
     if (
+      !fullReplacement &&
+      /\b(mont\w*|cri\w*|elabor\w*|suger\w*|indi(?:c|qu)\w*)\b/u.test(text) &&
+      /\b(refeicao|cafe da manha|almoco|jantar|lanche|ceia)\b/u.test(text) &&
+      !/\b(plano|dieta|cardapio|alimentacao)\b/u.test(text)
+    ) {
+      add(CONVERSATION_OPERATION.PROVIDE_GUIDANCE);
+    }
+    if (
       (fullReplacement ||
         /\b(ger\w*|cri\w*|mont\w*|elabor\w*|quero|preciso|faca|faz)\b/u.test(
           text,

@@ -166,7 +166,7 @@ describe('CoachPlanningBothApplicationExecutorService', () => {
     expect(subject.prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('generates both candidates before the coordinator opens its transaction', async () => {
+  it('does not reach the legacy combined coordinator through public dispatch', async () => {
     const events: string[] = [];
     const dietPlan = {
       title: 'Dieta',
@@ -229,11 +229,7 @@ describe('CoachPlanningBothApplicationExecutorService', () => {
       decision: null,
     });
 
-    expect(events).toEqual([
-      'diet-provider',
-      'workout-provider',
-      'transaction',
-    ]);
-    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(events).toEqual([]);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });

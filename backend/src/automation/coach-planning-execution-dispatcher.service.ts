@@ -9,7 +9,6 @@ import {
 } from '../context/conversation-goal-planner.contract';
 import { DietGeneratorService } from '../diet/diet-generator.service';
 import { WorkoutGeneratorService } from '../workout/workout-generator.service';
-import type { LegacyWorkoutCandidate } from '../workout/interfaces/legacy-workout-candidate.interface';
 import type { CoachCommandIntent } from './coach-command.service';
 import type {
   CoachPlanningDispatchResult,
@@ -86,11 +85,7 @@ export class CoachPlanningExecutionDispatcherService {
     input: CoachPlanningExecutionDispatchInput,
   ): Promise<CoachPlanningDispatchResult> {
     if (!input.decision) {
-      return this.executeLegacyIntent(
-        input.userId,
-        input.legacyIntent,
-        input.continuationOperationKey,
-      );
+      return this.noLegacyGeneration(input.legacyIntent);
     }
 
     if (
@@ -99,6 +94,10 @@ export class CoachPlanningExecutionDispatcherService {
         input.decision.goal === CONVERSATION_GOAL.SHOW_PLAN_STATUS)
     ) {
       return this.readCurrentNutrition(input);
+    }
+
+    if (input.decision.goal === CONVERSATION_GOAL.GENERATE_COMBINED_PLANS) {
+      return this.generateCombinedV2(input);
     }
 
     if (input.routeSelection?.workout === 'V2') {
@@ -121,33 +120,26 @@ export class CoachPlanningExecutionDispatcherService {
 
     switch (input.decision.goal) {
       case CONVERSATION_GOAL.GENERATE_DIET_PLAN:
-        return input.routeSelection?.nutrition === 'V2'
-          ? this.generateDietV2(input)
-          : this.generateDiet(input.userId, input.continuationOperationKey);
+        return this.generateDietV2(input);
       case CONVERSATION_GOAL.GENERATE_WORKOUT_PLAN:
-        return this.generateWorkout(input.userId);
-      case CONVERSATION_GOAL.GENERATE_COMBINED_PLANS:
-        return this.generateCombined(input.userId);
-      // Estes objetivos ainda não possuem executor oficial e preservam o intent legado.
+        return this.generateWorkoutV2(input);
       case CONVERSATION_GOAL.ANSWER_MESSAGE:
+        return this.noLegacyGeneration(input.legacyIntent);
       case CONVERSATION_GOAL.ASK_PROFILE_INFORMATION:
+        return this.result('', 'PROFILE_ACQUISITION', false, 'CLARIFICATION');
       case CONVERSATION_GOAL.UPDATE_WORKOUT_PLAN:
       case CONVERSATION_GOAL.REVIEW_PROGRESS:
       case CONVERSATION_GOAL.SHOW_CURRENT_PLAN:
       case CONVERSATION_GOAL.SHOW_PLAN_STATUS:
       case CONVERSATION_GOAL.GENERAL_GUIDANCE:
       case CONVERSATION_GOAL.UNKNOWN:
-        return this.executeLegacyIntent(
-          input.userId,
-          input.legacyIntent,
-          input.continuationOperationKey,
-        );
+        return this.noLegacyGeneration(input.legacyIntent);
       case CONVERSATION_GOAL.UPDATE_DIET_PLAN:
         return this.adaptDiet(input);
       case CONVERSATION_GOAL.REQUEST_CONFIRMATION:
         return this.result(
           'Antes de gerar o plano, preciso confirmar seu objetivo atual. Você quer emagrecer, ganhar massa muscular ou manter seu estado atual?',
-          'UNKNOWN_LEGACY',
+          'NO_GENERATION',
           false,
         );
     }
@@ -209,37 +201,64 @@ export class CoachPlanningExecutionDispatcherService {
     ].join('\n');
   }
 
-  private async executeLegacyIntent(
+  private executeLegacyIntent(
     userId: string,
     intent: CoachCommandIntent,
     continuationOperationKey?: string,
   ): Promise<CoachPlanningDispatchResult> {
-    switch (intent) {
-      case 'DIET':
-        return this.generateDiet(userId, continuationOperationKey);
-      case 'WORKOUT':
-        return this.generateWorkout(userId);
-      case 'BOTH':
-        return this.generateCombined(userId);
-      case 'UNKNOWN':
-        return this.result(
-          this.unknownIntentMessage(),
-          'UNKNOWN_LEGACY',
-          false,
-        );
-    }
-
-    return this.executeUnsupportedIntent(intent);
+    void userId;
+    void continuationOperationKey;
+    return Promise.resolve(this.noLegacyGeneration(intent));
   }
 
-  private async generateDiet(
-    userId: string,
-    operationKey?: string,
+  private noLegacyGeneration(
+    intent: CoachCommandIntent,
+  ): CoachPlanningDispatchResult {
+    const content =
+      intent === 'UNKNOWN'
+        ? this.unknownIntentMessage()
+        : 'Não consegui preparar a geração moderna com segurança agora. Nenhum plano foi criado; tente novamente em instantes.';
+    return this.result(content, 'FAILURE_FALLBACK', false);
+  }
+
+  private async generateCombinedV2(
+    input: CoachPlanningExecutionDispatchInput,
   ): Promise<CoachPlanningDispatchResult> {
-    const plan = operationKey
-      ? await this.dietGenerator.generate(userId, operationKey)
-      : await this.dietGenerator.generate(userId);
-    return this.result(this.formatDiet(plan), 'DIET_LEGACY', true);
+    if (!input.workoutV2 || !this.workoutV2Executor) {
+      throw new ServiceUnavailableException(
+        'Rota Workout V2 selecionada sem infraestrutura executável',
+      );
+    }
+    const preflight = this.workoutV2Executor.preflight(
+      input.workoutV2.generationInput,
+    );
+    if (preflight.kind === 'CLARIFICATION') {
+      return this.result(
+        this.workoutClarification([
+          ...preflight.missingFields,
+          ...preflight.confirmationRequiredFields,
+        ]),
+        'V2_DECOMPOSITION',
+        false,
+        'CLARIFICATION',
+      );
+    }
+    if (preflight.kind === 'BLOCKED') {
+      return this.result(
+        'Não vou gerar os planos enquanto esse contexto de segurança precisar de cuidado ou avaliação profissional.',
+        'V2_DECOMPOSITION',
+        false,
+        'BLOCKED',
+      );
+    }
+    const nutrition = await this.generateDietV2(input);
+    const workout = await this.generateWorkoutV2(input);
+    return this.result(
+      [nutrition.content, workout.content].filter(Boolean).join('\n\n'),
+      'V2_DECOMPOSITION',
+      nutrition.generationCompleted && workout.generationCompleted,
+      workout.workoutDisposition,
+    );
   }
 
   private async adaptDiet(
@@ -260,24 +279,12 @@ export class CoachPlanningExecutionDispatcherService {
         false,
       );
     }
-    if (current.implementation !== 'LEGACY') {
-      return this.result(
-        'Seu plano atual está disponível, mas essa adaptação ainda precisa de revisão antes de ser aplicada. Nenhuma alteração foi feita.',
-        'NUTRITION_CANONICAL_READER',
-        false,
-        'CLARIFICATION',
-      );
-    }
-    const plan = await this.dietGenerator.generate(
-      input.userId,
-      input.continuationOperationKey,
-      {
-        requestedChange:
-          input.currentMessage?.trim() || 'Adaptar meu plano alimentar atual',
-        previousPlan: current,
-      },
+    return this.result(
+      'Seu plano atual está disponível, mas essa adaptação ainda precisa de revisão antes de ser aplicada. Nenhuma alteração foi feita.',
+      'NUTRITION_CANONICAL_READER',
+      false,
+      'CLARIFICATION',
     );
-    return this.result(this.formatDiet(plan), 'DIET_LEGACY', true);
   }
 
   private async generateDietV2(
@@ -310,16 +317,6 @@ export class CoachPlanningExecutionDispatcherService {
       }),
       'DIET_V2',
       result.aiJobCompleted,
-    );
-  }
-
-  private async generateWorkout(
-    userId: string,
-  ): Promise<CoachPlanningDispatchResult> {
-    return this.result(
-      this.formatWorkout(await this.workoutGenerator.generate(userId)),
-      'WORKOUT_LEGACY',
-      true,
     );
   }
 
@@ -412,34 +409,6 @@ export class CoachPlanningExecutionDispatcherService {
     return this.result(content, 'NUTRITION_CANONICAL_READER', false);
   }
 
-  private async generateCombined(
-    userId: string,
-  ): Promise<CoachPlanningDispatchResult> {
-    const dietCandidate = await this.dietGenerator.generateCandidate(userId);
-    let workoutCandidate: LegacyWorkoutCandidate;
-    try {
-      workoutCandidate = await this.workoutGenerator.generateCandidate(userId);
-    } catch (error: unknown) {
-      await this.dietGenerator.failCandidate(
-        dietCandidate,
-        new Error(
-          `Planejamento combinado abortado antes do commit: ${this.errorMessage(error)}`,
-        ),
-      );
-      throw error;
-    }
-    const committed = await this.bothExecutor.execute(
-      dietCandidate,
-      workoutCandidate,
-    );
-
-    return this.result(
-      `${this.formatDiet(committed.dietPlan)}\n\n${this.formatWorkout(committed.workoutPlan)}`,
-      'COMBINED_LEGACY',
-      true,
-    );
-  }
-
   private executeUnsupportedGoal(
     _goal: never,
     userId: string,
@@ -452,7 +421,7 @@ export class CoachPlanningExecutionDispatcherService {
     _intent: never,
   ): CoachPlanningDispatchResult {
     void _intent;
-    return this.result(this.unknownIntentMessage(), 'UNKNOWN_LEGACY', false);
+    return this.result(this.unknownIntentMessage(), 'NO_GENERATION', false);
   }
 
   private result(
@@ -521,11 +490,5 @@ export class CoachPlanningExecutionDispatcherService {
       | undefined,
   ): string | undefined {
     return value?.status === 'KNOWN' ? value.value : undefined;
-  }
-
-  private errorMessage(error: unknown): string {
-    return error instanceof Error && error.message.trim()
-      ? error.message.trim().slice(0, 1_000)
-      : 'falha não identificada';
   }
 }

@@ -45,6 +45,7 @@ import { AIModule } from '../ai/ai.module';
 import { CoachProactiveSchedulePolicy } from './coach-proactive-schedule.policy';
 import { CoachProactiveRealizerService } from './coach-proactive-realizer.service';
 import { CoachProactiveResponseService } from './coach-proactive-response.service';
+import { DietController } from '../diet/diet.controller';
 
 @Module({
   imports: [
@@ -65,7 +66,7 @@ import { CoachProactiveResponseService } from './coach-proactive-response.servic
     ConversationRealizationModule,
     AIModule,
   ],
-  controllers: [AutomationController, CoachAdminController],
+  controllers: [AutomationController, CoachAdminController, DietController],
   providers: [
     AutomationService,
     CoachPlanningExecutionDispatcherService,

@@ -21,6 +21,7 @@ import type {
 import { ProfileAcquisitionInternalRolloutService } from '../context/profile-acquisition/profile-acquisition-internal-rollout.service';
 import { isWorkoutCurrentPlanRead } from '../workout/v2/workout-current-plan-read.policy';
 import { CurrentWorkoutPlanReaderService } from '../workout/v2/current-workout-plan-reader.service';
+import { CONVERSATION_GOAL } from '../context/conversation-goal-planner.contract';
 
 const WORKOUT_SESSION_SELECTION_ACTION = 'WORKOUT_SESSION_SELECTION';
 const WORKOUT_SESSION_SELECTION_WINDOW_MS = 24 * 60 * 60 * 1_000;
@@ -28,9 +29,13 @@ const WORKOUT_SESSION_SELECTION_WINDOW_MS = 24 * 60 * 60 * 1_000;
 export type CoachCommandIntent = 'DIET' | 'WORKOUT' | 'BOTH' | 'UNKNOWN';
 
 export interface ProcessCoachCommandInput {
+  readonly proactiveReply?: boolean;
   userId: string;
   messageId: string;
-  workoutContinuationMessageId?: string;
+  planningContinuation?: Readonly<{
+    originalRequestMessageId: string;
+    intent: 'DIET' | 'WORKOUT' | 'BOTH';
+  }>;
 }
 
 export interface ProcessCoachCommandResult {
@@ -143,16 +148,16 @@ export class CoachCommandService {
         reason: 'TEXT_MESSAGE_NOT_FOUND',
       };
     }
-    const workoutOriginal = input.workoutContinuationMessageId
+    const planningOriginal = input.planningContinuation
       ? await this.prisma.message.findFirst({
           where: {
-            id: input.workoutContinuationMessageId,
+            id: input.planningContinuation.originalRequestMessageId,
             conversation: { userId: input.userId },
           },
           select: { content: true },
         })
       : null;
-    const workoutContinuation = workoutOriginal
+    const workoutContinuation = planningOriginal
       ? null
       : await this.resolveWorkoutSessionContinuation({
           userId: input.userId,
@@ -162,7 +167,7 @@ export class CoachCommandService {
           replyToExternalMessageId: message.replyToExternalMessageId,
         });
     const commandText =
-      workoutOriginal?.content ??
+      planningOriginal?.content ??
       (workoutContinuation
         ? `sessão ${workoutContinuation.sequence}`
         : message.content);
@@ -190,9 +195,11 @@ export class CoachCommandService {
           ? pending.intent
           : pending.status === 'ALREADY_CONSUMED'
             ? pending.intent
-            : input.workoutContinuationMessageId || workoutContinuation
-              ? 'WORKOUT'
-              : this.classify(commandText);
+            : input.planningContinuation
+              ? input.planningContinuation.intent
+              : workoutContinuation
+                ? 'WORKOUT'
+                : this.classify(commandText);
     const selectionContext = await this.workoutSelectionContext(
       input.userId,
       commandText,
@@ -256,6 +263,7 @@ export class CoachCommandService {
           text: commandText,
           receivedAt: message.timestamp.toISOString(),
           replyToExternalMessageId: message.replyToExternalMessageId,
+          ...(input.proactiveReply ? { proactiveReply: true } : {}),
           legacyIntent: intent,
         });
     const planningResult =
@@ -274,7 +282,8 @@ export class CoachCommandService {
               pendingGoalConfirmation:
                 pending.status === 'ACTIONABLE' ? pending.context : undefined,
               suppressCurrentGoalResolution: pending.status === 'EXPIRED',
-              originalRequestMessageId: input.workoutContinuationMessageId,
+              originalRequestMessageId:
+                input.planningContinuation?.originalRequestMessageId,
             });
     if (!planningResult.responseRequired) {
       return {
@@ -404,6 +413,7 @@ export class CoachCommandService {
         input.pendingGoalConfirmation?.payload.originalMessage ?? input.text,
       pendingGoalConfirmation: input.pendingGoalConfirmation,
       suppressCurrentGoalResolution: input.suppressCurrentGoalResolution,
+      originalRequestMessageId: input.originalRequestMessageId,
     };
     const execution = await this.planningExecution.executeStructured(
       input.userId,
@@ -413,19 +423,47 @@ export class CoachCommandService {
     if (!execution.responseRequired) {
       return Object.freeze({ content: '', responseRequired: false });
     }
-    if (execution.dispatch?.workoutDisposition === 'CLARIFICATION') {
+    const acquisitionIntent =
+      execution.decision?.targetPlan === 'DIET'
+        ? 'DIET'
+        : execution.decision?.targetPlan === 'WORKOUT'
+          ? 'WORKOUT'
+          : execution.decision?.targetPlan === 'BOTH'
+            ? 'BOTH'
+            : input.intent === 'DIET' || input.intent === 'WORKOUT'
+              ? input.intent
+              : input.intent === 'BOTH'
+                ? 'BOTH'
+                : null;
+    const productiveAcquisition =
+      (execution.decision?.goal === CONVERSATION_GOAL.ASK_PROFILE_INFORMATION &&
+        acquisitionIntent !== null) ||
+      ((input.intent === 'WORKOUT' || input.intent === 'BOTH') &&
+        execution.dispatch?.workoutDisposition === 'CLARIFICATION');
+    if (productiveAcquisition) {
       if (!this.profileAcquisitionRollout) {
-        return this.blockedWorkoutClarification();
+        return this.blockedProfileClarification(acquisitionIntent);
       }
       try {
         const clarification =
-          await this.profileAcquisitionRollout.requestWorkoutClarification({
-            userId: input.userId,
-            sourceMessageId: input.messageId,
-            referenceDate: input.referenceDate,
-            originalRequestMessageId: input.originalRequestMessageId,
-            conversationContext: execution.profileAcquisitionContext,
-          });
+          acquisitionIntent === 'WORKOUT'
+            ? await this.profileAcquisitionRollout.requestWorkoutClarification({
+                userId: input.userId,
+                sourceMessageId: input.messageId,
+                referenceDate: input.referenceDate,
+                originalRequestMessageId: input.originalRequestMessageId,
+                conversationContext: execution.profileAcquisitionContext,
+              })
+            : await this.profileAcquisitionRollout.requestProductiveClarification(
+                {
+                  userId: input.userId,
+                  sourceMessageId: input.messageId,
+                  referenceDate: input.referenceDate,
+                  originalRequestMessageId: input.originalRequestMessageId,
+                  conversationContext: execution.profileAcquisitionContext,
+                  intent: acquisitionIntent ?? 'DIET',
+                },
+              );
         if (
           clarification.questionCreated ||
           clarification.reason === 'QUESTION_ALREADY_ACTIVE'
@@ -433,9 +471,9 @@ export class CoachCommandService {
           return Object.freeze({ content: '', responseRequired: false });
         }
       } catch {
-        return this.blockedWorkoutClarification();
+        return this.blockedProfileClarification(acquisitionIntent);
       }
-      return this.blockedWorkoutClarification();
+      return this.blockedProfileClarification(acquisitionIntent);
     }
     const content =
       isNutritionPlanningRealizerEligible(execution) &&
@@ -455,14 +493,21 @@ export class CoachCommandService {
     });
   }
 
-  private blockedWorkoutClarification(): {
+  private blockedProfileClarification(
+    intent: 'DIET' | 'WORKOUT' | 'BOTH' | null,
+  ): {
     readonly content: string;
     readonly responseRequired: true;
     readonly workoutDisposition: 'BLOCKED';
   } {
     return Object.freeze({
-      content:
-        'Não consegui registrar com segurança a próxima pergunta do seu treino. Tente novamente em instantes para continuarmos sem perder suas respostas.',
+      content: `Não consegui registrar com segurança a próxima pergunta ${
+        intent === 'DIET'
+          ? 'do seu plano alimentar'
+          : intent === 'WORKOUT'
+            ? 'do seu treino'
+            : 'dos seus planos'
+      }. Tente novamente em instantes para continuarmos sem perder suas respostas.`,
       responseRequired: true,
       workoutDisposition: 'BLOCKED' as const,
     });
@@ -507,6 +552,7 @@ export class CoachCommandService {
     receivedAt: string;
     replyToExternalMessageId?: string | null;
     legacyIntent: CoachCommandIntent;
+    proactiveReply?: boolean;
   }) {
     if (!this.conversationRuntime) {
       return { source: 'LEGACY' as const, reason: 'RUNTIME_DISABLED' as const };

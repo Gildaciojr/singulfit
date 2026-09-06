@@ -32,15 +32,15 @@ describe('PlanningExecutionRoutePolicyService', () => {
   }
 
   it.each([
-    ['DISABLED', 'NUTRITION_PILOT_NOT_ELIGIBLE'],
-    ['INVALID_CONFIG', 'NUTRITION_PILOT_NOT_ELIGIBLE'],
-    ['NOT_AUTHORIZED', 'NUTRITION_PILOT_NOT_ELIGIBLE'],
-    ['INELIGIBLE_OPERATION', 'NUTRITION_PILOT_NOT_ELIGIBLE'],
-    ['MISSING_OWNERSHIP', 'NUTRITION_PILOT_NOT_ELIGIBLE'],
-    ['ELIGIBLE', 'NUTRITION_V2_ELIGIBLE'],
+    'DISABLED',
+    'INVALID_CONFIG',
+    'NOT_AUTHORIZED',
+    'INELIGIBLE_OPERATION',
+    'MISSING_OWNERSHIP',
+    'ELIGIBLE',
   ] as const)(
-    'selects exactly one DIET route for pilot status %s',
-    (status, reason) => {
+    'selects public Nutrition V2 independently of pilot status %s',
+    (status) => {
       const subject = setup(status);
       const planningDecision = decision('GENERATE_DIET_PLAN');
       const generationInput = Object.freeze({
@@ -55,11 +55,11 @@ describe('PlanningExecutionRoutePolicyService', () => {
           generationInput,
         }),
       ).toEqual({
-        nutrition: status === 'ELIGIBLE' ? 'V2' : 'LEGACY',
+        nutrition: 'V2',
         workout: null,
-        reason,
+        reason: 'NUTRITION_V2_OFFICIAL_ROUTE',
         nutritionPilotStatus: status,
-        suppressNutritionShadow: status === 'ELIGIBLE',
+        suppressNutritionShadow: true,
       });
       expect(subject.nutritionPilot.evaluate).toHaveBeenCalledTimes(1);
     },
@@ -84,6 +84,47 @@ describe('PlanningExecutionRoutePolicyService', () => {
       suppressNutritionShadow: false,
     });
     expect(subject.nutritionPilot.evaluate).not.toHaveBeenCalled();
+  });
+
+  it('routes missing Nutrition profile to productive V2 acquisition', () => {
+    const subject = setup('NOT_AUTHORIZED');
+    expect(
+      subject.policy.select({
+        userId: 'ordinary-user',
+        profileId: 'profile-id',
+        decision: {
+          ...decision('ASK_PROFILE_INFORMATION'),
+          targetPlan: 'DIET',
+        },
+        generationInput: null,
+      }),
+    ).toEqual({
+      nutrition: 'V2',
+      workout: null,
+      reason: 'NUTRITION_V2_PROFILE_ACQUISITION',
+      nutritionPilotStatus: null,
+      suppressNutritionShadow: false,
+    });
+    expect(subject.nutritionPilot.evaluate).not.toHaveBeenCalled();
+  });
+
+  it('keeps BOTH on productive V2 acquisition when profiles are incomplete', () => {
+    const subject = setup('NOT_AUTHORIZED');
+    expect(
+      subject.policy.select({
+        userId: 'ordinary-user',
+        profileId: 'profile-id',
+        decision: {
+          ...decision('ASK_PROFILE_INFORMATION'),
+          targetPlan: 'BOTH',
+        },
+        generationInput: null,
+      }),
+    ).toMatchObject({
+      nutrition: 'V2',
+      workout: 'V2',
+      reason: 'COMBINED_V2_PROFILE_ACQUISITION',
+    });
   });
 
   it('selects the canonical V2 reader for current Workout queries for every user', () => {
@@ -129,7 +170,7 @@ describe('PlanningExecutionRoutePolicyService', () => {
     expect(subject.nutritionPilot.evaluate).not.toHaveBeenCalled();
   });
 
-  it('keeps BOTH entirely Legacy while cross-domain atomicity is pending', () => {
+  it('decomposes BOTH into V2 flows without selecting legacy', () => {
     const subject = setup('ELIGIBLE');
 
     expect(
@@ -140,9 +181,9 @@ describe('PlanningExecutionRoutePolicyService', () => {
         generationInput: null,
       }),
     ).toEqual({
-      nutrition: 'LEGACY',
-      workout: 'LEGACY',
-      reason: 'CROSS_DOMAIN_ATOMICITY_PENDING',
+      nutrition: 'V2',
+      workout: 'V2',
+      reason: 'CROSS_DOMAIN_V2_DECOMPOSITION_REQUIRED',
       nutritionPilotStatus: null,
       suppressNutritionShadow: false,
     });

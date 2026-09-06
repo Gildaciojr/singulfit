@@ -1,3 +1,4 @@
+import { workoutEquipmentBaseline } from '../workout/v2/workout-equipment-defaults';
 import { ActivityLevel, FitnessGoal } from '@prisma/client';
 import {
   CoachAdaptiveProfileCollectorInput,
@@ -249,6 +250,59 @@ describe('CoachAdaptiveProfileCollectorService', () => {
     if (!result) throw new Error(`Candidato ausente: ${field}`);
     return result;
   }
+
+  it.each([
+    ['FULL_GYM', PROFILE_ACQUISITION_MODALITY.GYM],
+    ['CROSSFIT_BOX', PROFILE_ACQUISITION_MODALITY.CROSSFIT],
+    ['HOME', PROFILE_ACQUISITION_MODALITY.HOME],
+  ] as const)(
+    'does not ask equipment names for canonical %s baseline',
+    (environment, modality) => {
+      const result = decide(
+        PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,
+        completeProfile({ equipment: unknown(), environment: unknown() }),
+        {
+          conversationContext: {
+            modality: { value: modality, evidence: 'EXPLICIT' },
+            environment: { value: environment, evidence: 'EXPLICIT' },
+            equipment: {
+              value: workoutEquipmentBaseline(environment)!.value,
+              evidence: 'INFERRED',
+            },
+          },
+        },
+      );
+      expect(
+        candidate(result, PROFILE_ACQUISITION_FIELD.TRAINING_EQUIPMENT),
+      ).toMatchObject({
+        state: 'ALREADY_KNOWN',
+        reason: 'INFERRED_VALUE_ACCEPTED',
+      });
+      expect(result.selectedCandidate?.field).not.toBe(
+        PROFILE_ACQUISITION_FIELD.TRAINING_EQUIPMENT,
+      );
+    },
+  );
+
+  it('still confirms arbitrary inferred equipment outside the canonical baseline', () => {
+    const result = decide(
+      PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,
+      completeProfile({ equipment: unknown() }),
+      {
+        conversationContext: {
+          modality: {
+            value: PROFILE_ACQUISITION_MODALITY.GYM,
+            evidence: 'EXPLICIT',
+          },
+          environment: { value: 'LIMITED_GYM', evidence: 'EXPLICIT' },
+          equipment: { value: ['DUMBBELL'], evidence: 'INFERRED' },
+        },
+      },
+    );
+    expect(
+      candidate(result, PROFILE_ACQUISITION_FIELD.TRAINING_EQUIPMENT).state,
+    ).toBe('WAITING_CONFIRMATION');
+  });
 
   it('returns no acquisition and complete readiness for a complete profile', () => {
     const result = decide(

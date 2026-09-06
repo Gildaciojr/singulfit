@@ -81,6 +81,7 @@ import { UsageLimitExceededException } from '../entitlements/usage-limit.excepti
 import { isWorkoutCurrentPlanRead } from '../workout/v2/workout-current-plan-read.policy';
 
 export interface CoachPlanningRuntimeContext {
+  readonly originalRequestMessageId?: string;
   readonly conversationId: string;
   readonly messageId: string;
   readonly correlationId: string;
@@ -247,7 +248,10 @@ export class CoachPlanningExecutionService {
     const legacyStartedAt = performance.now();
     let legacySucceeded = true;
     let dispatch: CoachPlanningDispatchResult;
-    const continuationOperationKey = this.continuationOperationKey(runtime);
+    const continuationOperationKey = this.continuationOperationKey(
+      runtime,
+      intent,
+    );
     try {
       dispatch = await this.dispatcher.dispatchStructured({
         userId,
@@ -318,7 +322,7 @@ export class CoachPlanningExecutionService {
       dispatch = Object.freeze({
         content: commercialLimit
           ? error.friendlyMessage
-          : this.failureMessage(error),
+          : this.failureMessage(error, intent),
         executor: commercialLimit
           ? ('COMMERCIAL_LIMIT' as const)
           : ('FAILURE_FALLBACK' as const),
@@ -433,9 +437,16 @@ export class CoachPlanningExecutionService {
 
   private continuationOperationKey(
     runtime: CoachPlanningRuntimeContext | undefined,
+    intent: CoachCommandIntent,
   ): string | undefined {
     const pending = runtime?.pendingGoalConfirmation;
-    if (!pending || !runtime) return undefined;
+    if (!runtime) return undefined;
+    if (intent === 'BOTH') {
+      const rootMessageId =
+        runtime.originalRequestMessageId ?? runtime.messageId;
+      return `combined-continuation:${runtime.conversationId}:${rootMessageId}:nutrition`;
+    }
+    if (!pending) return undefined;
     return `pending-goal-continuation:${pending.actionId}:${runtime.messageId}:nutrition`;
   }
 
@@ -451,7 +462,7 @@ export class CoachPlanningExecutionService {
       suppressNutritionShadow: false,
     });
     const dispatch = Object.freeze({
-      content: this.failureMessage(error),
+      content: this.failureMessage(error, 'WORKOUT'),
       executor: 'FAILURE_FALLBACK' as const,
       generationCompleted: false,
       fallbackApplied: false,
@@ -709,7 +720,8 @@ export class CoachPlanningExecutionService {
       runtime?.currentMessage,
     );
     const baseWorkoutContext =
-      intent === 'WORKOUT' && this.workoutPlanningInputBuilder
+      (intent === 'WORKOUT' || intent === 'BOTH') &&
+      this.workoutPlanningInputBuilder
         ? this.workoutPlanningInputBuilder.recognizeDeclaredContext(
             runtime?.currentMessage,
           )
@@ -757,7 +769,7 @@ export class CoachPlanningExecutionService {
         : null;
     const profileAcquisitionContext = this.profileAcquisitionContext(
       declaredWorkoutContext,
-      intent === 'WORKOUT' &&
+      (intent === 'WORKOUT' || intent === 'BOTH') &&
         !readRequested &&
         mutation.status === 'NOT_A_MUTATION',
     );
@@ -793,7 +805,7 @@ export class CoachPlanningExecutionService {
     });
     const builtInput = this.nutritionPlanningInputBuilder?.build(source);
     const builtWorkoutInput =
-      intent === 'WORKOUT' &&
+      (intent === 'WORKOUT' || intent === 'BOTH') &&
       adaptation.recognizedIntent !==
         CONVERSATION_RECOGNIZED_INTENT.CURRENT_PLAN_REQUEST &&
       !workoutV2Response &&
@@ -829,21 +841,7 @@ export class CoachPlanningExecutionService {
     intent: CoachCommandIntent,
     message: string | undefined,
   ): boolean {
-    if (intent !== 'WORKOUT' || !message) return false;
-    const normalized = message
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase();
-    return (
-      /\b(meu|minha)\s+(?:plano\s+de\s+)?treino\b/u.test(normalized) ||
-      /\bo que (?:eu )?treino (?:hoje|amanha)\b/u.test(normalized) ||
-      /\b(?:mostra|mostre|ver|qual|consulta|consultar)\b.*\b(?:treino|sessao)\b/u.test(
-        normalized,
-      ) ||
-      /\btreino\s+(?:de\s+)?(?:segunda|terca|quarta|quinta|sexta|sabado|domingo|\d)\b/u.test(
-        normalized,
-      )
-    );
+    return intent === 'WORKOUT' && isWorkoutCurrentPlanRead(message);
   }
 
   private workoutMutationRequested(
@@ -917,7 +915,7 @@ export class CoachPlanningExecutionService {
     const dispatch = Object.freeze({
       content:
         'Já considerei uma atualização de objetivo mais recente. Confirme seu objetivo atual antes de gerar um novo plano.',
-      executor: 'UNKNOWN_LEGACY' as const,
+      executor: 'NO_GENERATION' as const,
       generationCompleted: false,
       fallbackApplied: false,
     });
@@ -988,7 +986,7 @@ export class CoachPlanningExecutionService {
   ): CoachPlanningExecutionResult {
     const dispatch = Object.freeze({
       content: '',
-      executor: 'UNKNOWN_LEGACY' as const,
+      executor: 'NO_GENERATION' as const,
       generationCompleted: false,
       fallbackApplied: false,
     });
@@ -1243,8 +1241,15 @@ export class CoachPlanningExecutionService {
   private explicitWorkoutValue<T>(
     value: WorkoutPlanningValue<T> | undefined,
   ): ProfileAcquisitionContextValue<T> | undefined {
-    if (!value || value.status !== 'CONFIRMED') return undefined;
-    return Object.freeze({ value: value.value, evidence: 'EXPLICIT' as const });
+    if (!value || (value.status !== 'CONFIRMED' && value.status !== 'INFERRED'))
+      return undefined;
+    return Object.freeze({
+      value: value.value,
+      evidence:
+        value.status === 'CONFIRMED'
+          ? ('EXPLICIT' as const)
+          : ('INFERRED' as const),
+    });
   }
 
   private profileAcquisitionModality(
@@ -1296,7 +1301,7 @@ export class CoachPlanningExecutionService {
     );
   }
 
-  private failureMessage(error: unknown): string {
+  private failureMessage(error: unknown, intent: CoachCommandIntent): string {
     const message = error instanceof Error ? error.message : '';
 
     if (/assinatura|acesso|subscription|forbidden/i.test(message)) {
@@ -1307,7 +1312,13 @@ export class CoachPlanningExecutionService {
       return 'Ainda preciso do seu perfil completo para gerar um plano seguro e personalizado. Conclua o onboarding e me peça novamente.';
     }
 
-    return 'Tive uma falha ao gerar seu plano agora. Tente novamente em alguns instantes que eu continuo te ajudando.';
+    const target =
+      intent === 'DIET'
+        ? 'seu plano alimentar'
+        : intent === 'WORKOUT'
+          ? 'seu treino'
+          : 'seus planos';
+    return `Tive uma falha ao gerar ${target} agora. Tente novamente em alguns instantes que eu continuo te ajudando.`;
   }
 
   private safeMessage(error: unknown): string {

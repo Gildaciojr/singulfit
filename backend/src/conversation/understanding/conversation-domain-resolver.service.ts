@@ -58,6 +58,26 @@ export class ConversationDomainResolverService {
       this.addReferenceDomain(candidates, reference);
     }
 
+    const mealScopedNutrition = entityRecognition.entities.some(
+      (entity) => entity.kind === 'MEAL',
+    );
+    if (
+      mealScopedNutrition &&
+      /\b(comer|jantar|almocar|refeicao|suger|mont)\w*\b/u.test(text) &&
+      !/\b(plano de treino|monte (?:um )?treino|crie (?:um )?treino)\b/u.test(
+        text,
+      )
+    ) {
+      return Object.freeze({
+        domain: CONVERSATION_DOMAIN.NUTRITION,
+        candidates: Object.freeze([CONVERSATION_DOMAIN.NUTRITION]),
+        contextual:
+          candidates.has(CONVERSATION_DOMAIN.WORKOUT) ||
+          referenceResolution.usedContinuity ||
+          referenceResolution.usedRecentHistory,
+      });
+    }
+
     const planDomains = [...candidates].filter(
       (domain) => domain === 'NUTRITION' || domain === 'WORKOUT',
     );

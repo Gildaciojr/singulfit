@@ -7,6 +7,7 @@ import {
   MessageType,
   Prisma,
   ScheduledMessageStatus,
+  OutboundMessageStatus,
 } from '@prisma/client';
 import { EventBusService } from '../event-bus/event-bus.service';
 import { INTERNAL_EVENT } from '../event-bus/event-bus.constants';
@@ -28,6 +29,7 @@ interface ProactiveResponseClassification {
 }
 
 export interface CoachProactiveResponseCaptureResult {
+  readonly continueInRuntime?: boolean;
   readonly handled: boolean;
   readonly duplicated: boolean;
   readonly outcome: CoachProactiveWorkoutOutcome | null;
@@ -63,7 +65,7 @@ export class CoachProactiveResponseService {
       },
     });
     if (!message) return this.notHandled();
-    if (this.isIndependentCommand(message.content)) return this.notHandled();
+    const independentCommand = this.isIndependentCommand(message.content);
 
     const quoted = Boolean(message.replyToExternalMessageId);
     const intervention = await this.prisma.scheduledMessage.findFirst({
@@ -127,8 +129,38 @@ export class CoachProactiveResponseService {
       }
     }
 
-    const classification = this.classify(intent, message.content);
-    if (classification === null) return this.notHandled();
+    if (!quoted) {
+      const sentAt = intervention.sentAt ?? intervention.scheduledFor;
+      const [newerOutbound, newerScheduled] = await Promise.all([
+        this.prisma.outboundMessage.findFirst({
+          where: {
+            userId: input.userId,
+            conversationId: message.conversationId,
+            status: {
+              in: [OutboundMessageStatus.SENT, OutboundMessageStatus.DELIVERED],
+            },
+            sentAt: { gt: sentAt, lt: message.timestamp },
+          },
+          select: { id: true },
+        }),
+        this.prisma.scheduledMessage.findFirst({
+          where: {
+            id: { not: intervention.id },
+            userId: input.userId,
+            conversationId: message.conversationId,
+            status: ScheduledMessageStatus.SENT,
+            sentAt: { gt: sentAt, lt: message.timestamp },
+          },
+          select: { id: true },
+        }),
+      ]);
+      if (newerOutbound || newerScheduled) return this.notHandled();
+    }
+    const classification = independentCommand
+      ? null
+      : this.classify(intent, message.content);
+    if (classification === null)
+      return Object.freeze({ ...this.notHandled(), continueInRuntime: true });
     return this.persist({
       userId: input.userId,
       message,
@@ -337,6 +369,12 @@ export class CoachProactiveResponseService {
     ) {
       return this.classification(CoachProactiveWorkoutOutcome.PARTIAL);
     }
+    if (
+      intent === COACH_PROACTIVE_INTENTS.HYDRATION_CHECK &&
+      /\b(?:encher|enchi) (?:minha |a )?garrafa\b/u.test(text)
+    ) {
+      return this.classification(CoachProactiveWorkoutOutcome.DEFERRED);
+    }
     if (/\b(vou fazer|mais tarde|depois eu faco|adiei|adiar)\b/u.test(text)) {
       return this.classification(CoachProactiveWorkoutOutcome.DEFERRED);
     }
@@ -360,7 +398,7 @@ export class CoachProactiveResponseService {
     }
     if (
       intent === COACH_PROACTIVE_INTENTS.HYDRATION_CHECK &&
-      /\b(sim|ja|ja bebi|bebi agua|estou bebendo|to bebendo|consegui beber)\b/u.test(
+      /\b(sim|ja|ja bebi|bebi agua|estou bebendo|to bebendo|consegui beber|tomei (?:uns? )?\d+\s*(?:ml|litros?))\b/u.test(
         text,
       )
     ) {
@@ -376,7 +414,9 @@ export class CoachProactiveResponseService {
     ) {
       return this.classification(CoachProactiveWorkoutOutcome.COMPLETED);
     }
-    if (/\b(cansad[oa]|exaust[oa]|sem energia)\b/u.test(text)) {
+    if (
+      /\b(cansad[oa]|exaust[oa]|sem energia|hoje esta corrido)\b/u.test(text)
+    ) {
       return this.classification(CoachProactiveWorkoutOutcome.PARTIAL);
     }
     return null;

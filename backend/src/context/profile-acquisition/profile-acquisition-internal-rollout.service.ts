@@ -8,6 +8,7 @@ import {
   MessageType,
   OutboundMessageStatus,
   ResponseType,
+  ScheduledMessageStatus,
 } from '@prisma/client';
 import { EventBusService } from '../../event-bus/event-bus.service';
 import { INTERNAL_EVENT } from '../../event-bus/event-bus.constants';
@@ -44,6 +45,10 @@ import {
 
 const ROLLOUT_ORIGIN = 'INTERNAL_PROFILE_ACQUISITION_ROLLOUT';
 const WORKOUT_V2_ORIGIN = 'WORKOUT_V2_PRODUCTIVE_GENERATION';
+const NUTRITION_V2_ORIGIN = 'NUTRITION_V2_PRODUCTIVE_GENERATION';
+const COMBINED_V2_ORIGIN = 'COMBINED_V2_PRODUCTIVE_GENERATION';
+
+type ProductivePlanningIntent = 'DIET' | 'WORKOUT' | 'BOTH';
 
 type ActiveCycle = CoachProfileAcquisitionCycle | null;
 
@@ -70,6 +75,20 @@ export class ProfileAcquisitionInternalRolloutService {
     readonly originalRequestMessageId?: string;
     readonly conversationContext?: ProfileAcquisitionConversationContext;
   }): Promise<ProfileAcquisitionRolloutResult> {
+    return this.requestProductiveClarification({
+      ...input,
+      intent: 'WORKOUT',
+    });
+  }
+
+  async requestProductiveClarification(input: {
+    readonly userId: string;
+    readonly sourceMessageId: string;
+    readonly referenceDate: Date;
+    readonly originalRequestMessageId?: string;
+    readonly conversationContext?: ProfileAcquisitionConversationContext;
+    readonly intent: ProductivePlanningIntent;
+  }): Promise<ProfileAcquisitionRolloutResult> {
     const source = await this.prisma.message.findFirst({
       where: {
         id: input.sourceMessageId,
@@ -95,8 +114,12 @@ export class ProfileAcquisitionInternalRolloutService {
         sentAt: input.referenceDate,
       },
       this.config.get().mode,
-      PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,
-      `${WORKOUT_V2_ORIGIN}:${input.originalRequestMessageId ?? input.sourceMessageId}`,
+      input.intent === 'WORKOUT'
+        ? PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST
+        : input.intent === 'DIET'
+          ? PROFILE_ACQUISITION_INTENT.DIET_PLAN_REQUEST
+          : PROFILE_ACQUISITION_INTENT.COMBINED_PLAN_REQUEST,
+      `${this.productiveOrigin(input.intent)}:${input.originalRequestMessageId ?? input.sourceMessageId}`,
       input.conversationContext,
     );
   }
@@ -108,6 +131,7 @@ export class ProfileAcquisitionInternalRolloutService {
       select: {
         id: true,
         userId: true,
+        conversationId: true,
         sourceMessageId: true,
         responseType: true,
       },
@@ -118,17 +142,16 @@ export class ProfileAcquisitionInternalRolloutService {
     ) {
       return false;
     }
-    const productiveCycle =
-      await this.prisma.coachProfileAcquisitionCycle.findFirst({
-        where: {
-          userId: outbound.userId,
-          sourceMessageId: outbound.sourceMessageId,
-          active: true,
-          origin: { startsWith: `${WORKOUT_V2_ORIGIN}:` },
-        },
-        select: { id: true },
-      });
-    if (productiveCycle) return true;
+    const productiveCycle = await this.findCycleForOutbound(outbound, true);
+    if (
+      productiveCycle &&
+      (await this.cycleBelongsToConversation(
+        productiveCycle,
+        outbound.conversationId,
+      ))
+    ) {
+      return true;
+    }
     const access =
       operational.mode === PROFILE_ACQUISITION_MODE.INTERNAL
         ? await this.eligibility.evaluate(outbound.userId)
@@ -209,17 +232,14 @@ export class ProfileAcquisitionInternalRolloutService {
       }
       const sentAt = outbound.sentAt;
       const sentOutbound = Object.freeze({ ...outbound, sentAt });
-      const productiveCycle =
-        await this.prisma.coachProfileAcquisitionCycle.findFirst({
-          where: {
-            userId: outbound.userId,
-            sourceMessageId: outbound.sourceMessageId,
-            active: true,
-            origin: { startsWith: `${WORKOUT_V2_ORIGIN}:` },
-          },
-          select: { id: true },
-        });
-      if (!productiveCycle) {
+      const productiveCycle = await this.findCycleForOutbound(outbound, true);
+      const productiveAuthorized =
+        productiveCycle &&
+        (await this.cycleBelongsToConversation(
+          productiveCycle,
+          outbound.conversationId,
+        ));
+      if (!productiveAuthorized) {
         if (operational.mode !== PROFILE_ACQUISITION_MODE.INTERNAL) {
           return this.rolloutResult(false, false, 'MODE_OFF', operational.mode);
         }
@@ -243,7 +263,9 @@ export class ProfileAcquisitionInternalRolloutService {
       }
 
       if (outbound.responseType === ResponseType.PROFILE_ACQUISITION) {
-        return this.markPromptSent(sentOutbound, operational.mode);
+        const cycle =
+          productiveCycle ?? (await this.findCycleForOutbound(outbound, false));
+        return this.markPromptSent(sentOutbound, operational.mode, cycle);
       }
       if (outbound.responseType !== ResponseType.NUTRITION_ANALYSIS) {
         return this.rolloutResult(
@@ -352,7 +374,7 @@ export class ProfileAcquisitionInternalRolloutService {
         where: {
           userId: input.userId,
           active: true,
-          origin: { startsWith: `${WORKOUT_V2_ORIGIN}:` },
+          OR: this.productiveOriginWhere(),
         },
         orderBy: [{ referenceDate: 'desc' }, { id: 'desc' }],
       });
@@ -385,6 +407,7 @@ export class ProfileAcquisitionInternalRolloutService {
           content: true,
           timestamp: true,
           conversationId: true,
+          replyToExternalMessageId: true,
         },
       });
       if (!message) {
@@ -412,6 +435,11 @@ export class ProfileAcquisitionInternalRolloutService {
               duplicate.field,
             )
           : this.captureResult(false, false, false, 'NO_ACTIVE_QUESTION');
+      }
+      if (
+        !(await this.cycleBelongsToConversation(cycle, message.conversationId))
+      ) {
+        return this.captureResult(false, false, false, 'NO_ACTIVE_QUESTION');
       }
       if (!cycle.askedAt) {
         return this.captureResult(
@@ -609,15 +637,15 @@ export class ProfileAcquisitionInternalRolloutService {
       readonly sentAt: Date;
     },
     mode: ProfileAcquisitionMode,
+    cycle: ActiveCycle,
   ): Promise<ProfileAcquisitionRolloutResult> {
-    const cycle = await this.findActiveCycle(outbound.userId);
     if (!cycle) {
       return this.rolloutResult(true, false, 'NO_ACTIVE_QUESTION', mode);
     }
     if (
       cycle.status ===
         CoachProfileAcquisitionCycleStatus.CONFIRMATION_PENDING &&
-      cycle.sourceMessageId !== outbound.sourceMessageId
+      this.confirmationSourceMatches(cycle, outbound.sourceMessageId)
     ) {
       await this.audit(outbound.userId, cycle.id, {
         event: 'CONFIRMATION_QUESTION_SENT',
@@ -654,6 +682,7 @@ export class ProfileAcquisitionInternalRolloutService {
       readonly content: string;
       readonly timestamp: Date;
       readonly conversationId: string;
+      readonly replyToExternalMessageId: string | null;
     },
   ): Promise<ProfileAcquisitionCaptureResult> {
     const specification = this.questionSpecifications.forField(
@@ -805,11 +834,11 @@ export class ProfileAcquisitionInternalRolloutService {
         reason,
         cycle.id,
         cycle.field,
-        reason === 'ANSWER_PERSISTED' &&
-          cycle.origin.startsWith(`${WORKOUT_V2_ORIGIN}:`)
+        reason === 'ANSWER_PERSISTED' && this.isProductiveOrigin(cycle.origin)
           ? message.id
           : undefined,
-        this.workoutOriginalRequest(cycle.origin),
+        this.productiveOriginalRequest(cycle.origin),
+        this.productiveIntent(cycle.origin),
       );
     } catch (error: unknown) {
       await this.cycleService.releaseResponseClaim({
@@ -828,8 +857,19 @@ export class ProfileAcquisitionInternalRolloutService {
       readonly content: string;
       readonly timestamp: Date;
       readonly conversationId: string;
+      readonly replyToExternalMessageId: string | null;
     },
   ): Promise<ProfileAcquisitionCaptureResult> {
+    if (!(await this.confirmationIsContextual(cycle, message))) {
+      return this.captureResult(
+        false,
+        false,
+        false,
+        'QUESTION_NOT_SENT',
+        cycle.id,
+        cycle.field,
+      );
+    }
     const confirmation = this.answerRecognizer.recognizeConfirmation(
       message.content,
     );
@@ -935,10 +975,11 @@ export class ProfileAcquisitionInternalRolloutService {
         confirmed ? 'CONFIRMATION_COMPLETED' : 'CONFIRMATION_REJECTED',
         cycle.id,
         cycle.field,
-        confirmed && cycle.origin.startsWith(`${WORKOUT_V2_ORIGIN}:`)
+        confirmed && this.isProductiveOrigin(cycle.origin)
           ? message.id
           : undefined,
-        this.workoutOriginalRequest(cycle.origin),
+        this.productiveOriginalRequest(cycle.origin),
+        this.productiveIntent(cycle.origin),
       );
     } catch (error: unknown) {
       await this.cycleService.releaseResponseClaim({
@@ -1137,6 +1178,7 @@ export class ProfileAcquisitionInternalRolloutService {
     field: ProfileAcquisitionCaptureResult['field'] = null,
     continuationMessageId?: string,
     originalRequestMessageId?: string,
+    originalIntent?: ProductivePlanningIntent,
   ): ProfileAcquisitionCaptureResult {
     return Object.freeze({
       handled,
@@ -1147,11 +1189,172 @@ export class ProfileAcquisitionInternalRolloutService {
       field,
       continuationMessageId,
       originalRequestMessageId,
+      originalIntent,
     });
   }
 
-  private workoutOriginalRequest(origin: string): string | undefined {
-    const prefix = `${WORKOUT_V2_ORIGIN}:`;
-    return origin.startsWith(prefix) ? origin.slice(prefix.length) : undefined;
+  private productiveOrigin(intent: ProductivePlanningIntent): string {
+    return intent === 'WORKOUT'
+      ? WORKOUT_V2_ORIGIN
+      : intent === 'DIET'
+        ? NUTRITION_V2_ORIGIN
+        : COMBINED_V2_ORIGIN;
+  }
+
+  private productiveOriginWhere(): {
+    origin: { startsWith: string };
+  }[] {
+    return [
+      { origin: { startsWith: `${WORKOUT_V2_ORIGIN}:` } },
+      { origin: { startsWith: `${NUTRITION_V2_ORIGIN}:` } },
+      { origin: { startsWith: `${COMBINED_V2_ORIGIN}:` } },
+    ];
+  }
+
+  private isProductiveOrigin(origin: string): boolean {
+    return this.productiveIntent(origin) !== undefined;
+  }
+
+  private productiveIntent(
+    origin: string,
+  ): ProductivePlanningIntent | undefined {
+    if (origin.startsWith(`${WORKOUT_V2_ORIGIN}:`)) return 'WORKOUT';
+    if (origin.startsWith(`${NUTRITION_V2_ORIGIN}:`)) return 'DIET';
+    if (origin.startsWith(`${COMBINED_V2_ORIGIN}:`)) return 'BOTH';
+    return undefined;
+  }
+
+  private productiveOriginalRequest(origin: string): string | undefined {
+    const intent = this.productiveIntent(origin);
+    if (!intent) return undefined;
+    return origin.slice(this.productiveOrigin(intent).length + 1);
+  }
+
+  private async cycleBelongsToConversation(
+    cycle: NonNullable<ActiveCycle>,
+    conversationId: string,
+  ): Promise<boolean> {
+    if (!cycle.sourceMessageId) return false;
+    const source = await this.prisma.message.findFirst({
+      where: {
+        id: cycle.sourceMessageId,
+        conversationId,
+        conversation: { userId: cycle.userId },
+      },
+      select: { id: true },
+    });
+    return source !== null;
+  }
+
+  private async confirmationIsContextual(
+    cycle: NonNullable<ActiveCycle>,
+    message: {
+      readonly timestamp: Date;
+      readonly conversationId: string;
+      readonly replyToExternalMessageId: string | null;
+    },
+  ): Promise<boolean> {
+    if (!cycle.answeredAt) return false;
+    const confirmations = await this.prisma.outboundMessage.findMany({
+      where: {
+        userId: cycle.userId,
+        conversationId: message.conversationId,
+        responseType: ResponseType.PROFILE_ACQUISITION,
+        status: {
+          in: [OutboundMessageStatus.SENT, OutboundMessageStatus.DELIVERED],
+        },
+        sentAt: { gt: cycle.answeredAt, lt: message.timestamp },
+      },
+      orderBy: [{ sentAt: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true,
+        externalMessageId: true,
+        sentAt: true,
+        sourceMessageId: true,
+      },
+    });
+    const confirmation = confirmations.find((candidate) =>
+      this.confirmationSourceMatches(cycle, candidate.sourceMessageId),
+    );
+    if (!confirmation?.sentAt) return false;
+    if (message.replyToExternalMessageId) {
+      return (
+        message.replyToExternalMessageId === confirmation.externalMessageId
+      );
+    }
+    const [newerOutbound, newerScheduled] = await Promise.all([
+      this.prisma.outboundMessage.findFirst({
+        where: {
+          userId: cycle.userId,
+          conversationId: message.conversationId,
+          status: {
+            in: [OutboundMessageStatus.SENT, OutboundMessageStatus.DELIVERED],
+          },
+          sentAt: { gt: confirmation.sentAt, lt: message.timestamp },
+        },
+        select: { id: true },
+      }),
+      this.prisma.scheduledMessage.findFirst({
+        where: {
+          userId: cycle.userId,
+          conversationId: message.conversationId,
+          status: ScheduledMessageStatus.SENT,
+          sentAt: { gt: confirmation.sentAt, lt: message.timestamp },
+        },
+        select: { id: true },
+      }),
+    ]);
+    return newerOutbound === null && newerScheduled === null;
+  }
+
+  private async findCycleForOutbound(
+    outbound: {
+      readonly userId: string;
+      readonly conversationId: string;
+      readonly sourceMessageId: string;
+    },
+    productiveOnly: boolean,
+  ): Promise<ActiveCycle> {
+    const token = this.responseToken(outbound.sourceMessageId);
+    const cycle = await this.prisma.coachProfileAcquisitionCycle.findFirst({
+      where: {
+        userId: outbound.userId,
+        active: true,
+        ...(productiveOnly ? { OR: this.productiveOriginWhere() } : {}),
+        AND: [
+          {
+            OR: [
+              { sourceMessageId: outbound.sourceMessageId },
+              {
+                status: CoachProfileAcquisitionCycleStatus.CONFIRMATION_PENDING,
+                resultCode: { endsWith: token },
+              },
+            ],
+          },
+        ],
+      },
+      orderBy: [{ referenceDate: 'desc' }, { id: 'desc' }],
+    });
+    if (!cycle) return null;
+    if (
+      !(await this.cycleBelongsToConversation(cycle, outbound.conversationId))
+    )
+      return null;
+    return cycle.sourceMessageId === outbound.sourceMessageId ||
+      this.confirmationSourceMatches(cycle, outbound.sourceMessageId)
+      ? cycle
+      : null;
+  }
+
+  private confirmationSourceMatches(
+    cycle: NonNullable<ActiveCycle>,
+    sourceMessageId: string,
+  ): boolean {
+    return (
+      cycle.status ===
+        CoachProfileAcquisitionCycleStatus.CONFIRMATION_PENDING &&
+      cycle.answeredAt !== null &&
+      cycle.resultCode?.endsWith(this.responseToken(sourceMessageId)) === true
+    );
   }
 }

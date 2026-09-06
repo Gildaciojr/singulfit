@@ -144,6 +144,19 @@ describe('Structured profile acquisition registry and recognition', () => {
       'halteres e elásticos',
       ['DUMBBELL', 'RESISTANCE_BAND'],
     ],
+    [
+      CoachProfileAcquisitionField.AVAILABLE_EQUIPMENT,
+      'Todos de uma academia comum',
+      [
+        'BARBELL',
+        'BENCH',
+        'CABLE',
+        'DUMBBELL',
+        'MACHINE',
+        'PULL_UP_BAR',
+        'TREADMILL',
+      ],
+    ],
     [CoachProfileAcquisitionField.DESIRED_MEAL_COUNT, 'quatro refeições', 4],
     [CoachProfileAcquisitionField.EATING_PATTERN, 'vegetariano', 'VEGETARIAN'],
     [

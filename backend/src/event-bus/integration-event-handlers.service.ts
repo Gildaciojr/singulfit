@@ -117,6 +117,13 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     if (this.proactiveResponse) {
       const proactive = await this.proactiveResponse.capture(input);
       if (proactive.handled) return;
+      if (proactive.continueInRuntime) {
+        await this.coachCommandService.processTextMessage({
+          ...input,
+          proactiveReply: true,
+        });
+        return;
+      }
     }
 
     const acquisition =
@@ -127,7 +134,14 @@ export class IntegrationEventHandlersService implements OnModuleInit {
         await this.coachCommandService.processTextMessage({
           userId: input.userId,
           messageId: acquisition.continuationMessageId,
-          workoutContinuationMessageId: acquisition.originalRequestMessageId,
+          planningContinuation:
+            acquisition.originalRequestMessageId && acquisition.originalIntent
+              ? {
+                  originalRequestMessageId:
+                    acquisition.originalRequestMessageId,
+                  intent: acquisition.originalIntent,
+                }
+              : undefined,
         });
       }
       return;

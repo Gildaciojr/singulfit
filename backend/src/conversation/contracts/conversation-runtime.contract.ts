@@ -26,6 +26,7 @@ export interface ConversationRuntimeConfig {
 }
 
 export interface ConversationRuntimeInput {
+  readonly proactiveReply?: boolean;
   readonly userId: string;
   readonly conversationId: string;
   readonly messageId: string;

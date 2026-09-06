@@ -82,6 +82,7 @@ describe('CoachPlanningExecutionDispatcherService', () => {
       format: jest.fn().mockReturnValue('Resposta oficial V2'),
     };
     const workoutV2Executor = {
+      preflight: jest.fn().mockReturnValue({ kind: 'READY' }),
       execute: jest.fn().mockResolvedValue({
         kind: 'PLAN',
         document: { artifactType: 'WEEKLY_PLAN' },
@@ -161,7 +162,7 @@ describe('CoachPlanningExecutionDispatcherService', () => {
     },
   );
 
-  it('adapts the canonical legacy plan with the requested change and one generation', async () => {
+  it('fails a legacy Nutrition update closed without a new legacy generation', async () => {
     const subject = createSubject();
     const previousPlan = await subject.currentNutritionPlanReader.getCurrent();
     subject.currentNutritionPlanReader.getCurrent.mockClear();
@@ -178,18 +179,11 @@ describe('CoachPlanningExecutionDispatcherService', () => {
         continuationOperationKey: 'operation-key',
       }),
     ).resolves.toMatchObject({
-      executor: 'DIET_LEGACY',
-      generationCompleted: true,
+      executor: 'NUTRITION_CANONICAL_READER',
+      generationCompleted: false,
     });
-    expect(subject.dietGenerator.generate).toHaveBeenCalledWith(
-      'user-id',
-      'operation-key',
-      {
-        requestedChange: 'Quero mais proteína',
-        previousPlan,
-      },
-    );
-    expect(subject.dietGenerator.generate).toHaveBeenCalledTimes(1);
+    expect(previousPlan).toBeDefined();
+    expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
   });
 
   it('reads current Workout V2 without legacy generation or provider execution', async () => {
@@ -297,12 +291,11 @@ describe('CoachPlanningExecutionDispatcherService', () => {
   });
 
   it.each([
-    [CONVERSATION_GOAL.GENERATE_DIET_PLAN, 1, 0, 0, 0],
-    [CONVERSATION_GOAL.GENERATE_WORKOUT_PLAN, 0, 1, 0, 0],
-    [CONVERSATION_GOAL.GENERATE_COMBINED_PLANS, 0, 0, 1, 1],
+    CONVERSATION_GOAL.GENERATE_DIET_PLAN,
+    CONVERSATION_GOAL.GENERATE_WORKOUT_PLAN,
   ] as const)(
-    'dispatches %s through legacy generators',
-    async (goal, diets, workouts, dietCandidates, workoutCandidates) => {
+    'fails %s closed when its V2 infrastructure input is absent',
+    async (goal) => {
       const subject = createSubject();
 
       await expect(
@@ -311,17 +304,101 @@ describe('CoachPlanningExecutionDispatcherService', () => {
           legacyIntent: 'UNKNOWN',
           decision: decision(goal),
         }),
-      ).resolves.toEqual(expect.any(String));
-      expect(subject.dietGenerator.generate).toHaveBeenCalledTimes(diets);
-      expect(subject.workoutGenerator.generate).toHaveBeenCalledTimes(workouts);
-      expect(subject.dietGenerator.generateCandidate).toHaveBeenCalledTimes(
-        dietCandidates,
-      );
-      expect(subject.workoutGenerator.generateCandidate).toHaveBeenCalledTimes(
-        workoutCandidates,
-      );
+      ).rejects.toThrow(/V2/u);
+      expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+      expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+      expect(subject.dietGenerator.generateCandidate).not.toHaveBeenCalled();
+      expect(subject.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
     },
   );
+
+  it('decomposes combined generation without invoking either legacy generator', async () => {
+    const subject = createSubject();
+    const combinedInput = {
+      userId: 'user-id',
+      legacyIntent: 'BOTH' as const,
+      decision: decision(CONVERSATION_GOAL.GENERATE_COMBINED_PLANS),
+      routeSelection: {
+        nutrition: 'V2' as const,
+        workout: 'V2' as const,
+        reason: 'CROSS_DOMAIN_V2_DECOMPOSITION_REQUIRED' as const,
+        nutritionPilotStatus: null,
+        suppressNutritionShadow: true,
+      },
+      nutritionV2: {
+        generationInput: { userId: 'user-id', snapshot: {} } as never,
+        profileId: 'profile-id',
+        correlationId: 'combined-correlation-id',
+        continuationOperationKey: 'combined-nutrition-operation-id',
+      },
+      workoutV2: {
+        generationInput: { userId: 'user-id' } as never,
+        profileId: 'profile-id',
+        correlationId: 'combined-correlation-id',
+      },
+    };
+    for (const kind of ['CLARIFICATION', 'BLOCKED'] as const) {
+      subject.workoutV2Executor.preflight.mockReturnValueOnce({
+        kind,
+        missingFields: ['EQUIPMENT'],
+        confirmationRequiredFields: [],
+      });
+      await expect(
+        subject.dispatcher.dispatchStructured(combinedInput),
+      ).resolves.toMatchObject({
+        executor: 'V2_DECOMPOSITION',
+        generationCompleted: false,
+        workoutDisposition: kind,
+      });
+      expect(subject.nutritionV2Executor.execute).not.toHaveBeenCalled();
+      expect(subject.workoutV2Executor.execute).not.toHaveBeenCalled();
+      expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+      expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+    }
+    subject.workoutV2Executor.preflight.mockClear();
+    await expect(
+      subject.dispatcher.dispatchStructured(combinedInput),
+    ).resolves.toMatchObject({
+      content: 'Resposta oficial V2\n\nTreino oficial V2',
+      executor: 'V2_DECOMPOSITION',
+      generationCompleted: true,
+      workoutDisposition: 'PLAN',
+    });
+    expect(subject.nutritionV2Executor.execute).toHaveBeenCalledTimes(1);
+    expect(subject.workoutV2Executor.execute).toHaveBeenCalledTimes(1);
+    expect(subject.dietGenerator.generateCandidate).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
+    expect(subject.bothExecutor.execute).not.toHaveBeenCalled();
+
+    expect(
+      subject.nutritionV2Executor.execute.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      subject.workoutV2Executor.execute.mock.invocationCallOrder[0],
+    );
+    subject.workoutV2Executor.execute.mockRejectedValueOnce(
+      new Error('Workout V2 failed after Nutrition persisted'),
+    );
+    await expect(
+      subject.dispatcher.dispatchStructured(combinedInput),
+    ).rejects.toThrow('Workout V2 failed after Nutrition persisted');
+    await expect(
+      subject.dispatcher.dispatchStructured(combinedInput),
+    ).resolves.toMatchObject({ generationCompleted: true });
+    expect(subject.nutritionV2Executor.execute).toHaveBeenCalledTimes(3);
+    expect(subject.workoutV2Executor.execute).toHaveBeenCalledTimes(3);
+    for (const [execution] of subject.nutritionV2Executor.execute.mock.calls) {
+      expect(execution).toMatchObject({
+        continuationOperationKey: 'combined-nutrition-operation-id',
+      });
+    }
+    expect(subject.nutritionV2Executor.execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        continuationOperationKey: 'combined-nutrition-operation-id',
+      }),
+    );
+    expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+  });
 
   it('executes Nutrition V2 once without invoking the Legacy provider or commit', async () => {
     const subject = createSubject();
@@ -505,7 +582,7 @@ describe('CoachPlanningExecutionDispatcherService', () => {
   );
 
   it.each(unsupportedGoals)(
-    'keeps legacy behavior explicitly for unsupported goal %s',
+    'does not generate legacy content for unsupported goal %s',
     async (goal) => {
       const subject = createSubject();
 
@@ -515,8 +592,8 @@ describe('CoachPlanningExecutionDispatcherService', () => {
           legacyIntent: 'DIET',
           decision: decision(goal),
         }),
-      ).resolves.toContain('Montei Dieta legado');
-      expect(subject.dietGenerator.generate).toHaveBeenCalledWith('user-id');
+      ).resolves.toEqual(expect.any(String));
+      expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
       expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
     },
   );
@@ -531,7 +608,7 @@ describe('CoachPlanningExecutionDispatcherService', () => {
     });
 
     expect(result).toMatchObject({
-      executor: 'UNKNOWN_LEGACY',
+      executor: 'NO_GENERATION',
       generationCompleted: false,
     });
     expect(result.content).toContain('confirmar seu objetivo atual');
@@ -539,7 +616,7 @@ describe('CoachPlanningExecutionDispatcherService', () => {
     expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
   });
 
-  it('falls back to the combined legacy execution when no planner decision is available', async () => {
+  it('fails closed without legacy generation when no planner decision is available', async () => {
     const subject = createSubject();
 
     await expect(
@@ -548,37 +625,27 @@ describe('CoachPlanningExecutionDispatcherService', () => {
         legacyIntent: 'BOTH',
         decision: null,
       }),
-    ).resolves.toMatch(/^🥗[\s\S]+\n\n🏋️/);
-    expect(
-      subject.dietGenerator.generateCandidate.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      subject.workoutGenerator.generateCandidate.mock.invocationCallOrder[0],
-    );
-    expect(
-      subject.workoutGenerator.generateCandidate.mock.invocationCallOrder[0],
-    ).toBeLessThan(subject.bothExecutor.execute.mock.invocationCallOrder[0]);
+    ).resolves.toContain('Nenhum plano foi criado');
+    expect(subject.dietGenerator.generateCandidate).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
+    expect(subject.bothExecutor.execute).not.toHaveBeenCalled();
   });
 
   it('returns structured execution metadata without executing generators twice', async () => {
     const subject = createSubject();
 
-    const result = await subject.dispatcher.dispatchStructured({
-      userId: 'user-id',
-      legacyIntent: 'DIET',
-      decision: decision(CONVERSATION_GOAL.GENERATE_DIET_PLAN),
-    });
-
-    expect(result).toMatchObject({
-      executor: 'DIET_LEGACY',
-      generationCompleted: true,
-      fallbackApplied: false,
-    });
-    expect(result.content).toContain('Montei Dieta legado');
-    expect(subject.dietGenerator.generate).toHaveBeenCalledTimes(1);
+    await expect(
+      subject.dispatcher.dispatchStructured({
+        userId: 'user-id',
+        legacyIntent: 'DIET',
+        decision: decision(CONVERSATION_GOAL.GENERATE_DIET_PLAN),
+      }),
+    ).rejects.toThrow(/V2/u);
+    expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
     expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
   });
 
-  it('fails the ready Diet candidate when Workout generation aborts BOTH before commit', async () => {
+  it('never prepares legacy candidates for a combined fallback', async () => {
     const subject = createSubject();
     const failure = new Error('workout provider failed');
     subject.workoutGenerator.generateCandidate.mockRejectedValue(failure);
@@ -589,15 +656,8 @@ describe('CoachPlanningExecutionDispatcherService', () => {
         legacyIntent: 'BOTH',
         decision: null,
       }),
-    ).rejects.toThrow('workout provider failed');
-    expect(subject.dietGenerator.failCandidate).toHaveBeenCalledWith(
-      { domain: 'DIET' },
-      expect.objectContaining({
-        message: expect.stringContaining(
-          'Planejamento combinado abortado antes do commit',
-        ),
-      }),
-    );
+    ).resolves.toContain('Nenhum plano foi criado');
+    expect(subject.dietGenerator.failCandidate).not.toHaveBeenCalled();
     expect(subject.bothExecutor.execute).not.toHaveBeenCalled();
   });
 });
