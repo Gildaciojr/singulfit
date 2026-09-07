@@ -205,7 +205,7 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
         reasonCode: 'DETERMINISTIC_MATCH',
         confirmationRequired: false,
       }),
-      recognizeConfirmation: jest.fn().mockReturnValue({
+      recognizeContextualConfirmation: jest.fn().mockReturnValue({
         disposition: 'CONFIRMED',
         confidence: 'DETERMINISTIC',
         reasonCode: 'USER_CONFIRMED_VALUE',

@@ -437,6 +437,8 @@ export class ProfileAcquisitionInternalRolloutService {
           : this.captureResult(false, false, false, 'NO_ACTIVE_QUESTION');
       }
       if (
+        cycle.userId !== input.userId ||
+        !cycle.active ||
         !(await this.cycleBelongsToConversation(cycle, message.conversationId))
       ) {
         return this.captureResult(false, false, false, 'NO_ACTIVE_QUESTION');
@@ -870,18 +872,11 @@ export class ProfileAcquisitionInternalRolloutService {
         cycle.field,
       );
     }
-    const confirmation = this.answerRecognizer.recognizeConfirmation(
+    const confirmation = this.answerRecognizer.recognizeContextualConfirmation(
+      cycle.field,
       message.content,
     );
-    if (
-      confirmation.disposition === 'INVALID' ||
-      confirmation.disposition === 'UNRELATED'
-    ) {
-      await this.audit(cycle.userId, cycle.id, {
-        event: 'CONFIRMATION_IGNORED',
-        field: cycle.field,
-        reason: confirmation.reasonCode,
-      });
+    if (confirmation.disposition === 'NOT_APPLICABLE') {
       return this.captureResult(
         false,
         false,
@@ -910,6 +905,20 @@ export class ProfileAcquisitionInternalRolloutService {
 
     try {
       const token = this.responseToken(message.id);
+      if (
+        confirmation.disposition === 'INVALID' ||
+        confirmation.disposition === 'UNRELATED'
+      ) {
+        await this.repromptConfirmation(cycle, message);
+        return this.captureResult(
+          true,
+          false,
+          false,
+          'CONFIRMATION_REQUESTED',
+          cycle.id,
+          cycle.field,
+        );
+      }
       if (confirmation.disposition === 'DEFERRED') {
         await this.cycleService.complete({
           userId: cycle.userId,
@@ -930,7 +939,16 @@ export class ProfileAcquisitionInternalRolloutService {
       const mutation = await this.mutationService.resolvePendingConfirmation({
         userId: cycle.userId,
         field: cycle.field,
-        action: confirmation.disposition === 'CONFIRMED' ? 'CONFIRM' : 'REJECT',
+        action:
+          confirmation.disposition === 'CORRECTED_VALUE'
+            ? 'CORRECT'
+            : confirmation.disposition === 'CONFIRMED' ||
+                confirmation.disposition === 'CONFIRMED_VALUE'
+              ? 'CONFIRM'
+              : 'REJECT',
+        ...('value' in confirmation
+          ? { replacementValue: confirmation.value }
+          : {}),
         referenceDate: message.timestamp.toISOString(),
         sourceOperationKey: message.id,
       });
@@ -939,6 +957,7 @@ export class ProfileAcquisitionInternalRolloutService {
           userId: cycle.userId,
           cycleId: cycle.id,
           claimCode: claim.claimCode,
+          previousResultCode: cycle.resultCode,
         });
         await this.audit(cycle.userId, cycle.id, {
           event: 'CONFIRMATION_CONFLICT',
@@ -954,14 +973,37 @@ export class ProfileAcquisitionInternalRolloutService {
           cycle.field,
         );
       }
-      const confirmed = confirmation.disposition === 'CONFIRMED';
-      await this.cycleService.complete({
+      if (confirmation.disposition === 'CORRECTED_VALUE') {
+        await this.repromptConfirmation(cycle, message, confirmation.value);
+        return this.captureResult(
+          true,
+          false,
+          true,
+          'CONFIRMATION_REQUESTED',
+          cycle.id,
+          cycle.field,
+        );
+      }
+      const confirmed =
+        confirmation.disposition === 'CONFIRMED' ||
+        confirmation.disposition === 'CONFIRMED_VALUE';
+      const completed = await this.cycleService.complete({
         userId: cycle.userId,
         cycleId: cycle.id,
         outcome: confirmed ? 'CONFIRMED' : 'CANCELLED',
         resultCode: (confirmed ? 'CONFIRMED:' : 'REJECTED:') + token,
         referenceDate: message.timestamp.toISOString(),
       });
+      if (completed.status !== 'COMPLETED') {
+        return this.captureResult(
+          true,
+          completed.status === 'ALREADY_CLOSED',
+          false,
+          'DUPLICATE',
+          cycle.id,
+          cycle.field,
+        );
+      }
       await this.audit(cycle.userId, cycle.id, {
         event: confirmed ? 'CONFIRMATION_COMPLETED' : 'CONFIRMATION_REJECTED',
         field: cycle.field,
@@ -986,9 +1028,44 @@ export class ProfileAcquisitionInternalRolloutService {
         userId: cycle.userId,
         cycleId: cycle.id,
         claimCode: claim.claimCode,
+        previousResultCode: cycle.resultCode,
       });
       throw error;
     }
+  }
+
+  private async repromptConfirmation(
+    cycle: NonNullable<ActiveCycle>,
+    message: {
+      readonly id: string;
+      readonly conversationId: string;
+      readonly timestamp: Date;
+    },
+    value?: readonly string[],
+  ): Promise<void> {
+    const specification = this.questionSpecifications.forField(
+      cycle.field,
+      'CONFIRMATION_REQUIRED',
+    );
+    const content =
+      (value === undefined ? 'Não consegui confirmar sua resposta. ' : '') +
+      this.questionRealizer.realizeConfirmation(
+        specification,
+        value ?? 'o valor informado',
+      ).text;
+    await this.publishQuestion({
+      userId: cycle.userId,
+      conversationId: message.conversationId,
+      sourceMessageId: message.id,
+      content,
+    });
+    await this.cycleService.complete({
+      userId: cycle.userId,
+      cycleId: cycle.id,
+      outcome: 'ANSWERED',
+      resultCode: 'ANSWERED:' + this.responseToken(message.id),
+      referenceDate: message.timestamp.toISOString(),
+    });
   }
 
   private async publishConfirmation(

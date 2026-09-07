@@ -23,6 +23,122 @@ describe('Structured profile acquisition registry and recognition', () => {
     return questions.forField(field, 'MISSING_CONTEXTUAL_FIELD');
   }
 
+  it.each([
+    'Não',
+    'Não.',
+    'nada',
+    'não tenho nenhuma',
+    'nao',
+    'não tenho',
+    'não tenho alergia',
+    'não tenho alergias',
+    'não tenho nenhuma alergia',
+    'não tenho nenhuma alergia alimentar',
+    'nenhuma',
+    'nenhuma alergia',
+    'Eu não tenho nenhuma alergia alimentar',
+  ])('canonicalizes absent allergies: %s', (answer) => {
+    expect(
+      recognizer.recognize(
+        specification(CoachProfileAcquisitionField.ALLERGIES),
+        answer,
+      ),
+    ).toMatchObject({ disposition: 'RECOGNIZED', value: [] });
+  });
+
+  it.each([
+    ['amendoim', ['amendoim']],
+    ['tenho alergia a amendoim', ['amendoim']],
+    ['amendoim e camarão', ['amendoim', 'camarão']],
+  ])('preserves declared allergies: %s', (answer, value) => {
+    expect(
+      recognizer.recognize(
+        specification(CoachProfileAcquisitionField.ALLERGIES),
+        answer,
+      ),
+    ).toMatchObject({ value });
+  });
+
+  it.each([
+    'Sim',
+    'Sim.',
+    'Pode',
+    'Pode.',
+    'Pode salvar',
+    'Pode salvar assim',
+    'Correto',
+    'Correto.',
+    'Isso mesmo',
+    'Isso mesmo.',
+  ])('accepts natural confirmation: %s', (answer) => {
+    expect(recognizer.recognizeConfirmation(answer).disposition).toBe(
+      'CONFIRMED',
+    );
+  });
+
+  it.each([
+    ['Pode. Eu não tenho nenhuma alergia alimentar', 'CONFIRMED_VALUE', []],
+    ['Isso mesmo, não tenho alergia.', 'CONFIRMED_VALUE', []],
+    [
+      'Não, na verdade tenho alergia a amendoim.',
+      'CORRECTED_VALUE',
+      ['amendoim'],
+    ],
+  ] as const)(
+    'resolves the same field in compound confirmation: %s',
+    (answer, disposition, value) => {
+      expect(
+        recognizer.recognizeContextualConfirmation(
+          CoachProfileAcquisitionField.ALLERGIES,
+          answer,
+        ),
+      ).toEqual({ disposition, value });
+      expect(
+        recognizer.recognizeContextualConfirmation(
+          CoachProfileAcquisitionField.FOOD_INTOLERANCES,
+          answer,
+        ).disposition,
+      ).toBe('UNRELATED');
+    },
+  );
+
+  it.each([
+    'acho que sim',
+    'talvez',
+    'não sei',
+    'Pode, mas talvez tenha alergia',
+    'Pode. Eu não tenho alergia a amendoim',
+  ])('does not confirm an uncertain answer: %s', (answer) => {
+    expect(
+      recognizer.recognizeContextualConfirmation(
+        CoachProfileAcquisitionField.ALLERGIES,
+        answer,
+      ).disposition,
+    ).toBe('UNRELATED');
+  });
+
+  it.each([
+    'não tenho alergia',
+    'não tenho nenhuma alergia alimentar',
+    'Eu não tenho nenhuma alergia alimentar',
+  ])('treats a repeated negative value as a field correction: %s', (answer) => {
+    expect(
+      recognizer.recognizeContextualConfirmation(
+        CoachProfileAcquisitionField.ALLERGIES,
+        answer,
+      ),
+    ).toEqual({ disposition: 'CORRECTED_VALUE', value: [] });
+  });
+
+  it('releases an unequivocal current-workout command', () => {
+    expect(
+      recognizer.recognizeContextualConfirmation(
+        CoachProfileAcquisitionField.ALLERGIES,
+        'Qual é meu treino atual?',
+      ).disposition,
+    ).toBe('NOT_APPLICABLE');
+  });
+
   it('registers every persistent field exactly once with immutable policies', () => {
     const definitions = registry.all();
     expect(definitions.map((definition) => definition.field).sort()).toEqual(

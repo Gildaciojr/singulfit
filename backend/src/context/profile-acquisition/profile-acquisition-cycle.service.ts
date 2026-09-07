@@ -309,7 +309,7 @@ export class ProfileAcquisitionCycleService {
           active: true,
           resultCode: command.claimCode,
         },
-        data: { resultCode: null },
+        data: { resultCode: command.previousResultCode ?? null },
       });
     });
   }

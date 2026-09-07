@@ -484,7 +484,20 @@ export class CoachProfileMutationService {
       });
       return this.execute(command);
     }
-    const value = this.storedValue(current);
+    if (
+      (input.replacementValue !== undefined &&
+        input.field !== CoachProfileAcquisitionField.ALLERGIES) ||
+      (input.action === 'CORRECT' && input.replacementValue === undefined)
+    ) {
+      return this.result(
+        'REJECTED',
+        input.field,
+        current.id,
+        current.valueFingerprint,
+        'INVALID_CONFIRMATION_COMMAND',
+      );
+    }
+    const value = input.replacementValue ?? this.storedValue(current);
     if (value === undefined) {
       return this.result(
         'REJECTED',
@@ -499,13 +512,23 @@ export class CoachProfileMutationService {
       userId: input.userId,
       field: input.field,
       value,
-      source: CoachProfileValueSource.USER_CONFIRMED,
-      confirmation: CoachProfileConfirmationState.CONFIRMED,
-      status: CoachProfileValueStatus.CONFIRMED,
+      source:
+        input.action === 'CORRECT'
+          ? CoachProfileValueSource.USER_REPORTED
+          : CoachProfileValueSource.USER_CONFIRMED,
+      confirmation:
+        input.action === 'CORRECT'
+          ? CoachProfileConfirmationState.PENDING
+          : CoachProfileConfirmationState.CONFIRMED,
+      status:
+        input.action === 'CORRECT'
+          ? CoachProfileValueStatus.ANSWERED_UNCONFIRMED
+          : CoachProfileValueStatus.CONFIRMED,
       referenceDate: referenceDate.toISOString(),
       operationKey,
       previousValueFingerprint: current.valueFingerprint,
-      reason: 'CONFIRMATION',
+      reason:
+        input.replacementValue === undefined ? 'CONFIRMATION' : 'CORRECTION',
       definitionVersion: definition.definitionVersion,
     });
     return this.execute(command);
@@ -593,6 +616,9 @@ export class CoachProfileMutationService {
             input.userId,
             input.field,
             input.action,
+            ...(input.replacementValue === undefined
+              ? []
+              : [JSON.stringify(input.replacementValue)]),
             input.sourceOperationKey,
             valueFingerprint,
             String(definitionVersion),

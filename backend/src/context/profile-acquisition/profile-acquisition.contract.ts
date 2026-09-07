@@ -248,6 +248,14 @@ export interface RecognizedProfileConfirmation {
   readonly reasonCode: string;
 }
 
+export type ContextualProfileConfirmation =
+  | RecognizedProfileConfirmation
+  | Readonly<{
+      disposition: 'CONFIRMED_VALUE' | 'CORRECTED_VALUE';
+      value: readonly string[];
+    }>
+  | Readonly<{ disposition: 'NOT_APPLICABLE' }>;
+
 interface CoachProfileMutationBase<
   TField extends CoachProfileAcquisitionField,
 > {
@@ -312,7 +320,8 @@ export interface ProfileMutationResult {
 export interface ProfilePendingConfirmationCommand {
   readonly userId: string;
   readonly field: CoachProfileAcquisitionField;
-  readonly action: 'CONFIRM' | 'REJECT';
+  readonly action: 'CONFIRM' | 'REJECT' | 'CORRECT';
+  readonly replacementValue?: readonly string[];
   readonly referenceDate: string;
   readonly sourceOperationKey: string;
 }
@@ -407,6 +416,7 @@ export interface ProfileAcquisitionResponseClaimReleaseCommand {
   readonly userId: string;
   readonly cycleId: string;
   readonly claimCode: string;
+  readonly previousResultCode?: string | null;
 }
 
 export const PROFILE_ACQUISITION_FAILURE_CODE = {

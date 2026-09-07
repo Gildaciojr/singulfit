@@ -1,3 +1,7 @@
+import { isWorkoutCurrentPlanRead } from '../../workout/v2/workout-current-plan-read.policy';
+import { isNutritionCurrentPlanRead } from '../../diet/nutrition-current-plan-read.policy';
+import { isFullPlanReplacementRequest } from '../../conversation/understanding/full-plan-replacement.policy';
+import type { ContextualProfileConfirmation } from './profile-acquisition.contract';
 import { Injectable } from '@nestjs/common';
 import {
   CoachProfileAcquisitionField,
@@ -69,13 +73,15 @@ export class ProfileAnswerRecognizerService {
   }
 
   recognizeConfirmation(rawAnswer: string): RecognizedProfileConfirmation {
-    const normalized = this.normalize(rawAnswer.trim());
+    const normalized = this.normalize(rawAnswer.trim())
+      .replace(/[.!?]+$/u, '')
+      .trim();
 
     if (!normalized) {
       return this.confirmation('INVALID', 'EMPTY_CONFIRMATION');
     }
     if (
-      /^(sim(?:,? (?:pode salvar|pode registrar))?|confirmo|confirmado|pode salvar|pode registrar|esta certo|correto)$/u.test(
+      /^(sim(?:,? (?:pode salvar|pode registrar))?|confirmo|confirmado|pode(?: salvar(?: assim)?| registrar)?|esta certo|correto|isso mesmo)$/u.test(
         normalized,
       )
     ) {
@@ -93,6 +99,73 @@ export class ProfileAnswerRecognizerService {
     }
 
     return this.confirmation('UNRELATED', 'NO_DETERMINISTIC_CONFIRMATION');
+  }
+
+  recognizeContextualConfirmation(
+    field: CoachProfileAcquisitionField,
+    rawAnswer: string,
+  ): ContextualProfileConfirmation {
+    if (
+      isWorkoutCurrentPlanRead(rawAnswer) ||
+      isNutritionCurrentPlanRead(rawAnswer) ||
+      isFullPlanReplacementRequest(this.normalize(rawAnswer))
+    ) {
+      return Object.freeze({ disposition: 'NOT_APPLICABLE' });
+    }
+    const simple = this.recognizeConfirmation(rawAnswer);
+    if (simple.disposition !== 'UNRELATED') return simple;
+    if (field !== CoachProfileAcquisitionField.ALLERGIES) return simple;
+    const text = rawAnswer
+      .trim()
+      .replace(/[.!?]+$/u, '')
+      .trim();
+    const positive =
+      /^(?:sim|pode(?: salvar(?: assim)?| registrar)?|isso mesmo|correto|confirmo)[,.:!\s]+(.+)$/iu.exec(
+        text,
+      );
+    const correction =
+      /^n[aã]o(?:[,.:!]\s*(?:na verdade\s+)?|\s+na verdade\s+)(.+)$/iu.exec(
+        text,
+      );
+    const declaration = positive?.[1] ?? correction?.[1] ?? text;
+    const normalized = this.normalize(declaration);
+    if (!/^(?:eu )?(?:nao tenho|tenho alergia|nenhum)/u.test(normalized))
+      return simple;
+    const value = this.allergies(declaration);
+    if (
+      !value ||
+      (value.length > 0 &&
+        !/^(?:eu )?tenho alergias?(?: alimentar(?:es)?)? (?:a|ao|aos) /u.test(
+          normalized,
+        )) ||
+      /\b(?:talvez|acho|nao sei|certeza|pode ser)\b/u.test(normalized)
+    )
+      return simple;
+    return Object.freeze({
+      disposition: positive ? 'CONFIRMED_VALUE' : 'CORRECTED_VALUE',
+      value,
+    });
+  }
+
+  private allergies(answer: string): readonly string[] | undefined {
+    const text = answer
+      .trim()
+      .replace(/[.!?]+$/u, '')
+      .trim();
+    const normalized = this.normalize(text);
+    if (
+      this.explicitNone(normalized) ||
+      /^(?:eu )?(?:nao|nao tenho(?: (?:nenhuma? )?alergias?(?: alimentar(?:es)?)?)?|nenhuma?(?: alergias?(?: alimentar(?:es)?)?)?)$/u.test(
+        normalized,
+      )
+    ) {
+      return Object.freeze([]);
+    }
+    const names = text.replace(
+      /^(?:eu\s+)?tenho\s+alergias?(?:\s+alimentar(?:es)?)?\s+(?:a|ao|aos|à)\s+/iu,
+      '',
+    );
+    return this.textList(names);
   }
 
   private value(
@@ -174,8 +247,7 @@ export class ProfileAnswerRecognizerService {
         if (/gluten/.test(normalized)) return Object.freeze(['GLUTEN']);
         return this.textList(original);
       case CoachProfileAcquisitionField.ALLERGIES:
-        if (this.explicitNone(normalized)) return Object.freeze([]);
-        return this.textList(original);
+        return this.allergies(original);
       case CoachProfileAcquisitionField.MEDICAL_CONDITIONS:
         if (this.explicitNone(normalized)) return Object.freeze([]);
         return this.textList(original);
