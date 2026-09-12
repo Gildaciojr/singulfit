@@ -613,6 +613,36 @@ describe('CoachAdaptiveProfileCollectorService', () => {
     });
   });
 
+  it('selects medical conditions as the sole missing basic Nutrition requirement and does not re-ask a known empty answer', () => {
+    const pending = decide(
+      PROFILE_ACQUISITION_INTENT.DIET_PLAN_REQUEST,
+      completeProfile({ medicalConditions: unknown() }),
+    );
+    const resolved = decide(
+      PROFILE_ACQUISITION_INTENT.DIET_PLAN_REQUEST,
+      completeProfile({ medicalConditions: known(Object.freeze([])) }),
+    );
+
+    expect(pending.shouldAsk).toBe(true);
+    expect(pending.selectedCandidate).toMatchObject({
+      field: PROFILE_ACQUISITION_FIELD.MEDICAL_CONDITIONS,
+      blocksPlans: ['DIET'],
+    });
+    expect(pending.readiness.find((item) => item.plan === 'DIET')).toEqual({
+      plan: 'DIET',
+      ready: false,
+      blockingFields: [PROFILE_ACQUISITION_FIELD.MEDICAL_CONDITIONS],
+    });
+    expect(resolved.selectedCandidate?.field).not.toBe(
+      PROFILE_ACQUISITION_FIELD.MEDICAL_CONDITIONS,
+    );
+    expect(resolved.readiness.find((item) => item.plan === 'DIET')).toEqual({
+      plan: 'DIET',
+      ready: true,
+      blockingFields: [],
+    });
+  });
+
   it('requires confirmation for an inferred conversational modality', () => {
     const result = decide(
       PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,

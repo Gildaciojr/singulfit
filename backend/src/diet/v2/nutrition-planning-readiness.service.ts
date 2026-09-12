@@ -10,19 +10,10 @@ import {
   type NutritionReadinessField,
   type NutritionSafetyFlag,
 } from './nutrition-planning-artifact.contract';
+import { NUTRITION_BASIC_PLAN_REQUIREMENTS } from '../../context/planning-profile-requirements.contract';
 
-const BASIC_PLAN_FIELDS: readonly NutritionReadinessField[] = Object.freeze([
-  'PRIMARY_GOAL',
-  'AGE',
-  'SEX',
-  'HEIGHT',
-  'CURRENT_WEIGHT',
-  'ACTIVITY_LEVEL',
-  'FOOD_RESTRICTIONS',
-  'ALLERGIES',
-  'MEDICAL_CONDITIONS',
-  'MEAL_COUNT',
-]);
+const BASIC_PLAN_FIELDS: readonly NutritionReadinessField[] =
+  NUTRITION_BASIC_PLAN_REQUIREMENTS.map((requirement) => requirement.field);
 
 @Injectable()
 export class NutritionPlanningReadinessService {

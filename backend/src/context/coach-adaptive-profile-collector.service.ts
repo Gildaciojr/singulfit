@@ -28,6 +28,7 @@ import {
   ProfileAcquisitionReason,
   ProfileAcquisitionState,
 } from './coach-adaptive-profile-collector.contract';
+import { isAdaptiveNutritionBasicRequirement } from './planning-profile-requirements.contract';
 
 export const PROFILE_ACQUISITION_COOLDOWN = Object.freeze({
   askedTurns: 3,
@@ -757,6 +758,13 @@ export class CoachAdaptiveProfileCollectorService {
       input.conversationContext.requiresWorkoutCalendar
     ) {
       return Object.freeze(['WORKOUT']);
+    }
+    if (
+      isAdaptiveNutritionBasicRequirement(definition.field) &&
+      (input.intent === PROFILE_ACQUISITION_INTENT.DIET_PLAN_REQUEST ||
+        input.intent === PROFILE_ACQUISITION_INTENT.COMBINED_PLAN_REQUEST)
+    ) {
+      return Object.freeze(['DIET'] as const);
     }
     return definition.blocksPlans;
   }
