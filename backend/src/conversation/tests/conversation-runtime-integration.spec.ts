@@ -173,33 +173,77 @@ describe('ConversationRuntimeIntegrationService', () => {
     expect(subject.runtime.evaluate).not.toHaveBeenCalled();
   });
 
-  it('falls back on runtime failure', async () => {
+  it('fails closed on runtime failure instead of returning a legacy decision', async () => {
     const subject = createSubject({
       mode: 'PRIMARY',
       evaluation: Promise.reject(new Error('runtime failed')),
     });
 
-    await expect(subject.service.select(request)).resolves.toMatchObject({
-      source: 'LEGACY',
+    await expect(
+      subject.service.decide(decisionRequest),
+    ).resolves.toMatchObject({
+      source: 'SAFE_RESPONSE',
       reason: 'RUNTIME_FAILURE',
     });
   });
 
-  it('falls back on timeout without sending a second response', async () => {
+  it('fails closed on timeout without sending a second response', async () => {
     jest.useFakeTimers();
     const subject = createSubject({
       mode: 'PRIMARY',
       timeoutMs: 5,
       evaluation: new Promise<ConversationRuntimeEvaluation>(() => undefined),
     });
-    const result = subject.service.select(request);
+    const result = subject.service.decide(decisionRequest);
     await jest.advanceTimersByTimeAsync(5);
 
     await expect(result).resolves.toMatchObject({
-      source: 'LEGACY',
+      source: 'SAFE_RESPONSE',
       reason: 'RUNTIME_TIMEOUT',
-      content: 'Resposta legada',
     });
     jest.useRealTimers();
   });
+
+  it.each([
+    'NUTRITION_PLAN_GENERATION',
+    'WORKOUT_PLAN_GENERATION',
+    'COMBINED_PLAN_GENERATION',
+    'NUTRITION_PLAN_UPDATE',
+    'WORKOUT_PLAN_UPDATE',
+  ])('returns a typed planning handoff for %s', async (routeKind) => {
+    const subject = createSubject({ mode: 'PRIMARY' });
+    subject.bridge.execute.mockResolvedValue({
+      status: 'FALLBACK_REQUIRED',
+      content: null,
+      routeKind,
+      reason: 'SIDE_EFFECT_ROUTE_REQUIRES_LEGACY_SINGLE_EXECUTION',
+    });
+    await expect(subject.service.decide(decisionRequest)).resolves.toEqual({
+      source: 'PLANNING_HANDOFF',
+      reason: 'SIDE_EFFECT_ROUTE_REQUIRES_SINGLE_EXECUTION',
+    });
+  });
+
+  it.each([
+    'NUTRITION_PLAN_GENERATION',
+    'WORKOUT_PLAN_GENERATION',
+    'COMBINED_PLAN_GENERATION',
+    'NUTRITION_PLAN_UPDATE',
+    'WORKOUT_PLAN_UPDATE',
+  ])(
+    'keeps %s shadow-only instead of handing planning off',
+    async (routeKind) => {
+      const subject = createSubject({ mode: 'SHADOW' });
+      subject.bridge.execute.mockResolvedValue({
+        status: 'FALLBACK_REQUIRED',
+        content: null,
+        routeKind,
+        reason: 'SIDE_EFFECT_ROUTE_REQUIRES_LEGACY_SINGLE_EXECUTION',
+      });
+      await expect(subject.service.decide(decisionRequest)).resolves.toEqual({
+        source: 'LEGACY',
+        reason: 'SHADOW_ONLY',
+      });
+    },
+  );
 });

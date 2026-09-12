@@ -200,17 +200,15 @@ export class CoachCommandService {
               : workoutContinuation
                 ? 'WORKOUT'
                 : this.classify(commandText);
+
     const selectionContext = await this.workoutSelectionContext(
       input.userId,
       commandText,
     );
     const idempotencyKey = this.idempotencyKey(input.userId, message.id);
     const existing = await this.prisma.coachMessage.findUnique({
-      where: {
-        idempotencyKey,
-      },
+      where: { idempotencyKey },
     });
-
     if (existing) {
       await this.scheduleResponse({
         userId: input.userId,
@@ -227,14 +225,8 @@ export class CoachCommandService {
         message,
         message.timestamp,
       );
-
-      return {
-        handled: true,
-        duplicated: true,
-        intent,
-      };
+      return { handled: true, duplicated: true, intent };
     }
-
     if (pending.status === 'ALREADY_CONSUMED') {
       return {
         handled: true,
@@ -243,7 +235,6 @@ export class CoachCommandService {
         reason: 'PENDING_ACTION_ALREADY_CONSUMED',
       };
     }
-
     const bypassRuntime =
       pending.status === 'ACTIONABLE' ||
       pending.status === 'EXPIRED' ||
@@ -263,28 +254,49 @@ export class CoachCommandService {
           text: commandText,
           receivedAt: message.timestamp.toISOString(),
           replyToExternalMessageId: message.replyToExternalMessageId,
-          ...(input.proactiveReply ? { proactiveReply: true } : {}),
           legacyIntent: intent,
+          ...(input.proactiveReply ? { proactiveReply: true } : {}),
         });
     const planningResult =
       pending.status === 'COMPLETED'
         ? { content: pending.content, responseRequired: true }
         : runtimeDecision.source === 'CONVERSATION_RUNTIME'
           ? { content: runtimeDecision.content, responseRequired: true }
-          : await this.executePlanning({
-              userId: input.userId,
-              intent,
-              conversationId: message.conversation.id,
-              messageId: message.id,
-              text: commandText,
-              referenceDate: message.timestamp,
-              profileId: message.conversation.user.fitnessProfile?.id,
-              pendingGoalConfirmation:
-                pending.status === 'ACTIONABLE' ? pending.context : undefined,
-              suppressCurrentGoalResolution: pending.status === 'EXPIRED',
-              originalRequestMessageId:
-                input.planningContinuation?.originalRequestMessageId,
-            });
+          : runtimeDecision.source === 'SAFE_RESPONSE'
+            ? { content: runtimeDecision.content, responseRequired: true }
+            : runtimeDecision.source === 'PLANNING_HANDOFF'
+              ? await this.executePlanning({
+                  userId: input.userId,
+                  intent,
+                  conversationId: message.conversation.id,
+                  messageId: message.id,
+                  text: commandText,
+                  referenceDate: message.timestamp,
+                  profileId: message.conversation.user.fitnessProfile?.id,
+                  pendingGoalConfirmation:
+                    pending.status === 'ACTIONABLE'
+                      ? pending.context
+                      : undefined,
+                  suppressCurrentGoalResolution: pending.status === 'EXPIRED',
+                  originalRequestMessageId:
+                    input.planningContinuation?.originalRequestMessageId,
+                })
+              : await this.executePlanning({
+                  userId: input.userId,
+                  intent,
+                  conversationId: message.conversation.id,
+                  messageId: message.id,
+                  text: commandText,
+                  referenceDate: message.timestamp,
+                  profileId: message.conversation.user.fitnessProfile?.id,
+                  pendingGoalConfirmation:
+                    pending.status === 'ACTIONABLE'
+                      ? pending.context
+                      : undefined,
+                  suppressCurrentGoalResolution: pending.status === 'EXPIRED',
+                  originalRequestMessageId:
+                    input.planningContinuation?.originalRequestMessageId,
+                });
     if (!planningResult.responseRequired) {
       return {
         handled: true,
@@ -560,7 +572,12 @@ export class CoachCommandService {
     try {
       return await this.conversationRuntime.decide(input);
     } catch {
-      return { source: 'LEGACY' as const, reason: 'RUNTIME_FAILURE' as const };
+      return {
+        source: 'SAFE_RESPONSE' as const,
+        reason: 'RUNTIME_FAILURE' as const,
+        content:
+          'Não consegui concluir isso com segurança agora. Pode tentar novamente em instantes?',
+      };
     }
   }
 

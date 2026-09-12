@@ -138,6 +138,7 @@ describe('CoachCommandService', () => {
     runtimeContent?: string;
     runtimeFailure?: Error;
     runtimeLegacy?: boolean;
+    runtimeHandoff?: boolean;
     planningConversationContent?: string;
     workoutClarification?: boolean;
     workoutSelection?: boolean;
@@ -281,15 +282,22 @@ describe('CoachCommandService', () => {
     const conversationRuntime = {
       decide: options?.runtimeFailure
         ? jest.fn().mockRejectedValue(options.runtimeFailure)
-        : jest.fn().mockResolvedValue({
-            source: options?.runtimeContent ? 'CONVERSATION_RUNTIME' : 'LEGACY',
-            reason: options?.runtimeContent
-              ? 'RUNTIME_SELECTED'
-              : 'RUNTIME_DISABLED',
-            ...(options?.runtimeContent
-              ? { content: options.runtimeContent }
-              : {}),
-          }),
+        : options?.runtimeHandoff
+          ? jest.fn().mockResolvedValue({
+              source: 'PLANNING_HANDOFF',
+              reason: 'SIDE_EFFECT_ROUTE_REQUIRES_SINGLE_EXECUTION',
+            })
+          : jest.fn().mockResolvedValue({
+              source: options?.runtimeContent
+                ? 'CONVERSATION_RUNTIME'
+                : 'LEGACY',
+              reason: options?.runtimeContent
+                ? 'RUNTIME_SELECTED'
+                : 'RUNTIME_DISABLED',
+              ...(options?.runtimeContent
+                ? { content: options.runtimeContent }
+                : {}),
+            }),
     };
     const planningDispatcher = new CoachPlanningExecutionDispatcherService(
       dietGenerator as unknown as DietGeneratorService,
@@ -353,7 +361,8 @@ describe('CoachCommandService', () => {
       conversationGoalShadow as unknown as ConversationGoalShadowPipelineService,
       options?.runtimeContent ||
         options?.runtimeFailure ||
-        options?.runtimeLegacy
+        options?.runtimeLegacy ||
+        options?.runtimeHandoff
         ? (conversationRuntime as unknown as ConversationRuntimeIntegrationService)
         : undefined,
       options?.planningConversationContent
@@ -1512,26 +1521,42 @@ describe('CoachCommandService', () => {
     );
   });
 
-  it('does not generate legacy content after the runtime fails', async () => {
+  it('fails closed without legacy generation after the runtime fails', async () => {
     const subject = createSubject({
       content: 'quero uma dieta',
       runtimeFailure: new Error('runtime unavailable'),
     });
 
+    const planning = jest.spyOn(subject.planningExecution, 'executeStructured');
     await subject.service.processTextMessage({
       userId: 'user-id',
       messageId: 'message-id',
     });
 
     expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+    expect(planning).not.toHaveBeenCalled();
     expect(subject.prisma.coachMessage.create).toHaveBeenCalledTimes(1);
     expect(subject.prisma.coachMessage.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          content: expect.stringContaining('Nenhum plano foi criado'),
+          content: expect.stringContaining(
+            'Não consegui concluir isso com segurança',
+          ),
         }),
       }),
     );
+  });
+
+  it('executes planning once for an explicit runtime planning handoff', async () => {
+    const subject = createSubject({ runtimeHandoff: true });
+    const planning = jest.spyOn(subject.planningExecution, 'executeStructured');
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+    expect(planning).toHaveBeenCalledTimes(1);
+    expect(subject.prisma.coachMessage.create).toHaveBeenCalledTimes(1);
   });
 
   it('does not process commands before onboarding is completed', async () => {
@@ -1557,6 +1582,7 @@ describe('CoachCommandService', () => {
       content: 'Qual é meu treino atual?',
       existingContent: 'Resposta existente',
       planningConversationContent: 'Resposta de segunda geração',
+      runtimeLegacy: true,
     });
 
     await expect(
@@ -1575,6 +1601,7 @@ describe('CoachCommandService', () => {
     expect(subject.planningConversationResponse.select).not.toHaveBeenCalled();
     expect(subject.prisma.coachMessage.create).not.toHaveBeenCalled();
     expect(subject.conversationGoalShadow.execute).not.toHaveBeenCalled();
+    expect(subject.conversationRuntime.decide).not.toHaveBeenCalled();
     expect(subject.transaction.scheduledMessage.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({

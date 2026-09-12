@@ -28,6 +28,21 @@ export type ConversationRuntimePreExecutionDecision =
       source: 'CONVERSATION_RUNTIME';
       content: string;
       reason: 'RUNTIME_SELECTED';
+    }>
+  | Readonly<{
+      source: 'SAFE_RESPONSE';
+      content: string;
+      reason:
+        | 'AMBIGUOUS'
+        | 'NO_RUNTIME_DECISION'
+        | 'BRIDGE_FAILURE'
+        | 'INVALID_RESPONSE_CONTENT'
+        | 'RUNTIME_TIMEOUT'
+        | 'RUNTIME_FAILURE';
+    }>
+  | Readonly<{
+      source: 'PLANNING_HANDOFF';
+      reason: 'SIDE_EFFECT_ROUTE_REQUIRES_SINGLE_EXECUTION';
     }>;
 
 @Injectable()
@@ -47,6 +62,16 @@ export class ConversationRuntimeIntegrationService {
     const decision = await this.decide(input);
     if (decision.source === 'CONVERSATION_RUNTIME') {
       return decision;
+    }
+    if (decision.source === 'SAFE_RESPONSE') {
+      return Object.freeze({
+        source: 'CONVERSATION_RUNTIME' as const,
+        content: decision.content,
+        reason: 'RUNTIME_SELECTED' as const,
+      });
+    }
+    if (decision.source === 'PLANNING_HANDOFF') {
+      return this.selection.legacy(input.legacyContent, 'RUNTIME_FALLBACK');
     }
     return this.selection.legacy(input.legacyContent, decision.reason);
   }
@@ -69,7 +94,7 @@ export class ConversationRuntimeIntegrationService {
         config.timeoutMs,
       );
     } catch (error) {
-      return this.legacyDecision(
+      return this.safeFailure(
         error instanceof ConversationRuntimeTimeoutError
           ? 'RUNTIME_TIMEOUT'
           : 'RUNTIME_FAILURE',
@@ -127,11 +152,23 @@ export class ConversationRuntimeIntegrationService {
         reason: 'RUNTIME_SELECTED' as const,
       });
     }
-    return this.legacyDecision(
-      selection.reason === 'RUNTIME_SELECTED'
-        ? 'RUNTIME_FALLBACK'
-        : selection.reason,
-    );
+    if (selection.reason === 'SHADOW_ONLY') {
+      return this.legacyDecision(selection.reason);
+    }
+    if (this.isIntentionalPlanningHandoff(bridge)) {
+      return Object.freeze({
+        source: 'PLANNING_HANDOFF' as const,
+        reason: 'SIDE_EFFECT_ROUTE_REQUIRES_SINGLE_EXECUTION' as const,
+      });
+    }
+    const failureReason = evaluation.summary.ambiguityPresent
+      ? 'AMBIGUOUS'
+      : bridge.status === 'FAILED' || bridge.status === 'FALLBACK_REQUIRED'
+        ? bridge.reason === 'INVALID_RESPONSE_CONTENT'
+          ? 'INVALID_RESPONSE_CONTENT'
+          : 'BRIDGE_FAILURE'
+        : 'NO_RUNTIME_DECISION';
+    return this.safeFailure(failureReason);
   }
 
   private legacyDecision(
@@ -141,6 +178,36 @@ export class ConversationRuntimeIntegrationService {
     >,
   ): ConversationRuntimePreExecutionDecision {
     return Object.freeze({ source: 'LEGACY' as const, reason });
+  }
+
+  private safeFailure(
+    reason: Extract<
+      ConversationRuntimePreExecutionDecision,
+      { source: 'SAFE_RESPONSE' }
+    >['reason'],
+  ): ConversationRuntimePreExecutionDecision {
+    const content =
+      reason === 'AMBIGUOUS'
+        ? 'Quero entender direito antes de fazer qualquer alteração. Pode me explicar um pouco melhor o que você quer?'
+        : 'Não consegui concluir isso com segurança agora. Pode tentar novamente em instantes?';
+    return Object.freeze({ source: 'SAFE_RESPONSE' as const, content, reason });
+  }
+
+  private isIntentionalPlanningHandoff(
+    bridge: ConversationBridgeResult,
+  ): boolean {
+    return (
+      bridge.status === 'FALLBACK_REQUIRED' &&
+      bridge.reason === 'SIDE_EFFECT_ROUTE_REQUIRES_LEGACY_SINGLE_EXECUTION' &&
+      bridge.routeKind !== null &&
+      [
+        'NUTRITION_PLAN_GENERATION',
+        'WORKOUT_PLAN_GENERATION',
+        'COMBINED_PLAN_GENERATION',
+        'NUTRITION_PLAN_UPDATE',
+        'WORKOUT_PLAN_UPDATE',
+      ].includes(bridge.routeKind)
+    );
   }
 
   private withTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
