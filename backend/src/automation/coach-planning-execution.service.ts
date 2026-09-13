@@ -1234,6 +1234,10 @@ export class CoachPlanningExecutionService {
       sessionDurationMinutes: this.explicitWorkoutValue(
         recognized.sessionDurationMinutes,
       ),
+      requiresRunningDistanceProfile:
+        modality?.value === WORKOUT_MODALITY.RUNNING &&
+        recognized.objective?.status !== 'NOT_SET' &&
+        recognized.objective?.value === 'COMPLETE_DISTANCE',
       requiresWorkoutCalendar,
     });
   }

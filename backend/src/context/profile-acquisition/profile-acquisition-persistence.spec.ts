@@ -102,6 +102,58 @@ describe('Structured profile acquisition persistence', () => {
     };
   }
 
+  it.each([
+    [
+      CoachProfileAcquisitionField.TARGET_DISTANCE,
+      '2,5 km',
+      2500,
+      'target-distance-message',
+    ],
+    [
+      CoachProfileAcquisitionField.CURRENT_RUNNING_DISTANCE,
+      'hoje consigo correr 3 km',
+      3000,
+      'current-running-distance-message',
+    ],
+  ])(
+    'persists canonical meters for %s',
+    async (field, rawAnswer, expectedMeters, sourceOperationKey) => {
+      const test = await subject();
+      const answer = test.recognizer.recognize(
+        test.questions.forField(field, 'MISSING_CONTEXTUAL_FIELD'),
+        rawAnswer,
+      );
+      expect(answer).toMatchObject({
+        disposition: 'RECOGNIZED',
+        valueType: CoachProfileValueType.INTEGER,
+        value: expectedMeters,
+      });
+      const command = test.factory.create({
+        userId: 'user-id',
+        answer,
+        source: CoachProfileValueSource.USER_REPORTED,
+        referenceDate,
+        sourceOperationKey,
+        reason: 'INITIAL_ANSWER',
+      });
+      if (!command)
+        throw new Error('Expected running distance mutation command');
+      await expect(test.mutations.execute(command)).resolves.toMatchObject({
+        status: 'CREATED',
+        field,
+      });
+      expect(test.tx.coachProfileFieldValue.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          field,
+          valueType: CoachProfileValueType.INTEGER,
+          integerValue: expectedMeters,
+          status: CoachProfileValueStatus.CONFIRMED,
+          isActive: true,
+        }),
+      });
+    },
+  );
+
   it('keeps persistence and acquisition cycles inert while mode is OFF', async () => {
     const test = await subject('OFF');
     const mutation = await test.mutations.execute({

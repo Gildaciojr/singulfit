@@ -398,6 +398,7 @@ describe('CoachPlanningExecutionService', () => {
       environment: { value: 'FULL_GYM', evidence: 'EXPLICIT' },
       weeklyFrequency: { value: 4, evidence: 'EXPLICIT' },
       sessionDurationMinutes: { value: 60, evidence: 'EXPLICIT' },
+      requiresRunningDistanceProfile: false,
       requiresWorkoutCalendar: true,
     });
     expect(workoutBuilder.recognizeDeclaredContext).toHaveBeenCalledWith(
@@ -410,6 +411,7 @@ describe('CoachPlanningExecutionService', () => {
           environment: { value: 'FULL_GYM', evidence: 'EXPLICIT' },
           weeklyFrequency: { value: 4, evidence: 'EXPLICIT' },
           sessionDurationMinutes: { value: 60, evidence: 'EXPLICIT' },
+          requiresRunningDistanceProfile: false,
           requiresWorkoutCalendar: true,
         },
       }),
@@ -426,6 +428,170 @@ describe('CoachPlanningExecutionService', () => {
       }),
     );
   });
+
+  it.each([
+    {
+      objective: 'COMPLETE_DISTANCE' as const,
+      currentMessage:
+        'Quero treinar corrida para completar 10 km, 3 vezes por semana, 45 minutos por treino, na rua.',
+      expectedFlag: true,
+    },
+    {
+      objective: 'CONDITIONING' as const,
+      currentMessage:
+        'Quero treinar corrida para melhorar meu condicionamento, 3 vezes por semana, 45 minutos por treino, na rua.',
+      expectedFlag: false,
+    },
+  ])(
+    'derives the running-distance acquisition flag from the productive workout context: $objective',
+    async ({ objective, currentMessage, expectedFlag }) => {
+      const unavailableDatum = Object.freeze({
+        status: 'UNKNOWN' as const,
+        sources: Object.freeze([]),
+      });
+      const snapshot = Object.freeze({
+        completion: Object.freeze({ overall: 'PARTIAL', sections: [] }),
+        longitudinal: Object.freeze({
+          latestProgressWeightKg: unavailableDatum,
+          goalProgression: unavailableDatum,
+          nutritionEvolution: unavailableDatum,
+        }),
+      }) as unknown as CoachProfileSnapshot;
+      const decision = Object.freeze({
+        recognizedIntent: 'WORKOUT_PLAN_REQUEST',
+        goal: 'ASK_PROFILE_INFORMATION',
+        reason: 'PROFILE_INFORMATION_REQUIRED',
+        targetPlan: 'WORKOUT',
+        profileCompletionState: 'PARTIAL',
+        canExecute: false,
+        confidence: 'HIGH',
+        selectedProfileField: 'TRAINING_MODALITY',
+        metPreconditions: Object.freeze([]),
+        missingPreconditions: Object.freeze([]),
+        pendingDependencies: Object.freeze([]),
+      }) satisfies ConversationGoalDecision;
+      const recognizedContext = Object.freeze({
+        modality: Object.freeze({
+          status: 'CONFIRMED' as const,
+          value: 'RUNNING' as const,
+        }),
+        objective: Object.freeze({
+          status: 'CONFIRMED' as const,
+          value: objective,
+        }),
+        environment: Object.freeze({
+          status: 'CONFIRMED' as const,
+          value: 'STREET' as const,
+        }),
+        weeklyFrequency: Object.freeze({
+          status: 'CONFIRMED' as const,
+          value: 3,
+        }),
+        sessionDurationMinutes: Object.freeze({
+          status: 'CONFIRMED' as const,
+          value: 45,
+        }),
+      });
+      const generationInput = Object.freeze({
+        userId: 'user-id',
+        recognizedContext,
+      });
+      const dispatcher = {
+        dispatchStructured: jest.fn().mockResolvedValue({
+          content: 'Treino V2',
+          executor: 'WORKOUT_V2',
+          generationCompleted: true,
+          fallbackApplied: false,
+          workoutDisposition: 'PLAN',
+        }),
+      };
+      const workoutBuilder = {
+        recognizeDeclaredContext: jest.fn().mockReturnValue(recognizedContext),
+        build: jest.fn().mockResolvedValue({
+          generationInput,
+          profileId: 'profile-id',
+        }),
+      };
+      const routePolicy = {
+        select: jest.fn().mockReturnValue({
+          nutrition: null,
+          workout: 'V2',
+          reason: 'WORKOUT_V2_PRODUCTIVE_GENERATION',
+          nutritionPilotStatus: null,
+          suppressNutritionShadow: false,
+        }),
+      };
+      const collector = {
+        decide: jest.fn().mockReturnValue(Object.freeze({})),
+      };
+      const service = new CoachPlanningExecutionService(
+        dispatcher as unknown as CoachPlanningExecutionDispatcherService,
+        {
+          build: jest.fn().mockResolvedValue(snapshot),
+        } as unknown as CoachProfileSnapshotBuilder,
+        {
+          adapt: jest.fn().mockReturnValue({
+            recognizedIntent: 'WORKOUT_PLAN_REQUEST',
+            planTarget: 'WORKOUT',
+            acquisitionIntent: Object.freeze({}),
+          }),
+        } as unknown as LegacyCoachIntentAdapter,
+        collector as unknown as CoachAdaptiveProfileCollectorService,
+        {
+          plan: jest.fn().mockReturnValue(decision),
+        } as unknown as ConversationGoalPlannerService,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        routePolicy as unknown as PlanningExecutionRoutePolicyService,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        workoutBuilder as unknown as GenerateWorkoutPlanV2InputBuilder,
+      );
+
+      const result = await service.executeStructured('user-id', 'WORKOUT', {
+        conversationId: 'conversation-id',
+        messageId: `running-${objective.toLowerCase()}`,
+        correlationId: `running-${objective.toLowerCase()}`,
+        profileId: 'profile-id',
+        currentMessage,
+        referenceDate: new Date('2026-08-18T12:00:00.000Z'),
+      });
+
+      expect(result.selectedSource).toBe('WORKOUT_V2');
+      expect(result.profileAcquisitionContext).toMatchObject({
+        modality: { value: 'RUNNING', evidence: 'EXPLICIT' },
+        requiresRunningDistanceProfile: expectedFlag,
+      });
+      expect(
+        result.profileAcquisitionContext.requiresRunningDistanceProfile,
+      ).toBe(expectedFlag);
+      expect(collector.decide).toHaveBeenCalledWith(
+        expect.objectContaining({
+          conversationContext: expect.objectContaining({
+            modality: { value: 'RUNNING', evidence: 'EXPLICIT' },
+            requiresRunningDistanceProfile: expectedFlag,
+          }),
+        }),
+      );
+      expect(workoutBuilder.recognizeDeclaredContext).toHaveBeenCalledWith(
+        currentMessage,
+      );
+      expect(workoutBuilder.build).toHaveBeenCalledWith(
+        expect.objectContaining({
+          currentMessage,
+          declaredContext: recognizedContext,
+        }),
+      );
+    },
+  );
 
   it('routes a Workout mutation with the canonical previous plan and no Legacy fallback', async () => {
     const unavailableDatum = Object.freeze({

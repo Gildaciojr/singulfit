@@ -595,6 +595,18 @@ export class CoachProfileSnapshotBuilder {
         acquired,
         CoachProfileAcquisitionField.RETURNING_AFTER_BREAK,
       ),
+      targetDistanceKm: this.distanceKm(
+        this.acquisitionProjection.integer(
+          acquired,
+          CoachProfileAcquisitionField.TARGET_DISTANCE,
+        ),
+      ),
+      currentRunningDistanceKm: this.distanceKm(
+        this.acquisitionProjection.integer(
+          acquired,
+          CoachProfileAcquisitionField.CURRENT_RUNNING_DISTANCE,
+        ),
+      ),
     });
     const routine = Object.freeze({
       wakeUpTime: this.optionalPreference(
@@ -1387,6 +1399,14 @@ export class CoachProfileSnapshotBuilder {
       .filter((item): item is string => typeof item === 'string')
       .map((item) => item.trim())
       .filter((item) => item.length > 0);
+  }
+
+  private distanceKm(
+    datum: CoachProfileDatum<number>,
+  ): CoachProfileDatum<number> {
+    return 'value' in datum
+      ? Object.freeze({ ...datum, value: datum.value / 1000 })
+      : datum;
   }
 
   private known<T>(

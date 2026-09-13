@@ -57,6 +57,9 @@ const FIELD_BRIDGE: Readonly<
   RETURNING_AFTER_BREAK: CoachProfileAcquisitionField.RETURNING_AFTER_BREAK,
   AVAILABLE_TRAINING_DAYS: CoachProfileAcquisitionField.AVAILABLE_TRAINING_DAYS,
   DAILY_TRAINING_WINDOWS: CoachProfileAcquisitionField.DAILY_TRAINING_WINDOWS,
+  TARGET_DISTANCE: CoachProfileAcquisitionField.TARGET_DISTANCE,
+  CURRENT_RUNNING_DISTANCE:
+    CoachProfileAcquisitionField.CURRENT_RUNNING_DISTANCE,
 });
 
 const REVERSE_FIELD_BRIDGE: Readonly<
@@ -90,6 +93,8 @@ const REVERSE_FIELD_BRIDGE: Readonly<
   TRAINING_TIME: 'TRAINING_TIME',
   AVAILABLE_TRAINING_DAYS: 'AVAILABLE_TRAINING_DAYS',
   DAILY_TRAINING_WINDOWS: 'DAILY_TRAINING_WINDOWS',
+  TARGET_DISTANCE: 'TARGET_DISTANCE',
+  CURRENT_RUNNING_DISTANCE: 'CURRENT_RUNNING_DISTANCE',
 });
 
 const TEMPLATE: Readonly<Record<CoachProfileAcquisitionField, string>> =
@@ -148,6 +153,10 @@ const TEMPLATE: Readonly<Record<CoachProfileAcquisitionField, string>> =
       'Quais dias da semana costumam estar disponíveis para treino?',
     DAILY_TRAINING_WINDOWS:
       'Em quais janelas de horário você consegue treinar nesses dias?',
+    TARGET_DISTANCE:
+      'Qual distância você quer conseguir completar? Pode responder em km.',
+    CURRENT_RUNNING_DISTANCE:
+      'Hoje, aproximadamente quantos quilômetros você consegue correr de forma contínua?',
   });
 
 @Injectable()

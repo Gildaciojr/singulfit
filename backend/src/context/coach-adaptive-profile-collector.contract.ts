@@ -44,6 +44,7 @@ export interface ProfileAcquisitionConversationContext {
   readonly weeklyFrequency?: ProfileAcquisitionContextValue<number>;
   readonly sessionDurationMinutes?: ProfileAcquisitionContextValue<number>;
   readonly requiresWorkoutCalendar?: boolean;
+  readonly requiresRunningDistanceProfile?: boolean;
 }
 
 export const PROFILE_ACQUISITION_FIELD = {
@@ -88,6 +89,8 @@ export const PROFILE_ACQUISITION_FIELD = {
   MEAL_TIMES: 'MEAL_TIMES',
   AVAILABLE_TRAINING_DAYS: 'AVAILABLE_TRAINING_DAYS',
   DAILY_TRAINING_WINDOWS: 'DAILY_TRAINING_WINDOWS',
+  TARGET_DISTANCE: 'TARGET_DISTANCE',
+  CURRENT_RUNNING_DISTANCE: 'CURRENT_RUNNING_DISTANCE',
 } as const;
 
 export type ProfileAcquisitionField =

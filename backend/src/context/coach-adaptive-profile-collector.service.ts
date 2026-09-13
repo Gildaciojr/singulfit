@@ -405,6 +405,26 @@ const FIELD_DEFINITIONS: readonly ProfileAcquisitionFieldDefinition[] =
         snapshot.routine.dailyTrainingWindows ?? UNKNOWN_ACQUISITION_DATUM,
     ),
     definition(
+      PROFILE_ACQUISITION_FIELD.TARGET_DISTANCE,
+      'TRAINING',
+      PROFILE_ACQUISITION_IMPORTANCE.CRITICAL,
+      'EXPLICIT_CONFIRMATION_REQUIRED',
+      WORKOUT_INTENTS,
+      NO_PLANS,
+      (snapshot) =>
+        snapshot.training.targetDistanceKm ?? UNKNOWN_ACQUISITION_DATUM,
+    ),
+    definition(
+      PROFILE_ACQUISITION_FIELD.CURRENT_RUNNING_DISTANCE,
+      'TRAINING',
+      PROFILE_ACQUISITION_IMPORTANCE.CRITICAL,
+      'EXPLICIT_CONFIRMATION_REQUIRED',
+      WORKOUT_INTENTS,
+      NO_PLANS,
+      (snapshot) =>
+        snapshot.training.currentRunningDistanceKm ?? UNKNOWN_ACQUISITION_DATUM,
+    ),
+    definition(
       PROFILE_ACQUISITION_FIELD.HYDRATION,
       'NUTRITION',
       PROFILE_ACQUISITION_IMPORTANCE.OPTIONAL,
@@ -548,7 +568,13 @@ export class CoachAdaptiveProfileCollectorService {
       definition.field,
       input.conversationContext,
     );
-    const active = definition.intents.includes(input.intent);
+    const runningDistanceField =
+      definition.field === PROFILE_ACQUISITION_FIELD.TARGET_DISTANCE ||
+      definition.field === PROFILE_ACQUISITION_FIELD.CURRENT_RUNNING_DISTANCE;
+    const active =
+      definition.intents.includes(input.intent) &&
+      (!runningDistanceField ||
+        input.conversationContext.requiresRunningDistanceProfile === true);
     const interaction = interactions.get(definition.field);
     const dependencies = definition.dependencies;
     const dependencyNotApplicable = dependencies.some(
@@ -759,6 +785,12 @@ export class CoachAdaptiveProfileCollectorService {
     ) {
       return Object.freeze(['WORKOUT']);
     }
+    if (
+      input.conversationContext.requiresRunningDistanceProfile &&
+      (definition.field === PROFILE_ACQUISITION_FIELD.TARGET_DISTANCE ||
+        definition.field === PROFILE_ACQUISITION_FIELD.CURRENT_RUNNING_DISTANCE)
+    )
+      return Object.freeze(['WORKOUT']);
     if (
       isAdaptiveNutritionBasicRequirement(definition.field) &&
       (input.intent === PROFILE_ACQUISITION_INTENT.DIET_PLAN_REQUEST ||

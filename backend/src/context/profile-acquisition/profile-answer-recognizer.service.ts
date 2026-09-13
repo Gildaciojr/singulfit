@@ -293,7 +293,26 @@ export class ProfileAnswerRecognizerService {
         return this.weekdays(normalized);
       case CoachProfileAcquisitionField.DAILY_TRAINING_WINDOWS:
         return this.textList(original);
+      case CoachProfileAcquisitionField.TARGET_DISTANCE:
+      case CoachProfileAcquisitionField.CURRENT_RUNNING_DISTANCE:
+        return this.distanceMeters(normalized);
     }
+  }
+
+  private distanceMeters(value: string): number | undefined {
+    const match = value.match(
+      /(?:^|\s)(\d+(?:[,.]\d+)?)\s*(km|quilometros?|kilometros?|m|metros?)(?:\s|$)/u,
+    );
+    if (!match) return undefined;
+    const amount = Number(match[1].replace(',', '.'));
+    if (!Number.isFinite(amount) || amount <= 0) return undefined;
+    const meters =
+      match[2] === 'km' ||
+      match[2].startsWith('kilo') ||
+      match[2].startsWith('quilo')
+        ? amount * 1000
+        : amount;
+    return Number.isInteger(meters) ? meters : undefined;
   }
 
   private valid(

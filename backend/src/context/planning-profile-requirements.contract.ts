@@ -44,6 +44,11 @@ export const NUTRITION_BASIC_PLAN_REQUIREMENTS = Object.freeze([
   adaptive(PROFILE_ACQUISITION_FIELD.MEAL_COUNT),
 ]);
 
+export const RUNNING_COMPLETE_DISTANCE_REQUIRED_FIELDS = Object.freeze([
+  PROFILE_ACQUISITION_FIELD.TARGET_DISTANCE,
+  PROFILE_ACQUISITION_FIELD.CURRENT_RUNNING_DISTANCE,
+] as const);
+
 export const isAdaptiveNutritionBasicRequirement = (
   field: ProfileAcquisitionField,
 ): boolean =>

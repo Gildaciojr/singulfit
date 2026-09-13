@@ -365,6 +365,22 @@ const FIELD_DEFINITIONS: CoachProfileFieldDefinitionMap = Object.freeze({
       },
     ],
   }),
+  [CoachProfileAcquisitionField.TARGET_DISTANCE]: definition({
+    field: CoachProfileAcquisitionField.TARGET_DISTANCE,
+    domain: 'TRAINING',
+    valueType: CoachProfileValueType.INTEGER,
+    priority: 'CRITICAL',
+    minimum: 1,
+    consumers: [SNAPSHOT, COLLECTOR, WORKOUT],
+  }),
+  [CoachProfileAcquisitionField.CURRENT_RUNNING_DISTANCE]: definition({
+    field: CoachProfileAcquisitionField.CURRENT_RUNNING_DISTANCE,
+    domain: 'TRAINING',
+    valueType: CoachProfileValueType.INTEGER,
+    priority: 'CRITICAL',
+    minimum: 1,
+    consumers: [SNAPSHOT, COLLECTOR, WORKOUT],
+  }),
 });
 
 @Injectable()

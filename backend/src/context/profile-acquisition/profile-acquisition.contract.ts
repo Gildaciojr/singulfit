@@ -107,6 +107,10 @@ export interface CoachProfileFieldValueMap {
   readonly [CoachProfileAcquisitionField.TRAINING_TIME]: string;
   readonly [CoachProfileAcquisitionField.AVAILABLE_TRAINING_DAYS]: readonly Weekday[];
   readonly [CoachProfileAcquisitionField.DAILY_TRAINING_WINDOWS]: readonly string[];
+  /** Canonical storage is integer meters. */
+  readonly [CoachProfileAcquisitionField.TARGET_DISTANCE]: number;
+  /** Canonical storage is integer meters. */
+  readonly [CoachProfileAcquisitionField.CURRENT_RUNNING_DISTANCE]: number;
 }
 
 export type CoachProfileFieldValue<

@@ -94,10 +94,12 @@ export class WorkoutPlanningContextBuilder {
         muscleFocus: this.orderedArrayValue(recognized.muscleFocus),
         targetDistanceKm:
           recognized.targetDistanceKm ??
-          Object.freeze({ status: 'NOT_SET' as const }),
+          this.optionalSnapshotValue(input.snapshot.training.targetDistanceKm),
         currentRunningDistanceKm:
           recognized.currentRunningDistanceKm ??
-          Object.freeze({ status: 'NOT_SET' as const }),
+          this.optionalSnapshotValue(
+            input.snapshot.training.currentRunningDistanceKm,
+          ),
         targetEventDate:
           recognized.targetEventDate ??
           Object.freeze({ status: 'NOT_SET' as const }),

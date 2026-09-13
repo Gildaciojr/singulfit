@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { RUNNING_COMPLETE_DISTANCE_REQUIRED_FIELDS } from '../../context/planning-profile-requirements.contract';
 import type { CoachProfileSnapshot } from '../../context/coach-profile-snapshot.contract';
 import {
   WORKOUT_ARTIFACT_TYPE,
@@ -29,7 +30,7 @@ export class WorkoutPlanningReadinessService {
       recognized.objective?.status !== 'NOT_SET' &&
       recognized.objective?.value === 'COMPLETE_DISTANCE'
     ) {
-      requiredFields.push('TARGET_DISTANCE', 'CURRENT_RUNNING_DISTANCE');
+      requiredFields.push(...RUNNING_COMPLETE_DISTANCE_REQUIRED_FIELDS);
     }
     const availableFields: WorkoutReadinessField[] = [];
     const missingFields: WorkoutReadinessField[] = [];
@@ -235,6 +236,10 @@ export class WorkoutPlanningReadinessService {
         return snapshot.training.availableEquipment;
       case 'PERCEIVED_CONDITIONING':
         return snapshot.training.perceivedConditioning;
+      case 'TARGET_DISTANCE':
+        return snapshot.training.targetDistanceKm;
+      case 'CURRENT_RUNNING_DISTANCE':
+        return snapshot.training.currentRunningDistanceKm;
       default:
         return null;
     }

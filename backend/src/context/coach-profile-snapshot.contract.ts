@@ -136,6 +136,8 @@ export interface CoachProfileTrainingProfile {
   readonly cardioAvailability: CoachProfileDatum<boolean>;
   readonly trainingFormatPreference: CoachProfileDatum<string>;
   readonly returningAfterBreak?: CoachProfileDatum<boolean>;
+  readonly targetDistanceKm?: CoachProfileDatum<number>;
+  readonly currentRunningDistanceKm?: CoachProfileDatum<number>;
 }
 
 export interface CoachProfileRoutineProfile {

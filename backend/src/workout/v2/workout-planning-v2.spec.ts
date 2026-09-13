@@ -399,6 +399,59 @@ describe('Workout Planning Engine V2', () => {
     return module.get(WorkoutPlanningEngineV2Service);
   }
 
+  it('uses persisted running distances when the current message has none, while current values win', () => {
+    const base = snapshot();
+    const persisted = Object.freeze({
+      ...base,
+      training: Object.freeze({
+        ...base.training,
+        targetDistanceKm: known(5),
+        currentRunningDistanceKm: known(2.5),
+      }),
+    });
+    const fallback = context(
+      recognized('RUNNING', [], {
+        objective: 'COMPLETE_DISTANCE',
+        environment: 'STREET',
+      }),
+      persisted,
+    );
+    expect(fallback.training.targetDistanceKm).toEqual({
+      status: 'CONFIRMED',
+      value: 5,
+    });
+    expect(fallback.training.currentRunningDistanceKm).toEqual({
+      status: 'CONFIRMED',
+      value: 2.5,
+    });
+    const current = context(
+      recognized('RUNNING', [], {
+        objective: 'COMPLETE_DISTANCE',
+        environment: 'STREET',
+        targetDistanceKm: 10,
+      }),
+      persisted,
+    );
+    expect(current.training.targetDistanceKm).toEqual({
+      status: 'CONFIRMED',
+      value: 10,
+    });
+    expect(current.training.currentRunningDistanceKm).toEqual({
+      status: 'CONFIRMED',
+      value: 2.5,
+    });
+    const none = context(
+      recognized('RUNNING', [], {
+        objective: 'COMPLETE_DISTANCE',
+        environment: 'STREET',
+      }),
+    );
+    expect(none.training.targetDistanceKm).toEqual({ status: 'NOT_SET' });
+    expect(none.training.currentRunningDistanceKm).toEqual({
+      status: 'NOT_SET',
+    });
+  });
+
   it('sends individualized canonical payloads with deterministic user-isolated identities', async () => {
     const ai = {
       createStandaloneJob: jest

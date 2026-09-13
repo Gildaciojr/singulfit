@@ -303,6 +303,12 @@ describe('CoachProfileSnapshotBuilder', () => {
     expect(snapshot.training.availableEquipment.status).toBe(
       COACH_PROFILE_KNOWLEDGE_STATUS.UNKNOWN,
     );
+    expect(snapshot.training.targetDistanceKm?.status).toBe(
+      COACH_PROFILE_KNOWLEDGE_STATUS.UNKNOWN,
+    );
+    expect(snapshot.training.currentRunningDistanceKm?.status).toBe(
+      COACH_PROFILE_KNOWLEDGE_STATUS.UNKNOWN,
+    );
     expect(training).toMatchObject({
       state: COACH_PROFILE_COMPLETION_STATE.PARTIAL,
       ready: false,
@@ -314,6 +320,36 @@ describe('CoachProfileSnapshotBuilder', () => {
         'TRAINING_EQUIPMENT',
       ]),
     );
+  });
+
+  it('projects persisted running distances from canonical meters to kilometers', async () => {
+    const record = userRecord();
+    const test = await subject({
+      ...record,
+      coachProfileFieldValues: [
+        acquired({
+          field: CoachProfileAcquisitionField.TARGET_DISTANCE,
+          valueType: CoachProfileValueType.INTEGER,
+          integerValue: 5000,
+        }),
+        acquired({
+          field: CoachProfileAcquisitionField.CURRENT_RUNNING_DISTANCE,
+          valueType: CoachProfileValueType.INTEGER,
+          integerValue: 2500,
+        }),
+      ],
+    });
+    const snapshot = await test.builder.build('user-id', referenceDate);
+    expect(snapshot.training.targetDistanceKm).toEqual({
+      status: COACH_PROFILE_KNOWLEDGE_STATUS.KNOWN,
+      value: 5,
+      sources: [COACH_PROFILE_DATA_SOURCE.PROFILE_ACQUISITION],
+    });
+    expect(snapshot.training.currentRunningDistanceKm).toEqual({
+      status: COACH_PROFILE_KNOWLEDGE_STATUS.KNOWN,
+      value: 2.5,
+      sources: [COACH_PROFILE_DATA_SOURCE.PROFILE_ACQUISITION],
+    });
   });
 
   it('projects confirmed, inferred and conflicted structured acquisition values with provenance', async () => {
