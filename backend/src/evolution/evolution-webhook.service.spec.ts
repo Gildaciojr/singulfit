@@ -206,6 +206,63 @@ describe('EvolutionWebhookService', () => {
   });
 
   it.each([
+    { root: ' quote-id ', nested: undefined, expected: 'quote-id' },
+    { root: ' quote-id ', nested: 'quote-id', expected: 'quote-id' },
+    { root: 'quote-id', nested: 'other-id', expected: undefined },
+    { root: ' ', nested: undefined, expected: undefined },
+  ])(
+    'resolves unique quote evidence and rejects conflicts: $root / $nested',
+    async ({ root, nested, expected }) => {
+      const subject = createSubject();
+      const entry = {
+        ...webhook({
+          extendedTextMessage: {
+            text: 'Pode.',
+            contextInfo: { stanzaId: nested },
+          },
+        }).data,
+        contextInfo: { stanzaId: root },
+      };
+      await subject.service.processQueuedEntry('singulfit', entry);
+      expect(subject.messagesService.createInbound).toHaveBeenCalledWith(
+        expect.objectContaining({ replyToExternalMessageId: expected }),
+      );
+    },
+  );
+
+  it('preserves the root contextInfo in the production-shaped LID fixture', async () => {
+    const subject = createSubject({ remoteConversationFound: true });
+    await subject.service.processQueuedEntry('singulfit', {
+      key: {
+        id: '2A5E02FB54CD7378280A',
+        fromMe: false,
+        remoteJid: 'fictional@lid',
+        remoteJidAlt: '5511999999999@s.whatsapp.net',
+        addressingMode: 'lid',
+      },
+      message: {
+        conversation: 'Pode. Eu não tenho nenhuma alergia alimentar',
+        messageContextInfo: {},
+      },
+      contextInfo: {
+        stanzaId: '3EB0B10F3B298E1BB42633',
+        quotedType: 0,
+        participant: 'fictional@s.whatsapp.net',
+        quotedMessage: {
+          conversation: 'Só para confirmar: Não.. Posso salvar assim?',
+        },
+      },
+      messageType: 'conversation',
+      messageTimestamp: 1788720833,
+    });
+    expect(subject.messagesService.createInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        replyToExternalMessageId: '3EB0B10F3B298E1BB42633',
+      }),
+    );
+  });
+
+  it.each([
     {
       label: 'image',
       field: 'imageMessage',
@@ -240,6 +297,7 @@ describe('EvolutionWebhookService', () => {
           base64: 'dGVzdA==',
           mimetype: mimeType,
           fileLength: '4096',
+          contextInfo: { stanzaId: ' media-quote-id ' },
         },
       });
 
@@ -250,6 +308,7 @@ describe('EvolutionWebhookService', () => {
           mediaUrl: 'https://media.example.com/file.enc',
           mimeType,
           fileSize: 4096,
+          replyToExternalMessageId: 'media-quote-id',
         }),
       );
       expect(subject.mediaService.storeRemoteMedia).toHaveBeenCalledWith(
@@ -265,6 +324,86 @@ describe('EvolutionWebhookService', () => {
       );
     },
   );
+
+  it.each([
+    'ephemeralMessage',
+    'viewOnceMessage',
+    'viewOnceMessageV2',
+    'documentWithCaptionMessage',
+  ])(
+    'preserves quote evidence through supported wrapper %s',
+    async (wrapper) => {
+      const subject = createSubject();
+      await process(subject.service, {
+        [wrapper]: {
+          message: {
+            extendedTextMessage: {
+              text: 'Pode.',
+              contextInfo: { stanzaId: ' wrapped-quote ' },
+            },
+          },
+        },
+      });
+      expect(subject.messagesService.createInbound).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: MessageType.TEXT,
+          content: 'Pode.',
+          replyToExternalMessageId: 'wrapped-quote',
+        }),
+      );
+    },
+  );
+
+  it.each([
+    undefined,
+    {},
+    { stanzaId: ' ' },
+    { stanzaId: 123 },
+    {
+      quotedMessage: {
+        conversation: 'Só para confirmar: Não.. Posso salvar assim?',
+      },
+    },
+  ])(
+    'does not invent quote identity from absent or invalid context %#',
+    async (contextInfo) => {
+      const subject = createSubject();
+      await subject.service.processQueuedEntry('singulfit', {
+        ...webhook({ conversation: 'Pode.' }).data,
+        contextInfo,
+      });
+      expect(subject.messagesService.createInbound).toHaveBeenCalledWith(
+        expect.objectContaining({ replyToExternalMessageId: undefined }),
+      );
+      expect(subject.messagesService.createInbound).toHaveBeenCalledTimes(1);
+      expect(
+        subject.conversationsService.findActiveByRemoteJid,
+      ).toHaveBeenCalledTimes(1);
+      expect(subject.usersService.findByWhatsAppPhone).toHaveBeenCalledTimes(1);
+      expect(
+        subject.subscriptionsService.getMessagingSubscription,
+      ).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('fails closed on conflicting quote identities within nested sources', async () => {
+    const subject = createSubject();
+    await process(subject.service, {
+      extendedTextMessage: {
+        text: 'Pode.',
+        contextInfo: { stanzaId: 'text-quote' },
+      },
+      imageMessage: { contextInfo: { stanzaId: 'image-quote' } },
+    });
+    expect(subject.messagesService.createInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: MessageType.TEXT,
+        content: 'Pode.',
+        replyToExternalMessageId: undefined,
+      }),
+    );
+    expect(subject.mediaService.storeRemoteMedia).not.toHaveBeenCalled();
+  });
 
   it('returns the same message safely when Evolution retries the event', async () => {
     const subject = createSubject({

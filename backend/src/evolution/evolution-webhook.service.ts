@@ -437,26 +437,39 @@ export class EvolutionWebhookService {
       remoteJid,
       fromMe: entry.key.fromMe === true,
       messageTimestamp: this.parseTimestamp(entry.messageTimestamp),
-      replyToExternalMessageId: this.replyToExternalMessageId(message),
+      replyToExternalMessageId: this.replyToExternalMessageId(entry),
       ...parsedContent,
     };
   }
 
   private replyToExternalMessageId(
-    message: Record<string, unknown>,
+    entry: Record<string, unknown>,
   ): string | undefined {
-    const candidates = [
-      this.asRecord(message.extendedTextMessage),
-      this.asRecord(message.imageMessage),
-      this.asRecord(message.audioMessage),
-      this.asRecord(message.documentMessage),
-    ];
+    const candidates: (Record<string, unknown> | undefined)[] = [entry];
+    let message = this.asRecord(entry.message);
+    for (let depth = 0; message && depth <= 4; depth += 1) {
+      candidates.push(
+        message,
+        this.asRecord(message.extendedTextMessage),
+        this.asRecord(message.imageMessage),
+        this.asRecord(message.audioMessage),
+        this.asRecord(message.documentMessage),
+      );
+      const wrapper =
+        this.asRecord(message.ephemeralMessage) ??
+        this.asRecord(message.viewOnceMessage) ??
+        this.asRecord(message.viewOnceMessageV2) ??
+        this.asRecord(message.documentWithCaptionMessage);
+      candidates.push(wrapper);
+      message = this.asRecord(wrapper?.message);
+    }
+    const ids = new Set<string>();
     for (const candidate of candidates) {
       const context = this.asRecord(candidate?.contextInfo);
       const stanzaId = this.optionalString(context?.stanzaId);
-      if (stanzaId) return stanzaId;
+      if (stanzaId) ids.add(stanzaId);
     }
-    return undefined;
+    return ids.size === 1 ? [...ids][0] : undefined;
   }
 
   private parseMessageContent(
