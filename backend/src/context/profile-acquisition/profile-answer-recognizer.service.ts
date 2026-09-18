@@ -20,10 +20,16 @@ export class ProfileAnswerRecognizerService {
   constructor(private readonly registry: CoachProfileFieldRegistryService) {}
 
   recognize(
-    specification: ProfileQuestionSpecification,
+    specification: Pick<
+      ProfileQuestionSpecification,
+      'field' | 'confirmationPolicy' | 'reasonCode'
+    >,
     rawAnswer: string,
   ): RecognizedProfileAnswer {
-    const answer = rawAnswer.trim();
+    const answer = rawAnswer
+      .trim()
+      .replace(/[.!?]+$/u, '')
+      .trim();
     const normalized = this.normalize(answer);
     const definition = this.registry.get(specification.field);
 
@@ -42,7 +48,16 @@ export class ProfileAnswerRecognizerService {
       return this.result(specification, 'UNKNOWN', 'USER_DOES_NOT_KNOW');
     }
 
-    const value = this.value(specification.field, normalized, answer);
+    if (this.isIndependentCommand(answer))
+      return this.result(specification, 'UNRELATED', 'NOT_APPLICABLE');
+    if (this.ambiguous(normalized))
+      return this.result(specification, 'UNKNOWN', 'AMBIGUOUS_ANSWER');
+    const correction = this.correctionBody(answer);
+    const value = this.value(
+      specification.field,
+      this.normalize(correction ?? answer),
+      correction ?? answer,
+    );
     if (value === undefined) {
       return this.result(specification, 'UNRELATED', 'NO_DETERMINISTIC_MATCH');
     }
@@ -81,7 +96,7 @@ export class ProfileAnswerRecognizerService {
       return this.confirmation('INVALID', 'EMPTY_CONFIRMATION');
     }
     if (
-      /^(sim(?:,? (?:pode salvar|pode registrar))?|confirmo|confirmado|pode(?: salvar(?: assim)?| registrar)?|esta certo|correto|isso mesmo)$/u.test(
+      /^(sim(?:,? (?:pode salvar|pode registrar))?|confirmo|confirmado|pode(?: salvar(?: assim)?| registrar| confirmar)?|esta certo|correto|isso(?: mesmo)?|exato|e isso)$/u.test(
         normalized,
       )
     ) {
@@ -105,66 +120,152 @@ export class ProfileAnswerRecognizerService {
     field: CoachProfileAcquisitionField,
     rawAnswer: string,
   ): ContextualProfileConfirmation {
-    if (
-      isWorkoutCurrentPlanRead(rawAnswer) ||
-      isNutritionCurrentPlanRead(rawAnswer) ||
-      isFullPlanReplacementRequest(this.normalize(rawAnswer))
-    ) {
+    if (this.isIndependentCommand(rawAnswer)) {
       return Object.freeze({ disposition: 'NOT_APPLICABLE' });
     }
     const simple = this.recognizeConfirmation(rawAnswer);
     if (simple.disposition !== 'UNRELATED') return simple;
-    if (field !== CoachProfileAcquisitionField.ALLERGIES) return simple;
     const text = rawAnswer
       .trim()
       .replace(/[.!?]+$/u, '')
       .trim();
+    if (this.ambiguous(this.normalize(text))) return simple;
+    const correction = this.correctionBody(text);
     const positive =
-      /^(?:sim|pode(?: salvar(?: assim)?| registrar)?|isso mesmo|correto|confirmo)[,.:!\s]+(.+)$/iu.exec(
+      /^(?:sim|pode(?: salvar(?: assim)?| registrar| confirmar)?|isso mesmo|correto|confirmo)[,.:!\s]+(.+)$/iu.exec(
         text,
       );
-    const correction =
-      /^n[aã]o(?:[,.:!]\s*(?:na verdade\s+)?|\s+na verdade\s+)(.+)$/iu.exec(
-        text,
-      );
-    const declaration = positive?.[1] ?? correction?.[1] ?? text;
-    const normalized = this.normalize(declaration);
-    if (!/^(?:eu )?(?:nao tenho|tenho alergia|nenhum)/u.test(normalized))
-      return simple;
-    const value = this.allergies(declaration);
+    const declaration = correction ?? positive?.[1] ?? text;
     if (
-      !value ||
-      (value.length > 0 &&
-        !/^(?:eu )?tenho alergias?(?: alimentar(?:es)?)? (?:a|ao|aos) /u.test(
-          normalized,
-        )) ||
-      /\b(?:talvez|acho|nao sei|certeza|pode ser)\b/u.test(normalized)
+      !correction &&
+      !this.sensitiveDeclaration(field, this.normalize(declaration))
     )
       return simple;
+    const definition = this.registry.get(field);
+    const answer = this.recognize(
+      {
+        field,
+        confirmationPolicy: definition.confirmationPolicy,
+        reasonCode: 'MISSING_CONTEXTUAL_FIELD',
+      },
+      declaration,
+    );
+    if (answer.disposition !== 'RECOGNIZED' || answer.value === undefined)
+      return simple;
     return Object.freeze({
-      disposition: positive ? 'CONFIRMED_VALUE' : 'CORRECTED_VALUE',
-      value,
+      disposition:
+        positive && !correction ? 'CONFIRMED_VALUE' : 'CORRECTED_VALUE',
+      value: answer.value,
     });
   }
 
-  private allergies(answer: string): readonly string[] | undefined {
-    const text = answer
+  isIndependentCommand(text: string): boolean {
+    return (
+      isWorkoutCurrentPlanRead(text) ||
+      isNutritionCurrentPlanRead(text) ||
+      isFullPlanReplacementRequest(this.normalize(text))
+    );
+  }
+
+  private ambiguous(text: string): boolean {
+    return /\b(?:talvez|acho|nao sei|nao tenho certeza|provavelmente|pode ser)\b/u.test(
+      text,
+    );
+  }
+
+  private correctionBody(text: string): string | undefined {
+    return /^(?:n[aã]o(?:[,.:!]\s*(?:na verdade\s+)?|\s+na verdade\s+)|na verdade[,:\s]+|corrigindo[,:\s]+)(.+)$/iu
+      .exec(text)?.[1]
+      ?.trim();
+  }
+
+  private sensitiveNoun(
+    field: CoachProfileAcquisitionField,
+  ): string | undefined {
+    switch (field) {
+      case CoachProfileAcquisitionField.ALLERGIES:
+        return 'alergias?(?: alimentares?| alimentar)?';
+      case CoachProfileAcquisitionField.FOOD_INTOLERANCES:
+        return 'intolerancias?(?: alimentares?| alimentar)?';
+      case CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS:
+        return '(?:limitacoes(?: fisicas)?|limitacao(?: fisica)?|lesoes|lesao|problema(?: fisico)?)';
+      case CoachProfileAcquisitionField.MEDICAL_CONDITIONS:
+        return '(?:condicoes(?: medicas| de saude)?|condicao(?: medica| de saude)?|doencas?)';
+      default:
+        return undefined;
+    }
+  }
+
+  private sensitiveDeclaration(
+    field: CoachProfileAcquisitionField,
+    normalized: string,
+  ): boolean {
+    const noun = this.sensitiveNoun(field);
+    return (
+      noun !== undefined &&
+      new RegExp(
+        '^(?:eu )?(?:(?:nao (?:tenho|possuo)(?: nenhuma?)?|tenho|possuo) )?(?:' +
+          noun +
+          ')\\b',
+        'u',
+      ).test(normalized)
+    );
+  }
+
+  private sensitiveList(
+    field: CoachProfileAcquisitionField,
+    original: string,
+  ): readonly string[] | undefined {
+    const text = original
       .trim()
       .replace(/[.!?]+$/u, '')
       .trim();
     const normalized = this.normalize(text);
-    if (
-      this.explicitNone(normalized) ||
-      /^(?:eu )?(?:nao|nao tenho(?: (?:nenhuma? )?alergias?(?: alimentar(?:es)?)?)?|nenhuma?(?: alergias?(?: alimentar(?:es)?)?)?)$/u.test(
-        normalized,
-      )
-    ) {
-      return Object.freeze([]);
-    }
-    const names = text.replace(
-      /^(?:eu\s+)?tenho\s+alergias?(?:\s+alimentar(?:es)?)?\s+(?:a|ao|aos|à)\s+/iu,
-      '',
+    const noun = this.sensitiveNoun(field);
+    if (!noun) return undefined;
+    const absence = new RegExp(
+      '^(?:eu )?(?:nao|nada|nenhuma?|nao (?:tenho|possuo)(?: nenhuma?)?)(?: ' +
+        noun +
+        ')?$',
+      'u',
     );
+    if (absence.test(normalized)) return Object.freeze([]);
+    if (
+      this.registry
+        .all()
+        .some(
+          (definition) =>
+            definition.field !== field &&
+            this.sensitiveDeclaration(definition.field, normalized),
+        )
+    )
+      return undefined;
+    if (
+      /^(?:eu )?nao\b/u.test(normalized) ||
+      this.ambiguous(normalized) ||
+      /^(?:sim|tenho|possuo|claro|correto)$/u.test(normalized)
+    )
+      return undefined;
+    let names = text.replace(/^(?:eu\s+)?(?:tenho|possuo)\s+/iu, '');
+    if (field === CoachProfileAcquisitionField.ALLERGIES)
+      names = names.replace(
+        /^alergias?(?:\s+alimentar(?:es)?)?\s+(?:a|ao|aos|à)\s+/iu,
+        '',
+      );
+    if (field === CoachProfileAcquisitionField.FOOD_INTOLERANCES) {
+      names = names.replace(
+        /^(?:(?:eu\s+)?(?:tenho|possuo)\s+)?intoler[aâ]ncia(?:s)?(?:\s+alimentar(?:es)?)?\s+(?:a|ao|aos|à)\s+/iu,
+        '',
+      );
+      return this.textList(names)?.map((item) => {
+        const normalizedItem = this.normalize(item);
+        return normalizedItem === 'lactose'
+          ? 'LACTOSE'
+          : normalizedItem === 'gluten'
+            ? 'GLUTEN'
+            : item;
+      });
+    }
     return this.textList(names);
   }
 
@@ -173,6 +274,22 @@ export class ProfileAnswerRecognizerService {
     normalized: string,
     original: string,
   ): RecognizedProfileValue | undefined {
+    const definition = this.registry.get(field);
+    if (
+      definition.valueType === CoachProfileValueType.TEXT &&
+      definition.allowedOptions.includes(original.toUpperCase())
+    )
+      return original.toUpperCase();
+    if (
+      definition.valueType === CoachProfileValueType.TEXT_LIST &&
+      definition.allowedOptions.length > 0
+    ) {
+      const codes = original
+        .split(/[,;]|\s+e\s+/iu)
+        .map((item) => item.trim().toUpperCase());
+      if (codes.every((code) => definition.allowedOptions.includes(code)))
+        return Object.freeze([...new Set(codes)]);
+    }
     switch (field) {
       case CoachProfileAcquisitionField.TRAINING_MODALITY:
         return this.first(normalized, [
@@ -191,17 +308,20 @@ export class ProfileAnswerRecognizerService {
           ['ADVANCED', /avancad/],
         ]);
       case CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS:
-        if (this.explicitNone(normalized)) return Object.freeze([]);
-        return this.textList(original);
+        return this.sensitiveList(field, original);
       case CoachProfileAcquisitionField.WEEKLY_FREQUENCY:
+        return this.integer(
+          normalized,
+          '(?:vezes?|dias?)(?: (?:por|na|pela) semana)?',
+        );
       case CoachProfileAcquisitionField.DESIRED_MEAL_COUNT:
-        return this.integer(normalized);
+        return this.integer(normalized, 'refeicoes?(?: (?:por|ao) dia)?');
       case CoachProfileAcquisitionField.SESSION_DURATION_MINUTES:
         return this.duration(normalized);
       case CoachProfileAcquisitionField.TRAINING_ENVIRONMENT:
         return this.first(normalized, [
           ['CROSSFIT_BOX', /box|crossfit/],
-          ['FULL_GYM', /academia completa/],
+          ['FULL_GYM', /academia (?:comum|completa)/],
           ['LIMITED_GYM', /academia pequena|academia limitada/],
           ['HOME', /casa|home/],
           ['TRACK', /pista/],
@@ -242,15 +362,9 @@ export class ProfileAnswerRecognizerService {
           ['OMNIVORE', /onivor|como de tudo/],
         ]);
       case CoachProfileAcquisitionField.FOOD_INTOLERANCES:
-        if (this.explicitNone(normalized)) return Object.freeze([]);
-        if (/lactose/.test(normalized)) return Object.freeze(['LACTOSE']);
-        if (/gluten/.test(normalized)) return Object.freeze(['GLUTEN']);
-        return this.textList(original);
       case CoachProfileAcquisitionField.ALLERGIES:
-        return this.allergies(original);
       case CoachProfileAcquisitionField.MEDICAL_CONDITIONS:
-        if (this.explicitNone(normalized)) return Object.freeze([]);
-        return this.textList(original);
+        return this.sensitiveList(field, original);
       case CoachProfileAcquisitionField.DECLARED_FOOD_PREFERENCES:
       case CoachProfileAcquisitionField.DECLARED_FOOD_REJECTIONS:
         return this.textList(original);
@@ -345,7 +459,10 @@ export class ProfileAnswerRecognizerService {
   }
 
   private result(
-    specification: ProfileQuestionSpecification,
+    specification: Pick<
+      ProfileQuestionSpecification,
+      'field' | 'confirmationPolicy' | 'reasonCode'
+    >,
     disposition: RecognizedProfileAnswer['disposition'],
     reasonCode: string,
   ): RecognizedProfileAnswer {
@@ -377,8 +494,8 @@ export class ProfileAnswerRecognizerService {
     return options.find((option) => option[1].test(value))?.[0];
   }
 
-  private integer(value: string): number | undefined {
-    const words: Readonly<Record<string, number>> = Object.freeze({
+  private integer(value: string, unit = 'minutos?'): number | undefined {
+    const words: Readonly<Record<string, number>> = {
       uma: 1,
       um: 1,
       duas: 2,
@@ -389,23 +506,43 @@ export class ProfileAnswerRecognizerService {
       seis: 6,
       sete: 7,
       oito: 8,
-    });
-    const digit = value.match(/\b(\d{1,3})\b/u);
-    if (digit) return Number(digit[1]);
-    return Object.entries(words).find(([word]) =>
-      new RegExp(`\\b${word}\\b`, 'u').test(value),
-    )?.[1];
+    };
+    const pattern = new RegExp(
+      '^(?:(?:eu )?(?:treino|consigo treinar|sao|faco|como) )?(-?\\d+|uma|um|duas|dois|tres|quatro|cinco|seis|sete|oito)(?: ' +
+        unit +
+        ')?$',
+      'u',
+    );
+    const match = pattern.exec(value);
+    if (!match) return undefined;
+    return words[match[1]] ?? Number(match[1]);
   }
 
   private duration(value: string): number | undefined {
-    const hours = value.match(/(\d+(?:[.,]\d+)?)\s*(?:hora|horas|h)\b/u);
-    if (hours) return Math.round(Number(hours[1].replace(',', '.')) * 60);
-    return this.integer(value);
+    const hours =
+      /^(?:(?:sao|tenho) )?(\d+(?:[.,]\d+)?|uma|um)\s*(?:hora|horas|h)$/u.exec(
+        value,
+      );
+    if (hours)
+      return Math.round(
+        (hours[1] === 'uma' || hours[1] === 'um'
+          ? 1
+          : Number(hours[1].replace(',', '.'))) * 60,
+      );
+    return this.integer(
+      value.replace(/^(?:uns|cerca de|aproximadamente) /u, ''),
+    );
   }
 
   private boolean(value: string): boolean | undefined {
-    if (/^(sim|consigo|tenho|estou|com certeza)/u.test(value)) return true;
-    if (/^(nao|não)|nao consigo|nao estou/u.test(value)) return false;
+    if (
+      /^(?:sim|consigo|tenho(?: sim)?|possuo|claro|correto|estou|com certeza)$/u.test(
+        value,
+      )
+    )
+      return true;
+    if (/^(?:nao(?: tenho| possuo| consigo| estou)?|nenhuma?)$/u.test(value))
+      return false;
     return undefined;
   }
 

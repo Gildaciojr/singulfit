@@ -246,11 +246,11 @@ describe('Confirmation continuity through the inbound handler and real acquisiti
           },
         ),
         findMany: jest.fn(
-          ({ where }: { where: { sentAt: { gt: Date; lt: Date } } }) =>
+          ({ where }: { where: { sentAt: { gte: Date; lt: Date } } }) =>
             outbounds.filter(
               (o) =>
                 o.sentAt &&
-                o.sentAt > where.sentAt.gt &&
+                o.sentAt >= where.sentAt.gte &&
                 o.sentAt < where.sentAt.lt,
             ),
         ),

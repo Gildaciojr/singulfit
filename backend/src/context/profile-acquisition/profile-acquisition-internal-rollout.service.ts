@@ -695,24 +695,22 @@ export class ProfileAcquisitionInternalRolloutService {
       specification,
       message.content,
     );
-    if (
-      answer.disposition === 'INVALID' ||
-      answer.disposition === 'UNRELATED' ||
-      answer.disposition === 'UNKNOWN'
-    ) {
-      await this.audit(cycle.userId, cycle.id, {
-        event: 'ANSWER_IGNORED',
-        field: cycle.field,
-        reason: answer.reasonCode,
-        responseMilliseconds: this.responseMilliseconds(cycle, message),
-      });
+    if (!(await this.responseIsContextual(cycle, message))) {
       return this.captureResult(
         false,
         false,
         false,
-        answer.disposition === 'UNRELATED'
-          ? 'ANSWER_UNRELATED'
-          : 'ANSWER_INVALID',
+        'ANSWER_UNRELATED',
+        cycle.id,
+        cycle.field,
+      );
+    }
+    if (answer.reasonCode === 'NOT_APPLICABLE') {
+      return this.captureResult(
+        false,
+        false,
+        false,
+        'ANSWER_UNRELATED',
         cycle.id,
         cycle.field,
       );
@@ -749,6 +747,34 @@ export class ProfileAcquisitionInternalRolloutService {
     }
 
     try {
+      if (
+        answer.disposition === 'INVALID' ||
+        answer.disposition === 'UNRELATED' ||
+        answer.disposition === 'UNKNOWN'
+      ) {
+        await this.publishQuestion({
+          userId: cycle.userId,
+          conversationId: message.conversationId,
+          sourceMessageId: message.id,
+          content:
+            'Não consegui registrar sua resposta. ' +
+            this.questionRealizer.realize(specification).text,
+        });
+        await this.cycleService.releaseResponseClaim({
+          userId: cycle.userId,
+          cycleId: cycle.id,
+          claimCode: claim.claimCode,
+          previousResultCode: 'REPROMPT:' + this.responseToken(message.id),
+        });
+        return this.captureResult(
+          true,
+          false,
+          false,
+          'ANSWER_INVALID',
+          cycle.id,
+          cycle.field,
+        );
+      }
       const command = this.mutationFactory.create({
         userId: cycle.userId,
         answer,
@@ -808,13 +834,27 @@ export class ProfileAcquisitionInternalRolloutService {
             : mutation.status === 'REQUIRES_CONFIRMATION'
               ? 'CONFIRMATION_REQUESTED'
               : 'ANSWER_PERSISTED';
-      await this.cycleService.complete({
+      const completed = await this.cycleService.complete({
         userId: cycle.userId,
         cycleId: cycle.id,
         outcome,
+        confirmationRequired: mutation.status === 'REQUIRES_CONFIRMATION',
         resultCode: outcome + ':' + token,
         referenceDate: message.timestamp.toISOString(),
       });
+      if (
+        completed.status !== 'COMPLETED' &&
+        completed.status !== 'CONFIRMATION_PENDING'
+      ) {
+        return this.captureResult(
+          true,
+          true,
+          false,
+          'DUPLICATE',
+          cycle.id,
+          cycle.field,
+        );
+      }
       await this.audit(cycle.userId, cycle.id, {
         event: reason,
         field: cycle.field,
@@ -862,7 +902,7 @@ export class ProfileAcquisitionInternalRolloutService {
       readonly replyToExternalMessageId: string | null;
     },
   ): Promise<ProfileAcquisitionCaptureResult> {
-    if (!(await this.confirmationIsContextual(cycle, message))) {
+    if (!(await this.responseIsContextual(cycle, message))) {
       return this.captureResult(
         false,
         false,
@@ -973,7 +1013,10 @@ export class ProfileAcquisitionInternalRolloutService {
           cycle.field,
         );
       }
-      if (confirmation.disposition === 'CORRECTED_VALUE') {
+      if (
+        confirmation.disposition === 'CORRECTED_VALUE' &&
+        mutation.status === 'REQUIRES_CONFIRMATION'
+      ) {
         await this.repromptConfirmation(cycle, message, confirmation.value);
         return this.captureResult(
           true,
@@ -986,7 +1029,8 @@ export class ProfileAcquisitionInternalRolloutService {
       }
       const confirmed =
         confirmation.disposition === 'CONFIRMED' ||
-        confirmation.disposition === 'CONFIRMED_VALUE';
+        confirmation.disposition === 'CONFIRMED_VALUE' ||
+        confirmation.disposition === 'CORRECTED_VALUE';
       const completed = await this.cycleService.complete({
         userId: cycle.userId,
         cycleId: cycle.id,
@@ -1041,7 +1085,7 @@ export class ProfileAcquisitionInternalRolloutService {
       readonly conversationId: string;
       readonly timestamp: Date;
     },
-    value?: readonly string[],
+    value?: import('./profile-acquisition.contract').RecognizedProfileValue,
   ): Promise<void> {
     const specification = this.questionSpecifications.forField(
       cycle.field,
@@ -1323,7 +1367,7 @@ export class ProfileAcquisitionInternalRolloutService {
     return source !== null;
   }
 
-  private async confirmationIsContextual(
+  private async responseIsContextual(
     cycle: NonNullable<ActiveCycle>,
     message: {
       readonly timestamp: Date;
@@ -1331,7 +1375,10 @@ export class ProfileAcquisitionInternalRolloutService {
       readonly replyToExternalMessageId: string | null;
     },
   ): Promise<boolean> {
-    if (!cycle.answeredAt) return false;
+    const confirming =
+      cycle.status === CoachProfileAcquisitionCycleStatus.CONFIRMATION_PENDING;
+    const reference = confirming ? cycle.answeredAt : cycle.askedAt;
+    if (!reference) return false;
     const confirmations = await this.prisma.outboundMessage.findMany({
       where: {
         userId: cycle.userId,
@@ -1340,7 +1387,7 @@ export class ProfileAcquisitionInternalRolloutService {
         status: {
           in: [OutboundMessageStatus.SENT, OutboundMessageStatus.DELIVERED],
         },
-        sentAt: { gt: cycle.answeredAt, lt: message.timestamp },
+        sentAt: { gte: reference, lt: message.timestamp },
       },
       orderBy: [{ sentAt: 'desc' }, { id: 'desc' }],
       select: {
@@ -1351,7 +1398,12 @@ export class ProfileAcquisitionInternalRolloutService {
       },
     });
     const confirmation = confirmations.find((candidate) =>
-      this.confirmationSourceMatches(cycle, candidate.sourceMessageId),
+      confirming
+        ? this.confirmationSourceMatches(cycle, candidate.sourceMessageId)
+        : cycle.resultCode?.startsWith('REPROMPT:')
+          ? cycle.resultCode ===
+            'REPROMPT:' + this.responseToken(candidate.sourceMessageId)
+          : candidate.sourceMessageId === cycle.sourceMessageId,
     );
     if (!confirmation?.sentAt) return false;
     if (message.replyToExternalMessageId) {

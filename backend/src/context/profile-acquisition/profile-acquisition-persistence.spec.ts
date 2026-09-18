@@ -154,6 +154,85 @@ describe('Structured profile acquisition persistence', () => {
     },
   );
 
+  it.each(
+    new CoachProfileFieldRegistryService()
+      .all()
+      .filter(
+        (definition) =>
+          definition.confirmationPolicy === 'EXPLICIT_ON_CONFLICT',
+      ),
+  )('requires confirmation of changed $field values', async (definition) => {
+    const test = await subject();
+    test.tx.coachProfileFieldValue.findFirst.mockResolvedValue({
+      id: 'previous',
+      status: CoachProfileValueStatus.CONFIRMED,
+      valueFingerprint: 'previous-fingerprint',
+    });
+    const answer = test.recognizer.recognize(
+      test.questions.forField(definition.field, 'MISSING_CONTEXTUAL_FIELD'),
+      definition.valueType === CoachProfileValueType.BOOLEAN
+        ? 'sim'
+        : 'creatina',
+    );
+    const command = test.factory.create({
+      userId: 'user-a',
+      answer,
+      source: CoachProfileValueSource.USER_REPORTED,
+      referenceDate,
+      sourceOperationKey: 'correction',
+      reason: 'PROFILE_UPDATE',
+    });
+    if (!command) throw new Error('Expected valid command');
+    await expect(test.mutations.execute(command)).resolves.toMatchObject({
+      status: 'REQUIRES_CONFIRMATION',
+    });
+    expect(test.tx.coachProfileFieldValue.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        status: CoachProfileValueStatus.ANSWERED_UNCONFIRMED,
+        confirmationState: CoachProfileConfirmationState.PENDING,
+        previousValueId: 'previous',
+      }),
+    });
+  });
+
+  it.each(
+    new CoachProfileFieldRegistryService()
+      .all()
+      .filter(
+        (definition) =>
+          definition.updatePolicy === 'APPEND_UNIQUE_WITH_HISTORY',
+      ),
+  )('preserves existing unique entries for $field', async (definition) => {
+    const test = await subject();
+    test.tx.coachProfileFieldValue.findFirst.mockResolvedValue({
+      id: 'previous',
+      status: CoachProfileValueStatus.CONFIRMED,
+      valueType: CoachProfileValueType.TEXT_LIST,
+      textListValue: ['arroz'],
+      valueFingerprint: 'previous-fingerprint',
+    });
+    const answer = test.recognizer.recognize(
+      test.questions.forField(definition.field, 'MISSING_CONTEXTUAL_FIELD'),
+      'feijão',
+    );
+    const command = test.factory.create({
+      userId: 'user-a',
+      answer,
+      source: CoachProfileValueSource.USER_REPORTED,
+      referenceDate,
+      sourceOperationKey: 'append',
+      reason: 'PROFILE_UPDATE',
+    });
+    if (!command) throw new Error('Expected valid command');
+    await test.mutations.execute(command);
+    expect(test.tx.coachProfileFieldValue.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        textListValue: ['arroz', 'feijão'],
+        previousValueId: 'previous',
+      }),
+    });
+  });
+
   it('keeps persistence and acquisition cycles inert while mode is OFF', async () => {
     const test = await subject('OFF');
     const mutation = await test.mutations.execute({

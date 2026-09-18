@@ -447,7 +447,7 @@ describe('Structured profile acquisition registry and recognition', () => {
       recognizer.recognize(question, 'tenho dor e lesão no joelho'),
     ).toMatchObject({
       disposition: 'RECOGNIZED',
-      value: ['tenho dor', 'lesão no joelho'],
+      value: ['dor', 'lesão no joelho'],
       confirmationRequired: true,
     });
   });

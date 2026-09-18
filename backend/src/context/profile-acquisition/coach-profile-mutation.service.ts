@@ -209,7 +209,7 @@ export class CoachProfileMutationService {
         'INVALID_COMMAND',
       );
     }
-    const serialized =
+    const initialSerialized =
       command.action === 'SET'
         ? this.serialize(
             command.field,
@@ -220,7 +220,7 @@ export class CoachProfileMutationService {
             definition.maximum,
           )
         : EMPTY_SERIALIZED;
-    if (!serialized) {
+    if (!initialSerialized) {
       return this.result(
         'REJECTED',
         command.field,
@@ -232,6 +232,7 @@ export class CoachProfileMutationService {
 
     try {
       return await this.prisma.$transaction(async (transaction) => {
+        let serialized: SerializedValue = initialSerialized;
         const lockKey =
           'profile-acquisition:' + command.userId + ':' + command.field;
         await transaction.$queryRaw`
@@ -261,6 +262,57 @@ export class CoachProfileMutationService {
           },
           orderBy: [{ referenceDate: 'desc' }, { id: 'desc' }],
         });
+        const explicitConflictPolicy =
+          definition.confirmationPolicy === 'EXPLICIT_ON_CONFLICT' ||
+          definition.updatePolicy === 'EXPLICIT_ON_CONFLICT';
+        if (command.action === 'SET') {
+          if (
+            definition.updatePolicy === 'APPEND_UNIQUE_WITH_HISTORY' &&
+            current?.valueType === CoachProfileValueType.TEXT_LIST &&
+            Array.isArray(command.value) &&
+            Array.isArray(current.textListValue)
+          ) {
+            const previous = current.textListValue.filter(
+              (item): item is string => typeof item === 'string',
+            );
+            command = {
+              ...command,
+              value: Object.freeze([
+                ...new Set([...previous, ...command.value]),
+              ]),
+            };
+            const merged = this.serialize(
+              command.field,
+              command.value,
+              definition.valueType,
+              definition.allowedOptions,
+              definition.minimum,
+              definition.maximum,
+            );
+            if (!merged)
+              return this.result(
+                'REJECTED',
+                command.field,
+                null,
+                null,
+                'UNSUPPORTED_FIELD_VALUE',
+              );
+            serialized = merged;
+          }
+          if (
+            command.source !== CoachProfileValueSource.USER_CONFIRMED &&
+            (definition.confirmationPolicy === 'ALWAYS_EXPLICIT' ||
+              (explicitConflictPolicy &&
+                current?.status === CoachProfileValueStatus.CONFIRMED &&
+                current.valueFingerprint !== serialized.fingerprint))
+          ) {
+            command = {
+              ...command,
+              confirmation: CoachProfileConfirmationState.PENDING,
+              status: CoachProfileValueStatus.ANSWERED_UNCONFIRMED,
+            };
+          }
+        }
         const staleReference =
           command.previousValueFingerprint !== undefined &&
           current?.valueFingerprint !== command.previousValueFingerprint;
@@ -295,6 +347,7 @@ export class CoachProfileMutationService {
           command.action === 'SET' &&
           current?.status === CoachProfileValueStatus.CONFIRMED &&
           current.valueFingerprint !== serialized.fingerprint &&
+          !explicitConflictPolicy &&
           command.confirmation !== CoachProfileConfirmationState.CONFIRMED;
 
         if (conflict) {
@@ -484,11 +537,7 @@ export class CoachProfileMutationService {
       });
       return this.execute(command);
     }
-    if (
-      (input.replacementValue !== undefined &&
-        input.field !== CoachProfileAcquisitionField.ALLERGIES) ||
-      (input.action === 'CORRECT' && input.replacementValue === undefined)
-    ) {
+    if (input.action === 'CORRECT' && input.replacementValue === undefined) {
       return this.result(
         'REJECTED',
         input.field,
@@ -497,6 +546,9 @@ export class CoachProfileMutationService {
         'INVALID_CONFIRMATION_COMMAND',
       );
     }
+    const correctionPending =
+      input.action === 'CORRECT' &&
+      definition.confirmationPolicy !== 'IMPLICIT_ON_VALID_RESPONSE';
     const value = input.replacementValue ?? this.storedValue(current);
     if (value === undefined) {
       return this.result(
@@ -516,14 +568,12 @@ export class CoachProfileMutationService {
         input.action === 'CORRECT'
           ? CoachProfileValueSource.USER_REPORTED
           : CoachProfileValueSource.USER_CONFIRMED,
-      confirmation:
-        input.action === 'CORRECT'
-          ? CoachProfileConfirmationState.PENDING
-          : CoachProfileConfirmationState.CONFIRMED,
-      status:
-        input.action === 'CORRECT'
-          ? CoachProfileValueStatus.ANSWERED_UNCONFIRMED
-          : CoachProfileValueStatus.CONFIRMED,
+      confirmation: correctionPending
+        ? CoachProfileConfirmationState.PENDING
+        : CoachProfileConfirmationState.CONFIRMED,
+      status: correctionPending
+        ? CoachProfileValueStatus.ANSWERED_UNCONFIRMED
+        : CoachProfileValueStatus.CONFIRMED,
       referenceDate: referenceDate.toISOString(),
       operationKey,
       previousValueFingerprint: current.valueFingerprint,

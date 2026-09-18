@@ -100,7 +100,14 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
         ),
         updateMany: jest.fn(),
         findFirst: jest.fn().mockResolvedValue(null),
-        findMany: jest.fn().mockResolvedValue([]),
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'question-id',
+            externalMessageId: 'question-external',
+            sentAt,
+            sourceMessageId: 'source-message-id',
+          },
+        ]),
       },
       scheduledMessage: {
         findFirst: jest.fn().mockResolvedValue(null),
@@ -123,7 +130,14 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
         }),
         updateMany: jest.fn(),
         findFirst: jest.fn().mockResolvedValue(null),
-        findMany: jest.fn().mockResolvedValue([]),
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'question-id',
+            externalMessageId: 'question-external',
+            sentAt,
+            sourceMessageId: 'source-message-id',
+          },
+        ]),
       },
       scheduledMessage: {
         findFirst: jest.fn().mockResolvedValue(null),
@@ -390,6 +404,14 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
       timestamp: answerAt,
       conversationId: 'conversation-id',
     });
+    test.prisma.outboundMessage.findMany.mockResolvedValue([
+      {
+        id: 'question-outbound-id',
+        sourceMessageId: 'workout-request-id',
+        externalMessageId: 'workout-question',
+        sentAt,
+      },
+    ]);
 
     await expect(
       test.service.captureActiveResponse({
@@ -695,9 +717,9 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
 
   it.each([
     ['INVALID', 'VALUE_OUT_OF_RANGE', 'ANSWER_INVALID'],
-    ['UNRELATED', 'NO_DETERMINISTIC_MATCH', 'ANSWER_UNRELATED'],
+    ['UNRELATED', 'NO_DETERMINISTIC_MATCH', 'ANSWER_INVALID'],
   ] as const)(
-    'leaves %s responses to the unchanged legacy flow',
+    'keeps contextual %s responses inside acquisition',
     async (disposition, reasonCode, expectedReason) => {
       const test = subject();
       test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
@@ -719,11 +741,12 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
           messageId: 'answer-message-id',
         }),
       ).resolves.toMatchObject({
-        handled: false,
+        handled: true,
         persisted: false,
         reason: expectedReason,
       });
-      expect(test.cycles.claimResponse).not.toHaveBeenCalled();
+      expect(test.cycles.claimResponse).toHaveBeenCalledTimes(1);
+      expect(test.tx.outboundMessage.create).toHaveBeenCalledTimes(1);
       expect(test.mutationService.execute).not.toHaveBeenCalled();
     },
   );

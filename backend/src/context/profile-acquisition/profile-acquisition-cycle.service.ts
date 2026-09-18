@@ -370,7 +370,8 @@ export class ProfileAcquisitionCycleService {
       const confirmationPending =
         !expired &&
         command.outcome === 'ANSWERED' &&
-        cycle.confirmationState === CoachProfileConfirmationState.PENDING;
+        (command.confirmationRequired === true ||
+          cycle.confirmationState === CoachProfileConfirmationState.PENDING);
       const status = expired
         ? CoachProfileAcquisitionCycleStatus.EXPIRED
         : confirmationPending
@@ -392,7 +393,9 @@ export class ProfileAcquisitionCycleService {
           confirmationState:
             command.outcome === 'CONFIRMED'
               ? CoachProfileConfirmationState.CONFIRMED
-              : cycle.confirmationState,
+              : confirmationPending
+                ? CoachProfileConfirmationState.PENDING
+                : cycle.confirmationState,
         },
       });
       await transaction.auditLog.create({

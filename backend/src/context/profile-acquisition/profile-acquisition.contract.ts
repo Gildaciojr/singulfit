@@ -256,7 +256,7 @@ export type ContextualProfileConfirmation =
   | RecognizedProfileConfirmation
   | Readonly<{
       disposition: 'CONFIRMED_VALUE' | 'CORRECTED_VALUE';
-      value: readonly string[];
+      value: RecognizedProfileValue;
     }>
   | Readonly<{ disposition: 'NOT_APPLICABLE' }>;
 
@@ -325,7 +325,7 @@ export interface ProfilePendingConfirmationCommand {
   readonly userId: string;
   readonly field: CoachProfileAcquisitionField;
   readonly action: 'CONFIRM' | 'REJECT' | 'CORRECT';
-  readonly replacementValue?: readonly string[];
+  readonly replacementValue?: RecognizedProfileValue;
   readonly referenceDate: string;
   readonly sourceOperationKey: string;
 }
@@ -365,6 +365,7 @@ export interface ProfileAcquisitionCycleCompletionCommand {
   readonly resultCode: string;
   readonly referenceDate: string;
   readonly cooldownUntil?: string;
+  readonly confirmationRequired?: boolean;
 }
 
 export interface ProfileAcquisitionCycleCompletionResult {
