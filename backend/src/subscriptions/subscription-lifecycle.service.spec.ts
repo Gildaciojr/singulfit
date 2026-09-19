@@ -1,5 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
-import { SubscriptionStatus } from '@prisma/client';
+import { PaymentMethod, SubscriptionStatus } from '@prisma/client';
 import { AutomationService } from '../automation/automation.service';
 import { BillingService } from '../billing/billing.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -22,6 +22,8 @@ describe('SubscriptionLifecycleService', () => {
             id: 'subscription-id',
             userId: 'user-id',
             status: SubscriptionStatus.ACTIVE,
+            paymentMethod: PaymentMethod.PIX,
+            externalSubscriptionId: null,
             currentPeriodEnd: periodEnd,
             gracePeriodEnd: new Date('2026-08-13T12:00:00.000Z'),
             user: { name: 'Gil da Silva' },
@@ -50,6 +52,7 @@ describe('SubscriptionLifecycleService', () => {
       billing,
       automation,
       access,
+      prisma,
     };
   }
 
@@ -86,6 +89,23 @@ describe('SubscriptionLifecycleService', () => {
     expect(test.automation.scheduleSubscriptionNotice).toHaveBeenCalledWith(
       expect.objectContaining({
         noticeKey: expect.stringContaining(`before-${days}`),
+        content: expect.stringContaining('responda RENOVAR'),
+      }),
+    );
+  });
+
+  it('selects only manual PIX subscriptions for renewal invoices and reminders', async () => {
+    const test = subject();
+    await test.service.processDue(new Date('2026-08-07T12:00:00.000Z'));
+    expect(test.prisma.subscription.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          paymentMethod: PaymentMethod.PIX,
+          externalSubscriptionId: null,
+          status: {
+            in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE],
+          },
+        }),
       }),
     );
   });

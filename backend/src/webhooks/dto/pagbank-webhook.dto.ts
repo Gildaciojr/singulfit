@@ -5,6 +5,7 @@ export interface PagBankWebhookPayload {
   id: string;
   referenceId?: string;
   status?: string;
+  action?: string;
   payload: Prisma.InputJsonObject;
 }
 

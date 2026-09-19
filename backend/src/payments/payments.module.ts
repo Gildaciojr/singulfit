@@ -8,6 +8,9 @@ import { PaymentsController } from './payments.controller';
 import { PixPaymentsService } from './pix-payments.service';
 import { CreditCardPaymentsService } from './credit-card-payments.service';
 import { PaymentSettlementService } from './payment-settlement.service';
+import { PagBankRecurringReconciliationService } from './pagbank-recurring-reconciliation.service';
+import { PixRenewalService } from './pix-renewal.service';
+import { PixRenewalIntentService } from './pix-renewal-intent.service';
 
 @Module({
   imports: [AuthModule, BillingModule, PagBankModule, SubscriptionsModule],
@@ -16,6 +19,9 @@ import { PaymentSettlementService } from './payment-settlement.service';
     PixPaymentsService,
     CreditCardPaymentsService,
     PaymentSettlementService,
+    PagBankRecurringReconciliationService,
+    PixRenewalService,
+    PixRenewalIntentService,
   ],
   controllers: [PaymentsController],
   exports: [
@@ -23,6 +29,9 @@ import { PaymentSettlementService } from './payment-settlement.service';
     PixPaymentsService,
     CreditCardPaymentsService,
     PaymentSettlementService,
+    PagBankRecurringReconciliationService,
+    PixRenewalService,
+    PixRenewalIntentService,
   ],
 })
 export class PaymentsModule {}

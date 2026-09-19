@@ -20,6 +20,7 @@ import {
 } from './dto/pagbank-webhook.dto';
 import { WebhookEventsService } from './webhook-events.service';
 import { WebhookProcessorService } from './webhook-processor.service';
+import { PagBankRecurringWebhookService } from './pagbank-recurring-webhook.service';
 
 interface PagBankWebhookAuthDiagnostic {
   condition: string;
@@ -42,6 +43,7 @@ export class PagBankWebhookService {
     private readonly paymentGateway: PaymentGateway,
     private readonly prisma: PrismaService,
     private readonly eventBus: EventBusService,
+    private readonly recurringWebhookService: PagBankRecurringWebhookService,
   ) {}
 
   async handle(rawBody: Buffer | undefined, headers: PagBankWebhookHeaders) {
@@ -52,7 +54,7 @@ export class PagBankWebhookService {
     );
     const eventKey =
       headers.requestId?.trim() ||
-      `${payload.id}:${payload.status ?? 'UNKNOWN'}`;
+      `${payload.id}:${payload.action ?? payload.status ?? 'UNKNOWN'}`;
     const recorded = await this.prisma.$transaction(async (transaction) => {
       const result = await this.webhookEventsService.recordInTransaction(
         transaction,
@@ -64,7 +66,7 @@ export class PagBankWebhookService {
             ? WebhookResourceType.ORDER
             : WebhookResourceType.PAYMENT,
           resourceId: payload.id,
-          action: payload.status,
+          action: payload.action ?? payload.status,
           requestId: headers.requestId,
           signatureValid: true,
           payload: payload.payload,
@@ -116,6 +118,18 @@ export class PagBankWebhookService {
     }
 
     try {
+      if (event.resourceId.startsWith('SUBS_')) {
+        if (!this.recurringWebhookService.supports(event.action)) {
+          await this.webhookEventsService.markIgnored(event.id);
+          return { outcome: 'IGNORED_STATUS' as const };
+        }
+        await this.recurringWebhookService.process(
+          event.resourceId,
+          event.action as string,
+        );
+        await this.webhookEventsService.markProcessed(event.id);
+        return { outcome: 'APPROVED' as const };
+      }
       const canonicalPayment = await this.paymentGateway.getPayment(
         event.resourceId,
       );
@@ -179,6 +193,12 @@ export class PagBankWebhookService {
         typeof parsedPayload.status === 'string'
           ? parsedPayload.status
           : undefined,
+      action:
+        typeof parsedPayload.event === 'string'
+          ? parsedPayload.event
+          : typeof parsedPayload.type === 'string'
+            ? parsedPayload.type
+            : undefined,
       payload: parsedPayload,
     };
   }

@@ -48,6 +48,21 @@ export type AuthTokensResponse = {
   refreshToken: string;
 };
 
+export type LoginCheckoutPayload = {
+  email: string;
+  password: string;
+};
+
+export type LoginCheckoutResponse = {
+  user: {
+    id: string;
+    name: string | null;
+    email: string | null;
+    phone: string;
+  };
+  tokens: AuthTokensResponse;
+};
+
 export type RefreshCheckoutResponse = {
   tokens: AuthTokensResponse;
 };
@@ -62,6 +77,7 @@ export type RegisterCheckoutResponse = {
   };
   subscription: {
     id: string;
+    planId: string;
     status: string;
   };
   tokens: AuthTokensResponse;
@@ -77,6 +93,25 @@ export type CreateCreditCardPayload = {
   holderCpf: string;
   installments: 1;
   idempotencyKey: string;
+};
+
+export type BillingCycles = 1 | 3 | 6 | 12;
+
+export type CreateRecurringCreditCardSubscriptionPayload = {
+  subscriptionId: string;
+  planId: string;
+  billingCycles: BillingCycles;
+  encryptedCard: string;
+  holderName: string;
+  holderCpf: string;
+};
+
+export type RecurringCreditCardSubscriptionResponse = {
+  subscriptionId: string;
+  status: string;
+  provider: string | null;
+  externalSubscriptionId: string | null;
+  billingCycles: BillingCycles | null;
 };
 
 export type PixPaymentResponse = {
@@ -121,6 +156,7 @@ export type CheckoutStatusResponse = {
   subscription: {
     id: string;
     status: string;
+    planId: string;
     amount: string;
     plan: {
       id: string;
@@ -195,6 +231,15 @@ export function registerCheckout(
   });
 }
 
+export function loginCheckout(
+  payload: LoginCheckoutPayload,
+): Promise<LoginCheckoutResponse> {
+  return request("/auth/login", {
+    method: "POST",
+    body: payload,
+  });
+}
+
 export function createPixPayment(
   payload: CreatePixPayload,
   accessToken: string,
@@ -215,6 +260,20 @@ export function createCreditCardPayment(
 ): Promise<CreditCardPaymentResponse> {
   return request(
     "/payments/credit-card",
+    {
+      method: "POST",
+      body: payload,
+    },
+    accessToken,
+  );
+}
+
+export function createRecurringCreditCardSubscription(
+  payload: CreateRecurringCreditCardSubscriptionPayload,
+  accessToken: string,
+): Promise<RecurringCreditCardSubscriptionResponse> {
+  return request(
+    "/payments/recurring/credit-card",
     {
       method: "POST",
       body: payload,

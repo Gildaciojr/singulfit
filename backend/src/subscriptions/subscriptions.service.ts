@@ -127,6 +127,15 @@ export class SubscriptionsService {
       throw new ConflictException('A fatura não pertence à assinatura');
     }
 
+    if (
+      subscription.billingCycles !== null &&
+      invoice.cycleNumber > subscription.billingCycles
+    ) {
+      throw new ConflictException(
+        'A assinatura atingiu a quantidade contratada de ciclos',
+      );
+    }
+
     const alreadyApplied =
       subscription.status === SubscriptionStatus.ACTIVE &&
       subscription.currentPeriodEnd !== null &&
@@ -164,7 +173,10 @@ export class SubscriptionsService {
     const periodEnd = invoicePeriodIsCurrent
       ? dayjs(invoice.periodEnd)
       : periodStart.add(subscription.plan.billingIntervalCount, 'month');
-    const gracePeriodEnd = periodEnd.add(this.getGracePeriodDays(), 'day');
+    const gracePeriodEnd =
+      subscription.status === SubscriptionStatus.PAST_DUE
+        ? null
+        : this.calculateGracePeriodEnd(periodEnd.toDate());
     const activatedSubscription = await transaction.subscription.update({
       where: {
         id: input.subscriptionId,
@@ -182,7 +194,7 @@ export class SubscriptionsService {
         billingPeriodEnd: periodEnd.toDate(),
         currentPeriodStart: periodStart.toDate(),
         currentPeriodEnd: periodEnd.toDate(),
-        gracePeriodEnd: gracePeriodEnd.toDate(),
+        gracePeriodEnd,
         cancelAtPeriodEnd: false,
         canceledAt: null,
         endedAt: null,
@@ -371,5 +383,9 @@ export class SubscriptionsService {
     }
 
     return days;
+  }
+
+  calculateGracePeriodEnd(periodEnd: Date): Date {
+    return dayjs(periodEnd).add(this.getGracePeriodDays(), 'day').toDate();
   }
 }

@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
-import { SubscriptionStatus } from '@prisma/client';
+import { PaymentMethod, SubscriptionStatus } from '@prisma/client';
 import dayjs from 'dayjs';
 import { AutomationService } from '../automation/automation.service';
 import { BillingService } from '../billing/billing.service';
@@ -42,6 +42,8 @@ export class SubscriptionLifecycleService {
           in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE],
         },
         currentPeriodEnd: { not: null },
+        externalSubscriptionId: null,
+        paymentMethod: PaymentMethod.PIX,
       },
       include: {
         user: { select: { name: true } },
@@ -159,7 +161,7 @@ export class SubscriptionLifecycleService {
       await this.automation.scheduleSubscriptionNotice({
         userId,
         noticeKey: `${subscriptionId}:${periodEnd.toISOString()}:before-${days}`,
-        content: `${name}, seu plano termina em ${days} ${days === 1 ? 'dia' : 'dias'}. Quero garantir que você continue evoluindo sem perder seu acompanhamento. Quando quiser, posso ajudar com a renovação.`,
+        content: `${name}, seu plano termina em ${days} ${days === 1 ? 'dia' : 'dias'}. Se quiser renovar por mais um mês via PIX, responda RENOVAR. O PIX só será gerado quando você solicitar.`,
         scheduledFor: scheduledFor.toDate(),
         availableAt: scheduledFor.toDate(),
       });
@@ -182,7 +184,7 @@ export class SubscriptionLifecycleService {
     await this.automation.scheduleSubscriptionNotice({
       userId,
       noticeKey: `${subscriptionId}:${periodEnd.toISOString()}:due`,
-      content: `${name}, seu ciclo termina hoje. Seu histórico está seguro e você ainda pode renovar para manter o acompanhamento sem interrupções.`,
+      content: `${name}, seu ciclo termina hoje. Se quiser renovar por mais um mês via PIX, responda RENOVAR. O PIX só será gerado quando você solicitar.`,
       scheduledFor: periodEnd.toDate(),
       availableAt: periodEnd.toDate(),
     });

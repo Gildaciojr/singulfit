@@ -1,4 +1,10 @@
-import { Injectable, OnModuleInit, Optional } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  OnModuleInit,
+  Optional,
+} from '@nestjs/common';
 import {
   MediaType,
   OutboxEvent,
@@ -23,6 +29,8 @@ import { EventHandlerRegistry } from './event-handler.registry';
 import { ProfileAcquisitionInternalRolloutService } from '../context/profile-acquisition/profile-acquisition-internal-rollout.service';
 import { SubscriptionLifecycleService } from '../subscriptions/subscription-lifecycle.service';
 import { CoachProactiveResponseService } from '../automation/coach-proactive-response.service';
+import { PixRenewalIntentService } from '../payments/pix-renewal-intent.service';
+import { PixRenewalService } from '../payments/pix-renewal.service';
 
 @Injectable()
 export class IntegrationEventHandlersService implements OnModuleInit {
@@ -42,6 +50,10 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     private readonly subscriptionLifecycle: SubscriptionLifecycleService,
     @Optional()
     private readonly proactiveResponse?: CoachProactiveResponseService,
+    @Optional()
+    private readonly pixRenewalIntent?: PixRenewalIntentService,
+    @Optional()
+    private readonly pixRenewal?: PixRenewalService,
   ) {}
 
   onModuleInit(): void {
@@ -103,6 +115,9 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     ) {
       return;
     }
+    if (await this.processPixRenewalIntent(input)) {
+      return;
+    }
     if (
       typeof this.coachCommandService.shouldHandleBeforeProfileAcquisition ===
         'function' &&
@@ -152,6 +167,66 @@ export class IntegrationEventHandlersService implements OnModuleInit {
 
     if (result.handled) return;
     await this.coachCommandService.processTextMessage(input);
+  }
+
+  private async processPixRenewalIntent(input: {
+    userId: string;
+    messageId: string;
+  }): Promise<boolean> {
+    if (!this.pixRenewalIntent || !this.pixRenewal) {
+      return false;
+    }
+
+    const intent = await this.pixRenewalIntent.match(input);
+    if (!intent.matched) {
+      return false;
+    }
+
+    let pix: Awaited<ReturnType<PixRenewalService['createOrReuseForUser']>>;
+    try {
+      pix = await this.pixRenewal.createOrReuseForUser(intent.userId);
+    } catch (error: unknown) {
+      if (
+        !(
+          error instanceof NotFoundException ||
+          error instanceof BadRequestException
+        )
+      ) {
+        throw error;
+      }
+      const now = new Date();
+      await this.automationService.scheduleSubscriptionNotice({
+        userId: intent.userId,
+        noticeKey: `pix-renewal-unavailable:${intent.messageId}`,
+        content: 'Não encontrei uma renovação PIX disponível para você agora.',
+        scheduledFor: now,
+        availableAt: now,
+      });
+      return true;
+    }
+    const now = new Date();
+    await this.automationService.scheduleSubscriptionNotice({
+      userId: intent.userId,
+      noticeKey: `pix-renewal-response:${intent.messageId}`,
+      content: this.pixRenewalMessage(pix),
+      scheduledFor: now,
+      availableAt: now,
+    });
+    return true;
+  }
+
+  private pixRenewalMessage(pix: {
+    amount: string;
+    expiresAt: string;
+    qrCode: string;
+  }): string {
+    return [
+      'Seu PIX para renovação está disponível.',
+      `Valor: R$ ${pix.amount}.`,
+      `Válido até: ${pix.expiresAt}.`,
+      'Código PIX copia e cola:',
+      pix.qrCode,
+    ].join('\n');
   }
 
   private async processMedia(event: OutboxEvent): Promise<void> {

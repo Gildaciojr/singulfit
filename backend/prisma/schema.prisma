@@ -843,6 +843,7 @@ model User {
   updatedAt DateTime @updatedAt
 
   subscriptions                    Subscription[]
+  providerCustomers                ProviderCustomer[]
   meals                            Meal[]
   usageDaily                       UsageDaily[]
   authSessions                     AuthSession[]
@@ -1603,6 +1604,7 @@ model Plan {
 
   subscriptions Subscription[]
   entitlements  PlanEntitlement[]
+  providerPlans ProviderPlanMapping[]
 
   @@index([isActive])
   @@map("plans")
@@ -1658,6 +1660,7 @@ model Subscription {
   // PAGAMENTO / INTEGRAÇÃO
   provider               PaymentProvider?
   externalSubscriptionId String?
+  billingCycles          Int?
   amount                 Decimal          @db.Decimal(10, 2)
   externalPaymentId      String?          @unique
   paymentMethod          PaymentMethod?
@@ -1690,6 +1693,7 @@ model Invoice {
   id                String        @id @default(uuid())
   subscriptionId    String
   externalReference String        @unique
+  providerInvoiceId String?       @unique
   cycleNumber       Int
   status            InvoiceStatus @default(OPEN)
   currency          Currency      @default(BRL)
@@ -1713,6 +1717,39 @@ model Invoice {
   @@index([subscriptionId, status])
   @@index([status, dueAt])
   @@map("invoices")
+}
+
+model ProviderPlanMapping {
+  id             String          @id @default(uuid())
+  planId         String
+  provider       PaymentProvider
+  billingCycles  Int
+  providerPlanId String
+  referenceId    String
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, provider, billingCycles])
+  @@unique([provider, providerPlanId])
+  @@unique([provider, referenceId])
+  @@map("provider_plan_mappings")
+}
+
+model ProviderCustomer {
+  id                 String          @id @default(uuid())
+  userId             String
+  provider           PaymentProvider
+  providerCustomerId String
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@unique([provider, providerCustomerId])
+  @@map("provider_customers")
 }
 
 model Payment {

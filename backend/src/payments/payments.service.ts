@@ -33,6 +33,10 @@ export class PaymentsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(data: CreatePaymentDto) {
+    return (await this.createWithOutcome(data)).payment;
+  }
+
+  async createWithOutcome(data: CreatePaymentDto) {
     const existing = await this.prisma.payment.findUnique({
       where: {
         idempotencyKey: data.idempotencyKey,
@@ -42,7 +46,7 @@ export class PaymentsService {
 
     if (existing) {
       this.assertIdempotentRequest(existing, data);
-      return existing;
+      return { payment: existing, created: false };
     }
 
     const invoice = await this.prisma.invoice.findUnique({
@@ -70,7 +74,7 @@ export class PaymentsService {
     }
 
     try {
-      return await this.prisma.payment.create({
+      const payment = await this.prisma.payment.create({
         data: {
           invoiceId: data.invoiceId,
           provider: data.provider,
@@ -85,6 +89,7 @@ export class PaymentsService {
         },
         include: paymentWithInvoice,
       });
+      return { payment, created: true };
     } catch (error: unknown) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -99,7 +104,7 @@ export class PaymentsService {
 
         if (concurrentPayment) {
           this.assertIdempotentRequest(concurrentPayment, data);
-          return concurrentPayment;
+          return { payment: concurrentPayment, created: false };
         }
 
         const activePayment = await this.findCurrentByInvoiceId(data.invoiceId);

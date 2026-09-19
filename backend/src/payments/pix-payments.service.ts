@@ -114,6 +114,119 @@ export class PixPaymentsService {
     return this.toResponse(pendingPayment);
   }
 
+  async createForRenewalInvoice(input: {
+    subscription: {
+      id: string;
+      plan: { type: string; name: string };
+      user: {
+        name: string | null;
+        email: string | null;
+        cpf: string | null;
+        phone: string;
+      };
+    };
+    invoice: {
+      id: string;
+      total: Prisma.Decimal;
+      currency: PixPaymentResponseDto['currency'];
+    };
+    idempotencyKey: string;
+  }): Promise<PixPaymentResponseDto> {
+    const currentPayment = await this.paymentsService.findCurrentByInvoiceId(
+      input.invoice.id,
+    );
+
+    if (currentPayment) {
+      if (
+        currentPayment.status === PaymentStatus.PENDING &&
+        currentPayment.providerPaymentId &&
+        currentPayment.pixQrCode &&
+        currentPayment.pixTicketUrl &&
+        currentPayment.expiresAt &&
+        currentPayment.expiresAt.getTime() > Date.now()
+      ) {
+        return this.toResponse(currentPayment);
+      }
+
+      if (currentPayment.status === PaymentStatus.CREATED) {
+        return this.waitForCanonicalPix(currentPayment.id);
+      }
+
+      await this.releaseRetryablePayment(currentPayment);
+    }
+
+    const requestedExpiration = new Date(
+      Date.now() + PixPaymentsService.PIX_EXPIRATION_MINUTES * 60 * 1000,
+    );
+    const reservation = await this.paymentsService.createWithOutcome({
+      invoiceId: input.invoice.id,
+      provider: PaymentProvider.PAGBANK,
+      method: PaymentMethod.PIX,
+      amount: input.invoice.total.toFixed(2),
+      currency: input.invoice.currency,
+      idempotencyKey: input.idempotencyKey,
+      expiresAt: requestedExpiration.toISOString(),
+    });
+
+    if (!reservation.created) {
+      if (
+        reservation.payment.status === PaymentStatus.PENDING &&
+        reservation.payment.providerPaymentId &&
+        reservation.payment.pixQrCode &&
+        reservation.payment.pixTicketUrl &&
+        reservation.payment.expiresAt
+      ) {
+        return this.toResponse(reservation.payment);
+      }
+      return this.waitForCanonicalPix(reservation.payment.id);
+    }
+
+    const gatewayPayment = await this.paymentGateway.createPixPayment({
+      idempotencyKey: reservation.payment.idempotencyKey,
+      externalReference: reservation.payment.externalReference,
+      amountInCents: this.toCents(reservation.payment.amount),
+      expirationDate: reservation.payment.expiresAt!,
+      customer: this.buildCustomer(input.subscription.user),
+      item: {
+        referenceId: input.subscription.plan.type,
+        name: `Assinatura SingulFit ${input.subscription.plan.name}`,
+      },
+    });
+    const pendingPayment = await this.paymentsService.updateStatus(
+      reservation.payment.id,
+      {
+        status: PaymentStatus.PENDING,
+        providerOrderId: gatewayPayment.providerOrderId,
+        providerPaymentId: gatewayPayment.providerPaymentId,
+        pixQrCode: gatewayPayment.qrCode,
+        pixTicketUrl: gatewayPayment.qrCodeImageUrl,
+        expiresAt: gatewayPayment.expiresAt.toISOString(),
+      },
+    );
+
+    return this.toResponse(pendingPayment);
+  }
+
+  private async waitForCanonicalPix(
+    paymentId: string,
+  ): Promise<PixPaymentResponseDto> {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const payment = await this.paymentsService.findById(paymentId);
+      if (
+        payment.status === PaymentStatus.PENDING &&
+        payment.providerPaymentId &&
+        payment.pixQrCode &&
+        payment.pixTicketUrl &&
+        payment.expiresAt
+      ) {
+        return this.toResponse(payment);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+
+    throw new ConflictException('A cobrança PIX está sendo preparada');
+  }
+
   private buildCustomer(user: {
     name: string | null;
     email: string | null;

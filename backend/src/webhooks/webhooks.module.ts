@@ -6,6 +6,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { PagBankWebhookService } from './pagbank-webhook.service';
 import { WebhookEventsService } from './webhook-events.service';
 import { WebhookProcessorService } from './webhook-processor.service';
+import { PagBankRecurringWebhookService } from './pagbank-recurring-webhook.service';
 import { WebhooksController } from './webhooks.controller';
 
 @Module({
@@ -14,12 +15,14 @@ import { WebhooksController } from './webhooks.controller';
     WebhookEventsService,
     PagBankWebhookService,
     WebhookProcessorService,
+    PagBankRecurringWebhookService,
   ],
   controllers: [WebhooksController],
   exports: [
     WebhookEventsService,
     PagBankWebhookService,
     WebhookProcessorService,
+    PagBankRecurringWebhookService,
   ],
 })
 export class WebhooksModule {}

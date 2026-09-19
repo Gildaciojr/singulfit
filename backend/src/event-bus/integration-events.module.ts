@@ -7,6 +7,7 @@ import { WebhooksModule } from '../webhooks/webhooks.module';
 import { ActivationModule } from '../activation/activation.module';
 import { ContextModule } from '../context/context.module';
 import { SubscriptionLifecycleModule } from '../subscriptions/subscription-lifecycle.module';
+import { PaymentsModule } from '../payments/payments.module';
 import { IntegrationEventHandlersService } from './integration-event-handlers.service';
 
 @Module({
@@ -19,6 +20,7 @@ import { IntegrationEventHandlersService } from './integration-event-handlers.se
     ActivationModule,
     ContextModule,
     SubscriptionLifecycleModule,
+    PaymentsModule,
   ],
   providers: [IntegrationEventHandlersService],
 })

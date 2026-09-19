@@ -23,14 +23,15 @@ import { toast } from "@/hooks/use-toast";
 import {
   ApiError,
   AuthTokensResponse,
+  BillingCycles,
   CHECKOUT_STATUS_LABEL,
-  CheckoutStatusResponse,
-  createCreditCardPayment,
   createPixPayment,
-  CreditCardPaymentResponse,
-  CreateCreditCardPayload,
+  createRecurringCreditCardSubscription,
   getCreditCardPublicKey,
+  loginCheckout,
+  LoginCheckoutPayload,
   PixPaymentResponse,
+  RecurringCreditCardSubscriptionResponse,
   registerCheckout,
   refreshCheckoutSession,
 } from "@/lib/api";
@@ -63,7 +64,11 @@ type RegisterFormState = {
 
 type RegisterFormErrors = Partial<Record<keyof RegisterFormState, string>>;
 
+type LoginFormErrors = Partial<Record<keyof LoginCheckoutPayload, string>>;
+type CheckoutMode = "REGISTER" | "LOGIN";
+
 type PaymentMethodOption = "PIX" | "CREDIT_CARD";
+const BILLING_CYCLE_OPTIONS: readonly BillingCycles[] = [1, 3, 6, 12];
 
 type CardFormState = {
   holderName: string;
@@ -85,7 +90,6 @@ type PaymentDisplay = {
   expiresAt: string | null;
 };
 
-type CheckoutStatusPayment = NonNullable<CheckoutStatusResponse["payment"]>;
 type SavedCheckoutSession = AuthTokensResponse;
 
 const initialFormState: RegisterFormState = {
@@ -105,31 +109,40 @@ const initialCardFormState: CardFormState = {
   cvv: "",
 };
 
+const initialLoginFormState: LoginCheckoutPayload = {
+  email: "",
+  password: "",
+};
+
 export default function Checkout() {
   const params = useParams<CheckoutRouteParams>();
   const navigate = useNavigate();
   const initialPlan = commercialPlanFromRouteParam(params.planType);
-  const [selectedPlan, setSelectedPlan] =
-    useState<CommercialPlanType>(initialPlan.type);
+  const [selectedPlan, setSelectedPlan] = useState<CommercialPlanType>(
+    initialPlan.type,
+  );
   const [form, setForm] = useState<RegisterFormState>(initialFormState);
   const [errors, setErrors] = useState<RegisterFormErrors>({});
+  const [checkoutMode, setCheckoutMode] = useState<CheckoutMode>("REGISTER");
+  const [loginForm, setLoginForm] = useState<LoginCheckoutPayload>(
+    initialLoginFormState,
+  );
+  const [loginErrors, setLoginErrors] = useState<LoginFormErrors>({});
   const [paymentMethod, setPaymentMethod] =
     useState<PaymentMethodOption>("PIX");
-  const [cardForm, setCardForm] =
-    useState<CardFormState>(initialCardFormState);
+  const [billingCycles, setBillingCycles] = useState<BillingCycles>(1);
+  const [cardForm, setCardForm] = useState<CardFormState>(initialCardFormState);
   const [cardErrors, setCardErrors] = useState<CardFormErrors>({});
   const [savedCheckoutSession, setSavedCheckoutSession] =
     useState<SavedCheckoutSession | null>(() => readSavedCheckoutSession());
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState<string | null>(null);
   const [pixPayment, setPixPayment] = useState<PixPaymentResponse | null>(null);
-  const [creditCardPayment, setCreditCardPayment] =
-    useState<CreditCardPaymentResponse | null>(null);
+  const [recurringSubscription, setRecurringSubscription] =
+    useState<RecurringCreditCardSubscriptionResponse | null>(null);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [securePaymentLoading, setSecurePaymentLoading] = useState(false);
-  const [pollingStartedAt, setPollingStartedAt] = useState<number | null>(
-    null,
-  );
+  const [pollingStartedAt, setPollingStartedAt] = useState<number | null>(null);
 
   const plan = useMemo(
     () => commercialPlanFromRouteParam(selectedPlan.toLowerCase()),
@@ -146,6 +159,9 @@ export default function Checkout() {
   const registerMutation = useMutation({
     mutationFn: registerCheckout,
   });
+  const loginMutation = useMutation({
+    mutationFn: loginCheckout,
+  });
   const pixMutation = useMutation({
     mutationFn: (token: string) =>
       createPixPayment(
@@ -155,14 +171,14 @@ export default function Checkout() {
         token,
       ),
   });
-  const creditCardMutation = useMutation({
+  const recurringCreditCardMutation = useMutation({
     mutationFn: ({
       payload,
       token,
     }: {
-      payload: CreateCreditCardPayload;
+      payload: Parameters<typeof createRecurringCreditCardSubscription>[0];
       token: string;
-    }) => createCreditCardPayment(payload, token),
+    }) => createRecurringCreditCardSubscription(payload, token),
   });
 
   const currentStatus = checkoutStatus.data?.checkoutStatus;
@@ -173,8 +189,9 @@ export default function Checkout() {
       : paymentMethod;
   const submitting =
     registerMutation.isPending ||
+    loginMutation.isPending ||
     pixMutation.isPending ||
-    creditCardMutation.isPending ||
+    recurringCreditCardMutation.isPending ||
     securePaymentLoading;
 
   function updateField(field: keyof RegisterFormState, value: string): void {
@@ -197,6 +214,14 @@ export default function Checkout() {
       ...current,
       [field]: undefined,
     }));
+  }
+
+  function updateLoginField(
+    field: keyof LoginCheckoutPayload,
+    value: string,
+  ): void {
+    setLoginForm((current) => ({ ...current, [field]: value }));
+    setLoginErrors((current) => ({ ...current, [field]: undefined }));
   }
 
   function selectPaymentMethod(nextMethod: PaymentMethodOption): void {
@@ -253,31 +278,89 @@ export default function Checkout() {
         return;
       }
 
-      const cardPayment = await createCreditCardPaymentSecurely(
+      const subscription = await createRecurringCreditCardSubscriptionSecurely(
         registerResult.tokens.accessToken,
+        registerResult.subscription,
       );
 
-      setCreditCardPayment(cardPayment);
-      if (
-        cardPayment.status === "REJECTED" ||
-        cardPayment.status === "CANCELED"
-      ) {
-        toast({
-          title: "Cartão recusado",
-          description:
-            "Não foi possível aprovar este pagamento. Confira os dados ou tente outro cartão.",
-          variant: "destructive",
-        });
-        return;
-      }
+      setRecurringSubscription(subscription);
 
       toast({
-        title: "Pagamento enviado",
-        description: "Estamos confirmando seu acesso automaticamente.",
+        title: "Assinatura recorrente enviada",
+        description:
+          "Aguardamos a confirmação financeira para ativar seu acesso.",
       });
     } catch (error: unknown) {
       toast({
         title: "Não foi possível continuar",
+        description: errorMessage(error),
+        variant: "destructive",
+      });
+    }
+  }
+
+  async function submitLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const validation = validateLoginForm(loginForm);
+
+    if (Object.keys(validation).length > 0) {
+      setLoginErrors(validation);
+      return;
+    }
+
+    try {
+      const loginResult = await loginMutation.mutateAsync({
+        email: loginForm.email.trim().toLowerCase(),
+        password: loginForm.password,
+      });
+
+      saveCheckoutSession(loginResult.tokens, selectedPlan);
+      setSavedCheckoutSession(loginResult.tokens);
+      setAccessToken(loginResult.tokens.accessToken);
+      setRefreshToken(loginResult.tokens.refreshToken);
+      setLoginForm(initialLoginFormState);
+      setSessionExpired(false);
+      setPollingStartedAt(Date.now());
+    } catch (error: unknown) {
+      toast({
+        title: "Não foi possível entrar",
+        description: errorMessage(error),
+        variant: "destructive",
+      });
+    }
+  }
+
+  async function submitPendingCheckout(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const subscription = checkoutStatus.data?.subscription;
+    const cardValidation =
+      paymentMethod === "CREDIT_CARD" ? validateCardForm(cardForm) : {};
+
+    if (
+      !accessToken ||
+      !subscription ||
+      Object.keys(cardValidation).length > 0
+    ) {
+      setCardErrors(cardValidation);
+      return;
+    }
+
+    try {
+      if (paymentMethod === "PIX") {
+        const pix = await createPixWithSessionRefresh();
+        setPixPayment(pix);
+        setPollingStartedAt(Date.now());
+        return;
+      }
+
+      const recurring = await createRecurringCreditCardSubscriptionSecurely(
+        accessToken,
+        { id: subscription.id, planId: subscription.plan.id },
+      );
+      setRecurringSubscription(recurring);
+    } catch (error: unknown) {
+      toast({
+        title: "Não foi possível retomar o checkout",
         description: errorMessage(error),
         variant: "destructive",
       });
@@ -338,9 +421,10 @@ export default function Checkout() {
     setAccessToken(null);
     setRefreshToken(null);
     setPixPayment(null);
-    setCreditCardPayment(null);
+    setRecurringSubscription(null);
     setPollingStartedAt(null);
     setSessionExpired(false);
+    setCheckoutMode("REGISTER");
   }
 
   async function createPixWithSessionRefresh(): Promise<PixPaymentResponse> {
@@ -366,9 +450,10 @@ export default function Checkout() {
     return pixMutation.mutateAsync(refreshed.tokens.accessToken);
   }
 
-  async function createCreditCardPaymentSecurely(
+  async function createRecurringCreditCardSubscriptionSecurely(
     token: string,
-  ): Promise<CreditCardPaymentResponse> {
+    subscription: { id: string; planId: string },
+  ): Promise<RecurringCreditCardSubscriptionResponse> {
     const expiry = parseExpiry(cardForm.expiry);
 
     if (!expiry) {
@@ -398,14 +483,15 @@ export default function Checkout() {
         cvv: "",
       }));
 
-      return await creditCardMutation.mutateAsync({
+      return await recurringCreditCardMutation.mutateAsync({
         token,
         payload: {
+          subscriptionId: subscription.id,
+          planId: subscription.planId,
+          billingCycles,
           encryptedCard,
           holderName: cardForm.holderName.trim(),
           holderCpf: digitsOnly(cardForm.holderCpf),
-          installments: 1,
-          idempotencyKey: createIdempotencyKey("card"),
         },
       });
     } catch (error: unknown) {
@@ -455,28 +541,62 @@ export default function Checkout() {
           <PlanSummary plan={plan} onSelectPlan={selectPlan} />
 
           {!accessToken && sessionExpired ? (
-            <SessionExpiredCard onRestart={() => setSessionExpired(false)} />
+            <SessionExpiredCard
+              onRestart={() => {
+                setSessionExpired(false);
+                setCheckoutMode("LOGIN");
+              }}
+            />
           ) : !accessToken && savedCheckoutSession ? (
             <SavedCheckoutCard
               onContinue={continueSavedCheckout}
               onStartNew={startNewCheckout}
             />
           ) : !accessToken ? (
-            <RegisterCard
+            checkoutMode === "LOGIN" ? (
+              <LoginCard
+                errors={loginErrors}
+                form={loginForm}
+                onChange={updateLoginField}
+                onRegister={() => setCheckoutMode("REGISTER")}
+                onSubmit={submitLogin}
+                submitting={submitting}
+              />
+            ) : (
+              <RegisterCard
+                cardErrors={cardErrors}
+                cardForm={cardForm}
+                billingCycles={billingCycles}
+                errors={errors}
+                form={form}
+                onCardChange={updateCardField}
+                onBillingCyclesChange={setBillingCycles}
+                onChange={updateField}
+                onLogin={() => setCheckoutMode("LOGIN")}
+                onPaymentMethodChange={selectPaymentMethod}
+                onSubmit={submitRegister}
+                paymentMethod={paymentMethod}
+                plan={plan}
+                submitting={submitting}
+              />
+            )
+          ) : currentStatus === "ACTIVE" ? (
+            <ApprovedCard />
+          ) : currentStatus === "WAITING_PAYMENT" &&
+            checkoutStatus.data?.subscription?.status === "PENDING_PAYMENT" &&
+            !checkoutStatus.data.payment ? (
+            <PendingCheckoutCard
               cardErrors={cardErrors}
               cardForm={cardForm}
-              errors={errors}
-              form={form}
+              billingCycles={billingCycles}
+              onBillingCyclesChange={setBillingCycles}
               onCardChange={updateCardField}
-              onChange={updateField}
               onPaymentMethodChange={selectPaymentMethod}
-              onSubmit={submitRegister}
+              onSubmit={submitPendingCheckout}
               paymentMethod={paymentMethod}
               plan={plan}
               submitting={submitting}
             />
-          ) : currentStatus === "ACTIVE" ? (
-            <ApprovedCard />
           ) : currentStatus === "PAYMENT_EXPIRED" ? (
             <ExpiredCard
               onRetry={retryPix}
@@ -487,8 +607,10 @@ export default function Checkout() {
             <RejectedCard onStartNew={startNewCheckout} />
           ) : activePaymentMethod === "CREDIT_CARD" ? (
             <CreditCardStatusCard
-              loading={creditCardMutation.isPending || securePaymentLoading}
-              payment={creditCardPayment ?? checkoutStatus.data?.payment ?? null}
+              loading={
+                recurringCreditCardMutation.isPending || securePaymentLoading
+              }
+              subscription={recurringSubscription}
               polling={checkoutStatus.isFetching}
               statusLabel={
                 currentStatus
@@ -525,11 +647,7 @@ function PlanSummary({
   return (
     <div className="lg:sticky lg:top-8">
       <div className="mb-6 flex items-center gap-3">
-        <img
-          src={singulfitLogo}
-          alt="SingulFit"
-          className="h-18 w-auto"
-        />
+        <img src={singulfitLogo} alt="SingulFit" className="h-18 w-auto" />
         <div>
           <div className="text-2xl font-black tracking-[-0.04em]">
             SingulFit
@@ -596,10 +714,13 @@ function PlanSummary({
 function RegisterCard({
   cardErrors,
   cardForm,
+  billingCycles,
   errors,
   form,
   onCardChange,
+  onBillingCyclesChange,
   onChange,
+  onLogin,
   onPaymentMethodChange,
   onSubmit,
   paymentMethod,
@@ -608,10 +729,13 @@ function RegisterCard({
 }: {
   cardErrors: CardFormErrors;
   cardForm: CardFormState;
+  billingCycles: BillingCycles;
   errors: RegisterFormErrors;
   form: RegisterFormState;
   onCardChange: (field: keyof CardFormState, value: string) => void;
+  onBillingCyclesChange: (billingCycles: BillingCycles) => void;
   onChange: (field: keyof RegisterFormState, value: string) => void;
+  onLogin: () => void;
   onPaymentMethodChange: (method: PaymentMethodOption) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   paymentMethod: PaymentMethodOption;
@@ -702,11 +826,18 @@ function RegisterCard({
           />
 
           {paymentMethod === "CREDIT_CARD" && (
-            <CreditCardForm
-              errors={cardErrors}
-              form={cardForm}
-              onChange={onCardChange}
-            />
+            <>
+              <RecurringDurationSelector
+                billingCycles={billingCycles}
+                onChange={onBillingCyclesChange}
+                plan={plan}
+              />
+              <CreditCardForm
+                errors={cardErrors}
+                form={cardForm}
+                onChange={onCardChange}
+              />
+            </>
           )}
 
           <Button
@@ -723,7 +854,170 @@ function RegisterCard({
               </>
             ) : (
               <>
-                {paymentMethod === "PIX" ? "Gerar PIX" : "Pagar com cartão"}
+                {paymentMethod === "PIX" ? "Gerar PIX" : "Assinar com cartão"}
+                <ArrowRight className="h-5 w-5" />
+              </>
+            )}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className="w-full rounded-2xl"
+            disabled={submitting}
+            onClick={onLogin}
+          >
+            Já tenho uma conta
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+function LoginCard({
+  errors,
+  form,
+  onChange,
+  onRegister,
+  onSubmit,
+  submitting,
+}: {
+  errors: LoginFormErrors;
+  form: LoginCheckoutPayload;
+  onChange: (field: keyof LoginCheckoutPayload, value: string) => void;
+  onRegister: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  submitting: boolean;
+}) {
+  return (
+    <Card className="rounded-[2rem] border-zinc-200 bg-white shadow-[0_35px_90px_-45px_rgba(15,23,42,0.24)]">
+      <CardContent className="p-5 sm:p-7 lg:p-9">
+        <div className="mb-8">
+          <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-emerald-900">
+            Acessar checkout
+          </div>
+          <h2 className="mt-5 text-3xl font-black tracking-[-0.04em]">
+            Entre para retomar seu checkout.
+          </h2>
+          <p className="mt-3 text-sm leading-7 text-zinc-600">
+            Após entrar, mostramos o estado atual da sua assinatura sem criar
+            uma nova cobrança.
+          </p>
+        </div>
+
+        <form className="space-y-5" onSubmit={onSubmit}>
+          <FormField
+            error={errors.email}
+            label="Email"
+            onChange={(value) => onChange("email", value)}
+            placeholder="voce@email.com"
+            type="email"
+            value={form.email}
+          />
+          <FormField
+            error={errors.password}
+            label="Senha"
+            onChange={(value) => onChange("password", value)}
+            type="password"
+            value={form.password}
+          />
+          <Button
+            type="submit"
+            disabled={submitting}
+            className="h-14 w-full rounded-2xl bg-emerald-900 text-base font-bold text-white hover:bg-emerald-950"
+          >
+            {submitting ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <>
+                Entrar e retomar checkout
+                <ArrowRight className="h-5 w-5" />
+              </>
+            )}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className="w-full rounded-2xl"
+            disabled={submitting}
+            onClick={onRegister}
+          >
+            Criar uma conta
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PendingCheckoutCard({
+  cardErrors,
+  cardForm,
+  billingCycles,
+  onBillingCyclesChange,
+  onCardChange,
+  onPaymentMethodChange,
+  onSubmit,
+  paymentMethod,
+  plan,
+  submitting,
+}: {
+  cardErrors: CardFormErrors;
+  cardForm: CardFormState;
+  billingCycles: BillingCycles;
+  onBillingCyclesChange: (billingCycles: BillingCycles) => void;
+  onCardChange: (field: keyof CardFormState, value: string) => void;
+  onPaymentMethodChange: (method: PaymentMethodOption) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  paymentMethod: PaymentMethodOption;
+  plan: CommercialPlan;
+  submitting: boolean;
+}) {
+  return (
+    <Card className="rounded-[2rem] border-zinc-200 bg-white shadow-[0_35px_90px_-45px_rgba(15,23,42,0.24)]">
+      <CardContent className="p-5 sm:p-7 lg:p-9">
+        <div className="mb-8">
+          <div className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-amber-900">
+            Checkout pendente
+          </div>
+          <h2 className="mt-5 text-3xl font-black tracking-[-0.04em]">
+            Retome o pagamento da sua assinatura.
+          </h2>
+          <p className="mt-3 text-sm leading-7 text-zinc-600">
+            Usaremos a assinatura pendente existente. Seu acesso só será ativado
+            após a confirmação financeira.
+          </p>
+        </div>
+
+        <form className="space-y-5" onSubmit={onSubmit}>
+          <PaymentMethodSelector
+            paymentMethod={paymentMethod}
+            onChange={onPaymentMethodChange}
+          />
+          {paymentMethod === "CREDIT_CARD" && (
+            <>
+              <RecurringDurationSelector
+                billingCycles={billingCycles}
+                onChange={onBillingCyclesChange}
+                plan={plan}
+              />
+              <CreditCardForm
+                errors={cardErrors}
+                form={cardForm}
+                onChange={onCardChange}
+              />
+            </>
+          )}
+          <Button
+            type="submit"
+            disabled={submitting}
+            className="h-14 w-full rounded-2xl bg-emerald-900 text-base font-bold text-white hover:bg-emerald-950"
+          >
+            {submitting ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <>
+                {paymentMethod === "PIX" ? "Gerar PIX" : "Assinar com cartão"}
                 <ArrowRight className="h-5 w-5" />
               </>
             )}
@@ -777,9 +1071,41 @@ function PaymentMethodSelector({
             Cartão de Crédito
           </div>
           <p className="mt-2 text-xs leading-5 text-zinc-600">
-            Pagamento à vista com criptografia PagBank.
+            Cobrança mensal recorrente com criptografia PagBank.
           </p>
         </button>
+      </div>
+    </div>
+  );
+}
+
+function RecurringDurationSelector({
+  billingCycles,
+  onChange,
+  plan,
+}: {
+  billingCycles: BillingCycles;
+  onChange: (billingCycles: BillingCycles) => void;
+  plan: CommercialPlan;
+}) {
+  return (
+    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+      <Label>Período da assinatura</Label>
+      <p className="mt-2 text-sm font-semibold text-zinc-950">
+        {recurringPlanText(plan, billingCycles)}
+      </p>
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {BILLING_CYCLE_OPTIONS.map((cycles) => (
+          <Button
+            key={cycles}
+            type="button"
+            variant={cycles === billingCycles ? "default" : "outline"}
+            className="rounded-xl"
+            onClick={() => onChange(cycles)}
+          >
+            {cycles} {cycles === 1 ? "mês" : "meses"}
+          </Button>
+        ))}
       </div>
     </div>
   );
@@ -879,7 +1205,9 @@ function FormField({
         value={value}
         className="mt-2 h-12 rounded-2xl border-zinc-200 bg-white"
       />
-      {error && <p className="mt-2 text-xs font-semibold text-red-600">{error}</p>}
+      {error && (
+        <p className="mt-2 text-xs font-semibold text-red-600">{error}</p>
+      )}
     </div>
   );
 }
@@ -967,7 +1295,9 @@ function PixCard({
                   : "A tela será atualizada automaticamente."}
               </div>
             </div>
-            {polling && <RefreshCw className="h-5 w-5 animate-spin text-emerald-900" />}
+            {polling && (
+              <RefreshCw className="h-5 w-5 animate-spin text-emerald-900" />
+            )}
           </div>
           <Progress value={65} className="mt-4 h-2 bg-emerald-100" />
         </div>
@@ -978,12 +1308,12 @@ function PixCard({
 
 function CreditCardStatusCard({
   loading,
-  payment,
+  subscription,
   polling,
   statusLabel,
 }: {
   loading: boolean;
-  payment: CreditCardPaymentResponse | CheckoutStatusPayment | null;
+  subscription: RecurringCreditCardSubscriptionResponse | null;
   polling: boolean;
   statusLabel: string;
 }) {
@@ -1017,8 +1347,8 @@ function CreditCardStatusCard({
                   : "Cartão enviado com segurança"}
               </div>
               <div className="mt-1 text-xs text-zinc-600">
-                {payment?.providerPaymentId
-                  ? `Referência PagBank: ${payment.providerPaymentId}`
+                {subscription?.externalSubscriptionId
+                  ? `Referência PagBank: ${subscription.externalSubscriptionId}`
                   : "A tela será atualizada automaticamente."}
               </div>
             </div>
@@ -1070,11 +1400,7 @@ function SavedCheckoutCard({
         >
           Continuar pagamento
         </Button>
-        <Button
-          className="rounded-2xl"
-          variant="outline"
-          onClick={onStartNew}
-        >
+        <Button className="rounded-2xl" variant="outline" onClick={onStartNew}>
           Iniciar novo checkout
         </Button>
       </div>
@@ -1121,7 +1447,11 @@ function ExpiredCard({
         onClick={onRetry}
         disabled={retrying}
       >
-        {retrying ? <Loader2 className="h-4 w-4 animate-spin" /> : "Gerar novo PIX"}
+        {retrying ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          "Gerar novo PIX"
+        )}
       </Button>
       <Button
         className="ml-0 mt-3 rounded-2xl sm:ml-3 sm:mt-6"
@@ -1171,13 +1501,13 @@ function SessionExpiredCard({ onRestart }: { onRestart: () => void }) {
         pagamento.
       </p>
       <p className="mt-3">
-        Refaça o cadastro para gerar uma nova tentativa de checkout.
+        Entre novamente para consultar e retomar o checkout pendente.
       </p>
       <Button
         className="mt-6 rounded-2xl bg-emerald-900 text-white hover:bg-emerald-950"
         onClick={onRestart}
       >
-        Voltar ao cadastro
+        Entrar novamente
       </Button>
     </StatusCard>
   );
@@ -1208,9 +1538,7 @@ function StatusCard({
         >
           {icon}
         </div>
-        <h2 className="mt-6 text-4xl font-black tracking-[-0.05em]">
-          {title}
-        </h2>
+        <h2 className="mt-6 text-4xl font-black tracking-[-0.05em]">{title}</h2>
         <div className="mt-5 text-base leading-8 text-zinc-600">{children}</div>
         <div className="mt-8 flex items-center gap-2 text-sm font-semibold text-zinc-500">
           <Lock className="h-4 w-4 text-emerald-800" />
@@ -1239,6 +1567,20 @@ function validateForm(form: RegisterFormState): RegisterFormErrors {
   if (digitsOnly(form.cpf).length !== 11) {
     errors.cpf = "Informe um CPF com 11 dígitos.";
   }
+
+  if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) {
+    errors.email = "Informe um email válido.";
+  }
+
+  if (form.password.length < 8) {
+    errors.password = "A senha precisa ter pelo menos 8 caracteres.";
+  }
+
+  return errors;
+}
+
+function validateLoginForm(form: LoginCheckoutPayload): LoginFormErrors {
+  const errors: LoginFormErrors = {};
 
   if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) {
     errors.email = "Informe um email válido.";
@@ -1311,6 +1653,14 @@ function readSavedCheckoutSession(): SavedCheckoutSession | null {
   };
 }
 
+function recurringPlanText(
+  plan: CommercialPlan,
+  billingCycles: BillingCycles,
+): string {
+  const months = billingCycles === 1 ? "mês" : "meses";
+  return `${formatPlanPrice(plan.price)}/mês por ${billingCycles} ${months}`;
+}
+
 function createIdempotencyKey(prefix: "pix" | "card" = "pix"): string {
   if (typeof window.crypto.randomUUID === "function") {
     return `${prefix}-${window.crypto.randomUUID()}`;
@@ -1341,7 +1691,8 @@ function calculateCpfDigit(base: string): number {
   const total = base
     .split("")
     .reduce(
-      (sum, digit, index) => sum + Number.parseInt(digit, 10) * (factorStart - index),
+      (sum, digit, index) =>
+        sum + Number.parseInt(digit, 10) * (factorStart - index),
       0,
     );
   const remainder = total % 11;
@@ -1385,7 +1736,9 @@ function parseExpiry(value: string): { month: string; year: string } | null {
   const month = Number.parseInt(match[1], 10);
   const rawYear = match[2];
   const year =
-    rawYear.length === 2 ? 2000 + Number.parseInt(rawYear, 10) : Number.parseInt(rawYear, 10);
+    rawYear.length === 2
+      ? 2000 + Number.parseInt(rawYear, 10)
+      : Number.parseInt(rawYear, 10);
 
   if (month < 1 || month > 12) {
     return null;
