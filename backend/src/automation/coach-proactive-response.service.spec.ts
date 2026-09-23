@@ -20,6 +20,7 @@ describe('CoachProactiveResponseService', () => {
     ['WORKOUT_CHECK', 'não consegui treinar hoje', 'SKIPPED'],
     ['WORKOUT_CHECK', 'treinei mas senti dor no joelho', 'ISSUE_REPORTED'],
     ['GOOD_MORNING', 'estou bem', 'COMPLETED'],
+    ['GOOD_MORNING', 'Sim, já tomei café da manhã.', 'COMPLETED'],
     ['GOOD_MORNING', 'acordei cansada hoje', 'PARTIAL'],
     ['DAILY_CHECK_IN', 'hoje está corrido', 'PARTIAL'],
     ['MEAL_PLAN_CHECK', 'sim, segui o plano', 'COMPLETED'],

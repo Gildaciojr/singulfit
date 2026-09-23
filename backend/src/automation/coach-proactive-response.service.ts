@@ -193,9 +193,13 @@ export class CoachProactiveResponseService {
           ? { hydrationEvidence: input.hydrationEvidence }
           : {};
       await transaction.$queryRaw`
-        SELECT pg_advisory_xact_lock(
-          hashtext(${`coach-proactive-response:${input.interventionId}`})
+        WITH advisory_lock AS (
+          SELECT pg_advisory_xact_lock(
+            hashtext(${`coach-proactive-response:${input.interventionId}`})
+          )
         )
+        SELECT true AS "locked"
+        FROM advisory_lock
       `;
       const current = await transaction.scheduledMessage.findUnique({
         where: { id: input.interventionId },
