@@ -177,6 +177,14 @@ export class ProfileQuestionSpecificationService {
     return this.forField(field, reason);
   }
 
+  fromSelectedField(
+    field: ProfileAcquisitionField,
+    reasonCode: ProfileQuestionReason = 'MISSING_CONTEXTUAL_FIELD',
+  ): ProfileQuestionSpecification | null {
+    const profileField = FIELD_BRIDGE[field];
+    return profileField ? this.forField(profileField, reasonCode) : null;
+  }
+
   forField(
     field: CoachProfileAcquisitionField,
     reasonCode: ProfileQuestionReason,

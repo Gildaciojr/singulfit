@@ -194,6 +194,7 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
     };
     const questionSpecifications = {
       forField: jest.fn().mockReturnValue(specification),
+      fromSelectedField: jest.fn().mockReturnValue(specification),
     };
     const questionRealizer = {
       realize: jest.fn().mockReturnValue({
@@ -309,6 +310,49 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
     });
     expect(test.prisma.outboundMessage.findUnique).toHaveBeenCalledTimes(1);
     expect(test.eventBus.publish).not.toHaveBeenCalled();
+  });
+
+  it('uses a preselected field without re-evaluating profile acquisition', async () => {
+    const test = subject();
+    const currentRunningDistance = Object.freeze({
+      ...specification,
+      field: CoachProfileAcquisitionField.CURRENT_RUNNING_DISTANCE,
+      templateCode: 'PROFILE_QUESTION_CURRENT_RUNNING_DISTANCE_V1',
+    });
+    test.prisma.message.findFirst.mockResolvedValue({
+      id: 'workout-request-id',
+      conversationId: 'conversation-id',
+    });
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(null);
+    test.questionSpecifications.fromSelectedField.mockReturnValue(
+      currentRunningDistance,
+    );
+
+    await expect(
+      test.service.requestWorkoutClarification({
+        userId: 'common-user-id',
+        sourceMessageId: 'workout-request-id',
+        referenceDate: sentAt,
+        preselectedQuestion: {
+          selectedProfileField: 'CURRENT_RUNNING_DISTANCE',
+          logicalTurn: 9,
+        },
+      }),
+    ).resolves.toMatchObject({
+      questionCreated: true,
+      field: CoachProfileAcquisitionField.CURRENT_RUNNING_DISTANCE,
+    });
+    expect(test.questionSpecifications.fromSelectedField).toHaveBeenCalledWith(
+      'CURRENT_RUNNING_DISTANCE',
+    );
+    expect(test.runtime.evaluate).not.toHaveBeenCalled();
+    expect(test.cycles.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        specification: currentRunningDistance,
+        logicalTurn: 9,
+      }),
+    );
   });
 
   it('runs the productive Workout V2 clarification lifecycle for a non-ADMIN user with the canonical context', async () => {

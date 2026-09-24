@@ -224,6 +224,83 @@ describe('ConversationRuntimeIntegrationService', () => {
     });
   });
 
+  it('preserves the typed profile-acquisition decision in the handoff', async () => {
+    const subject = createSubject({ mode: 'INTERNAL' });
+    const decision = {
+      plannerSummary: { currentLogicalTurn: 8 },
+      executionRoute: {
+        kind: 'PROFILE_ACQUISITION',
+        targetPlan: 'WORKOUT',
+        selectedProfileField: 'CURRENT_RUNNING_DISTANCE',
+        goalDecision: {},
+        reasonCodes: [],
+        canExecute: true,
+        missingPreconditions: [],
+      },
+    } as unknown as ConversationRoutingDecision;
+    subject.runtime.evaluate.mockResolvedValue({
+      summary: {} as ConversationRuntimeEvaluation['summary'],
+      decision,
+    } as ConversationRuntimeEvaluation);
+    subject.bridge.execute.mockResolvedValue({
+      status: 'FALLBACK_REQUIRED',
+      content: null,
+      routeKind: 'PROFILE_ACQUISITION',
+      reason: 'PROFILE_ACQUISITION_NOT_CONNECTED',
+    });
+
+    await expect(subject.service.decide(decisionRequest)).resolves.toEqual({
+      source: 'PLANNING_HANDOFF',
+      reason: 'PROFILE_ACQUISITION_REQUIRES_SINGLE_EXECUTION',
+      profileAcquisition: {
+        executionRoute: expect.objectContaining({
+          kind: 'PROFILE_ACQUISITION',
+          targetPlan: 'WORKOUT',
+          selectedProfileField: 'CURRENT_RUNNING_DISTANCE',
+        }),
+        logicalTurn: 8,
+      },
+    });
+  });
+
+  it('fails closed when a profile handoff has no selected field', async () => {
+    const subject = createSubject({ mode: 'INTERNAL' });
+    const decision = {
+      plannerSummary: { currentLogicalTurn: 8 },
+      executionRoute: { kind: 'PROFILE_ACQUISITION' },
+    } as unknown as ConversationRoutingDecision;
+    subject.runtime.evaluate.mockResolvedValue({
+      summary: {} as ConversationRuntimeEvaluation['summary'],
+      decision,
+    } as ConversationRuntimeEvaluation);
+    subject.bridge.execute.mockResolvedValue({
+      status: 'FALLBACK_REQUIRED',
+      content: null,
+      routeKind: 'PROFILE_ACQUISITION',
+      reason: 'PROFILE_ACQUISITION_NOT_CONNECTED',
+    });
+
+    await expect(subject.service.decide(decisionRequest)).resolves.toMatchObject({
+      source: 'SAFE_RESPONSE',
+      reason: 'BRIDGE_FAILURE',
+    });
+  });
+
+  it('fails closed when a profile-acquisition route has no recognized handoff reason', async () => {
+    const subject = createSubject({ mode: 'INTERNAL' });
+    subject.bridge.execute.mockResolvedValue({
+      status: 'FALLBACK_REQUIRED',
+      content: null,
+      routeKind: 'PROFILE_ACQUISITION',
+      reason: 'RESPONSE_PIPELINE_FAILED',
+    });
+
+    await expect(subject.service.decide(decisionRequest)).resolves.toMatchObject({
+      source: 'SAFE_RESPONSE',
+      reason: 'BRIDGE_FAILURE',
+    });
+  });
+
   it.each([
     'NUTRITION_PLAN_GENERATION',
     'WORKOUT_PLAN_GENERATION',

@@ -139,6 +139,7 @@ describe('CoachCommandService', () => {
     runtimeFailure?: Error;
     runtimeLegacy?: boolean;
     runtimeHandoff?: boolean;
+    runtimeProfileAcquisitionHandoff?: boolean;
     planningConversationContent?: string;
     workoutClarification?: boolean;
     workoutSelection?: boolean;
@@ -282,7 +283,20 @@ describe('CoachCommandService', () => {
     const conversationRuntime = {
       decide: options?.runtimeFailure
         ? jest.fn().mockRejectedValue(options.runtimeFailure)
-        : options?.runtimeHandoff
+        : options?.runtimeProfileAcquisitionHandoff
+          ? jest.fn().mockResolvedValue({
+              source: 'PLANNING_HANDOFF',
+              reason: 'PROFILE_ACQUISITION_REQUIRES_SINGLE_EXECUTION',
+              profileAcquisition: {
+                executionRoute: {
+                  kind: 'PROFILE_ACQUISITION',
+                  targetPlan: 'WORKOUT',
+                  selectedProfileField: 'CURRENT_RUNNING_DISTANCE',
+                },
+                logicalTurn: 7,
+              },
+            })
+          : options?.runtimeHandoff
           ? jest.fn().mockResolvedValue({
               source: 'PLANNING_HANDOFF',
               reason: 'SIDE_EFFECT_ROUTE_REQUIRES_SINGLE_EXECUTION',
@@ -362,7 +376,8 @@ describe('CoachCommandService', () => {
       options?.runtimeContent ||
         options?.runtimeFailure ||
         options?.runtimeLegacy ||
-        options?.runtimeHandoff
+        options?.runtimeHandoff ||
+        options?.runtimeProfileAcquisitionHandoff
         ? (conversationRuntime as unknown as ConversationRuntimeIntegrationService)
         : undefined,
       options?.planningConversationContent
@@ -651,6 +666,57 @@ describe('CoachCommandService', () => {
     expect(subject.prisma.coachMessage.create).not.toHaveBeenCalled();
     expect(subject.eventBus.publish).not.toHaveBeenCalled();
     expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+  });
+
+  it('preserves the runtime-selected profile field without re-planning', async () => {
+    const subject = createSubject({
+      content: 'monte um treino de corrida para mim',
+      runtimeProfileAcquisitionHandoff: true,
+      workoutClarification: true,
+    });
+    const replanThatWouldDiverge = jest
+      .spyOn(subject.planningExecution, 'executeStructured')
+      .mockResolvedValueOnce({
+        content: '',
+        responseRequired: true,
+        selectedSource: 'WORKOUT_V2',
+        decision: {
+          goal: 'ASK_PROFILE_INFORMATION',
+          targetPlan: 'WORKOUT',
+          selectedProfileField: 'TARGET_DISTANCE',
+        },
+        profileAcquisitionContext: {
+          modality: { value: 'RUNNING', evidence: 'EXPLICIT' },
+        },
+        dispatch: {
+          content: '',
+          executor: 'WORKOUT_V2',
+          generationCompleted: false,
+          fallbackApplied: false,
+          workoutDisposition: 'CLARIFICATION',
+        },
+      } as never);
+
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+
+    expect(replanThatWouldDiverge).not.toHaveBeenCalled();
+    expect(
+      subject.profileAcquisitionRollout.requestWorkoutClarification,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-id',
+        sourceMessageId: 'message-id',
+        preselectedQuestion: {
+          selectedProfileField: 'CURRENT_RUNNING_DISTANCE',
+          logicalTurn: 7,
+        },
+      }),
+    );
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.prisma.coachMessage.create).not.toHaveBeenCalled();
   });
 
   it('sends productive Nutrition acquisition for a public user without legacy generation', async () => {

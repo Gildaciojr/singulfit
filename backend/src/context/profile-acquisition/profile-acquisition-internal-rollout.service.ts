@@ -15,6 +15,7 @@ import { INTERNAL_EVENT } from '../../event-bus/event-bus.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   PROFILE_ACQUISITION_INTENT,
+  type ProfileAcquisitionField,
   type ProfileAcquisitionConversationContext,
   type ProfileAcquisitionIntent,
 } from '../coach-adaptive-profile-collector.contract';
@@ -52,6 +53,16 @@ type ProductivePlanningIntent = 'DIET' | 'WORKOUT' | 'BOTH';
 
 type ActiveCycle = CoachProfileAcquisitionCycle | null;
 
+type PreselectedProfileQuestion = Readonly<{
+  readonly selectedProfileField: ProfileAcquisitionField;
+  readonly logicalTurn: number;
+}>;
+
+type PreparedProfileQuestion = Readonly<{
+  readonly specification: ProfileQuestionSpecification;
+  readonly logicalTurn: number;
+}>;
+
 @Injectable()
 export class ProfileAcquisitionInternalRolloutService {
   constructor(
@@ -74,6 +85,7 @@ export class ProfileAcquisitionInternalRolloutService {
     readonly referenceDate: Date;
     readonly originalRequestMessageId?: string;
     readonly conversationContext?: ProfileAcquisitionConversationContext;
+    readonly preselectedQuestion?: PreselectedProfileQuestion;
   }): Promise<ProfileAcquisitionRolloutResult> {
     return this.requestProductiveClarification({
       ...input,
@@ -88,6 +100,7 @@ export class ProfileAcquisitionInternalRolloutService {
     readonly originalRequestMessageId?: string;
     readonly conversationContext?: ProfileAcquisitionConversationContext;
     readonly intent: ProductivePlanningIntent;
+    readonly preselectedQuestion?: PreselectedProfileQuestion;
   }): Promise<ProfileAcquisitionRolloutResult> {
     const source = await this.prisma.message.findFirst({
       where: {
@@ -106,6 +119,17 @@ export class ProfileAcquisitionInternalRolloutService {
         this.config.get().mode,
       );
     }
+    const preparedPreselectedQuestion = input.preselectedQuestion
+      ? this.preparePreselectedQuestion(input.preselectedQuestion)
+      : undefined;
+    if (input.preselectedQuestion && !preparedPreselectedQuestion) {
+      return this.rolloutResult(
+        true,
+        false,
+        'ROLLOUT_FAILURE',
+        this.config.get().mode,
+      );
+    }
     return this.dispatchQuestion(
       {
         userId: input.userId,
@@ -121,6 +145,7 @@ export class ProfileAcquisitionInternalRolloutService {
           : PROFILE_ACQUISITION_INTENT.COMBINED_PLAN_REQUEST,
       `${this.productiveOrigin(input.intent)}:${input.originalRequestMessageId ?? input.sourceMessageId}`,
       input.conversationContext,
+      preparedPreselectedQuestion ?? undefined,
     );
   }
 
@@ -507,6 +532,7 @@ export class ProfileAcquisitionInternalRolloutService {
     conversationContext: ProfileAcquisitionConversationContext = Object.freeze(
       {},
     ),
+    preselectedQuestion?: PreparedProfileQuestion,
   ): Promise<ProfileAcquisitionRolloutResult> {
     const active = await this.findActiveCycle(outbound.userId);
     if (active) {
@@ -549,21 +575,29 @@ export class ProfileAcquisitionInternalRolloutService {
       );
     }
 
-    const runtime = await this.runtime.evaluate(
-      outbound.userId,
-      outbound.sentAt,
-      intent,
-      conversationContext,
-    );
-    if (!runtime.evaluation.canAsk || !runtime.specification) {
-      const reason = this.runtimeReason(runtime.evaluation.reason);
-      await this.audit(outbound.userId, null, {
-        event: 'QUESTION_IGNORED',
-        reason,
-      });
-      return this.rolloutResult(true, false, reason, mode);
+    let specification: ProfileQuestionSpecification;
+    let logicalTurn: number;
+    if (preselectedQuestion) {
+      specification = preselectedQuestion.specification;
+      logicalTurn = preselectedQuestion.logicalTurn;
+    } else {
+      const runtime = await this.runtime.evaluate(
+        outbound.userId,
+        outbound.sentAt,
+        intent,
+        conversationContext,
+      );
+      if (!runtime.evaluation.canAsk || !runtime.specification) {
+        const reason = this.runtimeReason(runtime.evaluation.reason);
+        await this.audit(outbound.userId, null, {
+          event: 'QUESTION_IGNORED',
+          reason,
+        });
+        return this.rolloutResult(true, false, reason, mode);
+      }
+      specification = runtime.specification;
+      logicalTurn = runtime.evaluation.logicalTurn;
     }
-    const specification = runtime.specification;
     const question = this.questionRealizer.realize(specification);
     const operationKey = this.operationKey([
       origin,
@@ -579,7 +613,7 @@ export class ProfileAcquisitionInternalRolloutService {
     const prepared = await this.cycleService.prepare({
       userId: outbound.userId,
       specification,
-      logicalTurn: runtime.evaluation.logicalTurn,
+      logicalTurn,
       origin,
       operationKey,
       referenceDate: outbound.sentAt.toISOString(),
@@ -630,6 +664,20 @@ export class ProfileAcquisitionInternalRolloutService {
       prepared.cycleId,
       specification.field,
     );
+  }
+
+  private preparePreselectedQuestion(
+    input: PreselectedProfileQuestion,
+  ): PreparedProfileQuestion | null {
+    if (!Number.isInteger(input.logicalTurn) || input.logicalTurn < 0) {
+      return null;
+    }
+    const specification = this.questionSpecifications.fromSelectedField(
+      input.selectedProfileField,
+    );
+    return specification
+      ? Object.freeze({ specification, logicalTurn: input.logicalTurn })
+      : null;
   }
 
   private async markPromptSent(

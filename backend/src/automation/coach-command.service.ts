@@ -10,7 +10,10 @@ import { INTERNAL_EVENT } from '../event-bus/event-bus.constants';
 import { PrismaService } from '../prisma/prisma.service';
 import { AUTOMATION_RULE_CODES } from './automation.constants';
 import { ConversationGoalShadowPipelineService } from './conversation-goal-shadow-pipeline.service';
-import { ConversationRuntimeIntegrationService } from '../conversation/runtime/conversation-runtime-integration.service';
+import {
+  ConversationRuntimeIntegrationService,
+  type ConversationRuntimePreExecutionDecision,
+} from '../conversation/runtime/conversation-runtime-integration.service';
 import { CoachPlanningConversationResponseService } from './coach-planning-conversation-response.service';
 import { isNutritionPlanningRealizerEligible } from './nutrition-planning-realizer-eligibility.policy';
 import { PendingConversationActionService } from './pending-conversation-action.service';
@@ -265,22 +268,32 @@ export class CoachCommandService {
           : runtimeDecision.source === 'SAFE_RESPONSE'
             ? { content: runtimeDecision.content, responseRequired: true }
             : runtimeDecision.source === 'PLANNING_HANDOFF'
-              ? await this.executePlanning({
-                  userId: input.userId,
-                  intent,
-                  conversationId: message.conversation.id,
-                  messageId: message.id,
-                  text: commandText,
-                  referenceDate: message.timestamp,
-                  profileId: message.conversation.user.fitnessProfile?.id,
-                  pendingGoalConfirmation:
-                    pending.status === 'ACTIONABLE'
-                      ? pending.context
-                      : undefined,
-                  suppressCurrentGoalResolution: pending.status === 'EXPIRED',
-                  originalRequestMessageId:
-                    input.planningContinuation?.originalRequestMessageId,
-                })
+              ? runtimeDecision.reason ===
+                'PROFILE_ACQUISITION_REQUIRES_SINGLE_EXECUTION'
+                ? await this.executeProfileAcquisitionHandoff({
+                    userId: input.userId,
+                    messageId: message.id,
+                    referenceDate: message.timestamp,
+                    originalRequestMessageId:
+                      input.planningContinuation?.originalRequestMessageId,
+                    profileAcquisition: runtimeDecision.profileAcquisition,
+                  })
+                : await this.executePlanning({
+                    userId: input.userId,
+                    intent,
+                    conversationId: message.conversation.id,
+                    messageId: message.id,
+                    text: commandText,
+                    referenceDate: message.timestamp,
+                    profileId: message.conversation.user.fitnessProfile?.id,
+                    pendingGoalConfirmation:
+                      pending.status === 'ACTIONABLE'
+                        ? pending.context
+                        : undefined,
+                    suppressCurrentGoalResolution: pending.status === 'EXPIRED',
+                    originalRequestMessageId:
+                      input.planningContinuation?.originalRequestMessageId,
+                  })
               : await this.executePlanning({
                   userId: input.userId,
                   intent,
@@ -503,6 +516,63 @@ export class CoachCommandService {
       pendingExecutionClaimToken: execution.pendingExecutionClaimToken,
       workoutDisposition: execution.dispatch?.workoutDisposition,
     });
+  }
+
+  private async executeProfileAcquisitionHandoff(input: {
+    readonly userId: string;
+    readonly messageId: string;
+    readonly referenceDate: Date;
+    readonly originalRequestMessageId?: string;
+    readonly profileAcquisition: Extract<
+      ConversationRuntimePreExecutionDecision,
+      {
+        readonly source: 'PLANNING_HANDOFF';
+        readonly reason: 'PROFILE_ACQUISITION_REQUIRES_SINGLE_EXECUTION';
+      }
+    >['profileAcquisition'];
+  }): Promise<{
+    readonly content: string;
+    readonly responseRequired: boolean;
+    readonly pendingExecutionClaimToken?: string;
+    readonly workoutDisposition?: 'PLAN' | 'CLARIFICATION' | 'BLOCKED';
+  }> {
+    const targetPlan = input.profileAcquisition.executionRoute.targetPlan;
+    if (!this.profileAcquisitionRollout) {
+      return this.blockedProfileClarification(targetPlan);
+    }
+    const preselectedQuestion = {
+      selectedProfileField:
+        input.profileAcquisition.executionRoute.selectedProfileField,
+      logicalTurn: input.profileAcquisition.logicalTurn,
+    };
+    try {
+      const clarification =
+        targetPlan === 'WORKOUT'
+          ? await this.profileAcquisitionRollout.requestWorkoutClarification({
+              userId: input.userId,
+              sourceMessageId: input.messageId,
+              referenceDate: input.referenceDate,
+              originalRequestMessageId: input.originalRequestMessageId,
+              preselectedQuestion,
+            })
+          : await this.profileAcquisitionRollout.requestProductiveClarification({
+              userId: input.userId,
+              sourceMessageId: input.messageId,
+              referenceDate: input.referenceDate,
+              originalRequestMessageId: input.originalRequestMessageId,
+              intent: targetPlan,
+              preselectedQuestion,
+            });
+      if (
+        clarification.questionCreated ||
+        clarification.reason === 'QUESTION_ALREADY_ACTIVE'
+      ) {
+        return Object.freeze({ content: '', responseRequired: false });
+      }
+    } catch {
+      return this.blockedProfileClarification(targetPlan);
+    }
+    return this.blockedProfileClarification(targetPlan);
   }
 
   private blockedProfileClarification(

@@ -4,6 +4,10 @@ import type {
   ConversationOfficialSelection,
   ConversationRuntimeIntegrationInput,
 } from '../contracts/conversation-runtime.contract';
+import type {
+  ConversationExecutionRoute,
+  ConversationRoutingDecision,
+} from '../contracts/conversation-execution-route.contract';
 import { ConversationExecutionBridgeService } from './conversation-execution-bridge.service';
 import { ConversationOfficialSelectionService } from './conversation-official-selection.service';
 import { ConversationRuntimeAuditService } from './conversation-runtime-audit.service';
@@ -15,6 +19,14 @@ type ConversationRuntimeDecisionInput = Omit<
   ConversationRuntimeIntegrationInput,
   'legacyContent'
 >;
+
+type ConversationProfileAcquisitionHandoff = Readonly<{
+  readonly executionRoute: Extract<
+    ConversationExecutionRoute,
+    { readonly kind: 'PROFILE_ACQUISITION' }
+  >;
+  readonly logicalTurn: ConversationRoutingDecision['plannerSummary']['currentLogicalTurn'];
+}>;
 
 export type ConversationRuntimePreExecutionDecision =
   | Readonly<{
@@ -43,6 +55,11 @@ export type ConversationRuntimePreExecutionDecision =
   | Readonly<{
       source: 'PLANNING_HANDOFF';
       reason: 'SIDE_EFFECT_ROUTE_REQUIRES_SINGLE_EXECUTION';
+    }>
+  | Readonly<{
+      source: 'PLANNING_HANDOFF';
+      reason: 'PROFILE_ACQUISITION_REQUIRES_SINGLE_EXECUTION';
+      profileAcquisition: ConversationProfileAcquisitionHandoff;
     }>;
 
 @Injectable()
@@ -156,6 +173,19 @@ export class ConversationRuntimeIntegrationService {
       return this.legacyDecision(selection.reason);
     }
     if (this.isIntentionalPlanningHandoff(bridge)) {
+      if (bridge.routeKind === 'PROFILE_ACQUISITION') {
+        const profileAcquisition = this.profileAcquisitionHandoff(
+          evaluation.decision,
+        );
+        if (!profileAcquisition) {
+          return this.safeFailure('BRIDGE_FAILURE');
+        }
+        return Object.freeze({
+          source: 'PLANNING_HANDOFF' as const,
+          reason: 'PROFILE_ACQUISITION_REQUIRES_SINGLE_EXECUTION' as const,
+          profileAcquisition,
+        });
+      }
       return Object.freeze({
         source: 'PLANNING_HANDOFF' as const,
         reason: 'SIDE_EFFECT_ROUTE_REQUIRES_SINGLE_EXECUTION' as const,
@@ -196,6 +226,13 @@ export class ConversationRuntimeIntegrationService {
   private isIntentionalPlanningHandoff(
     bridge: ConversationBridgeResult,
   ): boolean {
+    if (
+      bridge.status === 'FALLBACK_REQUIRED' &&
+      bridge.routeKind === 'PROFILE_ACQUISITION' &&
+      bridge.reason === 'PROFILE_ACQUISITION_NOT_CONNECTED'
+    ) {
+      return true;
+    }
     return (
       bridge.status === 'FALLBACK_REQUIRED' &&
       bridge.reason === 'SIDE_EFFECT_ROUTE_REQUIRES_LEGACY_SINGLE_EXECUTION' &&
@@ -208,6 +245,22 @@ export class ConversationRuntimeIntegrationService {
         'WORKOUT_PLAN_UPDATE',
       ].includes(bridge.routeKind)
     );
+  }
+
+  private profileAcquisitionHandoff(
+    decision: ConversationRoutingDecision | null,
+  ): ConversationProfileAcquisitionHandoff | null {
+    if (decision?.executionRoute.kind !== 'PROFILE_ACQUISITION') {
+      return null;
+    }
+    const { executionRoute } = decision;
+    if (!executionRoute.selectedProfileField) {
+      return null;
+    }
+    return Object.freeze({
+      executionRoute,
+      logicalTurn: decision.plannerSummary.currentLogicalTurn,
+    });
   }
 
   private withTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
