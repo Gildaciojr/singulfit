@@ -2,6 +2,10 @@ import type {
   CoachProfileKnowledgeStatus,
   CoachProfileSnapshot,
 } from './coach-profile-snapshot.contract';
+import {
+  WORKOUT_MODALITY,
+  type WorkoutModality,
+} from '../workout/v2/workout-planning-artifact.contract';
 
 export const PROFILE_ACQUISITION_INTENT = {
   GENERAL_CONVERSATION: 'GENERAL_CONVERSATION',
@@ -26,6 +30,25 @@ export const PROFILE_ACQUISITION_MODALITY = {
 
 export type ProfileAcquisitionModality =
   (typeof PROFILE_ACQUISITION_MODALITY)[keyof typeof PROFILE_ACQUISITION_MODALITY];
+
+export function profileAcquisitionModalityFromWorkoutModality(
+  modality: WorkoutModality,
+): ProfileAcquisitionModality {
+  switch (modality) {
+    case WORKOUT_MODALITY.GYM_STRENGTH:
+      return PROFILE_ACQUISITION_MODALITY.GYM;
+    case WORKOUT_MODALITY.HOME_WORKOUT:
+      return PROFILE_ACQUISITION_MODALITY.HOME;
+    case WORKOUT_MODALITY.RUNNING:
+      return PROFILE_ACQUISITION_MODALITY.RUNNING;
+    case WORKOUT_MODALITY.CROSSFIT:
+      return PROFILE_ACQUISITION_MODALITY.CROSSFIT;
+    case WORKOUT_MODALITY.CYCLING:
+      return PROFILE_ACQUISITION_MODALITY.CYCLING;
+    default:
+      return PROFILE_ACQUISITION_MODALITY.OTHER;
+  }
+}
 
 export type ProfileAcquisitionContextEvidence = 'EXPLICIT' | 'INFERRED';
 export type ProfileAcquisitionModalityEvidence =

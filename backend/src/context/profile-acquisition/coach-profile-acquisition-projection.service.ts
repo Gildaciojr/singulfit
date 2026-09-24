@@ -43,9 +43,10 @@ export class CoachProfileAcquisitionProjectionService {
     > = {};
     for (const [field, values] of grouped) {
       const selected =
+        values.find((value) => value.isActive) ??
         values.find(
           (value) => value.status === CoachProfileValueStatus.CONFLICTED,
-        ) ?? values.find((value) => value.isActive);
+        );
       if (selected) projection[field] = this.datum(selected);
     }
     return Object.freeze(projection);

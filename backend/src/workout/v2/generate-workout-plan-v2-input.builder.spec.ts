@@ -152,6 +152,63 @@ describe('GenerateWorkoutPlanV2InputBuilder', () => {
   });
 
   it.each([
+    ['GYM_STRENGTH', 'Quero que você monte um treino de corrida para mim.', 'RUNNING'],
+    ['RUNNING', 'Quero treino em casa', 'HOME_WORKOUT'],
+    ['GYM_STRENGTH', 'Quero um treino de CrossFit', 'CROSSFIT'],
+    ['UNKNOWN', 'Quero um treino de bike', 'CYCLING'],
+  ] as const)(
+    'uses the explicit current-turn modality over persisted %s for %s',
+    async (persisted, currentMessage, expected) => {
+      const result = await builder.build({
+        userId: 'user-id',
+        profileId: 'profile-id',
+        referenceDate: new Date('2026-08-19T12:00:00.000Z'),
+        currentMessage,
+        snapshot: {
+          ...snapshot,
+          training: {
+            ...snapshot.training,
+            preferredModality:
+              persisted === 'UNKNOWN'
+                ? { status: 'UNKNOWN', sources: [] }
+                : { status: 'KNOWN', value: persisted, sources: [] },
+          },
+        } as CoachProfileSnapshot,
+      });
+
+      expect(result.generationInput.recognizedContext.modality).toEqual({
+        status: 'CONFIRMED',
+        value: expected,
+      });
+    },
+  );
+
+  it('uses persisted modality only when the current turn has no explicit modality', async () => {
+    const result = await builder.build({
+      userId: 'user-id',
+      profileId: 'profile-id',
+      referenceDate: new Date('2026-08-19T12:00:00.000Z'),
+      currentMessage: 'Quero que você monte um treino para mim.',
+      snapshot: {
+        ...snapshot,
+        training: {
+          ...snapshot.training,
+          preferredModality: {
+            status: 'KNOWN',
+            value: 'GYM_STRENGTH',
+            sources: [],
+          },
+        },
+      } as CoachProfileSnapshot,
+    });
+
+    expect(result.generationInput.recognizedContext.modality).toEqual({
+      status: 'CONFIRMED',
+      value: 'GYM_STRENGTH',
+    });
+  });
+
+  it.each([
     'academia pequena',
     'academia do condomínio',
     'academia do hotel',

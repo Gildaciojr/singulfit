@@ -33,6 +33,18 @@ describe('Conversation Understanding deterministic pipeline components', () => {
   });
 
   it.each([
+    ['corrida', 'RUNNING'],
+    ['academia', 'GYM_STRENGTH'],
+    ['casa', 'HOME_WORKOUT'],
+    ['CrossFit', 'CROSSFIT'],
+    ['bike', 'CYCLING'],
+  ] as const)('recognizes %s as workout modality %s', (text, modality) => {
+    expect(
+      entities.recognize(normalize(`quero treino de ${text}`)).entities,
+    ).toContainEqual({ kind: 'WORKOUT_MODALITY', value: modality });
+  });
+
+  it.each([
     ['esse plano', 'DIET', true],
     ['essa dieta', 'DIET', false],
     ['aquele plano', 'DIET', true],

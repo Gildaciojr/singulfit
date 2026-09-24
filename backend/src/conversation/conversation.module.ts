@@ -51,6 +51,8 @@ import { ConversationUnderstandingValidator } from './validators/conversation-un
     ConversationGoalPreparationService,
     ConversationExecutionRouterService,
     ConversationRoutingDecisionService,
+    ConversationMessageNormalizerService,
+    ConversationEntityRecognizerService,
     ConversationUnderstandingEngineService,
     ConversationUnderstandingService,
     ConversationUnderstandingValidator,

@@ -660,6 +660,75 @@ describe('CoachAdaptiveProfileCollectorService', () => {
     });
   });
 
+  it.each([
+    [
+      'PHYSICAL_LIMITATIONS',
+      PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,
+      PROFILE_ACQUISITION_FIELD.PHYSICAL_LIMITATIONS,
+      (value: CoachProfileDatum<readonly string[]>) =>
+        completeProfile({ limitations: value }),
+    ],
+    [
+      'ALLERGIES',
+      PROFILE_ACQUISITION_INTENT.DIET_PLAN_REQUEST,
+      PROFILE_ACQUISITION_FIELD.ALLERGIES,
+      (value: CoachProfileDatum<readonly string[]>) =>
+        completeProfile({ allergies: value }),
+    ],
+    [
+      'FOOD_INTOLERANCES',
+      PROFILE_ACQUISITION_INTENT.DIET_PLAN_REQUEST,
+      PROFILE_ACQUISITION_FIELD.FOOD_INTOLERANCES,
+      (value: CoachProfileDatum<readonly string[]>) =>
+        completeProfile({ foodIntolerances: value }),
+    ],
+  ] as const)(
+    'does not reopen confirmed empty %s but keeps its unconfirmed value pending',
+    (_label, intent, field, profileWithValue) => {
+      const confirmed = decide(intent, profileWithValue(known(Object.freeze([]))));
+      const pending = decide(
+        intent,
+        profileWithValue(confirmation(Object.freeze([]))),
+      );
+
+      expect(candidate(confirmed, field)).toMatchObject({
+        state: PROFILE_ACQUISITION_STATE.ALREADY_KNOWN,
+        reason: 'KNOWN_VALUE',
+      });
+      expect(candidate(confirmed, field).state).not.toBe(
+        PROFILE_ACQUISITION_STATE.READY_TO_ASK,
+      );
+      expect(candidate(pending, field)).toMatchObject({
+        state: PROFILE_ACQUISITION_STATE.WAITING_CONFIRMATION,
+        reason: 'CONFLICT_REQUIRES_CONFIRMATION',
+      });
+    },
+  );
+
+  it.each([
+    [PROFILE_ACQUISITION_MODALITY.RUNNING],
+    [PROFILE_ACQUISITION_MODALITY.GYM],
+    [PROFILE_ACQUISITION_MODALITY.HOME],
+    [PROFILE_ACQUISITION_MODALITY.CROSSFIT],
+    [PROFILE_ACQUISITION_MODALITY.CYCLING],
+  ] as const)(
+    'uses explicit %s modality as an already-known workout acquisition value',
+    (modality) => {
+      const result = decide(
+        PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,
+        completeProfile({ modality: unknown() }),
+        { modality },
+      );
+
+      expect(
+        candidate(result, PROFILE_ACQUISITION_FIELD.TRAINING_MODALITY),
+      ).toMatchObject({
+        state: PROFILE_ACQUISITION_STATE.ALREADY_KNOWN,
+        reason: 'CONTEXT_EXPLICIT_VALUE',
+      });
+    },
+  );
+
   it('is deterministic and deeply freezes the complete decision graph', () => {
     const current = snapshot({ goal: known(FitnessGoal.WEIGHT_LOSS) });
     const first = decide(PROFILE_ACQUISITION_INTENT.DIET_PLAN_REQUEST, current);

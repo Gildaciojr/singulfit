@@ -44,15 +44,17 @@ describe('Confirmation continuity through the inbound handler and real acquisiti
   function subject(
     text = 'Pode. Eu não tenho nenhuma alergia alimentar',
     stored: string[] = ['Não.'],
+    field: CoachProfileAcquisitionField = CoachProfileAcquisitionField.ALLERGIES,
+    origin = 'NUTRITION_V2_PRODUCTIVE_GENERATION:fictional-root',
   ) {
     const cycle: CoachProfileAcquisitionCycle = {
       id: 'fictional-cycle',
       userId: 'fictional-user',
-      field: 'ALLERGIES',
+      field,
       status: 'CONFIRMATION_PENDING',
       active: true,
       confirmationState: 'PENDING',
-      origin: 'NUTRITION_V2_PRODUCTIVE_GENERATION:fictional-root',
+      origin,
       askedAt: new Date('2026-09-06T18:53:15.047Z'),
       answeredAt: new Date('2026-09-06T18:53:23Z'),
       expiresAt: new Date('2026-09-08T18:53:11Z'),
@@ -72,7 +74,7 @@ describe('Confirmation continuity through the inbound handler and real acquisiti
       {
         id: 'old-value',
         userId: cycle.userId,
-        field: 'ALLERGIES',
+        field,
         valueType: 'TEXT_LIST',
         textListValue: stored,
         valueFingerprint: 'old-fingerprint',
@@ -399,6 +401,43 @@ describe('Confirmation continuity through the inbound handler and real acquisiti
         },
       });
       expect(test.onboarding.processTextMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS,
+    CoachProfileAcquisitionField.ALLERGIES,
+    CoachProfileAcquisitionField.FOOD_INTOLERANCES,
+  ])(
+    'confirms empty %s once and resumes the original workout request',
+    async (field) => {
+      const test = subject(
+        'Sim',
+        [],
+        field,
+        'WORKOUT_V2_PRODUCTIVE_GENERATION:fictional-root',
+      );
+
+      await test.handle();
+
+      expect(test.cycle).toMatchObject({
+        active: false,
+        status: 'COMPLETED',
+        confirmationState: 'CONFIRMED',
+      });
+      expect(test.values.find((value) => value.isActive)).toMatchObject({
+        field,
+        textListValue: [],
+        status: 'CONFIRMED',
+      });
+      expect(test.commands.processTextMessage).toHaveBeenCalledWith({
+        userId: 'fictional-user',
+        messageId: 'confirmation-id',
+        planningContinuation: {
+          originalRequestMessageId: 'fictional-root',
+          intent: 'WORKOUT',
+        },
+      });
     },
   );
 

@@ -3,6 +3,8 @@ import { CoachProfileSnapshotConversationAdapter } from '../adapters/coach-profi
 import { ProfileAcquisitionDecisionConversationAdapter } from '../adapters/profile-acquisition-decision.adapter';
 import { ConversationTurnContextBuilderService } from '../runtime/conversation-turn-context-builder.service';
 import { CoachConversationHumanContextBuilder } from '../../context/coach-conversation-human-context.builder';
+import { ConversationEntityRecognizerService } from '../understanding/conversation-entity-recognizer.service';
+import { ConversationMessageNormalizerService } from '../understanding/conversation-message-normalizer.service';
 import {
   readyAdaptiveDecision,
   routingSnapshot,
@@ -40,6 +42,8 @@ describe('ConversationTurnContextBuilderService', () => {
       new ProfileAcquisitionDecisionConversationAdapter(),
       questions as never,
       new CoachConversationHumanContextBuilder(),
+      new ConversationMessageNormalizerService(),
+      new ConversationEntityRecognizerService(),
     );
     return { service, prisma, snapshotBuilder, collector };
   }
@@ -100,6 +104,49 @@ describe('ConversationTurnContextBuilderService', () => {
       subject.prisma.conversation.findFirst.mock.calls[0][0].select.messages
         .select,
     ).toEqual({ direction: true, content: true, timestamp: true });
+  });
+
+  it.each([
+    ['quero um treino de corrida', 'RUNNING'],
+    ['quero um treino para academia', 'GYM'],
+    ['quero um treino em casa', 'HOME'],
+    ['quero um treino de CrossFit', 'CROSSFIT'],
+    ['quero um treino de bike', 'CYCLING'],
+  ] as const)(
+    'passes explicit %s modality from the entity recognizer to profile acquisition',
+    async (text, modality) => {
+      const subject = createSubject({ messages: [] });
+
+      await subject.service.build({
+        ...input,
+        legacyIntent: 'WORKOUT',
+        text,
+      });
+
+      expect(subject.collector.decide).toHaveBeenCalledWith(
+        expect.objectContaining({
+          conversationContext: {
+            modality: { value: modality, evidence: 'EXPLICIT' },
+          },
+        }),
+      );
+    },
+  );
+
+  it('does not invent modality context when the current turn has no modality', async () => {
+    const subject = createSubject({ messages: [] });
+
+    await subject.service.build({
+      ...input,
+      legacyIntent: 'WORKOUT',
+      text: 'quero que você monte um treino para mim',
+    });
+
+    expect(subject.collector.decide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationContext: { modality: undefined },
+      }),
+    );
   });
 
   it.each([

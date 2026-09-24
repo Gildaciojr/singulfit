@@ -7,6 +7,8 @@ import {
 } from '@prisma/client';
 import {
   PROFILE_ACQUISITION_INTENT,
+  profileAcquisitionModalityFromWorkoutModality,
+  type ProfileAcquisitionConversationContext,
   type ProfileAcquisitionIntent,
 } from '../../context/coach-adaptive-profile-collector.contract';
 import { CoachAdaptiveProfileCollectorService } from '../../context/coach-adaptive-profile-collector.service';
@@ -23,11 +25,14 @@ import type {
   ConversationLegacyIntent,
   ConversationRuntimeInput,
 } from '../contracts/conversation-runtime.contract';
+import type { ConversationEntity } from '../contracts/conversation-entity.contract';
 import type { ConversationGoalPreparationInput } from '../contracts/conversation-goal-preparation.contract';
 import type { CoachProfileSnapshot } from '../../context/coach-profile-snapshot.contract';
 import type { ProfileAcquisitionDecision } from '../../context/coach-adaptive-profile-collector.contract';
 import { CoachConversationHumanContextBuilder } from '../../context/coach-conversation-human-context.builder';
 import type { CoachConversationHumanContext } from '../../context/coach-conversation-human-context.contract';
+import { ConversationEntityRecognizerService } from '../understanding/conversation-entity-recognizer.service';
+import { ConversationMessageNormalizerService } from '../understanding/conversation-message-normalizer.service';
 
 export interface ConversationTurnContext {
   readonly understandingInput: ConversationUnderstandingInput;
@@ -50,6 +55,8 @@ export class ConversationTurnContextBuilderService {
     private readonly collectorAdapter: ProfileAcquisitionDecisionConversationAdapter,
     private readonly questions: ProfileQuestionSpecificationService,
     private readonly humanContextBuilder: CoachConversationHumanContextBuilder,
+    private readonly normalizer: ConversationMessageNormalizerService,
+    private readonly entityRecognizer: ConversationEntityRecognizerService,
   ) {}
 
   async build(
@@ -175,10 +182,11 @@ export class ConversationTurnContextBuilderService {
       history.length + 1,
       (activeCycle?.logicalTurn ?? 0) + 1,
     );
+    const conversationContext = this.profileAcquisitionContext(input.text);
     const adaptiveDecision = this.collector.decide({
       snapshot,
       intent: this.collectorIntent(input.legacyIntent),
-      conversationContext: {},
+      conversationContext,
       memory: { interactions: [] },
       recentHistory: { currentLogicalTurn, interactions: [] },
     });
@@ -243,6 +251,30 @@ export class ConversationTurnContextBuilderService {
     if (intent === 'BOTH')
       return PROFILE_ACQUISITION_INTENT.COMBINED_PLAN_REQUEST;
     return PROFILE_ACQUISITION_INTENT.GENERAL_CONVERSATION;
+  }
+
+  private profileAcquisitionContext(
+    text: string,
+  ): ProfileAcquisitionConversationContext {
+    const modality = this.entityRecognizer
+      .recognize(this.normalizer.normalize(text))
+      .entities.find(
+        (entity): entity is Extract<
+          ConversationEntity,
+          { kind: 'WORKOUT_MODALITY' }
+        > =>
+          entity.kind === 'WORKOUT_MODALITY',
+      );
+    return Object.freeze({
+      modality: modality
+        ? Object.freeze({
+            value: profileAcquisitionModalityFromWorkoutModality(
+              modality.value,
+            ),
+            evidence: 'EXPLICIT' as const,
+          })
+        : undefined,
+    });
   }
 
   private targetPlan(

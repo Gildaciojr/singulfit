@@ -6,9 +6,8 @@ import type {
   ProfileAcquisitionContextValue,
   ProfileAcquisitionConversationContext,
   ProfileAcquisitionDecision,
-  ProfileAcquisitionModality,
 } from '../context/coach-adaptive-profile-collector.contract';
-import { PROFILE_ACQUISITION_MODALITY } from '../context/coach-adaptive-profile-collector.contract';
+import { profileAcquisitionModalityFromWorkoutModality } from '../context/coach-adaptive-profile-collector.contract';
 import { CoachAdaptiveProfileCollectorService } from '../context/coach-adaptive-profile-collector.service';
 import { CoachProfileSnapshotBuilder } from '../context/coach-profile-snapshot.builder';
 import { CoachConversationHumanContextBuilder } from '../context/coach-conversation-human-context.builder';
@@ -37,7 +36,6 @@ import type { WorkoutReasoningResult } from '../workout-reasoning/workout-reason
 import {
   WORKOUT_ARTIFACT_TYPE,
   WORKOUT_MODALITY,
-  type WorkoutModality,
 } from '../workout/v2/workout-planning-artifact.contract';
 import { GenerateWorkoutPlanV2InputBuilder } from '../workout/v2/generate-workout-plan-v2-input.builder';
 import type {
@@ -1223,7 +1221,9 @@ export class CoachPlanningExecutionService {
     return Object.freeze({
       modality: modality
         ? Object.freeze({
-            value: this.profileAcquisitionModality(modality.value),
+            value: profileAcquisitionModalityFromWorkoutModality(
+              modality.value,
+            ),
             evidence: modality.evidence,
           })
         : undefined,
@@ -1254,25 +1254,6 @@ export class CoachPlanningExecutionService {
           ? ('EXPLICIT' as const)
           : ('INFERRED' as const),
     });
-  }
-
-  private profileAcquisitionModality(
-    modality: WorkoutModality,
-  ): ProfileAcquisitionModality {
-    switch (modality) {
-      case WORKOUT_MODALITY.GYM_STRENGTH:
-        return PROFILE_ACQUISITION_MODALITY.GYM;
-      case WORKOUT_MODALITY.HOME_WORKOUT:
-        return PROFILE_ACQUISITION_MODALITY.HOME;
-      case WORKOUT_MODALITY.RUNNING:
-        return PROFILE_ACQUISITION_MODALITY.RUNNING;
-      case WORKOUT_MODALITY.CROSSFIT:
-        return PROFILE_ACQUISITION_MODALITY.CROSSFIT;
-      case WORKOUT_MODALITY.CYCLING:
-        return PROFILE_ACQUISITION_MODALITY.CYCLING;
-      default:
-        return PROFILE_ACQUISITION_MODALITY.OTHER;
-    }
   }
 
   private plannerInput(

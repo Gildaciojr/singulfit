@@ -39,6 +39,7 @@ const MODALITIES: readonly Readonly<{
     phrase: 'academia',
     modality: WORKOUT_MODALITY.GYM_STRENGTH,
   }),
+  Object.freeze({ phrase: 'casa', modality: WORKOUT_MODALITY.HOME_WORKOUT }),
   Object.freeze({ phrase: 'corrida', modality: WORKOUT_MODALITY.RUNNING }),
   Object.freeze({ phrase: 'correr', modality: WORKOUT_MODALITY.RUNNING }),
   Object.freeze({ phrase: 'bike', modality: WORKOUT_MODALITY.CYCLING }),
