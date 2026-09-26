@@ -246,6 +246,7 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
       }),
     };
     const cycles = {
+      expireActiveIfNeeded: jest.fn().mockResolvedValue(undefined),
       prepare: jest.fn().mockResolvedValue({
         status: 'CREATED',
         cycleId: 'cycle-id',
@@ -622,6 +623,35 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
     });
     expect(test.cycles.prepare).not.toHaveBeenCalled();
     expect(test.eventBus.publish).not.toHaveBeenCalled();
+  });
+
+  it('expires a stale confirmation cycle before preparing a workout question', async () => {
+    const test = subject();
+    test.prisma.message.findFirst.mockResolvedValue({
+      id: 'workout-request-id',
+      conversationId: 'conversation-id',
+    });
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(null);
+
+    await expect(
+      test.service.requestWorkoutClarification({
+        userId: 'admin-id',
+        sourceMessageId: 'workout-request-id',
+        referenceDate: sentAt,
+      }),
+    ).resolves.toMatchObject({
+      questionCreated: true,
+      reason: 'QUESTION_PREPARED',
+    });
+
+    expect(test.cycles.expireActiveIfNeeded).toHaveBeenCalledWith({
+      userId: 'admin-id',
+      referenceDate: sentAt.toISOString(),
+      resultCode: 'EXPIRED:' + responseToken('workout-request-id'),
+    });
+    expect(test.cycles.prepare).toHaveBeenCalledTimes(1);
+    expect(test.eventBus.publish).toHaveBeenCalledTimes(1);
   });
 
   it('uses the contextual workout intent after a legacy coach response', async () => {

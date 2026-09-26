@@ -21,6 +21,113 @@ import { ProfileQuestionSpecificationService } from './profile-question.service'
 describe('Structured profile acquisition persistence', () => {
   const referenceDate = '2026-07-16T12:00:00.000Z';
 
+  function statefulCycleSubject(
+    initial: CoachProfileAcquisitionCycle,
+  ): Readonly<{
+    readonly cycles: ProfileAcquisitionCycleService;
+    readonly records: CoachProfileAcquisitionCycle[];
+  }> {
+    const records = [initial];
+    let queue = Promise.resolve();
+    const transaction = {
+      $queryRaw: jest.fn().mockResolvedValue([{ locked: true }]),
+      auditLog: { create: jest.fn().mockResolvedValue({ id: 'audit-id' }) },
+      coachProfileAcquisitionCycle: {
+        findFirst: jest.fn(
+          ({ where }: { where: { userId: string; active: boolean } }) =>
+            records
+              .filter(
+                (record) =>
+                  record.userId === where.userId &&
+                  record.active === where.active,
+              )
+              .sort(
+                (left, right) =>
+                  right.referenceDate.getTime() - left.referenceDate.getTime(),
+              )[0] ?? null,
+        ),
+        findUnique: jest.fn().mockResolvedValue(null),
+        update: jest.fn(
+          ({
+            where,
+            data,
+          }: {
+            where: { id: string };
+            data: Partial<CoachProfileAcquisitionCycle>;
+          }) => {
+            const record = records.find((value) => value.id === where.id);
+            if (!record) throw new Error('Cycle not found');
+            Object.assign(record, data);
+            return record;
+          },
+        ),
+        create: jest.fn(
+          ({ data }: { data: Omit<CoachProfileAcquisitionCycle, 'id' | 'createdAt' | 'updatedAt'> }) => {
+            const record: CoachProfileAcquisitionCycle = {
+              ...data,
+              id: `cycle-${records.length + 1}`,
+              createdAt: new Date(referenceDate),
+              updatedAt: new Date(referenceDate),
+            };
+            records.push(record);
+            return record;
+          },
+        ),
+      },
+    };
+    const prisma = {
+      $transaction: <T>(
+        callback: (client: typeof transaction) => Promise<T>,
+      ): Promise<T> => {
+        const result = queue.then(() => callback(transaction));
+        queue = result.then(
+          () => undefined,
+          () => undefined,
+        );
+        return result;
+      },
+    };
+    const config = {
+      get: jest.fn().mockReturnValue({ mode: 'INTERNAL' }),
+    };
+    return Object.freeze({
+      cycles: new ProfileAcquisitionCycleService(
+        prisma as unknown as PrismaService,
+        config as unknown as ProfileAcquisitionOperationalConfigService,
+      ),
+      records,
+    });
+  }
+
+  function statefulCycle(
+    overrides: Partial<CoachProfileAcquisitionCycle> = {},
+  ): CoachProfileAcquisitionCycle {
+    return {
+      id: 'expired-cycle',
+      userId: 'user-id',
+      field: CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS,
+      status: CoachProfileAcquisitionCycleStatus.CONFIRMATION_PENDING,
+      questionKind: 'SHORT_TEXT_LIST',
+      questionVersion: 1,
+      logicalTurn: 1,
+      origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:root',
+      operationKey: 'expired-operation',
+      active: true,
+      resultCode: 'ANSWERED:old-token',
+      confirmationState: CoachProfileConfirmationState.PENDING,
+      referenceDate: new Date('2026-07-15T12:00:00.000Z'),
+      askedAt: new Date('2026-07-15T12:00:01.000Z'),
+      answeredAt: new Date('2026-07-15T12:00:02.000Z'),
+      expiresAt: new Date('2026-07-15T13:00:00.000Z'),
+      cooldownUntil: null,
+      completedAt: null,
+      sourceMessageId: 'old-request',
+      createdAt: new Date('2026-07-15T12:00:00.000Z'),
+      updatedAt: new Date('2026-07-15T12:00:00.000Z'),
+      ...overrides,
+    };
+  }
+
   function transaction() {
     return {
       $queryRaw: jest.fn().mockResolvedValue([{ locked: true }]),
@@ -539,6 +646,176 @@ describe('Structured profile acquisition persistence', () => {
     expect(test.tx.coachProfileAcquisitionCycle.create).toHaveBeenCalledTimes(
       1,
     );
+  });
+
+  it('keeps an unexpired active cycle unchanged during expiry reconciliation', async () => {
+    const test = await subject();
+    test.tx.coachProfileAcquisitionCycle.findFirst.mockResolvedValue({
+      id: 'active-id',
+      field: CoachProfileAcquisitionField.TRAINING_EXPERIENCE,
+      expiresAt: new Date('2026-07-16T12:00:01.000Z'),
+    });
+
+    await test.cycles.expireActiveIfNeeded({
+      userId: 'user-id',
+      referenceDate,
+      resultCode: 'EXPIRED:request-token',
+    });
+
+    expect(test.tx.coachProfileAcquisitionCycle.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    CoachProfileAcquisitionCycleStatus.ASKED,
+    CoachProfileAcquisitionCycleStatus.CONFIRMATION_PENDING,
+  ])('expires active %s cycles at the reference-date boundary', async (status) => {
+    const test = await subject();
+    test.tx.coachProfileAcquisitionCycle.findFirst.mockResolvedValue({
+      id: 'active-id',
+      field: CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS,
+      status,
+      active: true,
+      confirmationState: CoachProfileConfirmationState.PENDING,
+      expiresAt: new Date(referenceDate),
+    });
+
+    await test.cycles.expireActiveIfNeeded({
+      userId: 'user-id',
+      referenceDate,
+      resultCode: 'EXPIRED:request-token',
+    });
+
+    expect(test.tx.coachProfileAcquisitionCycle.update).toHaveBeenCalledWith({
+      where: { id: 'active-id' },
+      data: {
+        active: false,
+        status: CoachProfileAcquisitionCycleStatus.EXPIRED,
+        completedAt: new Date(referenceDate),
+        resultCode: 'EXPIRED:request-token',
+      },
+    });
+    expect(test.tx.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'PROFILE_ACQUISITION_CYCLE_COMPLETED',
+        entityId: 'active-id',
+      }),
+    });
+  });
+
+  it('serializes concurrent expiry of the live confirmation-pending fixture', async () => {
+    const test = statefulCycleSubject(statefulCycle());
+    await expect(
+      Promise.all([
+        test.cycles.expireActiveIfNeeded({
+          userId: 'user-id',
+          referenceDate,
+          resultCode: 'EXPIRED:first-token',
+        }),
+        test.cycles.expireActiveIfNeeded({
+          userId: 'user-id',
+          referenceDate,
+          resultCode: 'EXPIRED:second-token',
+        }),
+      ]),
+    ).resolves.toEqual([undefined, undefined]);
+
+    expect(test.records).toHaveLength(1);
+    expect(test.records[0]).toMatchObject({
+      status: CoachProfileAcquisitionCycleStatus.EXPIRED,
+      active: false,
+      completedAt: new Date(referenceDate),
+      resultCode: 'EXPIRED:first-token',
+      confirmationState: CoachProfileConfirmationState.PENDING,
+    });
+  });
+
+  it('does not change an unexpired confirmation-pending cycle in the stateful harness', async () => {
+    const test = statefulCycleSubject(
+      statefulCycle({ expiresAt: new Date('2026-07-16T12:00:01.000Z') }),
+    );
+
+    await test.cycles.expireActiveIfNeeded({
+      userId: 'user-id',
+      referenceDate,
+      resultCode: 'EXPIRED:request-token',
+    });
+
+    expect(test.records).toEqual([
+      expect.objectContaining({
+        status: CoachProfileAcquisitionCycleStatus.CONFIRMATION_PENDING,
+        active: true,
+        completedAt: null,
+        resultCode: 'ANSWERED:old-token',
+      }),
+    ]);
+  });
+
+  it('expires at the exact reference-date boundary in the stateful harness', async () => {
+    const test = statefulCycleSubject(
+      statefulCycle({ expiresAt: new Date(referenceDate) }),
+    );
+
+    await test.cycles.expireActiveIfNeeded({
+      userId: 'user-id',
+      referenceDate,
+      resultCode: 'EXPIRED:request-token',
+    });
+
+    expect(test.records[0]).toMatchObject({
+      status: CoachProfileAcquisitionCycleStatus.EXPIRED,
+      active: false,
+      completedAt: new Date(referenceDate),
+      resultCode: 'EXPIRED:request-token',
+    });
+  });
+
+  it('keeps at most one active cycle when expiry races preparation', async () => {
+    const test = statefulCycleSubject(statefulCycle());
+    const specification = {
+      field: CoachProfileAcquisitionField.TRAINING_EXPERIENCE,
+      questionKind: 'SINGLE_CHOICE' as const,
+      responseType: 'OPTION' as const,
+      allowedOptions: [],
+      allowsFreeText: false,
+      confirmationPolicy: 'IMPLICIT_ON_VALID_RESPONSE' as const,
+      reasonCode: 'MISSING_CONTEXTUAL_FIELD' as const,
+      version: 1,
+      templateCode: 'PROFILE_QUESTION_TRAINING_EXPERIENCE_V1',
+    };
+
+    await expect(
+      Promise.all([
+        test.cycles.expireActiveIfNeeded({
+          userId: 'user-id',
+          referenceDate,
+          resultCode: 'EXPIRED:request-token',
+        }),
+        test.cycles.prepare({
+          userId: 'user-id',
+          specification,
+          logicalTurn: 2,
+          origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:new-request',
+          operationKey: 'new-operation',
+          referenceDate,
+          expiresAt: '2026-07-18T12:00:00.000Z',
+          sourceMessageId: 'new-request',
+        }),
+      ]),
+    ).resolves.toEqual([
+      undefined,
+      expect.objectContaining({ status: 'CREATED' }),
+    ]);
+
+    expect(test.records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'expired-cycle',
+          status: CoachProfileAcquisitionCycleStatus.EXPIRED,
+          active: false,
+        }),
+      ]),
+    );
+    expect(test.records.filter((record) => record.active)).toHaveLength(1);
   });
 
   it('persists answer, confirmation pending, refusal and expiration without raw text', async () => {

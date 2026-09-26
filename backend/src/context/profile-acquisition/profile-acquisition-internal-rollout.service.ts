@@ -534,6 +534,11 @@ export class ProfileAcquisitionInternalRolloutService {
     ),
     preselectedQuestion?: PreparedProfileQuestion,
   ): Promise<ProfileAcquisitionRolloutResult> {
+    await this.cycleService.expireActiveIfNeeded({
+      userId: outbound.userId,
+      referenceDate: outbound.sentAt.toISOString(),
+      resultCode: 'EXPIRED:' + this.responseToken(outbound.sourceMessageId),
+    });
     const active = await this.findActiveCycle(outbound.userId);
     if (active) {
       if (

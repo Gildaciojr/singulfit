@@ -27,6 +27,53 @@ export class ProfileAcquisitionCycleService {
     private readonly operationalConfig: ProfileAcquisitionOperationalConfigService,
   ) {}
 
+  async expireActiveIfNeeded(input: {
+    readonly userId: string;
+    readonly referenceDate: string;
+    readonly resultCode: string;
+  }): Promise<void> {
+    if (
+      this.operationalConfig.get().mode !== PROFILE_ACQUISITION_MODE.INTERNAL
+    ) {
+      return;
+    }
+    const referenceDate = new Date(input.referenceDate);
+    if (Number.isNaN(referenceDate.getTime())) return;
+
+    await this.prisma.$transaction(async (transaction) => {
+      await this.lock(transaction, input.userId);
+      const active = await transaction.coachProfileAcquisitionCycle.findFirst({
+        where: { userId: input.userId, active: true },
+        orderBy: [{ referenceDate: 'desc' }, { id: 'desc' }],
+      });
+      if (!active || active.expiresAt > referenceDate) return;
+
+      await transaction.coachProfileAcquisitionCycle.update({
+        where: { id: active.id },
+        data: {
+          active: false,
+          status: CoachProfileAcquisitionCycleStatus.EXPIRED,
+          completedAt: referenceDate,
+          resultCode: input.resultCode.slice(0, 100),
+        },
+      });
+      await transaction.auditLog.create({
+        data: {
+          userId: input.userId,
+          action: 'PROFILE_ACQUISITION_CYCLE_COMPLETED',
+          entityType: 'COACH_PROFILE_ACQUISITION_CYCLE',
+          entityId: active.id,
+          metadata: {
+            field: active.field,
+            state: CoachProfileAcquisitionCycleStatus.EXPIRED,
+            result: input.resultCode.slice(0, 100),
+            confirmation: false,
+          },
+        },
+      });
+    });
+  }
+
   async prepare(
     command: ProfileAcquisitionCycleCommand,
   ): Promise<ProfileAcquisitionCycleResult> {
