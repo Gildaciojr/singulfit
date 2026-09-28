@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  CoachProfileAcquisitionCycleStatus,
   ChurnRiskLevel,
   Prisma,
   ScheduledMessageStatus,
@@ -683,6 +684,40 @@ export class AutomationService {
               },
             });
 
+            return {
+              shouldSend: false as const,
+              message: canceled,
+            };
+          }
+        }
+
+        if (this.isControlledOutreachContext(current.context)) {
+          const activeAcquisition =
+            await transaction.coachProfileAcquisitionCycle.findFirst({
+              where: {
+                userId: current.userId,
+                active: true,
+                askedAt: { not: null },
+                expiresAt: { gt: at },
+                status: {
+                  in: [
+                    CoachProfileAcquisitionCycleStatus.ASKED,
+                    CoachProfileAcquisitionCycleStatus.CONFIRMATION_PENDING,
+                  ],
+                },
+              },
+              select: { id: true },
+              orderBy: [{ askedAt: 'desc' }, { id: 'desc' }],
+            });
+          if (activeAcquisition) {
+            const canceled = await transaction.scheduledMessage.update({
+              where: { id: current.id },
+              data: {
+                status: ScheduledMessageStatus.CANCELED,
+                leaseExpiresAt: null,
+              },
+              include: { automationRule: true },
+            });
             return {
               shouldSend: false as const,
               message: canceled,

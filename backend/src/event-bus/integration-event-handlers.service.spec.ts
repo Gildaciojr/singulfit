@@ -505,6 +505,62 @@ describe('IntegrationEventHandlersService', () => {
     },
   );
 
+  it('routes an unquoted proactive collision to active profile acquisition', async () => {
+    const registry = new EventHandlerRegistry();
+    const acquisition = acquisitionRollout();
+    acquisition.captureActiveResponse.mockResolvedValue({
+      handled: true,
+      duplicated: false,
+      persisted: true,
+    });
+    const coachCommand = {
+      shouldHandleBeforeProfileAcquisition: jest.fn().mockResolvedValue(false),
+      processTextMessage: jest.fn(),
+    };
+    const proactiveResponse = {
+      capture: jest.fn().mockResolvedValue({
+        handled: false,
+        duplicated: false,
+        outcome: null,
+      }),
+    };
+    const handlers = new IntegrationEventHandlersService(
+      registry,
+      {} as PagBankWebhookService,
+      {} as EvolutionWebhookService,
+      {} as NutritionService,
+      {} as NutritionVisionService,
+      {} as ResponseBuilderService,
+      {} as EvolutionSendService,
+      coachCommand as unknown as CoachCommandService,
+      {} as AutomationService,
+      {} as ActivationJourneyService,
+      {} as ActivationOnboardingService,
+      acquisition as unknown as ProfileAcquisitionInternalRolloutService,
+      subscriptionLifecycle() as unknown as SubscriptionLifecycleService,
+      proactiveResponse as unknown as CoachProactiveResponseService,
+    );
+    handlers.onModuleInit();
+    const handler = registry.get(INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED);
+    if (!handler) throw new Error('Handler de texto não registrado');
+
+    await handler(
+      outboxEvent(INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED, {
+        userId: 'ordinary-user-id',
+        messageId: 'profile-answer-after-reminder-id',
+      }),
+    );
+
+    expect(proactiveResponse.capture).toHaveBeenCalled();
+    expect(acquisition.captureActiveResponse).toHaveBeenCalledWith({
+      userId: 'ordinary-user-id',
+      messageId: 'profile-answer-after-reminder-id',
+    });
+    expect(coachCommand.processTextMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ proactiveReply: true }),
+    );
+  });
+
   it('runs acquisition only after the official outbound completes sending', async () => {
     const registry = new EventHandlerRegistry();
     const evolutionSend = {

@@ -43,11 +43,13 @@ import {
   ProfileQuestionRealizerService,
   ProfileQuestionSpecificationService,
 } from './profile-question.service';
+import { COACH_PROACTIVE_SOURCE } from '../../automation/coach-proactive.contract';
 
 const ROLLOUT_ORIGIN = 'INTERNAL_PROFILE_ACQUISITION_ROLLOUT';
 const WORKOUT_V2_ORIGIN = 'WORKOUT_V2_PRODUCTIVE_GENERATION';
 const NUTRITION_V2_ORIGIN = 'NUTRITION_V2_PRODUCTIVE_GENERATION';
 const COMBINED_V2_ORIGIN = 'COMBINED_V2_PRODUCTIVE_GENERATION';
+const COACH_RETENTION_SOURCE = 'COACH_RETENTION_V1';
 
 type ProductivePlanningIntent = 'DIET' | 'WORKOUT' | 'BOTH';
 
@@ -1482,6 +1484,22 @@ export class ProfileAcquisitionInternalRolloutService {
           conversationId: message.conversationId,
           status: ScheduledMessageStatus.SENT,
           sentAt: { gt: confirmation.sentAt, lt: message.timestamp },
+          NOT: {
+            OR: [
+              {
+                context: {
+                  path: ['source'],
+                  equals: COACH_PROACTIVE_SOURCE,
+                },
+              },
+              {
+                context: {
+                  path: ['source'],
+                  equals: COACH_RETENTION_SOURCE,
+                },
+              },
+            ],
+          },
         },
         select: { id: true },
       }),

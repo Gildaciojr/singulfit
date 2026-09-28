@@ -953,6 +953,48 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
     expect(test.runtime.evaluate).toHaveBeenCalledWith('admin-id', answerAt);
   });
 
+  it('keeps a productive asked response contextual after low-priority proactive turns', async () => {
+    const test = subject();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+      activeCycle({
+        origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:root-workout-message-id',
+      }),
+    );
+    test.prisma.scheduledMessage.findFirst.mockResolvedValue(null);
+
+    await expect(
+      test.service.captureActiveResponse({
+        userId: 'admin-id',
+        messageId: 'answer-message-id',
+      }),
+    ).resolves.toMatchObject({
+      handled: true,
+      persisted: true,
+      reason: 'ANSWER_PERSISTED',
+    });
+    expect(test.prisma.scheduledMessage.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          NOT: expect.objectContaining({
+            OR: expect.arrayContaining([
+              expect.objectContaining({
+                context: expect.objectContaining({
+                  equals: 'COACH_PROACTIVE_V1',
+                }),
+              }),
+              expect.objectContaining({
+                context: expect.objectContaining({
+                  equals: 'COACH_RETENTION_V1',
+                }),
+              }),
+            ]),
+          }),
+        }),
+      }),
+    );
+  });
+
   it('persists Academia for TRAINING_ENVIRONMENT without publishing an invalid-answer reprompt', async () => {
     const test = subject();
     const trainingEnvironmentSpecification = Object.freeze({
@@ -1176,6 +1218,59 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
       test.mutationService.resolvePendingConfirmation,
     ).not.toHaveBeenCalled();
   });
+
+  it.each(['COACH_PROACTIVE_V1', 'COACH_RETENTION_V1'])(
+    'keeps an unquoted confirmation contextual after newer low-priority scheduled %s',
+    async (source) => {
+      const test = subject();
+      test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+      test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+        activeCycle({
+          status: CoachProfileAcquisitionCycleStatus.CONFIRMATION_PENDING,
+          field: CoachProfileAcquisitionField.FOOD_INTOLERANCES,
+          confirmationState: CoachProfileConfirmationState.PENDING,
+          answeredAt: new Date('2026-07-16T12:03:00.000Z'),
+          resultCode: `ANSWERED:${responseToken('answer-message-id')}`,
+        }),
+      );
+      test.prisma.message.findFirst.mockResolvedValue({
+        id: 'confirmation-message-id',
+        content: 'sim',
+        timestamp: answerAt,
+        conversationId: 'conversation-id',
+        replyToExternalMessageId: null,
+      });
+      test.prisma.outboundMessage.findMany.mockResolvedValue([
+        {
+          id: 'confirmation-outbound-id',
+          externalMessageId: 'external-confirmation-id',
+          sentAt: new Date('2026-07-16T12:04:00.000Z'),
+          sourceMessageId: 'answer-message-id',
+        },
+      ]);
+      test.prisma.scheduledMessage.findFirst.mockResolvedValue(null);
+
+      await expect(
+        test.service.captureActiveResponse({
+          userId: 'admin-id',
+          messageId: 'confirmation-message-id',
+        }),
+      ).resolves.toMatchObject({ handled: true, persisted: true });
+      expect(test.prisma.scheduledMessage.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            NOT: expect.objectContaining({
+              OR: expect.arrayContaining([
+                expect.objectContaining({
+                  context: expect.objectContaining({ equals: source }),
+                }),
+              ]),
+            }),
+          }),
+        }),
+      );
+    },
+  );
 
   it('fences an unquoted confirmation after a newer outbound coach turn', async () => {
     const test = subject();

@@ -1,4 +1,7 @@
-import { CoachProactiveWorkoutOutcome } from '@prisma/client';
+import {
+  CoachProfileAcquisitionCycleStatus,
+  CoachProactiveWorkoutOutcome,
+} from '@prisma/client';
 import type { EventBusService } from '../event-bus/event-bus.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import { CoachProactiveResponseService } from './coach-proactive-response.service';
@@ -99,6 +102,7 @@ describe('CoachProactiveResponseService', () => {
     consumedByCurrent?: boolean;
     intent?: string;
     activeProfileAskedAt?: Date | null;
+    activeProfileStatus?: CoachProfileAcquisitionCycleStatus;
     name?: string | null;
   }) {
     const timestamp = new Date('2026-08-19T22:15:00.000Z');
@@ -174,7 +178,12 @@ describe('CoachProactiveResponseService', () => {
           .fn()
           .mockResolvedValue(
             options?.activeProfileAskedAt
-              ? { askedAt: options.activeProfileAskedAt }
+              ? {
+                  id: 'active-cycle-id',
+                  status:
+                    options.activeProfileStatus ??
+                    CoachProfileAcquisitionCycleStatus.ASKED,
+                }
               : null,
           ),
       },
@@ -446,11 +455,11 @@ describe('CoachProactiveResponseService', () => {
     },
   );
 
-  it('lets a newer active profile question keep precedence over an unquoted proactive context', async () => {
+  it('lets an active profile question keep precedence over a newer unquoted proactive context', async () => {
     const subject = createSubject({
       replyId: null,
       content: 'sim',
-      activeProfileAskedAt: new Date('2026-08-19T22:05:00.000Z'),
+      activeProfileAskedAt: new Date('2026-08-19T21:13:00.000Z'),
     });
 
     await expect(
@@ -459,6 +468,25 @@ describe('CoachProactiveResponseService', () => {
         messageId: 'inbound-message-id',
       }),
     ).resolves.toEqual({ handled: false, duplicated: false, outcome: null });
+    expect(subject.transaction.scheduledMessage.upsert).not.toHaveBeenCalled();
+  });
+
+  it('does not classify an unquoted confirmation response while profile acquisition is active', async () => {
+    const subject = createSubject({
+      replyId: null,
+      content: 'sim',
+      activeProfileAskedAt: new Date('2026-08-19T21:13:00.000Z'),
+      activeProfileStatus:
+        CoachProfileAcquisitionCycleStatus.CONFIRMATION_PENDING,
+    });
+
+    await expect(
+      subject.service.capture({
+        userId: 'ordinary-user-id',
+        messageId: 'inbound-message-id',
+      }),
+    ).resolves.toEqual({ handled: false, duplicated: false, outcome: null });
+    expect(subject.transaction.scheduledMessage.update).not.toHaveBeenCalled();
   });
 
   it('gives an explicit quote precedence over a newer profile question', async () => {

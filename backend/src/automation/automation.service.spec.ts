@@ -1,5 +1,9 @@
 import { BadGatewayException, ForbiddenException } from '@nestjs/common';
-import { ScheduledMessageStatus, SubscriptionStatus } from '@prisma/client';
+import {
+  CoachProfileAcquisitionCycleStatus,
+  ScheduledMessageStatus,
+  SubscriptionStatus,
+} from '@prisma/client';
 import { EvolutionGateway } from '../evolution/evolution.gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
@@ -9,6 +13,7 @@ import {
   AutomationService,
   COACH_RETENTION_SOURCE,
 } from './automation.service';
+import { COACH_PROACTIVE_SOURCE } from './coach-proactive.contract';
 import { CoachService } from './coach.service';
 import { EventBusService } from '../event-bus/event-bus.service';
 import { CoachIntelligenceService } from './coach-intelligence.service';
@@ -30,6 +35,8 @@ describe('AutomationService', () => {
     isActive?: boolean;
     subscriptionLifecycleNotice?: boolean;
     subscriptionPeriodEnd?: Date;
+    outreachSource?: string;
+    activeAcquisition?: CoachProfileAcquisitionCycleStatus | null;
   }) {
     const preferences = {
       id: 'preferences-id',
@@ -61,7 +68,7 @@ describe('AutomationService', () => {
             noticeKey: 'subscription-id:2026-06-13T12:00:00.000Z:before-3',
           }
         : options?.outreach
-          ? { source: COACH_RETENTION_SOURCE }
+          ? { source: options.outreachSource ?? COACH_RETENTION_SOURCE }
           : {},
       automationRule: rule,
     };
@@ -147,6 +154,13 @@ describe('AutomationService', () => {
                   new Date('2026-06-13T12:00:00.000Z'),
                 cancelAtPeriodEnd: false,
               },
+        ),
+      },
+      coachProfileAcquisitionCycle: {
+        findFirst: jest.fn().mockResolvedValue(
+          options?.activeAcquisition
+            ? { id: 'active-cycle-id', status: options.activeAcquisition }
+            : null,
         ),
       },
     };
@@ -450,6 +464,90 @@ describe('AutomationService', () => {
         data: expect.objectContaining({
           status: ScheduledMessageStatus.SENT,
           externalMessageId: 'external-id',
+        }),
+      }),
+    );
+  });
+
+  it.each([
+    [COACH_PROACTIVE_SOURCE, CoachProfileAcquisitionCycleStatus.ASKED],
+    [
+      COACH_RETENTION_SOURCE,
+      CoachProfileAcquisitionCycleStatus.CONFIRMATION_PENDING,
+    ],
+  ])(
+    'cancels low-priority %s outreach while acquisition is %s',
+    async (outreachSource, activeAcquisition) => {
+      const subject = createSubject({
+        outreach: true,
+        outreachSource,
+        activeAcquisition,
+      });
+
+      await expect(
+        subject.service.sendScheduledMessage(
+          'scheduled-id',
+          new Date('2026-06-10T13:00:00.000Z'),
+        ),
+      ).resolves.toEqual(
+        expect.objectContaining({ status: ScheduledMessageStatus.CANCELED }),
+      );
+      expect(subject.evolutionGateway.sendText).not.toHaveBeenCalled();
+      expect(subject.transaction.scheduledMessage.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: ScheduledMessageStatus.CANCELED,
+            leaseExpiresAt: null,
+          }),
+        }),
+      );
+      expect(subject.prisma.scheduledMessage.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not suppress controlled outreach for an expired or inactive cycle', async () => {
+    const subject = createSubject({ outreach: true });
+    await subject.service.sendScheduledMessage(
+      'scheduled-id',
+      new Date('2026-06-10T13:00:00.000Z'),
+    );
+    expect(subject.evolutionGateway.sendText).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not suppress subscription lifecycle or requested command messages', async () => {
+    const lifecycle = createSubject({
+      subscriptionLifecycleNotice: true,
+      activeAcquisition: CoachProfileAcquisitionCycleStatus.ASKED,
+    });
+    await lifecycle.service.sendScheduledMessage(
+      'scheduled-id',
+      new Date('2026-06-10T13:00:00.000Z'),
+    );
+    expect(lifecycle.evolutionGateway.sendText).toHaveBeenCalledTimes(1);
+
+    const command = createSubject({
+      outreach: true,
+      outreachSource: 'WHATSAPP_COACH_COMMAND',
+      activeAcquisition: CoachProfileAcquisitionCycleStatus.ASKED,
+    });
+    await expect(
+      command.service.sendScheduledMessage(
+        'scheduled-id',
+        new Date('2026-06-10T13:00:00.000Z'),
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({ status: ScheduledMessageStatus.SENT }),
+    );
+    expect(command.scheduledMessage.context).toEqual({
+      source: 'WHATSAPP_COACH_COMMAND',
+    });
+    expect(command.evolutionGateway.sendText).toHaveBeenCalledTimes(1);
+    expect(command.prisma.scheduledMessage.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: ScheduledMessageStatus.SENT,
+          externalMessageId: 'external-id',
+          sentAt: expect.any(Date),
         }),
       }),
     );

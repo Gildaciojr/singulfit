@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   CoachMessageType,
+  CoachProfileAcquisitionCycleStatus,
   CoachProactiveWorkoutOutcome,
   MemoryType,
   MessageDirection,
@@ -119,12 +120,17 @@ export class CoachProactiveResponseService {
             active: true,
             expiresAt: { gt: message.timestamp },
             askedAt: { not: null },
+            status: {
+              in: [
+                CoachProfileAcquisitionCycleStatus.ASKED,
+                CoachProfileAcquisitionCycleStatus.CONFIRMATION_PENDING,
+              ],
+            },
           },
-          select: { askedAt: true },
+          select: { id: true },
           orderBy: [{ askedAt: 'desc' }, { id: 'desc' }],
         });
-      const proactiveAt = intervention.sentAt ?? intervention.scheduledFor;
-      if (activeProfile?.askedAt && activeProfile.askedAt > proactiveAt) {
+      if (activeProfile) {
         return this.notHandled();
       }
     }
