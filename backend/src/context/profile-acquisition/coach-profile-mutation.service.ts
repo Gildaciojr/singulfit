@@ -393,11 +393,17 @@ export class CoachProfileMutationService {
             'VALUE_UNCHANGED',
           );
           return this.result(
-            'UNCHANGED',
+            current.status === CoachProfileValueStatus.ANSWERED_UNCONFIRMED &&
+              current.confirmationState === CoachProfileConfirmationState.PENDING
+              ? 'REQUIRES_CONFIRMATION'
+              : 'UNCHANGED',
             command.field,
             current.id,
             current.valueFingerprint,
-            'VALUE_UNCHANGED',
+            current.status === CoachProfileValueStatus.ANSWERED_UNCONFIRMED &&
+              current.confirmationState === CoachProfileConfirmationState.PENDING
+              ? 'CONFIRMATION_REQUIRED'
+              : 'VALUE_UNCHANGED',
           );
         }
 

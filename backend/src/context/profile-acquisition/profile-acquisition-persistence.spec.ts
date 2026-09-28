@@ -648,6 +648,95 @@ describe('Structured profile acquisition persistence', () => {
     );
   });
 
+  it.each([
+    [
+      'pending empty',
+      CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS,
+      'não tenho',
+      CoachProfileValueStatus.ANSWERED_UNCONFIRMED,
+      CoachProfileConfirmationState.PENDING,
+      'REQUIRES_CONFIRMATION',
+    ],
+    [
+      'pending non-empty',
+      CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS,
+      'dor no joelho',
+      CoachProfileValueStatus.ANSWERED_UNCONFIRMED,
+      CoachProfileConfirmationState.PENDING,
+      'REQUIRES_CONFIRMATION',
+    ],
+    [
+      'always explicit confirmed',
+      CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS,
+      'não tenho',
+      CoachProfileValueStatus.CONFIRMED,
+      CoachProfileConfirmationState.CONFIRMED,
+      'REQUIRES_CONFIRMATION',
+    ],
+    [
+      'explicit-on-conflict confirmed',
+      CoachProfileAcquisitionField.RETURNING_AFTER_BREAK,
+      'não',
+      CoachProfileValueStatus.CONFIRMED,
+      CoachProfileConfirmationState.CONFIRMED,
+      'UNCHANGED',
+    ],
+    [
+      'implicit field',
+      CoachProfileAcquisitionField.WEEKLY_FREQUENCY,
+      '3',
+      CoachProfileValueStatus.CONFIRMED,
+      CoachProfileConfirmationState.CONFIRMED,
+      'UNCHANGED',
+    ],
+  ] as const)(
+    'keeps %s same-value mutation semantically correct',
+    async (_caseName, field, rawAnswer, status, confirmationState, expectedStatus) => {
+      const test = await subject();
+      const answer = test.recognizer.recognize(
+        test.questions.forField(field, 'MISSING_CONTEXTUAL_FIELD'),
+        rawAnswer,
+      );
+      const initial = test.factory.create({
+        userId: 'user-id',
+        answer,
+        source: CoachProfileValueSource.USER_REPORTED,
+        referenceDate,
+        sourceOperationKey: `initial-${field}`,
+        reason: 'INITIAL_ANSWER',
+      });
+      if (!initial) throw new Error('Expected valid mutation command');
+      await test.mutations.execute({ ...initial, status, confirmation: confirmationState });
+      const initialCreate = test.tx.coachProfileFieldValue.create.mock.calls[0][0]
+        .data;
+      test.tx.coachProfileFieldValue.findFirst.mockResolvedValue({
+        id: 'current-id',
+        status,
+        confirmationState,
+        valueFingerprint: initialCreate.valueFingerprint,
+      });
+      const replay = await test.mutations.execute({
+        ...initial,
+        status,
+        confirmation: confirmationState,
+        operationKey: `replay-${field}`,
+      });
+
+      expect(replay).toMatchObject({
+        status: expectedStatus,
+        reasonCode:
+          expectedStatus === 'REQUIRES_CONFIRMATION'
+            ? 'CONFIRMATION_REQUIRED'
+            : 'VALUE_UNCHANGED',
+      });
+      if (_caseName !== 'always explicit confirmed') {
+        expect(test.tx.coachProfileFieldValue.create).toHaveBeenLastCalledWith({
+          data: expect.objectContaining({ isActive: false }),
+        });
+      }
+    },
+  );
+
   it('keeps an unexpired active cycle unchanged during expiry reconciliation', async () => {
     const test = await subject();
     test.tx.coachProfileAcquisitionCycle.findFirst.mockResolvedValue({
