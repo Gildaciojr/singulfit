@@ -874,7 +874,11 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
     ['another user', 'conversation-id', 'other-user-id'],
   ] as const)(
     'fails closed for a productive reprompt whose inbound source belongs to %s',
-    async (_caseName, sourceConversationId, sourceUserId) => {
+    async (
+      _caseName: string,
+      sourceConversationId: string,
+      sourceUserId: string,
+    ) => {
       const test = subject('OFF');
       const originalRequestMessageId = 'original-request-message-id';
       const invalidAnswerMessageId = 'invalid-answer-message-id';
@@ -1006,8 +1010,26 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
       activeCycle({
         field: CoachProfileAcquisitionField.TRAINING_ENVIRONMENT,
         origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:root-workout-message-id',
+        resultCode: `REPROMPT:${responseToken('failed-reprompt-source-id')}`,
       }),
     );
+    test.prisma.outboundMessage.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'original-question-outbound-id',
+          externalMessageId: 'original-question-external-id',
+          sentAt,
+          sourceMessageId: 'source-message-id',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'failed-reprompt-outbound-id',
+          externalMessageId: null,
+          sentAt: null,
+          sourceMessageId: 'failed-reprompt-source-id',
+        },
+      ]);
     test.prisma.message.findFirst.mockResolvedValue({
       id: 'answer-message-id',
       content: 'Academia',
@@ -1039,10 +1061,94 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
       reason: 'ANSWER_PERSISTED',
     });
     expect(test.mutationService.execute).toHaveBeenCalledTimes(1);
+    const failedQuery = test.prisma.outboundMessage.findMany.mock.calls[1]?.[0];
+    expect(failedQuery?.where).toMatchObject({
+      userId: 'admin-id',
+      conversationId: 'conversation-id',
+      responseType: ResponseType.PROFILE_ACQUISITION,
+      status: OutboundMessageStatus.FAILED,
+      createdAt: { gte: sentAt, lt: answerAt },
+    });
+    expect(failedQuery?.where).not.toHaveProperty('sentAt');
     expect(test.tx.outboundMessage.create).not.toHaveBeenCalled();
     expect(test.cycles.complete).toHaveBeenCalledWith(
       expect.objectContaining({ outcome: 'ANSWERED' }),
     );
+  });
+
+  it('does not recover a failed reprompt when its token does not match the active cycle', async () => {
+    const test = subject();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+      activeCycle({
+        field: CoachProfileAcquisitionField.TRAINING_ENVIRONMENT,
+        origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:root-workout-message-id',
+        resultCode: `REPROMPT:${responseToken('expected-reprompt-source-id')}`,
+      }),
+    );
+    test.prisma.outboundMessage.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'original-question-outbound-id',
+          externalMessageId: 'original-question-external-id',
+          sentAt,
+          sourceMessageId: 'source-message-id',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'failed-reprompt-outbound-id',
+          externalMessageId: null,
+          sentAt: null,
+          sourceMessageId: 'different-reprompt-source-id',
+        },
+      ]);
+    await expect(
+      test.service.captureActiveResponse({
+        userId: 'admin-id',
+        messageId: 'answer-message-id',
+      }),
+    ).resolves.toMatchObject({
+      handled: false,
+      persisted: false,
+      reason: 'ANSWER_UNRELATED',
+    });
+    expect(test.cycles.claimResponse).not.toHaveBeenCalled();
+    expect(test.mutationService.execute).not.toHaveBeenCalled();
+  });
+
+  it('does not recover a failed reprompt when the original acquisition question was not sent', async () => {
+    const test = subject();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+      activeCycle({
+        field: CoachProfileAcquisitionField.TRAINING_ENVIRONMENT,
+        origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:root-workout-message-id',
+        resultCode: `REPROMPT:${responseToken('failed-reprompt-source-id')}`,
+      }),
+    );
+    test.prisma.outboundMessage.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 'failed-reprompt-outbound-id',
+          externalMessageId: null,
+          sentAt: null,
+          sourceMessageId: 'failed-reprompt-source-id',
+        },
+      ]);
+    await expect(
+      test.service.captureActiveResponse({
+        userId: 'admin-id',
+        messageId: 'answer-message-id',
+      }),
+    ).resolves.toMatchObject({
+      handled: false,
+      persisted: false,
+      reason: 'ANSWER_UNRELATED',
+    });
+    expect(test.cycles.claimResponse).not.toHaveBeenCalled();
+    expect(test.mutationService.execute).not.toHaveBeenCalled();
   });
 
   it.each([

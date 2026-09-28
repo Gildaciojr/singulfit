@@ -1452,18 +1452,49 @@ export class ProfileAcquisitionInternalRolloutService {
         sourceMessageId: true,
       },
     });
-    const confirmation = confirmations.find((candidate) =>
-      confirming
+    const reprompt = cycle.resultCode?.startsWith('REPROMPT:')
+      ? cycle.resultCode
+      : null;
+    const confirmation = confirmations.find((candidate) => {
+      return confirming
         ? this.confirmationSourceMatches(cycle, candidate.sourceMessageId)
-        : cycle.resultCode?.startsWith('REPROMPT:')
-          ? cycle.resultCode ===
+        : reprompt
+          ? reprompt ===
             'REPROMPT:' + this.responseToken(candidate.sourceMessageId)
-          : candidate.sourceMessageId === cycle.sourceMessageId,
+          : candidate.sourceMessageId === cycle.sourceMessageId;
+    });
+    const failedReprompts =
+      !confirmation && reprompt
+        ? await this.prisma.outboundMessage.findMany({
+            where: {
+              userId: cycle.userId,
+              conversationId: message.conversationId,
+              responseType: ResponseType.PROFILE_ACQUISITION,
+              status: OutboundMessageStatus.FAILED,
+              createdAt: { gte: reference, lt: message.timestamp },
+            },
+            select: { sourceMessageId: true },
+          })
+        : [];
+    const failedReprompt = failedReprompts.find(
+      (candidate) =>
+        reprompt ===
+        'REPROMPT:' + this.responseToken(candidate.sourceMessageId),
     );
-    if (!confirmation?.sentAt) return false;
+    const contextualQuestion =
+      confirmation ??
+      (failedReprompt
+        ? confirmations.find(
+            (candidate) =>
+              candidate.sourceMessageId === cycle.sourceMessageId &&
+              candidate.sentAt,
+          )
+        : null);
+    if (!contextualQuestion?.sentAt) return false;
     if (message.replyToExternalMessageId) {
       return (
-        message.replyToExternalMessageId === confirmation.externalMessageId
+        message.replyToExternalMessageId ===
+        contextualQuestion.externalMessageId
       );
     }
     const [newerOutbound, newerScheduled] = await Promise.all([
@@ -1474,7 +1505,7 @@ export class ProfileAcquisitionInternalRolloutService {
           status: {
             in: [OutboundMessageStatus.SENT, OutboundMessageStatus.DELIVERED],
           },
-          sentAt: { gt: confirmation.sentAt, lt: message.timestamp },
+          sentAt: { gt: contextualQuestion.sentAt, lt: message.timestamp },
         },
         select: { id: true },
       }),
@@ -1483,7 +1514,7 @@ export class ProfileAcquisitionInternalRolloutService {
           userId: cycle.userId,
           conversationId: message.conversationId,
           status: ScheduledMessageStatus.SENT,
-          sentAt: { gt: confirmation.sentAt, lt: message.timestamp },
+          sentAt: { gt: contextualQuestion.sentAt, lt: message.timestamp },
           NOT: {
             OR: [
               {
