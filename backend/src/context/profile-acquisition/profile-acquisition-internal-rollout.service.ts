@@ -1498,6 +1498,8 @@ export class ProfileAcquisitionInternalRolloutService {
     productiveOnly: boolean,
   ): Promise<ActiveCycle> {
     const token = this.responseToken(outbound.sourceMessageId);
+    const processingResultCode = 'PROCESSING:' + token;
+    const repromptResultCode = 'REPROMPT:' + token;
     const cycle = await this.prisma.coachProfileAcquisitionCycle.findFirst({
       where: {
         userId: outbound.userId,
@@ -1510,6 +1512,11 @@ export class ProfileAcquisitionInternalRolloutService {
               {
                 status: CoachProfileAcquisitionCycleStatus.CONFIRMATION_PENDING,
                 resultCode: { endsWith: token },
+              },
+              {
+                status: CoachProfileAcquisitionCycleStatus.ASKED,
+                askedAt: { not: null },
+                resultCode: { in: [processingResultCode, repromptResultCode] },
               },
             ],
           },
@@ -1525,7 +1532,9 @@ export class ProfileAcquisitionInternalRolloutService {
     return cycle.sourceMessageId === outbound.sourceMessageId ||
       this.confirmationSourceMatches(cycle, outbound.sourceMessageId)
       ? cycle
-      : null;
+      : (await this.repromptSourceMatches(cycle, outbound))
+        ? cycle
+        : null;
   }
 
   private confirmationSourceMatches(
@@ -1538,5 +1547,37 @@ export class ProfileAcquisitionInternalRolloutService {
       cycle.answeredAt !== null &&
       cycle.resultCode?.endsWith(this.responseToken(sourceMessageId)) === true
     );
+  }
+
+  private async repromptSourceMatches(
+    cycle: NonNullable<ActiveCycle>,
+    outbound: {
+      readonly userId: string;
+      readonly conversationId: string;
+      readonly sourceMessageId: string;
+    },
+  ): Promise<boolean> {
+    if (
+      cycle.status !== CoachProfileAcquisitionCycleStatus.ASKED ||
+      cycle.askedAt === null
+    ) {
+      return false;
+    }
+    const token = this.responseToken(outbound.sourceMessageId);
+    if (
+      cycle.resultCode !== 'PROCESSING:' + token &&
+      cycle.resultCode !== 'REPROMPT:' + token
+    ) {
+      return false;
+    }
+    const source = await this.prisma.message.findFirst({
+      where: {
+        id: outbound.sourceMessageId,
+        conversationId: outbound.conversationId,
+        conversation: { userId: outbound.userId },
+      },
+      select: { id: true },
+    });
+    return source !== null;
   }
 }

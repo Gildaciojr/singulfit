@@ -58,6 +58,19 @@ describe('Registry driven natural profile responses', () => {
     });
   });
 
+  it.each([
+    ['Academia', 'FULL_GYM'],
+    ['academia comum', 'FULL_GYM'],
+    ['academia completa', 'FULL_GYM'],
+    ['academia pequena', 'LIMITED_GYM'],
+    ['academia limitada', 'LIMITED_GYM'],
+  ] as const)('recognizes training environment %s as %s', (text, value) => {
+    expect(recognize(Field.TRAINING_ENVIRONMENT, text)).toMatchObject({
+      disposition: 'RECOGNIZED',
+      value,
+    });
+  });
+
   it.each(sensitive)(
     'canonicalizes generic absence only in the sensitive field $field',
     (definition) => {

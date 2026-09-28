@@ -321,8 +321,8 @@ export class ProfileAnswerRecognizerService {
       case CoachProfileAcquisitionField.TRAINING_ENVIRONMENT:
         return this.first(normalized, [
           ['CROSSFIT_BOX', /box|crossfit/],
-          ['FULL_GYM', /academia (?:comum|completa)/],
           ['LIMITED_GYM', /academia pequena|academia limitada/],
+          ['FULL_GYM', /^academia$|academia (?:comum|completa)/],
           ['HOME', /casa|home/],
           ['TRACK', /pista/],
           ['TRAIL', /trilha/],

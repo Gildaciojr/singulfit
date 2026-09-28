@@ -761,6 +761,170 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
     expect(test.eligibility.evaluate).not.toHaveBeenCalled();
   });
 
+  it.each(['PROCESSING', 'REPROMPT'] as const)(
+    'authorizes a productive %s reprompt using the inbound response source',
+    async (resultCodePrefix) => {
+      const test = subject('OFF');
+      const originalRequestMessageId = 'original-request-message-id';
+      const invalidAnswerMessageId = 'invalid-answer-message-id';
+      test.prisma.outboundMessage.findUnique.mockResolvedValue({
+        id: 'reprompt-outbound-id',
+        userId: 'common-user-id',
+        conversationId: 'conversation-id',
+        sourceMessageId: invalidAnswerMessageId,
+        responseType: ResponseType.PROFILE_ACQUISITION,
+      });
+      test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+      test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+        activeCycle({
+          userId: 'common-user-id',
+          field: CoachProfileAcquisitionField.TRAINING_ENVIRONMENT,
+          sourceMessageId: originalRequestMessageId,
+          origin: `WORKOUT_V2_PRODUCTIVE_GENERATION:${originalRequestMessageId}`,
+          resultCode: `${resultCodePrefix}:${responseToken(invalidAnswerMessageId)}`,
+        }),
+      );
+      test.prisma.message.findFirst.mockResolvedValue({ id: 'message-id' });
+
+      await expect(
+        test.service.authorizeQuestionSend('reprompt-outbound-id'),
+      ).resolves.toBe(true);
+      expect(test.tx.outboundMessage.updateMany).not.toHaveBeenCalled();
+      expect(test.prisma.message.findFirst).toHaveBeenCalledWith({
+        where: {
+          id: invalidAnswerMessageId,
+          conversationId: 'conversation-id',
+          conversation: { userId: 'common-user-id' },
+        },
+        select: { id: true },
+      });
+    },
+  );
+
+  it('authorizes a productive confirmation using its answer source', async () => {
+    const test = subject('OFF');
+    const originalRequestMessageId = 'original-request-message-id';
+    const answerMessageId = 'answer-message-id';
+    test.prisma.outboundMessage.findUnique.mockResolvedValue({
+      id: 'confirmation-outbound-id',
+      userId: 'common-user-id',
+      conversationId: 'conversation-id',
+      sourceMessageId: answerMessageId,
+      responseType: ResponseType.PROFILE_ACQUISITION,
+    });
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+      activeCycle({
+        userId: 'common-user-id',
+        sourceMessageId: originalRequestMessageId,
+        origin: `WORKOUT_V2_PRODUCTIVE_GENERATION:${originalRequestMessageId}`,
+        status: CoachProfileAcquisitionCycleStatus.CONFIRMATION_PENDING,
+        confirmationState: CoachProfileConfirmationState.PENDING,
+        answeredAt: answerAt,
+        resultCode: `ANSWERED:${responseToken(answerMessageId)}`,
+      }),
+    );
+    test.prisma.message.findFirst.mockResolvedValue({ id: 'message-id' });
+
+    await expect(
+      test.service.authorizeQuestionSend('confirmation-outbound-id'),
+    ).resolves.toBe(true);
+    expect(test.tx.outboundMessage.updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each(['REPROMPT', 'PROCESSING'] as const)(
+    'fails closed for a productive %s reprompt with a different token',
+    async (resultCodePrefix) => {
+      const test = subject('OFF');
+      const originalRequestMessageId = 'original-request-message-id';
+      const invalidAnswerMessageId = 'invalid-answer-message-id';
+      test.prisma.outboundMessage.findUnique.mockResolvedValue({
+        id: 'reprompt-outbound-id',
+        userId: 'common-user-id',
+        conversationId: 'conversation-id',
+        sourceMessageId: invalidAnswerMessageId,
+        responseType: ResponseType.PROFILE_ACQUISITION,
+      });
+      test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+      test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+        activeCycle({
+          userId: 'common-user-id',
+          sourceMessageId: originalRequestMessageId,
+          origin: `WORKOUT_V2_PRODUCTIVE_GENERATION:${originalRequestMessageId}`,
+          resultCode: `${resultCodePrefix}:${responseToken('other-message-id')}`,
+        }),
+      );
+
+      await expect(
+        test.service.authorizeQuestionSend('reprompt-outbound-id'),
+      ).resolves.toBe(false);
+      expect(test.tx.outboundMessage.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: OutboundMessageStatus.FAILED,
+            errorMessage: 'PROFILE_ACQUISITION_DISABLED',
+          }),
+        }),
+      );
+    },
+  );
+
+  it.each([
+    ['another conversation', 'other-conversation-id', 'common-user-id'],
+    ['another user', 'conversation-id', 'other-user-id'],
+  ] as const)(
+    'fails closed for a productive reprompt whose inbound source belongs to %s',
+    async (_caseName, sourceConversationId, sourceUserId) => {
+      const test = subject('OFF');
+      const originalRequestMessageId = 'original-request-message-id';
+      const invalidAnswerMessageId = 'invalid-answer-message-id';
+      test.prisma.outboundMessage.findUnique.mockResolvedValue({
+        id: 'reprompt-outbound-id',
+        userId: 'common-user-id',
+        conversationId: 'conversation-id',
+        sourceMessageId: invalidAnswerMessageId,
+        responseType: ResponseType.PROFILE_ACQUISITION,
+      });
+      test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+      test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+        activeCycle({
+          userId: 'common-user-id',
+          sourceMessageId: originalRequestMessageId,
+          origin: `WORKOUT_V2_PRODUCTIVE_GENERATION:${originalRequestMessageId}`,
+          resultCode: `REPROMPT:${responseToken(invalidAnswerMessageId)}`,
+        }),
+      );
+      test.prisma.message.findFirst
+        .mockResolvedValueOnce({ id: originalRequestMessageId })
+        .mockResolvedValueOnce(
+          sourceConversationId === 'conversation-id' &&
+            sourceUserId === 'common-user-id'
+            ? { id: invalidAnswerMessageId }
+            : null,
+        );
+
+      await expect(
+        test.service.authorizeQuestionSend('reprompt-outbound-id'),
+      ).resolves.toBe(false);
+      expect(test.prisma.message.findFirst).toHaveBeenCalledWith({
+        where: {
+          id: invalidAnswerMessageId,
+          conversationId: 'conversation-id',
+          conversation: { userId: 'common-user-id' },
+        },
+        select: { id: true },
+      });
+      expect(test.tx.outboundMessage.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: OutboundMessageStatus.FAILED,
+            errorMessage: 'PROFILE_ACQUISITION_DISABLED',
+          }),
+        }),
+      );
+    },
+  );
+
   it('persists a valid answer, closes the cycle and immediately refreshes runtime state', async () => {
     const test = subject();
     test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
@@ -787,6 +951,56 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
       expect.objectContaining({ outcome: 'ANSWERED' }),
     );
     expect(test.runtime.evaluate).toHaveBeenCalledWith('admin-id', answerAt);
+  });
+
+  it('persists Academia for TRAINING_ENVIRONMENT without publishing an invalid-answer reprompt', async () => {
+    const test = subject();
+    const trainingEnvironmentSpecification = Object.freeze({
+      ...specification,
+      field: CoachProfileAcquisitionField.TRAINING_ENVIRONMENT,
+    });
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+      activeCycle({
+        field: CoachProfileAcquisitionField.TRAINING_ENVIRONMENT,
+        origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:root-workout-message-id',
+      }),
+    );
+    test.prisma.message.findFirst.mockResolvedValue({
+      id: 'answer-message-id',
+      content: 'Academia',
+      timestamp: answerAt,
+      conversationId: 'conversation-id',
+      replyToExternalMessageId: null,
+    });
+    test.questionSpecifications.forField.mockReturnValue(
+      trainingEnvironmentSpecification,
+    );
+    test.answerRecognizer.recognize.mockReturnValue({
+      field: CoachProfileAcquisitionField.TRAINING_ENVIRONMENT,
+      disposition: 'RECOGNIZED',
+      valueType: 'TEXT',
+      value: 'FULL_GYM',
+      confidence: 'DETERMINISTIC',
+      reasonCode: 'DETERMINISTIC_MATCH',
+      confirmationRequired: false,
+    });
+
+    await expect(
+      test.service.captureActiveResponse({
+        userId: 'admin-id',
+        messageId: 'answer-message-id',
+      }),
+    ).resolves.toMatchObject({
+      handled: true,
+      persisted: true,
+      reason: 'ANSWER_PERSISTED',
+    });
+    expect(test.mutationService.execute).toHaveBeenCalledTimes(1);
+    expect(test.tx.outboundMessage.create).not.toHaveBeenCalled();
+    expect(test.cycles.complete).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'ANSWERED' }),
+    );
   });
 
   it.each([
@@ -820,7 +1034,18 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
         reason: expectedReason,
       });
       expect(test.cycles.claimResponse).toHaveBeenCalledTimes(1);
-      expect(test.tx.outboundMessage.create).toHaveBeenCalledTimes(1);
+      expect(test.tx.outboundMessage.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          sourceMessageId: 'answer-message-id',
+          responseType: ResponseType.PROFILE_ACQUISITION,
+        }),
+      });
+      expect(test.cycles.releaseResponseClaim).toHaveBeenCalledWith({
+        userId: 'admin-id',
+        cycleId: 'cycle-id',
+        claimCode: 'PROCESSING:token',
+        previousResultCode: `REPROMPT:${responseToken('answer-message-id')}`,
+      });
       expect(test.mutationService.execute).not.toHaveBeenCalled();
     },
   );
