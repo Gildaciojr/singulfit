@@ -253,6 +253,12 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
         cycleStatus: CoachProfileAcquisitionCycleStatus.PENDING,
         reasonCode: 'CYCLE_PREPARED',
       }),
+      supersedeActiveAndPrepare: jest.fn().mockResolvedValue({
+        status: 'CREATED',
+        cycleId: 'superseded-cycle-id',
+        cycleStatus: CoachProfileAcquisitionCycleStatus.PENDING,
+        reasonCode: 'SUPERSEDED_PREVIOUS',
+      }),
       markAsked: jest.fn().mockResolvedValue({
         status: 'MARKED',
         cycleId: 'cycle-id',
@@ -623,6 +629,344 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
     });
     expect(test.cycles.prepare).not.toHaveBeenCalled();
     expect(test.eventBus.publish).not.toHaveBeenCalled();
+  });
+
+
+  it('supersedes a fenced failed-reprompt productive cycle when a new independent workout request arrives', async () => {
+    const test = subject('INTERNAL');
+
+    test.prisma.message.findFirst.mockReset();
+    test.prisma.message.findFirst
+      .mockResolvedValueOnce({
+        id: 'new-workout-request-id',
+        conversationId: 'conversation-id',
+        replyToExternalMessageId: null,
+      })
+      .mockResolvedValueOnce({ id: 'source-message-id' });
+
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+      activeCycle({
+        origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:root-workout-message-id',
+        resultCode: `REPROMPT:${responseToken('failed-reprompt-source-id')}`,
+      }),
+    );
+
+    test.prisma.outboundMessage.findMany
+      .mockReset()
+      .mockResolvedValueOnce([
+        {
+          id: 'original-question-outbound-id',
+          externalMessageId: 'original-question-external-id',
+          sentAt,
+          sourceMessageId: 'source-message-id',
+        },
+      ])
+      .mockResolvedValueOnce([
+        { sourceMessageId: 'failed-reprompt-source-id' },
+      ]);
+
+    test.prisma.outboundMessage.findFirst.mockResolvedValue({
+      id: 'critical-coach-outbound-id',
+    });
+    test.prisma.scheduledMessage.findFirst.mockResolvedValue(null);
+
+    await expect(
+      test.service.requestWorkoutClarification({
+        userId: 'admin-id',
+        sourceMessageId: 'new-workout-request-id',
+        originalRequestMessageId: 'new-workout-root-id',
+        referenceDate: answerAt,
+      }),
+    ).resolves.toMatchObject({
+      questionCreated: true,
+      reason: 'QUESTION_PREPARED',
+      cycleId: 'superseded-cycle-id',
+    });
+
+    expect(test.cycles.supersedeActiveAndPrepare).toHaveBeenCalledWith({
+      expectedActiveCycleId: 'cycle-id',
+      expectedActiveCycleUpdatedAt: sentAt,
+      command: expect.objectContaining({
+        userId: 'admin-id',
+        sourceMessageId: 'new-workout-request-id',
+        origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:new-workout-root-id',
+      }),
+    });
+    expect(test.cycles.prepare).not.toHaveBeenCalled();
+    expect(test.eventBus.publish).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a recoverable failed-reprompt productive cycle active when there is no critical fence', async () => {
+    const test = subject('INTERNAL');
+
+    test.prisma.message.findFirst.mockReset();
+    test.prisma.message.findFirst
+      .mockResolvedValueOnce({
+        id: 'new-workout-request-id',
+        conversationId: 'conversation-id',
+        replyToExternalMessageId: null,
+      })
+      .mockResolvedValueOnce({ id: 'source-message-id' });
+
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+      activeCycle({
+        origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:root-workout-message-id',
+        resultCode: `REPROMPT:${responseToken('failed-reprompt-source-id')}`,
+      }),
+    );
+
+    test.prisma.outboundMessage.findMany
+      .mockReset()
+      .mockResolvedValueOnce([
+        {
+          id: 'original-question-outbound-id',
+          externalMessageId: 'original-question-external-id',
+          sentAt,
+          sourceMessageId: 'source-message-id',
+        },
+      ])
+      .mockResolvedValueOnce([
+        { sourceMessageId: 'failed-reprompt-source-id' },
+      ]);
+
+    test.prisma.outboundMessage.findFirst.mockResolvedValue(null);
+    test.prisma.scheduledMessage.findFirst.mockResolvedValue(null);
+
+    await expect(
+      test.service.requestWorkoutClarification({
+        userId: 'admin-id',
+        sourceMessageId: 'new-workout-request-id',
+        originalRequestMessageId: 'new-workout-root-id',
+        referenceDate: answerAt,
+      }),
+    ).resolves.toMatchObject({
+      questionCreated: false,
+      reason: 'QUESTION_ALREADY_ACTIVE',
+      cycleId: 'cycle-id',
+    });
+
+    expect(test.cycles.supersedeActiveAndPrepare).not.toHaveBeenCalled();
+    expect(test.cycles.prepare).not.toHaveBeenCalled();
+    expect(test.prisma.scheduledMessage.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          NOT: expect.objectContaining({
+            OR: expect.arrayContaining([
+              expect.objectContaining({
+                context: expect.objectContaining({
+                  equals: 'COACH_PROACTIVE_V1',
+                }),
+              }),
+              expect.objectContaining({
+                context: expect.objectContaining({
+                  equals: 'COACH_RETENTION_V1',
+                }),
+              }),
+            ]),
+          }),
+        }),
+      }),
+    );
+  });
+
+
+  it('does not supersede while the active productive response is PROCESSING, even with a critical fence', async () => {
+    const test = subject('INTERNAL');
+
+    test.prisma.message.findFirst.mockResolvedValue({
+      id: 'new-workout-request-id',
+      conversationId: 'conversation-id',
+      replyToExternalMessageId: null,
+    });
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+      activeCycle({
+        origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:root-workout-message-id',
+        resultCode: `PROCESSING:${responseToken('in-flight-answer-id')}`,
+      }),
+    );
+
+    await expect(
+      test.service.requestWorkoutClarification({
+        userId: 'admin-id',
+        sourceMessageId: 'new-workout-request-id',
+        originalRequestMessageId: 'new-workout-root-id',
+        referenceDate: answerAt,
+      }),
+    ).resolves.toMatchObject({
+      questionCreated: false,
+      reason: 'QUESTION_ALREADY_ACTIVE',
+      cycleId: 'cycle-id',
+    });
+
+    expect(test.cycles.supersedeActiveAndPrepare).not.toHaveBeenCalled();
+    expect(test.prisma.outboundMessage.findMany).not.toHaveBeenCalled();
+    expect(test.prisma.scheduledMessage.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('supersedes after a critical scheduled fence while preserving proactive and retention exclusions', async () => {
+    const test = subject('INTERNAL');
+
+    test.prisma.message.findFirst.mockReset();
+    test.prisma.message.findFirst
+      .mockResolvedValueOnce({
+        id: 'new-workout-request-id',
+        conversationId: 'conversation-id',
+        replyToExternalMessageId: null,
+      })
+      .mockResolvedValueOnce({ id: 'source-message-id' });
+
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+      activeCycle({
+        origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:root-workout-message-id',
+      }),
+    );
+
+    test.prisma.outboundMessage.findMany.mockReset().mockResolvedValue([
+      {
+        id: 'original-question-outbound-id',
+        externalMessageId: 'original-question-external-id',
+        sentAt,
+        sourceMessageId: 'source-message-id',
+      },
+    ]);
+    test.prisma.outboundMessage.findFirst.mockResolvedValue(null);
+    test.prisma.scheduledMessage.findFirst.mockResolvedValue({
+      id: 'critical-scheduled-id',
+    });
+
+    await expect(
+      test.service.requestWorkoutClarification({
+        userId: 'admin-id',
+        sourceMessageId: 'new-workout-request-id',
+        originalRequestMessageId: 'new-workout-root-id',
+        referenceDate: answerAt,
+      }),
+    ).resolves.toMatchObject({
+      questionCreated: true,
+      reason: 'QUESTION_PREPARED',
+    });
+
+    expect(test.cycles.supersedeActiveAndPrepare).toHaveBeenCalledTimes(1);
+    expect(test.prisma.scheduledMessage.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          NOT: expect.objectContaining({
+            OR: expect.arrayContaining([
+              expect.objectContaining({
+                context: expect.objectContaining({
+                  equals: 'COACH_PROACTIVE_V1',
+                }),
+              }),
+              expect.objectContaining({
+                context: expect.objectContaining({
+                  equals: 'COACH_RETENTION_V1',
+                }),
+              }),
+            ]),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('does not supersede an active productive cycle from a quoted new request', async () => {
+    const test = subject('INTERNAL');
+
+    test.prisma.message.findFirst.mockResolvedValue({
+      id: 'quoted-workout-request-id',
+      conversationId: 'conversation-id',
+      replyToExternalMessageId: 'quoted-external-id',
+    });
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+      activeCycle({
+        origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:root-workout-message-id',
+      }),
+    );
+
+    await expect(
+      test.service.requestWorkoutClarification({
+        userId: 'admin-id',
+        sourceMessageId: 'quoted-workout-request-id',
+        originalRequestMessageId: 'new-workout-root-id',
+        referenceDate: answerAt,
+      }),
+    ).resolves.toMatchObject({
+      questionCreated: false,
+      reason: 'QUESTION_ALREADY_ACTIVE',
+    });
+
+    expect(test.cycles.supersedeActiveAndPrepare).not.toHaveBeenCalled();
+    expect(test.prisma.outboundMessage.findMany).not.toHaveBeenCalled();
+  });
+
+  it('does not supersede a productive cycle from another conversation', async () => {
+    const test = subject('INTERNAL');
+
+    test.prisma.message.findFirst.mockReset();
+    test.prisma.message.findFirst
+      .mockResolvedValueOnce({
+        id: 'new-workout-request-id',
+        conversationId: 'new-conversation-id',
+        replyToExternalMessageId: null,
+      })
+      .mockResolvedValueOnce(null);
+
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+      activeCycle({
+        origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:root-workout-message-id',
+      }),
+    );
+
+    await expect(
+      test.service.requestWorkoutClarification({
+        userId: 'admin-id',
+        sourceMessageId: 'new-workout-request-id',
+        originalRequestMessageId: 'new-workout-root-id',
+        referenceDate: answerAt,
+      }),
+    ).resolves.toMatchObject({
+      questionCreated: false,
+      reason: 'QUESTION_ALREADY_ACTIVE',
+    });
+
+    expect(test.cycles.supersedeActiveAndPrepare).not.toHaveBeenCalled();
+    expect(test.prisma.outboundMessage.findMany).not.toHaveBeenCalled();
+  });
+
+  it('does not supersede when the incoming productive clarification belongs to the same root request', async () => {
+    const test = subject('INTERNAL');
+
+    test.prisma.message.findFirst.mockResolvedValue({
+      id: 'continuation-message-id',
+      conversationId: 'conversation-id',
+      replyToExternalMessageId: null,
+    });
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+      activeCycle({
+        origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:root-workout-message-id',
+      }),
+    );
+
+    await expect(
+      test.service.requestWorkoutClarification({
+        userId: 'admin-id',
+        sourceMessageId: 'continuation-message-id',
+        originalRequestMessageId: 'root-workout-message-id',
+        referenceDate: answerAt,
+      }),
+    ).resolves.toMatchObject({
+      questionCreated: false,
+      reason: 'QUESTION_ALREADY_ACTIVE',
+    });
+
+    expect(test.cycles.supersedeActiveAndPrepare).not.toHaveBeenCalled();
   });
 
   it('expires a stale confirmation cycle before preparing a workout question', async () => {

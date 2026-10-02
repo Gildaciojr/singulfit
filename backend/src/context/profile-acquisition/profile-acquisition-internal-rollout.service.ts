@@ -55,6 +55,8 @@ type ProductivePlanningIntent = 'DIET' | 'WORKOUT' | 'BOTH';
 
 type ActiveCycle = CoachProfileAcquisitionCycle | null;
 
+type ResponseContextState = 'CONTEXTUAL' | 'FENCED' | 'NOT_CONTEXTUAL';
+
 type PreselectedProfileQuestion = Readonly<{
   readonly selectedProfileField: ProfileAcquisitionField;
   readonly logicalTurn: number;
@@ -111,7 +113,11 @@ export class ProfileAcquisitionInternalRolloutService {
         type: MessageType.TEXT,
         conversation: { userId: input.userId },
       },
-      select: { id: true, conversationId: true },
+      select: {
+        id: true,
+        conversationId: true,
+        replyToExternalMessageId: true,
+      },
     });
     if (!source) {
       return this.rolloutResult(
@@ -138,6 +144,7 @@ export class ProfileAcquisitionInternalRolloutService {
         conversationId: source.conversationId,
         sourceMessageId: source.id,
         sentAt: input.referenceDate,
+        replyToExternalMessageId: source.replyToExternalMessageId,
       },
       this.config.get().mode,
       input.intent === 'WORKOUT'
@@ -527,6 +534,7 @@ export class ProfileAcquisitionInternalRolloutService {
       readonly conversationId: string;
       readonly sourceMessageId: string;
       readonly sentAt: Date;
+      readonly replyToExternalMessageId?: string | null;
     },
     mode: ProfileAcquisitionMode,
     intent: ProfileAcquisitionIntent = PROFILE_ACQUISITION_INTENT.DIET_PLAN_REQUEST,
@@ -542,6 +550,8 @@ export class ProfileAcquisitionInternalRolloutService {
       resultCode: 'EXPIRED:' + this.responseToken(outbound.sourceMessageId),
     });
     const active = await this.findActiveCycle(outbound.userId);
+    let activeToSupersede: NonNullable<ActiveCycle> | null = null;
+
     if (active) {
       if (
         active.sourceMessageId === outbound.sourceMessageId &&
@@ -567,19 +577,30 @@ export class ProfileAcquisitionInternalRolloutService {
           active.field,
         );
       }
-      await this.audit(outbound.userId, active.id, {
-        event: 'QUESTION_IGNORED',
-        field: active.field,
-        reason: 'QUESTION_ALREADY_ACTIVE',
-      });
-      return this.rolloutResult(
-        true,
-        false,
-        'QUESTION_ALREADY_ACTIVE',
-        mode,
-        active.id,
-        active.field,
+
+      const canSupersede = await this.shouldSupersedeActiveCycle(
+        active,
+        outbound,
+        origin,
       );
+
+      if (canSupersede) {
+        activeToSupersede = active;
+      } else {
+        await this.audit(outbound.userId, active.id, {
+          event: 'QUESTION_IGNORED',
+          field: active.field,
+          reason: 'QUESTION_ALREADY_ACTIVE',
+        });
+        return this.rolloutResult(
+          true,
+          false,
+          'QUESTION_ALREADY_ACTIVE',
+          mode,
+          active.id,
+          active.field,
+        );
+      }
     }
 
     let specification: ProfileQuestionSpecification;
@@ -617,7 +638,7 @@ export class ProfileAcquisitionInternalRolloutService {
       outbound.sentAt.getTime() +
         this.config.get().questionExpirationHours * 60 * 60 * 1_000,
     );
-    const prepared = await this.cycleService.prepare({
+    const prepareCommand = Object.freeze({
       userId: outbound.userId,
       specification,
       logicalTurn,
@@ -627,6 +648,15 @@ export class ProfileAcquisitionInternalRolloutService {
       expiresAt: expiresAt.toISOString(),
       sourceMessageId: outbound.sourceMessageId,
     });
+
+    const prepared = activeToSupersede
+      ? await this.cycleService.supersedeActiveAndPrepare({
+          expectedActiveCycleId: activeToSupersede.id,
+          expectedActiveCycleUpdatedAt: activeToSupersede.updatedAt,
+          command: prepareCommand,
+        })
+      : await this.cycleService.prepare(prepareCommand);
+
     if (
       !prepared.cycleId ||
       (prepared.status !== 'CREATED' &&
@@ -1422,6 +1452,55 @@ export class ProfileAcquisitionInternalRolloutService {
     return source !== null;
   }
 
+  private async shouldSupersedeActiveCycle(
+    cycle: NonNullable<ActiveCycle>,
+    outbound: {
+      readonly userId: string;
+      readonly conversationId: string;
+      readonly sourceMessageId: string;
+      readonly sentAt: Date;
+      readonly replyToExternalMessageId?: string | null;
+    },
+    origin: string,
+  ): Promise<boolean> {
+    if (
+      cycle.status !== CoachProfileAcquisitionCycleStatus.ASKED ||
+      cycle.askedAt === null ||
+      cycle.resultCode?.startsWith('PROCESSING:') === true ||
+      !this.isProductiveOrigin(cycle.origin) ||
+      !this.isProductiveOrigin(origin) ||
+      cycle.sourceMessageId === outbound.sourceMessageId ||
+      Boolean(outbound.replyToExternalMessageId)
+    ) {
+      return false;
+    }
+
+    const activeOriginalRequest = this.productiveOriginalRequest(cycle.origin);
+    const incomingOriginalRequest = this.productiveOriginalRequest(origin);
+
+    if (
+      !activeOriginalRequest ||
+      !incomingOriginalRequest ||
+      activeOriginalRequest === incomingOriginalRequest
+    ) {
+      return false;
+    }
+
+    if (
+      !(await this.cycleBelongsToConversation(cycle, outbound.conversationId))
+    ) {
+      return false;
+    }
+
+    const state = await this.responseContextState(cycle, {
+      timestamp: outbound.sentAt,
+      conversationId: outbound.conversationId,
+      replyToExternalMessageId: null,
+    });
+
+    return state === 'FENCED';
+  }
+
   private async responseIsContextual(
     cycle: NonNullable<ActiveCycle>,
     message: {
@@ -1430,10 +1509,22 @@ export class ProfileAcquisitionInternalRolloutService {
       readonly replyToExternalMessageId: string | null;
     },
   ): Promise<boolean> {
+    return (await this.responseContextState(cycle, message)) === 'CONTEXTUAL';
+  }
+
+  private async responseContextState(
+    cycle: NonNullable<ActiveCycle>,
+    message: {
+      readonly timestamp: Date;
+      readonly conversationId: string;
+      readonly replyToExternalMessageId: string | null;
+    },
+  ): Promise<ResponseContextState> {
     const confirming =
       cycle.status === CoachProfileAcquisitionCycleStatus.CONFIRMATION_PENDING;
     const reference = confirming ? cycle.answeredAt : cycle.askedAt;
-    if (!reference) return false;
+    if (!reference) return 'NOT_CONTEXTUAL';
+
     const confirmations = await this.prisma.outboundMessage.findMany({
       where: {
         userId: cycle.userId,
@@ -1452,9 +1543,11 @@ export class ProfileAcquisitionInternalRolloutService {
         sourceMessageId: true,
       },
     });
+
     const reprompt = cycle.resultCode?.startsWith('REPROMPT:')
       ? cycle.resultCode
       : null;
+
     const confirmation = confirmations.find((candidate) => {
       return confirming
         ? this.confirmationSourceMatches(cycle, candidate.sourceMessageId)
@@ -1463,6 +1556,7 @@ export class ProfileAcquisitionInternalRolloutService {
             'REPROMPT:' + this.responseToken(candidate.sourceMessageId)
           : candidate.sourceMessageId === cycle.sourceMessageId;
     });
+
     const failedReprompts =
       !confirmation && reprompt
         ? await this.prisma.outboundMessage.findMany({
@@ -1476,11 +1570,13 @@ export class ProfileAcquisitionInternalRolloutService {
             select: { sourceMessageId: true },
           })
         : [];
+
     const failedReprompt = failedReprompts.find(
       (candidate) =>
         reprompt ===
         'REPROMPT:' + this.responseToken(candidate.sourceMessageId),
     );
+
     const contextualQuestion =
       confirmation ??
       (failedReprompt
@@ -1490,13 +1586,16 @@ export class ProfileAcquisitionInternalRolloutService {
               candidate.sentAt,
           )
         : null);
-    if (!contextualQuestion?.sentAt) return false;
+
+    if (!contextualQuestion?.sentAt) return 'NOT_CONTEXTUAL';
+
     if (message.replyToExternalMessageId) {
-      return (
-        message.replyToExternalMessageId ===
+      return message.replyToExternalMessageId ===
         contextualQuestion.externalMessageId
-      );
+        ? 'CONTEXTUAL'
+        : 'NOT_CONTEXTUAL';
     }
+
     const [newerOutbound, newerScheduled] = await Promise.all([
       this.prisma.outboundMessage.findFirst({
         where: {
@@ -1535,7 +1634,10 @@ export class ProfileAcquisitionInternalRolloutService {
         select: { id: true },
       }),
     ]);
-    return newerOutbound === null && newerScheduled === null;
+
+    return newerOutbound === null && newerScheduled === null
+      ? 'CONTEXTUAL'
+      : 'FENCED';
   }
 
   private async findCycleForOutbound(

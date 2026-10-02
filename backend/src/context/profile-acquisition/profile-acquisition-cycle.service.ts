@@ -77,6 +77,46 @@ export class ProfileAcquisitionCycleService {
   async prepare(
     command: ProfileAcquisitionCycleCommand,
   ): Promise<ProfileAcquisitionCycleResult> {
+    return this.prepareWithMode(command, Object.freeze({ kind: 'NORMAL' }));
+  }
+  async supersedeActiveAndPrepare(input: {
+    readonly expectedActiveCycleId: string;
+    readonly expectedActiveCycleUpdatedAt: Date;
+    readonly command: ProfileAcquisitionCycleCommand;
+  }): Promise<ProfileAcquisitionCycleResult> {
+    const expectedActiveCycleId = input.expectedActiveCycleId.trim();
+    const expectedActiveCycleUpdatedAt = input.expectedActiveCycleUpdatedAt;
+    if (
+      !expectedActiveCycleId ||
+      !(expectedActiveCycleUpdatedAt instanceof Date) ||
+      Number.isNaN(expectedActiveCycleUpdatedAt.getTime())
+    ) {
+      return this.result(
+        'REJECTED',
+        null,
+        null,
+        'INVALID_SUPERSESSION_COMMAND',
+      );
+    }
+    return this.prepareWithMode(
+      input.command,
+      Object.freeze({
+        kind: 'SUPERSEDE',
+        expectedActiveCycleId,
+        expectedActiveCycleUpdatedAt,
+      }),
+    );
+  }
+  private async prepareWithMode(
+    command: ProfileAcquisitionCycleCommand,
+    mode:
+      | Readonly<{ kind: 'NORMAL' }>
+      | Readonly<{
+          kind: 'SUPERSEDE';
+          expectedActiveCycleId: string;
+          expectedActiveCycleUpdatedAt: Date;
+        }>,
+  ): Promise<ProfileAcquisitionCycleResult> {
     if (
       this.operationalConfig.get().mode !== PROFILE_ACQUISITION_MODE.INTERNAL
     ) {
@@ -93,98 +133,15 @@ export class ProfileAcquisitionCycleService {
     ) {
       return this.result('REJECTED', null, null, 'INVALID_CYCLE_COMMAND');
     }
-
     try {
       return await this.prisma.$transaction(async (transaction) => {
-        const lockKey = 'profile-acquisition-cycle:' + command.userId;
-        await transaction.$queryRaw`
-          WITH advisory_lock AS (
-            SELECT pg_advisory_xact_lock(hashtext(${lockKey}))
-          )
-          SELECT true AS "locked"
-          FROM advisory_lock
-        `;
-        const duplicate =
-          await transaction.coachProfileAcquisitionCycle.findUnique({
-            where: { operationKey: command.operationKey },
-          });
-        if (duplicate) {
-          return this.result(
-            'DUPLICATE',
-            duplicate.id,
-            duplicate.status,
-            'DUPLICATE_OPERATION',
-          );
-        }
-        const active = await transaction.coachProfileAcquisitionCycle.findFirst(
-          {
-            where: { userId: command.userId, active: true },
-            orderBy: [{ referenceDate: 'desc' }, { id: 'desc' }],
-          },
-        );
-        let expiredPrevious = false;
-        if (active && active.expiresAt <= referenceDate) {
-          await transaction.coachProfileAcquisitionCycle.update({
-            where: { id: active.id },
-            data: {
-              active: false,
-              status: CoachProfileAcquisitionCycleStatus.EXPIRED,
-              completedAt: referenceDate,
-              resultCode: 'EXPIRED_WITHOUT_ANSWER',
-            },
-          });
-          expiredPrevious = true;
-        } else if (active) {
-          return this.result(
-            'QUESTION_ALREADY_ACTIVE',
-            active.id,
-            active.status,
-            'QUESTION_ALREADY_ACTIVE',
-          );
-        }
-        const cycle = await transaction.coachProfileAcquisitionCycle.create({
-          data: {
-            userId: command.userId,
-            field: command.specification.field,
-            status: CoachProfileAcquisitionCycleStatus.PENDING,
-            questionKind: command.specification.questionKind,
-            questionVersion: command.specification.version,
-            logicalTurn: command.logicalTurn,
-            origin: command.origin.slice(0, 100),
-            operationKey: command.operationKey,
-            active: true,
-            confirmationState:
-              command.specification.confirmationPolicy === 'EXPLICIT' ||
-              command.specification.confirmationPolicy === 'ALWAYS_EXPLICIT'
-                ? CoachProfileConfirmationState.PENDING
-                : CoachProfileConfirmationState.NOT_REQUIRED,
-            referenceDate,
-            expiresAt,
-            sourceMessageId: command.sourceMessageId,
-          },
-        });
-        await transaction.auditLog.create({
-          data: {
-            userId: command.userId,
-            action: 'PROFILE_ACQUISITION_CYCLE_PREPARED',
-            entityType: 'COACH_PROFILE_ACQUISITION_CYCLE',
-            entityId: cycle.id,
-            metadata: {
-              field: cycle.field,
-              state: cycle.status,
-              questionVersion: cycle.questionVersion,
-              operation: createHash('sha256')
-                .update(command.operationKey)
-                .digest('hex'),
-              result: expiredPrevious ? 'EXPIRED_PREVIOUS' : 'CREATED',
-            },
-          },
-        });
-        return this.result(
-          expiredPrevious ? 'EXPIRED_PREVIOUS' : 'CREATED',
-          cycle.id,
-          cycle.status,
-          expiredPrevious ? 'EXPIRED_PREVIOUS' : 'CYCLE_PREPARED',
+        await this.lock(transaction, command.userId);
+        return this.prepareWithinTransaction(
+          transaction,
+          command,
+          referenceDate,
+          expiresAt,
+          mode,
         );
       });
     } catch (error: unknown) {
@@ -197,7 +154,153 @@ export class ProfileAcquisitionCycleService {
       throw error;
     }
   }
-
+  private async prepareWithinTransaction(
+    transaction: Prisma.TransactionClient,
+    command: ProfileAcquisitionCycleCommand,
+    referenceDate: Date,
+    expiresAt: Date,
+    mode:
+      | Readonly<{ kind: 'NORMAL' }>
+      | Readonly<{
+          kind: 'SUPERSEDE';
+          expectedActiveCycleId: string;
+          expectedActiveCycleUpdatedAt: Date;
+        }>,
+  ): Promise<ProfileAcquisitionCycleResult> {
+    const duplicate =
+      await transaction.coachProfileAcquisitionCycle.findUnique({
+        where: { operationKey: command.operationKey },
+      });
+    if (duplicate) {
+      return this.result(
+        'DUPLICATE',
+        duplicate.id,
+        duplicate.status,
+        'DUPLICATE_OPERATION',
+      );
+    }
+    const active = await transaction.coachProfileAcquisitionCycle.findFirst({
+      where: { userId: command.userId, active: true },
+      orderBy: [{ referenceDate: 'desc' }, { id: 'desc' }],
+    });
+    let expiredPrevious = false;
+    let supersededPreviousId: string | null = null;
+    let supersededPreviousField: string | null = null;
+    if (active && active.expiresAt <= referenceDate) {
+      await transaction.coachProfileAcquisitionCycle.update({
+        where: { id: active.id },
+        data: {
+          active: false,
+          status: CoachProfileAcquisitionCycleStatus.EXPIRED,
+          completedAt: referenceDate,
+          resultCode: 'EXPIRED_WITHOUT_ANSWER',
+        },
+      });
+      expiredPrevious = true;
+    } else if (mode.kind === 'SUPERSEDE') {
+      if (
+        !active ||
+        active.id !== mode.expectedActiveCycleId ||
+        active.updatedAt.getTime() !==
+          mode.expectedActiveCycleUpdatedAt.getTime()
+      ) {
+        return this.result(
+          'QUESTION_ALREADY_ACTIVE',
+          active?.id ?? null,
+          active?.status ?? null,
+          'ACTIVE_CYCLE_CHANGED',
+        );
+      }
+      await transaction.coachProfileAcquisitionCycle.update({
+        where: { id: active.id },
+        data: {
+          active: false,
+          status: CoachProfileAcquisitionCycleStatus.CANCELLED,
+          completedAt: referenceDate,
+          resultCode: 'SUPERSEDED_BY_NEW_PRODUCTIVE_REQUEST',
+        },
+      });
+      supersededPreviousId = active.id;
+      supersededPreviousField = active.field;
+    } else if (active) {
+      return this.result(
+        'QUESTION_ALREADY_ACTIVE',
+        active.id,
+        active.status,
+        'QUESTION_ALREADY_ACTIVE',
+      );
+    }
+    const cycle = await transaction.coachProfileAcquisitionCycle.create({
+      data: {
+        userId: command.userId,
+        field: command.specification.field,
+        status: CoachProfileAcquisitionCycleStatus.PENDING,
+        questionKind: command.specification.questionKind,
+        questionVersion: command.specification.version,
+        logicalTurn: command.logicalTurn,
+        origin: command.origin.slice(0, 100),
+        operationKey: command.operationKey,
+        active: true,
+        confirmationState:
+          command.specification.confirmationPolicy === 'EXPLICIT' ||
+          command.specification.confirmationPolicy === 'ALWAYS_EXPLICIT'
+            ? CoachProfileConfirmationState.PENDING
+            : CoachProfileConfirmationState.NOT_REQUIRED,
+        referenceDate,
+        expiresAt,
+        sourceMessageId: command.sourceMessageId,
+      },
+    });
+    const preparationResult = supersededPreviousId
+      ? 'SUPERSEDED_PREVIOUS'
+      : expiredPrevious
+        ? 'EXPIRED_PREVIOUS'
+        : 'CREATED';
+    await transaction.auditLog.create({
+      data: {
+        userId: command.userId,
+        action: 'PROFILE_ACQUISITION_CYCLE_PREPARED',
+        entityType: 'COACH_PROFILE_ACQUISITION_CYCLE',
+        entityId: cycle.id,
+        metadata: {
+          field: cycle.field,
+          state: cycle.status,
+          questionVersion: cycle.questionVersion,
+          operation: createHash('sha256')
+            .update(command.operationKey)
+            .digest('hex'),
+          result: preparationResult,
+        },
+      },
+    });
+    if (supersededPreviousId && supersededPreviousField) {
+      await transaction.auditLog.create({
+        data: {
+          userId: command.userId,
+          action: 'PROFILE_ACQUISITION_CYCLE_SUPERSEDED',
+          entityType: 'COACH_PROFILE_ACQUISITION_CYCLE',
+          entityId: supersededPreviousId,
+          metadata: {
+            oldCycleId: supersededPreviousId,
+            oldField: supersededPreviousField,
+            reason: 'SUPERSEDED_BY_NEW_PRODUCTIVE_REQUEST',
+            newSourceMessageId: command.sourceMessageId ?? null,
+            newCycleId: cycle.id,
+          },
+        },
+      });
+    }
+    return this.result(
+      expiredPrevious ? 'EXPIRED_PREVIOUS' : 'CREATED',
+      cycle.id,
+      cycle.status,
+      supersededPreviousId
+        ? 'SUPERSEDED_PREVIOUS'
+        : expiredPrevious
+          ? 'EXPIRED_PREVIOUS'
+          : 'CYCLE_PREPARED',
+    );
+  }
   async markAsked(
     command: ProfileAcquisitionCycleAskedCommand,
   ): Promise<ProfileAcquisitionCycleAskedResult> {
