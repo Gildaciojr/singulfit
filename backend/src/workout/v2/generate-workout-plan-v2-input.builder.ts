@@ -115,7 +115,7 @@ export class GenerateWorkoutPlanV2InputBuilder {
     decision: ConversationGoalDecision | undefined,
     snapshot: CoachProfileSnapshot,
   ): ConversationGoalDecision {
-    if (decision?.goal === CONVERSATION_GOAL.GENERATE_WORKOUT_PLAN) {
+    if (decision) {
       return decision;
     }
     return Object.freeze({
@@ -125,11 +125,11 @@ export class GenerateWorkoutPlanV2InputBuilder {
       targetPlan: 'WORKOUT' as const,
       profileCompletionState: snapshot.completion.overall,
       canExecute: true,
-      confidence: decision?.confidence ?? ('HIGH' as const),
-      selectedProfileField: decision?.selectedProfileField ?? null,
-      metPreconditions: decision?.metPreconditions ?? Object.freeze([]),
-      missingPreconditions: decision?.missingPreconditions ?? Object.freeze([]),
-      pendingDependencies: decision?.pendingDependencies ?? Object.freeze([]),
+      confidence: 'HIGH' as const,
+      selectedProfileField: null,
+      metPreconditions: Object.freeze([]),
+      missingPreconditions: Object.freeze([]),
+      pendingDependencies: Object.freeze([]),
     });
   }
 

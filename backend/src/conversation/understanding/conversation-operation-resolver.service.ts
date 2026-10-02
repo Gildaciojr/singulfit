@@ -12,12 +12,26 @@ import { isFullPlanReplacementRequest } from './full-plan-replacement.policy';
 @Injectable()
 export class ConversationOperationResolverService {
   resolve(
-    input: ConversationUnderstandingInput,
+    input: Pick<ConversationUnderstandingInput, 'continuity'>,
     message: NormalizedConversationMessage,
   ): ConversationOperationResolution {
     const text = message.folded;
     const candidates: ConversationOperation[] = [];
     const fullReplacement = isFullPlanReplacementRequest(text);
+    const explicitWorkoutRequest =
+      /^(?:por favor\s+)?(?:eu\s+)?(?:quero|preciso(?: de)?|gostaria(?: de)?|monte|monta|crie|gere|refaca|refazer)\b/u.test(
+        text,
+      ) &&
+      /\b(treino|treinar|ficha|correr|caminhar|caminhada|crossfit|musculacao|aerobico|cardio|prova de \d+ km)\b/u.test(
+        text,
+      ) &&
+      (/\b(plano|treino|treinar|ficha|aerobico|cardio)\b/u.test(text) ||
+        /\b(?:quero|preciso(?: de)?|gostaria(?: de)?)\s+(?:comecar a\s+|fazer\s+)?(?:correr|caminhar|caminhada|crossfit|musculacao)\b/u.test(
+          text,
+        ) ||
+        /\bme preparar para uma prova de \d+ km\b/u.test(text)) &&
+      !message.question;
+    const explicitUpdate = this.explicitPersistentMutation(message);
     const add = (operation: ConversationOperation): void => {
       if (!candidates.includes(operation)) candidates.push(operation);
     };
@@ -30,9 +44,10 @@ export class ConversationOperationResolverService {
       /^(?:e\s+)?(?:hoje|amanha|segunda(?:-feira)?|terca(?:-feira)?|quarta(?:-feira)?|quinta(?:-feira)?|sexta(?:-feira)?|sabado|domingo)$/u.test(
         text,
       ) ||
-      /\b(plano atual|dieta atual|treino atual|mostr\w*|ver meu|qual e meu)\b/u.test(
-        text,
-      )
+      (!explicitUpdate &&
+        /\b(plano atual|dieta atual|treino atual|mostr\w*|ver meu|qual e meu)\b/u.test(
+          text,
+        ))
     ) {
       add(CONVERSATION_OPERATION.PRESENT_CURRENT_PLAN);
     }
@@ -51,15 +66,16 @@ export class ConversationOperationResolverService {
     }
     if (
       !fullReplacement &&
-      /\b(atualiz\w*|ajust\w*|alter\w*|mud\w*|melhor\w*|faz outro|faca outro|quero diferente)\b/u.test(
+      /\b(atualiz\w*|ajust\w*|adapt\w*|alter\w*|mud\w*|melhor\w*|faz outro|faca outro|quero diferente)\b/u.test(
         text,
       )
     ) {
-      add(
-        this.explicitPersistentMutation(message)
-          ? CONVERSATION_OPERATION.UPDATE_PLAN
-          : CONVERSATION_OPERATION.PROVIDE_GUIDANCE,
-      );
+      if (!explicitWorkoutRequest || explicitUpdate)
+        add(
+          this.explicitPersistentMutation(message)
+            ? CONVERSATION_OPERATION.UPDATE_PLAN
+            : CONVERSATION_OPERATION.PROVIDE_GUIDANCE,
+        );
     }
     if (/\b(revis\w*|progresso|evolucao|comparar|compare)\b/u.test(text)) {
       add(CONVERSATION_OPERATION.REVIEW_PROGRESS);
@@ -73,13 +89,16 @@ export class ConversationOperationResolverService {
       add(CONVERSATION_OPERATION.PROVIDE_GUIDANCE);
     }
     if (
+      !/\b(?:nao|nunca)\s+(?:quero|preciso)\b/u.test(text) &&
       (fullReplacement ||
+        explicitWorkoutRequest ||
         /\b(ger\w*|cri\w*|mont\w*|elabor\w*|quero|preciso|faca|faz)\b/u.test(
           text,
         )) &&
       !candidates.includes(CONVERSATION_OPERATION.UPDATE_PLAN) &&
       !candidates.includes(CONVERSATION_OPERATION.SUBSTITUTE_ITEM) &&
-      /\b(plano|dieta|treino|cardapio|alimentacao)\b/u.test(text)
+      (explicitWorkoutRequest ||
+        /\b(plano|dieta|treino|cardapio|alimentacao|ficha)\b/u.test(text))
     ) {
       add(CONVERSATION_OPERATION.GENERATE_PLAN);
     }
@@ -121,7 +140,7 @@ export class ConversationOperationResolverService {
   ): boolean {
     if (message.question) return false;
     return (
-      /^(?:(?:eu\s+)?quero\s+que\s+voce\s+)?(?:tro(?:ca|que)|substitu(?:a|e)|atualize|ajuste|altere|mude|melhore|fa(?:ca|z)\s+outro)\b/u.test(
+      /^(?:(?:eu\s+)?quero\s+(?:que\s+voce\s+)?)?(?:tro(?:ca|que|car)|substitu(?:a|e|ir)|adapt(?:e|ar)|atualiz(?:e|ar)|ajust(?:e|ar)|altere|mude|melhore|fa(?:ca|z)\s+outro)\b/u.test(
         message.folded,
       ) ||
       /\b(?:no meu plano|na minha dieta|daqui para frente|permanentemente|definitivamente)\b/u.test(

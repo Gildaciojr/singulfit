@@ -14,7 +14,7 @@ import type {
 @Injectable()
 export class ConversationIntentResolverService {
   resolve(
-    input: ConversationUnderstandingInput,
+    input: Pick<ConversationUnderstandingInput, 'continuity'>,
     operation: ConversationOperationResolution,
     domain: ConversationDomainResolution,
   ): ConversationIntentResolution {

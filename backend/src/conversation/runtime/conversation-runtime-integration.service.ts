@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { ConversationGoalDecision } from '../../context/conversation-goal-planner.contract';
 import type {
   ConversationBridgeResult,
   ConversationOfficialSelection,
@@ -55,6 +56,7 @@ export type ConversationRuntimePreExecutionDecision =
   | Readonly<{
       source: 'PLANNING_HANDOFF';
       reason: 'SIDE_EFFECT_ROUTE_REQUIRES_SINGLE_EXECUTION';
+      planningDecision: ConversationGoalDecision;
     }>
   | Readonly<{
       source: 'PLANNING_HANDOFF';
@@ -186,9 +188,18 @@ export class ConversationRuntimeIntegrationService {
           profileAcquisition,
         });
       }
+      const planningDecision = evaluation.decision?.goalDecision;
+      if (
+        !planningDecision ||
+        planningDecision.recognizedIntent === 'UNKNOWN' ||
+        !planningDecision.targetPlan
+      ) {
+        return this.safeFailure('BRIDGE_FAILURE');
+      }
       return Object.freeze({
         source: 'PLANNING_HANDOFF' as const,
         reason: 'SIDE_EFFECT_ROUTE_REQUIRES_SINGLE_EXECUTION' as const,
+        planningDecision,
       });
     }
     const failureReason = evaluation.summary.ambiguityPresent

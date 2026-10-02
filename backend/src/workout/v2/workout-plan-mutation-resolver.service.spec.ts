@@ -118,6 +118,23 @@ describe('WorkoutPlanMutationResolverService', () => {
     },
   );
 
+  it.each(['Quero começar a correr 5 km', 'Quero começar a correr 10 km'])(
+    'allows a first running plan without a current plan: %s',
+    async (message) => {
+      const subject = setup(null);
+      await expect(
+        subject.resolver.resolve('user-id', message, {}),
+      ).resolves.toEqual({ status: 'NOT_A_MUTATION' });
+    },
+  );
+
+  it('keeps a vague adaptation in clarification', async () => {
+    const subject = setup();
+    await expect(
+      subject.resolver.resolve('user-id', 'Quero adaptar meu treino atual', {}),
+    ).resolves.toMatchObject({ status: 'CLARIFICATION' });
+  });
+
   it('distinguishes an ambiguous running statement from an explicit adaptation', async () => {
     const { resolver } = setup();
     await expect(

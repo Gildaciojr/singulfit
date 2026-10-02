@@ -3,6 +3,7 @@ import {
   Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { canGenerateWorkout } from '../workout/v2/workout-generation-authorization.policy';
 import {
   CONVERSATION_GOAL,
   type ConversationGoalDecision,
@@ -40,6 +41,7 @@ export interface CoachPlanningExecutionDispatchInput {
   readonly currentMessage?: string;
   readonly referenceDate?: Date;
   readonly workoutV2Response?: string;
+  readonly workoutMutationReady?: boolean;
   readonly nutritionV2?: {
     readonly generationInput: GenerateNutritionPlanV2Input;
     readonly profileId: string;
@@ -97,6 +99,8 @@ export class CoachPlanningExecutionDispatcherService {
     }
 
     if (input.decision.goal === CONVERSATION_GOAL.GENERATE_COMBINED_PLANS) {
+      if (!canGenerateWorkout(input.decision))
+        return this.noLegacyGeneration(input.legacyIntent);
       return this.generateCombinedV2(input);
     }
 
@@ -115,13 +119,16 @@ export class CoachPlanningExecutionDispatcherService {
       ) {
         return this.readCurrentWorkout(input);
       }
-      return this.generateWorkoutV2(input);
+      if (canGenerateWorkout(input.decision, input.workoutMutationReady))
+        return this.generateWorkoutV2(input);
     }
 
     switch (input.decision.goal) {
       case CONVERSATION_GOAL.GENERATE_DIET_PLAN:
         return this.generateDietV2(input);
       case CONVERSATION_GOAL.GENERATE_WORKOUT_PLAN:
+        if (!canGenerateWorkout(input.decision))
+          return this.noLegacyGeneration(input.legacyIntent);
         return this.generateWorkoutV2(input);
       case CONVERSATION_GOAL.ANSWER_MESSAGE:
         return this.noLegacyGeneration(input.legacyIntent);
@@ -224,7 +231,11 @@ export class CoachPlanningExecutionDispatcherService {
   private async generateCombinedV2(
     input: CoachPlanningExecutionDispatchInput,
   ): Promise<CoachPlanningDispatchResult> {
-    if (!input.workoutV2 || !this.workoutV2Executor) {
+    if (
+      !input.workoutV2 ||
+      !this.workoutV2Executor ||
+      !this.workoutV2Formatter
+    ) {
       throw new ServiceUnavailableException(
         'Rota Workout V2 selecionada sem infraestrutura executável',
       );
@@ -323,7 +334,13 @@ export class CoachPlanningExecutionDispatcherService {
   private async generateWorkoutV2(
     input: CoachPlanningExecutionDispatchInput,
   ): Promise<CoachPlanningDispatchResult> {
-    if (!input.workoutV2 || !this.workoutV2Executor) {
+    if (!canGenerateWorkout(input.decision, input.workoutMutationReady))
+      return this.noLegacyGeneration(input.legacyIntent);
+    if (
+      !input.workoutV2 ||
+      !this.workoutV2Executor ||
+      !this.workoutV2Formatter
+    ) {
       throw new ServiceUnavailableException(
         'Rota Workout V2 selecionada sem infraestrutura executável',
       );
@@ -356,11 +373,6 @@ export class CoachPlanningExecutionDispatcherService {
         'WORKOUT_V2',
         false,
         'BLOCKED',
-      );
-    }
-    if (!this.workoutV2Formatter) {
-      throw new ServiceUnavailableException(
-        'Formatter Workout V2 indisponível',
       );
     }
     const content = this.workoutV2Formatter

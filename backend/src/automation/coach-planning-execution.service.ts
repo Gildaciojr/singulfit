@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { canGenerateWorkout } from '../workout/v2/workout-generation-authorization.policy';
 import { productiveWorkoutProfileFacts } from '../context/profile-acquisition/productive-profile-facts';
 import { type NutritionArtifactType } from '@prisma/client';
 import { performance } from 'node:perf_hooks';
@@ -80,6 +81,7 @@ import { UsageLimitExceededException } from '../entitlements/usage-limit.excepti
 import { isWorkoutCurrentPlanRead } from '../workout/v2/workout-current-plan-read.policy';
 
 export interface CoachPlanningRuntimeContext {
+  readonly planningDecision?: ConversationGoalDecision;
   readonly originalRequestMessageId?: string;
   readonly conversationId: string;
   readonly messageId: string;
@@ -102,6 +104,7 @@ interface PreparedV2PlanningContext {
   readonly workoutGenerationInput: GenerateWorkoutPlanV2Input | null;
   readonly workoutProfileId: string | null;
   readonly workoutMutation: boolean;
+  readonly workoutMutationReady: boolean;
   readonly workoutV2Response: string | null;
   readonly profileAcquisitionContext: ProfileAcquisitionConversationContext;
 }
@@ -261,6 +264,7 @@ export class CoachPlanningExecutionService {
         currentMessage: runtime?.currentMessage,
         referenceDate: runtime?.referenceDate,
         workoutV2Response: preparation?.workoutV2Response ?? undefined,
+        workoutMutationReady: preparation?.workoutMutationReady ?? false,
         nutritionV2:
           routeSelection.nutrition === 'V2' &&
           preparation?.generationInput &&
@@ -713,7 +717,14 @@ export class CoachPlanningExecutionService {
       this.withCurrentDesiredOutcome(canonicalSnapshot, goalResolution),
       runtime?.pendingGoalConfirmation,
     );
-    const legacyAdaptation = this.intentAdapter.adapt(intent);
+    const baseAdaptation = this.intentAdapter.adapt(intent);
+    const legacyAdaptation = runtime?.planningDecision
+      ? Object.freeze({
+          ...baseAdaptation,
+          recognizedIntent: runtime.planningDecision.recognizedIntent,
+          planTarget: runtime.planningDecision.targetPlan,
+        })
+      : baseAdaptation;
     const readRequested = this.workoutReadRequested(
       intent,
       runtime?.currentMessage,
@@ -728,7 +739,11 @@ export class CoachPlanningExecutionService {
     let mutation: WorkoutPlanMutationResolution = Object.freeze({
       status: 'NOT_A_MUTATION' as const,
     });
-    if (this.workoutMutationRequested(intent, runtime?.currentMessage)) {
+    if (
+      legacyAdaptation.recognizedIntent ===
+        CONVERSATION_RECOGNIZED_INTENT.WORKOUT_PLAN_UPDATE_REQUEST ||
+      this.workoutMutationRequested(intent, runtime?.currentMessage)
+    ) {
       mutation = this.workoutMutationResolver
         ? await this.workoutMutationResolver.resolve(
             userId,
@@ -814,6 +829,7 @@ export class CoachPlanningExecutionService {
     const builtInput = this.nutritionPlanningInputBuilder?.build(source);
     const builtWorkoutInput =
       (intent === 'WORKOUT' || intent === 'BOTH') &&
+      canGenerateWorkout(decision, mutation.status === 'READY') &&
       adaptation.recognizedIntent !==
         CONVERSATION_RECOGNIZED_INTENT.CURRENT_PLAN_REQUEST &&
       !workoutV2Response &&
@@ -840,6 +856,7 @@ export class CoachPlanningExecutionService {
       workoutGenerationInput: builtWorkoutInput?.generationInput ?? null,
       workoutProfileId: builtWorkoutInput?.profileId ?? null,
       workoutMutation: mutation.status !== 'NOT_A_MUTATION',
+      workoutMutationReady: mutation.status === 'READY',
       workoutV2Response,
       profileAcquisitionContext,
     });
@@ -862,7 +879,7 @@ export class CoachPlanningExecutionService {
       .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase();
     if (/\bnovo plano\b/u.test(normalized)) return false;
-    return /\b(troque|trocar|substitua|substituir|nao posso fazer|nao tenho|sem essa maquina|agora|adapte|adapta|ajuste|ajusta|inclua|incluir|so tenho|so vou treinar|vou treinar so|focar mais|vou comecar a correr|quero comecar a correr)\b/u.test(
+    return /\b(troque|trocar|substitua|substituir|nao posso fazer|nao tenho|sem essa maquina|agora|adapte|adapta|adaptar|ajuste|ajusta|inclua|incluir|so tenho|so vou treinar|vou treinar so|focar mais|vou comecar a correr|quero comecar a correr)\b/u.test(
       normalized,
     );
   }

@@ -1,4 +1,6 @@
 import { Injectable, Optional } from '@nestjs/common';
+import { explicitPlanningIntent } from '../conversation/understanding/explicit-planning-intent';
+import type { ConversationGoalDecision } from '../context/conversation-goal-planner.contract';
 import { CoachPlanningExecutionService } from './coach-planning-execution.service';
 import {
   CoachMessageType,
@@ -191,7 +193,7 @@ export class CoachCommandService {
       text: message.content,
       receivedAt: message.timestamp,
     });
-    const intent =
+    let intent =
       pending.status === 'ACTIONABLE'
         ? pending.context.originalIntent
         : pending.status === 'COMPLETED'
@@ -260,6 +262,19 @@ export class CoachCommandService {
           legacyIntent: intent,
           ...(input.proactiveReply ? { proactiveReply: true } : {}),
         });
+    if (
+      runtimeDecision.source === 'PLANNING_HANDOFF' &&
+      runtimeDecision.reason ===
+        'SIDE_EFFECT_ROUTE_REQUIRES_SINGLE_EXECUTION' &&
+      runtimeDecision.planningDecision?.targetPlan
+    ) {
+      intent = runtimeDecision.planningDecision.targetPlan;
+    } else if (
+      runtimeDecision.source === 'PLANNING_HANDOFF' &&
+      runtimeDecision.reason === 'PROFILE_ACQUISITION_REQUIRES_SINGLE_EXECUTION'
+    ) {
+      intent = runtimeDecision.profileAcquisition.executionRoute.targetPlan;
+    }
     const planningResult =
       pending.status === 'COMPLETED'
         ? { content: pending.content, responseRequired: true }
@@ -281,6 +296,7 @@ export class CoachCommandService {
                 : await this.executePlanning({
                     userId: input.userId,
                     intent,
+                    planningDecision: runtimeDecision.planningDecision,
                     conversationId: message.conversation.id,
                     messageId: message.id,
                     text: commandText,
@@ -422,6 +438,7 @@ export class CoachCommandService {
     readonly pendingGoalConfirmation?: PendingGoalConfirmationContext;
     readonly suppressCurrentGoalResolution: boolean;
     readonly originalRequestMessageId?: string;
+    readonly planningDecision?: ConversationGoalDecision;
   }): Promise<{
     readonly content: string;
     readonly responseRequired: boolean;
@@ -429,6 +446,7 @@ export class CoachCommandService {
     readonly workoutDisposition?: 'PLAN' | 'CLARIFICATION' | 'BLOCKED';
   }> {
     const runtime = {
+      planningDecision: input.planningDecision,
       conversationId: input.conversationId,
       messageId: input.messageId,
       correlationId: input.messageId,
@@ -555,14 +573,16 @@ export class CoachCommandService {
               originalRequestMessageId: input.originalRequestMessageId,
               preselectedQuestion,
             })
-          : await this.profileAcquisitionRollout.requestProductiveClarification({
-              userId: input.userId,
-              sourceMessageId: input.messageId,
-              referenceDate: input.referenceDate,
-              originalRequestMessageId: input.originalRequestMessageId,
-              intent: targetPlan,
-              preselectedQuestion,
-            });
+          : await this.profileAcquisitionRollout.requestProductiveClarification(
+              {
+                userId: input.userId,
+                sourceMessageId: input.messageId,
+                referenceDate: input.referenceDate,
+                originalRequestMessageId: input.originalRequestMessageId,
+                intent: targetPlan,
+                preselectedQuestion,
+              },
+            );
       if (
         clarification.questionCreated ||
         clarification.reason === 'QUESTION_ALREADY_ACTIVE'
@@ -652,6 +672,18 @@ export class CoachCommandService {
   }
 
   classify(text: string): CoachCommandIntent {
+    const recognized = explicitPlanningIntent(text);
+    if (
+      recognized === 'WORKOUT_PLAN_REQUEST' ||
+      recognized === 'WORKOUT_PLAN_UPDATE_REQUEST'
+    )
+      return 'WORKOUT';
+    if (
+      recognized === 'DIET_PLAN_REQUEST' ||
+      recognized === 'DIET_PLAN_UPDATE_REQUEST'
+    )
+      return 'DIET';
+    if (recognized === 'COMBINED_PLAN_REQUEST') return 'BOTH';
     const normalized = this.normalize(text);
     const wantsDiet =
       this.includesAny(normalized, [
@@ -663,29 +695,6 @@ export class CoachCommandService {
         'alimentacao',
         'me ajuda com alimentacao',
       ]) || /\b(?:outra|nova) dieta\b/u.test(normalized);
-    const wantsWorkout =
-      this.includesAny(normalized, [
-        'quero treino',
-        'monte meu treino',
-        'monta meu treino',
-        'plano de treino',
-        'treino para mim',
-        'treino pra mim',
-        'academia',
-        'quero treinar',
-        'quero correr',
-        'comecar a correr',
-        'corrida',
-        'ja corro',
-        'crossfit',
-        'musculacao',
-        'treino funcional',
-        'cardio',
-        'aerobico',
-        'calistenia',
-      ]) ||
-      /\bprova de \d+ km\b/u.test(normalized) ||
-      /\b(?:outro|novo) (?:plano de )?treino\b/u.test(normalized);
     const wantsBoth = this.includesAny(normalized, [
       'quero os dois',
       'dieta e treino',
@@ -695,16 +704,12 @@ export class CoachCommandService {
       'treino e alimentacao',
     ]);
 
-    if (wantsBoth || (wantsDiet && wantsWorkout)) {
+    if (wantsBoth) {
       return 'BOTH';
     }
 
     if (wantsDiet) {
       return 'DIET';
-    }
-
-    if (wantsWorkout) {
-      return 'WORKOUT';
     }
 
     return 'UNKNOWN';

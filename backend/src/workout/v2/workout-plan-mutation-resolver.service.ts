@@ -35,7 +35,7 @@ export class WorkoutPlanMutationResolverService {
     if (!kind) return Object.freeze({ status: 'NOT_A_MUTATION' });
     const current = await this.reader.read(userId);
     if (current.status !== 'AVAILABLE') {
-      if (kind === 'SUBSTITUTION_CANDIDATE') {
+      if (kind === 'SUBSTITUTION_CANDIDATE' || kind === 'AMBIGUOUS_MODALITY') {
         return Object.freeze({ status: 'NOT_A_MUTATION' });
       }
       return Object.freeze({
@@ -147,10 +147,10 @@ export class WorkoutPlanMutationResolverService {
     }
     if (/\bnao tenho\b/u.test(text)) return 'SUBSTITUTION_CANDIDATE';
     if (
-      /\b(agora|adapte|adapta|ajuste|ajusta|inclua|incluir|so tenho|so vou treinar|vou treinar so|focar mais)\b/u.test(
+      /\b(agora|adapte|adapta|adaptar|ajuste|ajusta|inclua|incluir|so tenho|so vou treinar|vou treinar so|focar mais)\b/u.test(
         text,
       ) &&
-      /\b(minutos?|vezes?|dias?|semana|foco|focar|peito|costas|pernas?|corrida|correr|modalidade)\b/u.test(
+      /\b(minutos?|vezes?|dias?|semana|foco|focar|peito|costas|pernas?|corrida|correr|modalidade|treino|plano)\b/u.test(
         text,
       )
     ) {

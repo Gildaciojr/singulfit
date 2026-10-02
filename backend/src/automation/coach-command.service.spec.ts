@@ -3,7 +3,22 @@ import { AIJobStatus, AIJobType } from '@prisma/client';
 import { AIService } from '../ai/ai.service';
 import { ConversationModule } from '../conversation/conversation.module';
 import { CoachConversationHumanContextBuilder } from '../context/coach-conversation-human-context.builder';
-import { goalPreparationInput } from '../conversation/tests/conversation-routing.fixtures';
+import {
+  goalPreparationInput,
+  goalDecision,
+  routingSnapshot,
+  readyAdaptiveDecision,
+} from '../conversation/tests/conversation-routing.fixtures';
+import { LegacyCoachIntentAdapter } from './legacy-coach-intent.adapter';
+import { ConversationGoalPlannerService } from '../context/conversation-goal-planner.service';
+import { PlanningExecutionRoutePolicyService } from './planning-execution-route-policy.service';
+import { GenerateWorkoutPlanV2InputBuilder } from '../workout/v2/generate-workout-plan-v2-input.builder';
+import { WorkoutPlanMutationResolverService } from '../workout/v2/workout-plan-mutation-resolver.service';
+import type { CoachProfileSnapshotBuilder } from '../context/coach-profile-snapshot.builder';
+import type { CoachAdaptiveProfileCollectorService } from '../context/coach-adaptive-profile-collector.service';
+import type { WorkoutApplicationExecutorService } from '../workout/v2/execution/workout-application-executor.service';
+import type { WorkoutPlanV2Formatter } from '../workout/v2/workout-plan-v2.formatter';
+import type { CurrentWorkoutPlanReaderService } from '../workout/v2/current-workout-plan-reader.service';
 import { understandingInput } from '../conversation/tests/conversation-understanding.fixtures';
 import type { ConversationRuntimeInput } from '../conversation/contracts/conversation-runtime.contract';
 import { ConversationRuntimeService } from '../conversation/runtime/conversation-runtime.service';
@@ -139,6 +154,9 @@ describe('CoachCommandService', () => {
     runtimeFailure?: Error;
     runtimeLegacy?: boolean;
     runtimeHandoff?: boolean;
+    controlledPlanning?: boolean;
+    controlledProfileReady?: boolean;
+    runtimePlanningDecision?: import('../context/conversation-goal-planner.contract').ConversationGoalDecision;
     runtimeProfileAcquisitionHandoff?: boolean;
     planningConversationContent?: string;
     workoutClarification?: boolean;
@@ -190,6 +208,9 @@ describe('CoachCommandService', () => {
             id: 'conversation-id',
             user: {
               onboardingCompleted: options?.onboardingCompleted ?? true,
+              ...(options?.controlledPlanning
+                ? { fitnessProfile: { id: 'profile-id' } }
+                : {}),
             },
           },
         }),
@@ -297,29 +318,109 @@ describe('CoachCommandService', () => {
               },
             })
           : options?.runtimeHandoff
-          ? jest.fn().mockResolvedValue({
-              source: 'PLANNING_HANDOFF',
-              reason: 'SIDE_EFFECT_ROUTE_REQUIRES_SINGLE_EXECUTION',
-            })
-          : jest.fn().mockResolvedValue({
-              source: options?.runtimeContent
-                ? 'CONVERSATION_RUNTIME'
-                : 'LEGACY',
-              reason: options?.runtimeContent
-                ? 'RUNTIME_SELECTED'
-                : 'RUNTIME_DISABLED',
-              ...(options?.runtimeContent
-                ? { content: options.runtimeContent }
-                : {}),
-            }),
+            ? jest.fn().mockResolvedValue({
+                source: 'PLANNING_HANDOFF',
+                reason: 'SIDE_EFFECT_ROUTE_REQUIRES_SINGLE_EXECUTION',
+                planningDecision: options.runtimePlanningDecision,
+              })
+            : jest.fn().mockResolvedValue({
+                source: options?.runtimeContent
+                  ? 'CONVERSATION_RUNTIME'
+                  : 'LEGACY',
+                reason: options?.runtimeContent
+                  ? 'RUNTIME_SELECTED'
+                  : 'RUNTIME_DISABLED',
+                ...(options?.runtimeContent
+                  ? { content: options.runtimeContent }
+                  : {}),
+              }),
+    };
+    const controlledWorkoutExecutor = {
+      execute: jest.fn().mockResolvedValue({
+        kind: 'PLAN',
+        document: {},
+        aiJobCompleted: true,
+      }),
+    };
+    const controlledWorkoutReader = {
+      read: jest.fn().mockResolvedValue({ status: 'NO_PLAN', plan: null }),
+      present: jest.fn().mockResolvedValue('Plano atual controlado'),
+    };
+    const controlledSnapshotBuilder = {
+      build: jest.fn().mockResolvedValue(routingSnapshot()),
     };
     const planningDispatcher = new CoachPlanningExecutionDispatcherService(
       dietGenerator as unknown as DietGeneratorService,
       workoutGenerator as unknown as WorkoutGeneratorService,
       bothExecutor as unknown as CoachPlanningBothApplicationExecutorService,
+      undefined,
+      undefined,
+      options?.controlledPlanning
+        ? (controlledWorkoutExecutor as unknown as WorkoutApplicationExecutorService)
+        : undefined,
+      options?.controlledPlanning
+        ? ({
+            format: () => ['Treino V2 controlado'],
+          } as unknown as WorkoutPlanV2Formatter)
+        : undefined,
+      options?.controlledPlanning
+        ? (controlledWorkoutReader as unknown as CurrentWorkoutPlanReaderService)
+        : undefined,
     );
     const planningExecution = new CoachPlanningExecutionService(
       planningDispatcher,
+      options?.controlledPlanning
+        ? (controlledSnapshotBuilder as unknown as CoachProfileSnapshotBuilder)
+        : undefined,
+      options?.controlledPlanning ? new LegacyCoachIntentAdapter() : undefined,
+      options?.controlledPlanning
+        ? ({
+            decide: () =>
+              options.controlledProfileReady === false
+                ? {
+                    ...readyAdaptiveDecision(),
+                    readiness: [
+                      {
+                        plan: 'WORKOUT',
+                        ready: false,
+                        blockingFields: ['TRAINING_EXPERIENCE'],
+                      },
+                    ],
+                  }
+                : readyAdaptiveDecision(),
+          } as unknown as CoachAdaptiveProfileCollectorService)
+        : undefined,
+      options?.controlledPlanning
+        ? new ConversationGoalPlannerService()
+        : undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      options?.controlledPlanning
+        ? new PlanningExecutionRoutePolicyService({
+            evaluate: () => ({ status: 'DISABLED', eligible: false }),
+          } as never)
+        : undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      options?.controlledPlanning
+        ? new GenerateWorkoutPlanV2InputBuilder(
+            controlledSnapshotBuilder as unknown as CoachProfileSnapshotBuilder,
+            prisma as unknown as PrismaService,
+          )
+        : undefined,
+      options?.controlledPlanning
+        ? new WorkoutPlanMutationResolverService(
+            controlledWorkoutReader as unknown as CurrentWorkoutPlanReaderService,
+          )
+        : undefined,
     );
     const planningConversationResponse = {
       select: jest
@@ -396,6 +497,8 @@ describe('CoachCommandService', () => {
       transaction,
       planningDispatcher,
       planningExecution,
+      controlledWorkoutExecutor,
+      controlledWorkoutReader,
       dietGenerator,
       workoutGenerator,
       eventBus,
@@ -504,6 +607,83 @@ describe('CoachCommandService', () => {
   }
 
   it.each([
+    ['A', 'Quero treinar na academia', 'WORKOUT', 1],
+    ['B', 'Quero um treino em casa', 'WORKOUT', 1],
+    ['C', 'Quero fazer Crossfit', 'WORKOUT', 1],
+    ['D', 'Quero começar a correr 5 km', 'WORKOUT', 1],
+    ['E', 'Quero um plano para correr 10 km', 'WORKOUT', 1],
+    ['F', 'Quero caminhar 4 vezes por semana', 'WORKOUT', 1],
+    ['G', 'Quero melhorar meu condicionamento com treino', 'WORKOUT', 1],
+    ['H', 'Troque supino por outro exercício', 'WORKOUT', 0],
+    ['I', 'Refaça meu treino', 'WORKOUT', 1],
+    ['J', 'Qual é meu treino atual?', 'UNKNOWN', 0],
+    ['K', 'Qual é meu treino de hoje?', 'UNKNOWN', 0],
+    ['M', 'Olá, como vai?', 'UNKNOWN', 0],
+  ] as const)(
+    'controlled public chain %s: %s',
+    async (_row, content, intent, executions) => {
+      const subject = createSubject({ content, controlledPlanning: true });
+      expect(subject.service.classify(content)).toBe(intent);
+      const planning = jest.spyOn(
+        subject.planningExecution,
+        'executeStructured',
+      );
+      await subject.service.processTextMessage({
+        userId: 'user-id',
+        messageId: 'message-id',
+      });
+      expect(subject.controlledWorkoutExecutor.execute).toHaveBeenCalledTimes(
+        executions,
+      );
+      const planned = await planning.mock.results[0].value;
+      if (executions) {
+        expect(planned.decision).toMatchObject({
+          goal: 'GENERATE_WORKOUT_PLAN',
+          targetPlan: 'WORKOUT',
+          canExecute: true,
+        });
+        expect(planned.dispatch.executor).toBe('WORKOUT_V2');
+      }
+      if (_row === 'H')
+        expect(planned.dispatch.workoutDisposition).toBe('CLARIFICATION');
+      if (_row === 'H')
+        expect(subject.controlledWorkoutReader.read).toHaveBeenCalledWith(
+          'user-id',
+        );
+      if (_row === 'J' || _row === 'K')
+        expect(subject.controlledWorkoutReader.present).toHaveBeenCalledTimes(
+          1,
+        );
+      expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+      expect(subject.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
+      expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+    },
+  );
+
+  it('fails the controlled public V2 chain closed without invoking Legacy', async () => {
+    const subject = createSubject({
+      content: 'Quero um plano para correr 10 km',
+      controlledPlanning: true,
+    });
+    subject.controlledWorkoutExecutor.execute.mockRejectedValueOnce(
+      new Error('controlled provider failure'),
+    );
+    const planning = jest.spyOn(subject.planningExecution, 'executeStructured');
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+    const planned = await planning.mock.results[0].value;
+    expect(planned.dispatch).toMatchObject({
+      executor: 'FAILURE_FALLBACK',
+      generationCompleted: false,
+    });
+    expect(subject.controlledWorkoutExecutor.execute).toHaveBeenCalledTimes(1);
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
+  });
+
+  it.each([
     ['quero uma dieta', 'DIET'],
     ['Me ajuda com alimentação', 'DIET'],
     ['monte meu treino', 'WORKOUT'],
@@ -515,6 +695,22 @@ describe('CoachCommandService', () => {
     ['quero os dois', 'BOTH'],
     ['dieta e treino', 'BOTH'],
     ['olá', 'UNKNOWN'],
+    ['Quero um plano para correr 10 km', 'WORKOUT'],
+    ['Quero começar a correr 5 km', 'WORKOUT'],
+    ['Quero caminhar 4 vezes por semana', 'WORKOUT'],
+    ['Quero um plano de caminhada', 'WORKOUT'],
+    ['Quero melhorar meu condicionamento com treino', 'WORKOUT'],
+    ['Refaça meu treino', 'WORKOUT'],
+    ['Quero um treino novo', 'WORKOUT'],
+    ['Monte novamente minha ficha', 'WORKOUT'],
+    ['Quero trocar um exercício do meu treino atual', 'WORKOUT'],
+    ['Troque supino por outro exercício', 'WORKOUT'],
+    ['Quero adaptar meu treino atual', 'WORKOUT'],
+    ['Quero melhorar meu condicionamento', 'UNKNOWN'],
+    ['Como funciona a academia?', 'UNKNOWN'],
+    ['Hoje caminhei 4 km', 'UNKNOWN'],
+    ['Quero comprar tênis para correr', 'UNKNOWN'],
+    ['Não quero treino', 'UNKNOWN'],
   ] as const)('classifies "%s" as %s', (text, intent) => {
     const subject = createSubject();
 
@@ -1612,6 +1808,90 @@ describe('CoachCommandService', () => {
         }),
       }),
     );
+  });
+
+  it.each([
+    ['WORKOUT', 'WORKOUT_PLAN_REQUEST', 'GENERATE_WORKOUT_PLAN'],
+    ['DIET', 'DIET_PLAN_REQUEST', 'GENERATE_DIET_PLAN'],
+    ['BOTH', 'COMBINED_PLAN_REQUEST', 'GENERATE_COMBINED_PLANS'],
+  ] as const)(
+    'preserves canonical %s handoff after an UNKNOWN entry',
+    async (targetPlan, recognizedIntent, goal) => {
+      const planningDecision = goalDecision(goal, recognizedIntent, {
+        targetPlan,
+      });
+      const subject = createSubject({
+        content: 'prepare conforme combinamos',
+        runtimeHandoff: true,
+        runtimePlanningDecision: planningDecision,
+        controlledPlanning: true,
+      });
+      expect(subject.service.classify('prepare conforme combinamos')).toBe(
+        'UNKNOWN',
+      );
+      const planning = jest.spyOn(
+        subject.planningExecution,
+        'executeStructured',
+      );
+      const result = await subject.service.processTextMessage({
+        userId: 'user-id',
+        messageId: 'message-id',
+      });
+      expect(planning).toHaveBeenCalledWith(
+        'user-id',
+        targetPlan,
+        expect.objectContaining({ planningDecision }),
+      );
+      expect(result.intent).toBe(targetPlan);
+      expect(subject.prisma.coachMessage.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            context: expect.objectContaining({ intent: targetPlan }),
+          }),
+        }),
+      );
+      expect(planning).toHaveBeenCalledTimes(1);
+      const planned = await planning.mock.results[0].value;
+      expect(planned.decision).toMatchObject({
+        recognizedIntent,
+        targetPlan,
+        goal,
+      });
+      if (targetPlan === 'WORKOUT') {
+        expect(planned.dispatch.executor).toBe('WORKOUT_V2');
+        expect(subject.controlledWorkoutExecutor.execute).toHaveBeenCalledTimes(
+          1,
+        );
+      }
+    },
+  );
+
+  it('keeps a canonical UNKNOWN-to-WORKOUT handoff in acquisition when the profile is incomplete', async () => {
+    const subject = createSubject({
+      content: 'prepare conforme combinamos',
+      runtimeHandoff: true,
+      runtimePlanningDecision: goalDecision(
+        'GENERATE_WORKOUT_PLAN',
+        'WORKOUT_PLAN_REQUEST',
+        { targetPlan: 'WORKOUT' },
+      ),
+      controlledPlanning: true,
+      controlledProfileReady: false,
+    });
+    const planning = jest.spyOn(subject.planningExecution, 'executeStructured');
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+    const planned = await planning.mock.results[0].value;
+    expect(planned.decision).toMatchObject({
+      recognizedIntent: 'WORKOUT_PLAN_REQUEST',
+      targetPlan: 'WORKOUT',
+      goal: 'ASK_PROFILE_INFORMATION',
+      canExecute: false,
+    });
+    expect(planned.metadata.routeSelection.workout).toBe('V2');
+    expect(subject.controlledWorkoutExecutor.execute).not.toHaveBeenCalled();
   });
 
   it('executes planning once for an explicit runtime planning handoff', async () => {

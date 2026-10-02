@@ -3,6 +3,7 @@ import type { CoachProfileSnapshot } from '../../context/coach-profile-snapshot.
 import type { PrismaService } from '../../prisma/prisma.service';
 import { GenerateWorkoutPlanV2InputBuilder } from './generate-workout-plan-v2-input.builder';
 import { WorkoutPlanningReadinessService } from './workout-planning-readiness.service';
+import { goalDecision } from '../../conversation/tests/conversation-routing.fixtures';
 
 describe('GenerateWorkoutPlanV2InputBuilder', () => {
   const snapshot = Object.freeze({
@@ -23,6 +24,27 @@ describe('GenerateWorkoutPlanV2InputBuilder', () => {
     {} as CoachProfileSnapshotBuilder,
     {} as PrismaService,
   );
+
+  it.each([
+    'UNKNOWN',
+    'ANSWER_MESSAGE',
+    'GENERAL_GUIDANCE',
+    'ASK_PROFILE_INFORMATION',
+    'REQUEST_CONFIRMATION',
+    'SHOW_CURRENT_PLAN',
+    'SHOW_PLAN_STATUS',
+    'UPDATE_WORKOUT_PLAN',
+  ] as const)('preserves supplied authorization for %s', async (goal) => {
+    const decision = goalDecision(goal, 'UNKNOWN', { canExecute: false });
+    const result = await builder.build({
+      userId: 'user-id',
+      profileId: 'profile-id',
+      snapshot,
+      decision,
+      referenceDate: new Date('2026-08-18T12:00:00.000Z'),
+    });
+    expect(result.generationInput.decision).toBe(decision);
+  });
 
   it.each([
     [
@@ -152,7 +174,11 @@ describe('GenerateWorkoutPlanV2InputBuilder', () => {
   });
 
   it.each([
-    ['GYM_STRENGTH', 'Quero que você monte um treino de corrida para mim.', 'RUNNING'],
+    [
+      'GYM_STRENGTH',
+      'Quero que você monte um treino de corrida para mim.',
+      'RUNNING',
+    ],
     ['RUNNING', 'Quero treino em casa', 'HOME_WORKOUT'],
     ['GYM_STRENGTH', 'Quero um treino de CrossFit', 'CROSSFIT'],
     ['UNKNOWN', 'Quero um treino de bike', 'CYCLING'],

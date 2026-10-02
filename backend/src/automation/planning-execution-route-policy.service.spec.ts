@@ -5,7 +5,10 @@ import { PlanningExecutionRoutePolicyService } from './planning-execution-route-
 
 describe('PlanningExecutionRoutePolicyService', () => {
   function decision(goal: string): ConversationGoalDecision {
-    return Object.freeze({ goal }) as unknown as ConversationGoalDecision;
+    return Object.freeze({
+      goal,
+      canExecute: true,
+    }) as unknown as ConversationGoalDecision;
   }
 
   function setup(

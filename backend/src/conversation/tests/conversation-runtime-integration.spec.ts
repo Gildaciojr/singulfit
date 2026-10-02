@@ -2,6 +2,8 @@ import type { ConversationRoutingDecision } from '../contracts/conversation-exec
 import type { ConversationRuntimeEvaluation } from '../contracts/conversation-runtime.contract';
 import { ConversationRuntimeIntegrationService } from '../runtime/conversation-runtime-integration.service';
 import { ConversationOfficialSelectionService } from '../runtime/conversation-official-selection.service';
+import { goalDecision } from './conversation-routing.fixtures';
+import type { ConversationGoalDecision } from '../../context/conversation-goal-planner.contract';
 
 describe('ConversationRuntimeIntegrationService', () => {
   const decisionRequest = {
@@ -22,6 +24,7 @@ describe('ConversationRuntimeIntegrationService', () => {
     eligible?: boolean;
     timeoutMs?: number;
     evaluation?: Promise<ConversationRuntimeEvaluation>;
+    planningDecision?: ConversationGoalDecision;
   }) {
     const configValue = {
       mode: options.mode,
@@ -56,7 +59,13 @@ describe('ConversationRuntimeIntegrationService', () => {
           routing: 'conversation-routing-decision:v1',
         },
       },
-      decision: {} as ConversationRoutingDecision,
+      decision: {
+        goalDecision:
+          options.planningDecision ??
+          goalDecision('GENERATE_WORKOUT_PLAN', 'WORKOUT_PLAN_REQUEST', {
+            targetPlan: 'WORKOUT',
+          }),
+      } as ConversationRoutingDecision,
     };
     const runtime = {
       evaluate: jest
@@ -205,22 +214,71 @@ describe('ConversationRuntimeIntegrationService', () => {
   });
 
   it.each([
-    'NUTRITION_PLAN_GENERATION',
-    'WORKOUT_PLAN_GENERATION',
-    'COMBINED_PLAN_GENERATION',
-    'NUTRITION_PLAN_UPDATE',
-    'WORKOUT_PLAN_UPDATE',
-  ])('returns a typed planning handoff for %s', async (routeKind) => {
-    const subject = createSubject({ mode: 'PRIMARY' });
+    [
+      'NUTRITION_PLAN_GENERATION',
+      'DIET_PLAN_REQUEST',
+      'GENERATE_DIET_PLAN',
+      'DIET',
+    ],
+    [
+      'WORKOUT_PLAN_GENERATION',
+      'WORKOUT_PLAN_REQUEST',
+      'GENERATE_WORKOUT_PLAN',
+      'WORKOUT',
+    ],
+    [
+      'COMBINED_PLAN_GENERATION',
+      'COMBINED_PLAN_REQUEST',
+      'GENERATE_COMBINED_PLANS',
+      'BOTH',
+    ],
+    [
+      'NUTRITION_PLAN_UPDATE',
+      'DIET_PLAN_UPDATE_REQUEST',
+      'UPDATE_DIET_PLAN',
+      'DIET',
+    ],
+    [
+      'WORKOUT_PLAN_UPDATE',
+      'WORKOUT_PLAN_UPDATE_REQUEST',
+      'UPDATE_WORKOUT_PLAN',
+      'WORKOUT',
+    ],
+  ] as const)(
+    'returns a typed planning handoff for %s',
+    async (routeKind, intent, goal, targetPlan) => {
+      const planningDecision = goalDecision(goal, intent, { targetPlan });
+      const subject = createSubject({ mode: 'PRIMARY', planningDecision });
+      subject.bridge.execute.mockResolvedValue({
+        status: 'FALLBACK_REQUIRED',
+        content: null,
+        routeKind,
+        reason: 'SIDE_EFFECT_ROUTE_REQUIRES_LEGACY_SINGLE_EXECUTION',
+      });
+      await expect(subject.service.decide(decisionRequest)).resolves.toEqual({
+        source: 'PLANNING_HANDOFF',
+        reason: 'SIDE_EFFECT_ROUTE_REQUIRES_SINGLE_EXECUTION',
+        planningDecision,
+      });
+    },
+  );
+
+  it('does not promote a real UNKNOWN into a productive planning handoff', async () => {
+    const subject = createSubject({
+      mode: 'PRIMARY',
+      planningDecision: goalDecision('UNKNOWN', 'UNKNOWN'),
+    });
     subject.bridge.execute.mockResolvedValue({
       status: 'FALLBACK_REQUIRED',
       content: null,
-      routeKind,
+      routeKind: 'WORKOUT_PLAN_GENERATION',
       reason: 'SIDE_EFFECT_ROUTE_REQUIRES_LEGACY_SINGLE_EXECUTION',
     });
-    await expect(subject.service.decide(decisionRequest)).resolves.toEqual({
-      source: 'PLANNING_HANDOFF',
-      reason: 'SIDE_EFFECT_ROUTE_REQUIRES_SINGLE_EXECUTION',
+    await expect(
+      subject.service.decide(decisionRequest),
+    ).resolves.toMatchObject({
+      source: 'SAFE_RESPONSE',
+      reason: 'BRIDGE_FAILURE',
     });
   });
 
@@ -280,7 +338,9 @@ describe('ConversationRuntimeIntegrationService', () => {
       reason: 'PROFILE_ACQUISITION_NOT_CONNECTED',
     });
 
-    await expect(subject.service.decide(decisionRequest)).resolves.toMatchObject({
+    await expect(
+      subject.service.decide(decisionRequest),
+    ).resolves.toMatchObject({
       source: 'SAFE_RESPONSE',
       reason: 'BRIDGE_FAILURE',
     });
@@ -295,7 +355,9 @@ describe('ConversationRuntimeIntegrationService', () => {
       reason: 'RESPONSE_PIPELINE_FAILED',
     });
 
-    await expect(subject.service.decide(decisionRequest)).resolves.toMatchObject({
+    await expect(
+      subject.service.decide(decisionRequest),
+    ).resolves.toMatchObject({
       source: 'SAFE_RESPONSE',
       reason: 'BRIDGE_FAILURE',
     });

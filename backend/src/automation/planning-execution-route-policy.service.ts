@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { canGenerateWorkout } from '../workout/v2/workout-generation-authorization.policy';
 import type { ConversationGoalDecision } from '../context/conversation-goal-planner.contract';
 import { CONVERSATION_GOAL } from '../context/conversation-goal-planner.contract';
 import type { GenerateNutritionPlanV2Input } from '../diet/v2/nutrition-planning-generation.contract';
@@ -18,6 +19,7 @@ export type PlanningRouteSelectionReason =
   | 'WORKOUT_V2_PRODUCTIVE_GENERATION'
   | 'WORKOUT_V2_CANONICAL_READ'
   | 'WORKOUT_V2_PLAN_MUTATION'
+  | 'WORKOUT_V2_PROFILE_ACQUISITION'
   | 'CROSS_DOMAIN_V2_DECOMPOSITION_REQUIRED'
   | 'NUTRITION_V2_PROFILE_ACQUISITION'
   | 'COMBINED_V2_PROFILE_ACQUISITION'
@@ -49,7 +51,10 @@ export class PlanningExecutionRoutePolicyService {
   ): PlanningExecutionRouteSelection {
     const decision = input.decision;
     const goal = decision?.goal;
-    if (goal === CONVERSATION_GOAL.GENERATE_COMBINED_PLANS) {
+    if (
+      goal === CONVERSATION_GOAL.GENERATE_COMBINED_PLANS &&
+      canGenerateWorkout(decision)
+    ) {
       return this.selection(
         'V2',
         'V2',
@@ -63,14 +68,27 @@ export class PlanningExecutionRoutePolicyService {
     ) {
       return this.selection(null, 'V2', 'WORKOUT_V2_CANONICAL_READ');
     }
-    if (input.workoutMutation) {
+    if (
+      input.workoutMutation &&
+      goal === CONVERSATION_GOAL.UPDATE_WORKOUT_PLAN &&
+      canGenerateWorkout(decision, true)
+    ) {
       return this.selection(null, 'V2', 'WORKOUT_V2_PLAN_MUTATION');
     }
     if (
-      goal === CONVERSATION_GOAL.GENERATE_WORKOUT_PLAN ||
-      input.workoutGenerationInput
+      goal === CONVERSATION_GOAL.GENERATE_WORKOUT_PLAN &&
+      canGenerateWorkout(decision)
     ) {
       return this.selection(null, 'V2', 'WORKOUT_V2_PRODUCTIVE_GENERATION');
+    }
+    if (
+      decision?.targetPlan === 'WORKOUT' &&
+      goal === CONVERSATION_GOAL.ASK_PROFILE_INFORMATION
+    ) {
+      return this.selection(null, 'V2', 'WORKOUT_V2_PROFILE_ACQUISITION');
+    }
+    if (input.workoutMutation && decision?.targetPlan === 'WORKOUT') {
+      return this.selection(null, 'V2', 'WORKOUT_V2_PLAN_MUTATION');
     }
     if (
       decision?.targetPlan === 'BOTH' &&

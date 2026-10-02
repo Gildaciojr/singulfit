@@ -755,6 +755,7 @@ export class PendingConversationActionService {
       value === 'WORKOUT_V2_PLAN_MUTATION' ||
       value === 'CROSS_DOMAIN_ATOMICITY_PENDING' ||
       value === 'CROSS_DOMAIN_V2_DECOMPOSITION_REQUIRED' ||
+      value === 'WORKOUT_V2_PROFILE_ACQUISITION' ||
       value === 'LEGACY_INTENT_OR_UNSUPPORTED_GOAL'
     );
   }

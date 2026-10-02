@@ -15,7 +15,7 @@ import type {
 @Injectable()
 export class ConversationDomainResolverService {
   resolve(
-    input: ConversationUnderstandingInput,
+    input: Pick<ConversationUnderstandingInput, 'continuity'>,
     message: NormalizedConversationMessage,
     entityRecognition: ConversationEntityRecognition,
     referenceResolution: ConversationReferenceResolution,
@@ -30,7 +30,7 @@ export class ConversationDomainResolverService {
       candidates.add(CONVERSATION_DOMAIN.NUTRITION);
     }
     if (
-      /\b(treino|treinar|exercicio|academia|musculacao|corrida|bike|ciclismo|crossfit|calistenia)\b/u.test(
+      /\b(treino|treinar|ficha|exercicio|supino|academia|musculacao|corrida|correr|caminhar|caminhada|aerobico|cardio|bike|ciclismo|crossfit|calistenia|prova de \d+ km)\b/u.test(
         text,
       )
     ) {

@@ -43,7 +43,7 @@ describe('CoachPlanningExecutionDispatcherService', () => {
     });
   }
 
-  function createSubject() {
+  function createSubject(formatterAvailable = true) {
     const dietPlan = {
       title: 'Dieta legado',
       objective: 'WEIGHT_LOSS',
@@ -111,7 +111,9 @@ describe('CoachPlanningExecutionDispatcherService', () => {
       nutritionV2Executor as unknown as NutritionApplicationExecutorService,
       nutritionV2Formatter as unknown as NutritionPublicResultFormatter,
       workoutV2Executor as unknown as WorkoutApplicationExecutorService,
-      workoutV2Formatter as unknown as WorkoutPlanV2Formatter,
+      formatterAvailable
+        ? (workoutV2Formatter as unknown as WorkoutPlanV2Formatter)
+        : undefined,
       currentWorkoutPlanReader as unknown as CurrentWorkoutPlanReaderService,
       currentNutritionPlanReader as unknown as CurrentNutritionPlanReaderService,
       currentNutritionPresenter as unknown as CanonicalNutritionPlanPresenterService,
@@ -131,6 +133,92 @@ describe('CoachPlanningExecutionDispatcherService', () => {
       currentNutritionPresenter,
     };
   }
+
+  it.each([
+    CONVERSATION_GOAL.UNKNOWN,
+    CONVERSATION_GOAL.ANSWER_MESSAGE,
+    CONVERSATION_GOAL.GENERAL_GUIDANCE,
+    CONVERSATION_GOAL.ASK_PROFILE_INFORMATION,
+    CONVERSATION_GOAL.REQUEST_CONFIRMATION,
+    CONVERSATION_GOAL.SHOW_CURRENT_PLAN,
+    CONVERSATION_GOAL.SHOW_PLAN_STATUS,
+    CONVERSATION_GOAL.UPDATE_WORKOUT_PLAN,
+  ])(
+    'does not authorize Workout execution from an input for %s',
+    async (goal) => {
+      const subject = createSubject();
+      await subject.dispatcher.dispatchStructured({
+        userId: 'user-id',
+        legacyIntent: 'WORKOUT',
+        decision: { ...decision(goal), targetPlan: 'WORKOUT' },
+        routeSelection: {
+          nutrition: null,
+          workout: 'V2',
+          reason: 'WORKOUT_V2_PRODUCTIVE_GENERATION',
+          nutritionPilotStatus: null,
+          suppressNutritionShadow: false,
+        },
+        workoutV2: { generationInput: { userId: 'user-id' } as never },
+      });
+      expect(subject.workoutV2Executor.execute).not.toHaveBeenCalled();
+      expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+      expect(subject.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    CONVERSATION_GOAL.GENERATE_WORKOUT_PLAN,
+    CONVERSATION_GOAL.GENERATE_COMBINED_PLANS,
+  ])('requires canExecute for %s', async (goal) => {
+    const subject = createSubject();
+    await subject.dispatcher.dispatchStructured({
+      userId: 'user-id',
+      legacyIntent: 'BOTH',
+      decision: { ...decision(goal), canExecute: false },
+      workoutV2: { generationInput: { userId: 'user-id' } as never },
+      nutritionV2: { generationInput: { userId: 'user-id' } as never },
+    });
+    expect(subject.workoutV2Executor.execute).not.toHaveBeenCalled();
+    expect(subject.nutritionV2Executor.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    CONVERSATION_GOAL.GENERATE_WORKOUT_PLAN,
+    CONVERSATION_GOAL.GENERATE_COMBINED_PLANS,
+  ])('checks the Workout formatter before effects for %s', async (goal) => {
+    const subject = createSubject(false);
+    await expect(
+      subject.dispatcher.dispatchStructured({
+        userId: 'user-id',
+        legacyIntent: 'BOTH',
+        decision: decision(goal),
+        workoutV2: { generationInput: { userId: 'user-id' } as never },
+        nutritionV2: { generationInput: { userId: 'user-id' } as never },
+      }),
+    ).rejects.toThrow('sem infraestrutura executável');
+    expect(subject.workoutV2Executor.execute).not.toHaveBeenCalled();
+    expect(subject.workoutV2Executor.preflight).not.toHaveBeenCalled();
+    expect(subject.nutritionV2Executor.execute).not.toHaveBeenCalled();
+  });
+
+  it('authorizes an executable READY mutation on the V2 route', async () => {
+    const subject = createSubject();
+    await subject.dispatcher.dispatchStructured({
+      userId: 'user-id',
+      legacyIntent: 'WORKOUT',
+      decision: decision(CONVERSATION_GOAL.UPDATE_WORKOUT_PLAN),
+      workoutMutationReady: true,
+      routeSelection: {
+        nutrition: null,
+        workout: 'V2',
+        reason: 'WORKOUT_V2_PLAN_MUTATION',
+        nutritionPilotStatus: null,
+        suppressNutritionShadow: false,
+      },
+      workoutV2: { generationInput: { userId: 'user-id' } as never },
+    });
+    expect(subject.workoutV2Executor.execute).toHaveBeenCalledTimes(1);
+  });
 
   it.each([
     [CONVERSATION_GOAL.SHOW_CURRENT_PLAN, 'Plano nutricional canônico atual'],

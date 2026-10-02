@@ -428,17 +428,7 @@ describe('CoachPlanningExecutionService', () => {
         },
       }),
     );
-    expect(workoutBuilder.build).toHaveBeenCalledWith(
-      expect.objectContaining({
-        currentMessage,
-        declaredContext: recognizedContext,
-      }),
-    );
-    expect(dispatcher.dispatchStructured).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workoutV2: expect.objectContaining({ generationInput }),
-      }),
-    );
+    expect(workoutBuilder.build).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -596,12 +586,7 @@ describe('CoachPlanningExecutionService', () => {
       expect(workoutBuilder.recognizeDeclaredContext).toHaveBeenCalledWith(
         currentMessage,
       );
-      expect(workoutBuilder.build).toHaveBeenCalledWith(
-        expect.objectContaining({
-          currentMessage,
-          declaredContext: recognizedContext,
-        }),
-      );
+      expect(workoutBuilder.build).not.toHaveBeenCalled();
     },
   );
 
@@ -842,6 +827,7 @@ describe('CoachPlanningExecutionService', () => {
         suppressNutritionShadow: false,
       },
       nutritionV2: undefined,
+      workoutMutationReady: false,
     });
   });
 
