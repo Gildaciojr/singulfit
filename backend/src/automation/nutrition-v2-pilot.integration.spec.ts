@@ -42,6 +42,8 @@ describe('Nutrition V2 internal pilot integration', () => {
     const decision = Object.freeze({
       goal: options?.goal ?? 'GENERATE_DIET_PLAN',
       recognizedIntent: 'DIET_PLAN_REQUEST',
+      canExecute: true,
+      targetPlan: options?.goal === 'GENERATE_COMBINED_PLANS' ? 'BOTH' : 'DIET',
     }) as unknown as ConversationGoalDecision;
     const unknownDatum = Object.freeze({
       status: 'UNKNOWN' as const,

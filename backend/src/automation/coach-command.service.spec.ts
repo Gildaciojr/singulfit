@@ -52,6 +52,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WorkoutGeneratorService } from '../workout/workout-generator.service';
 import { AUTOMATION_RULE_CODES } from './automation.constants';
 import { CoachCommandService } from './coach-command.service';
+import { ConversationDailyQueryService } from '../conversation/runtime/conversation-daily-query.service';
 import { CoachPlanningExecutionDispatcherService } from './coach-planning-execution-dispatcher.service';
 import type { CoachPlanningBothApplicationExecutorService } from './coach-planning-both-application-executor.service';
 import { CoachPlanningExecutionService } from './coach-planning-execution.service';
@@ -178,6 +179,8 @@ describe('CoachCommandService', () => {
       | 'NO_PLAN'
       | 'INVALID_V2_PLAN';
     currentWorkoutPlanId?: string;
+    dailyEnabled?: boolean;
+    dailyContent?: string | null;
   }) {
     const at = new Date('2026-06-10T12:00:00.000Z');
     const rule = {
@@ -534,6 +537,12 @@ describe('CoachCommandService', () => {
         ? (profileAcquisitionRollout as unknown as ProfileAcquisitionInternalRolloutService)
         : undefined,
       currentWorkoutPlanReader as unknown as CurrentWorkoutPlanReaderService,
+      options?.dailyEnabled
+        ? ({
+            accepts: () => options.dailyContent !== undefined,
+            answer: async () => options.dailyContent ?? null,
+          } as unknown as ConversationDailyQueryService)
+        : undefined,
     );
 
     return {
@@ -554,6 +563,83 @@ describe('CoachCommandService', () => {
       currentWorkoutPlanReader,
     };
   }
+
+  it.each([
+    'sim',
+    'não',
+    'ok',
+    'já fiz',
+    'já comi',
+    'feito',
+    'não consegui',
+    'vou fazer depois',
+  ])(
+    'fails closed for uncorrelated short reply %s before runtime/planning',
+    async (content) => {
+      const s = createSubject({
+        content,
+        dailyEnabled: true,
+        runtimeContent: 'não deve executar',
+      });
+      expect(
+        await s.service.processUncorrelatedShortReply({
+          userId: 'user-id',
+          messageId: 'message-id',
+        }),
+      ).toBe(true);
+      expect(s.conversationRuntime.decide).not.toHaveBeenCalled();
+      expect(s.workoutGenerator.generate).not.toHaveBeenCalled();
+      expect(s.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
+      expect(s.dietGenerator.generate).not.toHaveBeenCalled();
+      expect(
+        s.profileAcquisitionRollout.requestProductiveClarification,
+      ).not.toHaveBeenCalled();
+      expect(s.prisma.coachMessage.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            content: expect.stringContaining('a que sua resposta se refere'),
+          }),
+        }),
+      );
+    },
+  );
+  it('preserves a quoted acquisition reply for its existing correlation handler', async () => {
+    const s = createSubject({
+      content: 'sim',
+      dailyEnabled: true,
+      replyToExternalMessageId: 'profile-question',
+    });
+    expect(
+      await s.service.processUncorrelatedShortReply({
+        userId: 'user-id',
+        messageId: 'message-id',
+      }),
+    ).toBe(false);
+    expect(s.prisma.coachMessage.create).not.toHaveBeenCalled();
+    expect(s.workoutGenerator.generate).not.toHaveBeenCalled();
+  });
+  it('answers a daily query without runtime, profile acquisition, or legacy generation', async () => {
+    const s = createSubject({
+      content: 'quanto consumi hoje?',
+      dailyEnabled: true,
+      dailyContent: '500 kcal registradas',
+      runtimeContent: 'não executar',
+    });
+    expect(
+      await s.service.processReadOnlyText({
+        userId: 'user-id',
+        messageId: 'message-id',
+      }),
+    ).toBe(true);
+    expect(s.conversationRuntime.decide).not.toHaveBeenCalled();
+    expect(s.workoutGenerator.generate).not.toHaveBeenCalled();
+    expect(s.dietGenerator.generate).not.toHaveBeenCalled();
+    expect(s.prisma.coachMessage.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ content: '500 kcal registradas' }),
+      }),
+    );
+  });
 
   function installPersistentEffectHarness(
     subject: ReturnType<typeof createSubject>,

@@ -4,6 +4,10 @@ import { NutritionWhatsAppPresenter } from '../../diet/v2/presentation/nutrition
 import type { PublicNutritionResponse } from '../../diet/v2/presentation/public-nutrition-response.contract';
 import type { ConversationAnswerCandidate } from './conversation-qa.contract';
 import type { ConversationCurrentNutritionContext } from './conversation-current-nutrition-context.service';
+import {
+  dailyQuery,
+  isWeeklyFollowUp,
+} from '../understanding/daily-query.policy';
 
 export interface DeterministicNutritionAnswer {
   readonly content: string;
@@ -20,6 +24,8 @@ export class ConversationNutritionDeterministicAnswerService {
     readonly current: ConversationCurrentNutritionContext;
   }): DeterministicNutritionAnswer | null {
     const request = this.normalize(input.request);
+    // Consumption and expenditure belong to the daily query service, never targets.
+    if (dailyQuery(request) || isWeeklyFollowUp(request)) return null;
     if (!this.nutritionRequest(input.route, request)) return null;
     const planRequest = this.referencesPlan(input.route, request);
     if (input.current.status !== 'AVAILABLE') {
@@ -96,6 +102,7 @@ export class ConversationNutritionDeterministicAnswerService {
   }
 
   private meal(request: string, plan: PublicNutritionResponse): string | null {
+    if (/\b(hoje|amanha|agora|proxima|depois)\b/u.test(request)) return null;
     const meals = plan.days.flatMap((day) => day.meals);
     const found = meals.find((candidate) => {
       const name = this.normalize(candidate.name);

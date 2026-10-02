@@ -10,6 +10,7 @@ import { ConversationQAExecutorService } from './conversation-qa-executor.servic
 import { ConversationQAFollowUpContextService } from './conversation-qa-follow-up-context.service';
 import type { ConversationQAFollowUpContext } from './conversation-qa-follow-up-context.service';
 import { CurrentWorkoutPlanReaderService } from '../../workout/v2/current-workout-plan-reader.service';
+import { ConversationDailyQueryService } from './conversation-daily-query.service';
 
 export interface ConversationBridgeExecutionContext {
   readonly userId: string;
@@ -29,6 +30,7 @@ export class ConversationExecutionBridgeService {
     private readonly qa?: ConversationQAExecutorService,
     private readonly qaFollowUp?: ConversationQAFollowUpContextService,
     private readonly currentWorkout?: CurrentWorkoutPlanReaderService,
+    private readonly dailyQueries?: ConversationDailyQueryService,
   ) {}
 
   async execute(
@@ -37,6 +39,19 @@ export class ConversationExecutionBridgeService {
     executionContext?: ConversationBridgeExecutionContext,
   ): Promise<ConversationBridgeResult> {
     const route = decision.executionRoute;
+    if (this.dailyQueries && humanContext && executionContext) {
+      const content = await this.dailyQueries.answer({
+        ...executionContext,
+        text: humanContext.currentMessage,
+        referenceDate: executionContext.referenceDate ?? new Date(),
+      });
+      if (content !== null)
+        return Object.freeze({
+          status: 'COMPLETED' as const,
+          content,
+          routeKind: route.kind,
+        });
+    }
     if (
       route.kind === 'CURRENT_PLAN_PRESENTATION' &&
       route.targetPlan === 'WORKOUT' &&

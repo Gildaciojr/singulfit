@@ -216,6 +216,39 @@ describe('CurrentWorkoutPlanReaderService', () => {
     };
   }
 
+  it.each([
+    ['2026-08-18T15:00:00Z', 'quarta-feira', 'Supino'],
+    ['2026-08-21T15:00:00Z', 'segunda-feira', 'Agachamento'],
+    ['2026-08-24T02:30:00Z', 'segunda-feira', 'Agachamento'],
+    ['2026-08-24T03:30:00Z', 'quarta-feira', 'Supino'],
+  ])(
+    'finds the next scheduled local day at %s, skipping rest days',
+    async (date, weekday, exercise) => {
+      const s = setup();
+      const answer = await s.service.present(
+        'user-id',
+        'qual meu próximo treino?',
+        new Date(date),
+      );
+      expect(answer).toContain(weekday);
+      expect(answer).toContain(exercise);
+      for (const mutation of Object.values(s.mutations))
+        expect(mutation).not.toHaveBeenCalled();
+    },
+  );
+  it('does not invent a next workout without a confirmed calendar', async () => {
+    const s = setup(record({ calendar: false }));
+    expect(
+      await s.service.present(
+        'user-id',
+        'quando é meu próximo treino?',
+        new Date('2026-08-24T15:00:00Z'),
+      ),
+    ).toContain('calendário confirmado');
+    for (const mutation of Object.values(s.mutations))
+      expect(mutation).not.toHaveBeenCalled();
+  });
+
   it('reads the latest valid V2 history, including archives, under user/profile ownership', async () => {
     const { service, findMany } = setup();
     await expect(

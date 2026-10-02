@@ -669,49 +669,66 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
     },
   );
 
-  it('keeps a legitimate quoted Academia answer attached to its exact cycle', async () => {
-    const test = subject();
-    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
-    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
-      activeCycle({ field: CoachProfileAcquisitionField.TRAINING_ENVIRONMENT }),
-    );
-    test.prisma.message.findFirst.mockResolvedValue({
-      id: 'quoted-answer-id',
-      content: 'Academia',
-      timestamp: answerAt,
-      conversationId: 'conversation-id',
-      replyToExternalMessageId: 'question-external',
-    });
-    const recognizer = new ProfileAnswerRecognizerService(
-      new CoachProfileFieldRegistryService(),
-    );
-    test.answerRecognizer.recognize.mockImplementation((spec, text) =>
-      recognizer.recognize(spec, text),
-    );
-    test.questionSpecifications.forField.mockImplementation((field) => ({
-      ...specification,
-      field,
-    }));
-    await expect(
-      test.service.captureActiveResponse({
-        userId: 'admin-id',
-        messageId: 'quoted-answer-id',
-      }),
-    ).resolves.toMatchObject({
-      handled: true,
-      persisted: true,
-      reason: 'ANSWER_PERSISTED',
-      cycleId: 'cycle-id',
-      field: CoachProfileAcquisitionField.TRAINING_ENVIRONMENT,
-    });
-    expect(test.cycles.claimResponse).toHaveBeenCalledWith(
-      expect.objectContaining({
+  it.each([
+    [CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS, 'não', null],
+    [CoachProfileAcquisitionField.TRAINING_ENVIRONMENT, 'Academia', null],
+    [CoachProfileAcquisitionField.WEEKLY_FREQUENCY, '5 vezes', null],
+    [
+      CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS,
+      'não',
+      'question-external',
+    ],
+    [
+      CoachProfileAcquisitionField.TRAINING_ENVIRONMENT,
+      'Academia',
+      'question-external',
+    ],
+  ] as const)(
+    'captures contextual %s answer %s (quote=%s) with the canonical recognizer',
+    async (field, content, replyToExternalMessageId) => {
+      const test = subject();
+      test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+      test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+        activeCycle({ field }),
+      );
+      test.prisma.message.findFirst.mockResolvedValue({
+        id: 'quoted-answer-id',
+        content,
+        timestamp: answerAt,
+        conversationId: 'conversation-id',
+        replyToExternalMessageId,
+      });
+      const recognizer = new ProfileAnswerRecognizerService(
+        new CoachProfileFieldRegistryService(),
+      );
+      test.answerRecognizer.recognize.mockImplementation((spec, text) =>
+        recognizer.recognize(spec, text),
+      );
+      test.questionSpecifications.forField.mockImplementation((field) => ({
+        ...specification,
+        field,
+      }));
+      await expect(
+        test.service.captureActiveResponse({
+          userId: 'admin-id',
+          messageId: 'quoted-answer-id',
+        }),
+      ).resolves.toMatchObject({
+        handled: true,
+        persisted: true,
+        reason: 'ANSWER_PERSISTED',
         cycleId: 'cycle-id',
-        messageId: 'quoted-answer-id',
-      }),
-    );
-    expect(test.cycles.supersedeActiveAndPrepare).not.toHaveBeenCalled();
-  });
+        field,
+      });
+      expect(test.cycles.claimResponse).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cycleId: 'cycle-id',
+          messageId: 'quoted-answer-id',
+        }),
+      );
+      expect(test.cycles.supersedeActiveAndPrepare).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     { internal: false, eligible: false, reason: 'USER_NOT_INTERNAL' },

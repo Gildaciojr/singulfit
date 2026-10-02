@@ -104,15 +104,10 @@ export class IntegrationEventHandlersService implements OnModuleInit {
       return;
     }
     if (
-      typeof this.coachCommandService.shouldHandleBeforeProfileAcquisition ===
-        'function' &&
-      (await this.coachCommandService.shouldHandleBeforeProfileAcquisition(
-        input,
-      ))
-    ) {
-      await this.coachCommandService.processTextMessage(input);
+      typeof this.coachCommandService.processReadOnlyText === 'function' &&
+      (await this.coachCommandService.processReadOnlyText(input))
+    )
       return;
-    }
 
     if (this.proactiveResponse) {
       const proactive = await this.proactiveResponse.capture(input);
@@ -146,6 +141,26 @@ export class IntegrationEventHandlersService implements OnModuleInit {
       }
       return;
     }
+
+    // Canonical acquisition capture owns contextual answers before the
+    // pending-action and isolated-short-reply fallbacks.
+    if (
+      typeof this.coachCommandService.shouldHandleBeforeProfileAcquisition ===
+        'function' &&
+      (await this.coachCommandService.shouldHandleBeforeProfileAcquisition(
+        input,
+      ))
+    ) {
+      await this.coachCommandService.processTextMessage(input);
+      return;
+    }
+
+    if (
+      typeof this.coachCommandService.processUncorrelatedShortReply ===
+        'function' &&
+      (await this.coachCommandService.processUncorrelatedShortReply(input))
+    )
+      return;
 
     const result =
       await this.activationOnboardingService.processTextMessage(input);

@@ -22,6 +22,24 @@ import { CoachProactiveSchedulePolicy } from './coach-proactive-schedule.policy'
 import { COACH_PROACTIVE_MIN_GAP_MINUTES } from './coach-proactive.contract';
 
 describe('AutomationService', () => {
+  it('persists proactive reply expiry from the actual send time', async () => {
+    const s = createSubject({
+      outreach: true,
+      outreachSource: COACH_PROACTIVE_SOURCE,
+    });
+    await s.service.sendScheduledMessage(
+      'scheduled-id',
+      new Date('2026-06-10T18:00:00Z'),
+    );
+    const sent = s.prisma.scheduledMessage.updateMany.mock.calls.find(
+      (call) => call[0].data.status === 'SENT',
+    );
+    expect(sent).toBeDefined();
+    const data = sent?.[0].data;
+    expect(data?.responseExpiresAt.getTime() - data?.sentAt.getTime()).toBe(
+      24 * 60 * 60 * 1_000,
+    );
+  });
   function createSubject(options?: {
     remindersEnabled?: boolean;
     workoutReminderEnabled?: boolean;
@@ -157,11 +175,13 @@ describe('AutomationService', () => {
         ),
       },
       coachProfileAcquisitionCycle: {
-        findFirst: jest.fn().mockResolvedValue(
-          options?.activeAcquisition
-            ? { id: 'active-cycle-id', status: options.activeAcquisition }
-            : null,
-        ),
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(
+            options?.activeAcquisition
+              ? { id: 'active-cycle-id', status: options.activeAcquisition }
+              : null,
+          ),
       },
     };
     const prisma = {

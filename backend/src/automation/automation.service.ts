@@ -34,12 +34,13 @@ import {
 import {
   COACH_PROACTIVE_MIN_GAP_MINUTES,
   COACH_PROACTIVE_SOURCE,
+  COACH_PROACTIVE_RESPONSE_WINDOW_HOURS,
   type CoachProactivePreferences,
   type CoachProactiveSlot,
 } from './coach-proactive.contract';
 
 const AUTOMATION_CODES = new Set<string>(Object.values(AUTOMATION_RULE_CODES));
-export const COACH_PROACTIVE_RESPONSE_WINDOW_HOURS = 24;
+export { COACH_PROACTIVE_RESPONSE_WINDOW_HOURS } from './coach-proactive.contract';
 export const COACH_RETENTION_SOURCE = 'COACH_RETENTION_V1';
 
 const CONTROLLED_OUTREACH_SOURCES = Object.freeze([
@@ -916,6 +917,7 @@ export class AutomationService {
       claimed.message.id,
       sent.externalMessageId,
       new Date(),
+      this.isCoachProactiveContext(claimed.message.context),
     );
 
     return this.prisma.scheduledMessage.findUniqueOrThrow({
@@ -932,6 +934,7 @@ export class AutomationService {
     scheduledMessageId: string,
     externalMessageId: string,
     sentAt: Date,
+    proactive = false,
   ): Promise<void> {
     let persistenceError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -945,6 +948,14 @@ export class AutomationService {
             status: ScheduledMessageStatus.SENT,
             externalMessageId,
             sentAt,
+            ...(proactive
+              ? {
+                  responseExpiresAt: new Date(
+                    sentAt.getTime() +
+                      COACH_PROACTIVE_RESPONSE_WINDOW_HOURS * 3_600_000,
+                  ),
+                }
+              : {}),
             leaseExpiresAt: null,
           },
         });

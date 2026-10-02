@@ -72,7 +72,11 @@ export class ConversationTurnContextBuilderService {
           where: { id: input.conversationId, userId: input.userId },
           select: {
             messages: {
-              where: { id: { not: input.messageId }, type: MessageType.TEXT },
+              where: {
+                id: { not: input.messageId },
+                type: MessageType.TEXT,
+                timestamp: { lte: referenceDate },
+              },
               select: {
                 direction: true,
                 content: true,
@@ -88,6 +92,10 @@ export class ConversationTurnContextBuilderService {
             userId: input.userId,
             conversationId: input.conversationId,
             status: ScheduledMessageStatus.SENT,
+            OR: [
+              { sentAt: { lte: referenceDate } },
+              { sentAt: null, scheduledFor: { lte: referenceDate } },
+            ],
             scheduledFor: {
               gte: new Date(referenceDate.getTime() - 48 * 60 * 60 * 1_000),
               lt: referenceDate,
@@ -99,6 +107,7 @@ export class ConversationTurnContextBuilderService {
             context: true,
             externalMessageId: true,
             scheduledFor: true,
+            sentAt: true,
             automationRule: { select: { code: true } },
             coachMessage: { select: { context: true } },
           },
@@ -119,33 +128,41 @@ export class ConversationTurnContextBuilderService {
     if (!conversation) throw new NotFoundException('Conversa não encontrada');
 
     const merged = [
-      ...conversation.messages.map((message) => ({
-        direction: message.direction,
-        content: message.content,
-        timestamp: message.timestamp,
-        priority: 0,
-        externalMessageId: null,
-        replyToExternalMessageId: null,
-        scheduledMessageId: null,
-        source: null,
-        automationRuleCode: null,
-        structuredContext: null,
-      })),
-      ...scheduledMessages.map((message) => ({
-        direction: MessageDirection.OUTBOUND,
-        content: message.content,
-        timestamp: message.scheduledFor,
-        priority: 1,
-        externalMessageId: message.externalMessageId,
-        replyToExternalMessageId: null,
-        scheduledMessageId: message.id,
-        source: this.contextSource(message.context),
-        automationRuleCode:
-          message.automationRule?.code ?? this.contextRuleCode(message.context),
-        structuredContext: this.contextRecord(
-          message.coachMessage?.context ?? message.context,
-        ),
-      })),
+      ...conversation.messages
+        .filter((message) => message.timestamp <= referenceDate)
+        .map((message) => ({
+          direction: message.direction,
+          content: message.content,
+          timestamp: message.timestamp,
+          priority: 0,
+          externalMessageId: null,
+          replyToExternalMessageId: null,
+          scheduledMessageId: null,
+          source: null,
+          automationRuleCode: null,
+          structuredContext: null,
+        })),
+      ...scheduledMessages
+        .filter(
+          (message) =>
+            (message.sentAt ?? message.scheduledFor) <= referenceDate,
+        )
+        .map((message) => ({
+          direction: MessageDirection.OUTBOUND,
+          content: message.content,
+          timestamp: message.sentAt ?? message.scheduledFor,
+          priority: 1,
+          externalMessageId: message.externalMessageId,
+          replyToExternalMessageId: null,
+          scheduledMessageId: message.id,
+          source: this.contextSource(message.context),
+          automationRuleCode:
+            message.automationRule?.code ??
+            this.contextRuleCode(message.context),
+          structuredContext: this.contextRecord(
+            message.coachMessage?.context ?? message.context,
+          ),
+        })),
     ]
       .sort(
         (left, right) =>
@@ -259,11 +276,12 @@ export class ConversationTurnContextBuilderService {
     const modality = this.entityRecognizer
       .recognize(this.normalizer.normalize(text))
       .entities.find(
-        (entity): entity is Extract<
+        (
+          entity,
+        ): entity is Extract<
           ConversationEntity,
           { kind: 'WORKOUT_MODALITY' }
-        > =>
-          entity.kind === 'WORKOUT_MODALITY',
+        > => entity.kind === 'WORKOUT_MODALITY',
       );
     return Object.freeze({
       modality: modality

@@ -23,6 +23,8 @@ import { ConversationQAExecutorService } from './conversation-qa-executor.servic
 import { ConversationQAFollowUpContextService } from './conversation-qa-follow-up-context.service';
 import { ConversationNutritionDeterministicAnswerService } from './conversation-nutrition-deterministic-answer.service';
 import { WorkoutModule } from '../../workout/workout.module';
+import { ConversationDailyQueryService } from './conversation-daily-query.service';
+import { NutritionConsumptionSummaryService } from '../../nutrition/nutrition-consumption-summary.service';
 
 @Module({
   imports: [
@@ -35,6 +37,8 @@ import { WorkoutModule } from '../../workout/workout.module';
     WorkoutModule,
   ],
   providers: [
+    ConversationDailyQueryService,
+    NutritionConsumptionSummaryService,
     ConversationRuntimeOperationalConfigService,
     ConversationTurnContextBuilderService,
     ConversationRuntimeService,
@@ -54,6 +58,7 @@ import { WorkoutModule } from '../../workout/workout.module';
     ConversationNutritionDeterministicAnswerService,
   ],
   exports: [
+    ConversationDailyQueryService,
     ConversationRuntimeOperationalConfigService,
     ConversationRuntimeService,
     ConversationExecutionBridgeService,

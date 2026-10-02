@@ -22,6 +22,81 @@ import { SubscriptionLifecycleService } from '../subscriptions/subscription-life
 import { CoachProactiveResponseService } from '../automation/coach-proactive-response.service';
 
 describe('IntegrationEventHandlersService', () => {
+  it.each([
+    ['PHYSICAL_LIMITATIONS', 'não', false],
+    ['TRAINING_ENVIRONMENT', 'Academia', false],
+    ['WEEKLY_FREQUENCY', '5 vezes', false],
+    ['PHYSICAL_LIMITATIONS', 'não', true],
+    ['NO_CONTEXT', 'não', false],
+  ] as const)(
+    'routes contextual %s answer %s to acquisition (quoted=%s)',
+    async (field, text, quoted) => {
+      const registry = new EventHandlerRegistry();
+      const acquisition = acquisitionRollout();
+      const contextual = field !== 'NO_CONTEXT';
+      acquisition.captureActiveResponse.mockResolvedValue({
+        handled: contextual,
+        duplicated: false,
+        persisted: true,
+        reason: 'CAPTURED',
+        cycleId: 'cycle',
+        field,
+      });
+      const coach = {
+        shouldHandleBeforeProfileAcquisition: jest
+          .fn()
+          .mockResolvedValue(false),
+        processReadOnlyText: jest.fn().mockResolvedValue(false),
+        processUncorrelatedShortReply: jest.fn().mockResolvedValue(!quoted),
+        processTextMessage: jest.fn(),
+      };
+      const proactive = {
+        capture: jest.fn().mockResolvedValue({ handled: false }),
+      };
+      const onboarding = { processTextMessage: jest.fn() };
+      const service = new IntegrationEventHandlersService(
+        registry,
+        {} as PagBankWebhookService,
+        {} as EvolutionWebhookService,
+        {} as NutritionService,
+        {} as NutritionVisionService,
+        {} as ResponseBuilderService,
+        {} as EvolutionSendService,
+        coach as unknown as CoachCommandService,
+        {} as AutomationService,
+        {} as ActivationJourneyService,
+        onboarding as unknown as ActivationOnboardingService,
+        acquisition as unknown as ProfileAcquisitionInternalRolloutService,
+        subscriptionLifecycle() as unknown as SubscriptionLifecycleService,
+        proactive as unknown as CoachProactiveResponseService,
+      );
+      service.onModuleInit();
+      const handler = registry.get(
+        INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED,
+      );
+      if (!handler) throw new Error('Missing inbound handler');
+      await handler(
+        outboxEvent(INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED, {
+          userId: 'user',
+          messageId: `${field}:${text}:${quoted}`,
+        }),
+      );
+      expect(acquisition.captureActiveResponse).toHaveBeenCalledTimes(1);
+      if (contextual) {
+        expect(coach.processUncorrelatedShortReply).not.toHaveBeenCalled();
+        expect(
+          coach.shouldHandleBeforeProfileAcquisition,
+        ).not.toHaveBeenCalled();
+      } else {
+        expect(coach.processUncorrelatedShortReply).toHaveBeenCalledTimes(1);
+        expect(
+          coach.shouldHandleBeforeProfileAcquisition,
+        ).toHaveBeenCalledTimes(1);
+      }
+      expect(coach.processTextMessage).not.toHaveBeenCalled();
+      expect(onboarding.processTextMessage).not.toHaveBeenCalled();
+    },
+  );
   function acquisitionRollout() {
     return {
       captureActiveResponse: jest.fn().mockResolvedValue({
@@ -310,7 +385,9 @@ describe('IntegrationEventHandlersService', () => {
     const onboarding = { processTextMessage: jest.fn() };
     const coach = { processTextMessage: jest.fn() };
     const lifecycle = subscriptionLifecycle();
-    const proactiveResponse = { capture: jest.fn() };
+    const proactiveResponse = {
+      capture: jest.fn().mockResolvedValue({ handled: false }),
+    };
     lifecycle.authorizeOrNotify.mockResolvedValue(false);
     const handlers = new IntegrationEventHandlersService(
       registry,
@@ -392,51 +469,58 @@ describe('IntegrationEventHandlersService', () => {
     expect(coachCommand.processTextMessage).not.toHaveBeenCalled();
   });
 
-  it('gives an actionable goal confirmation precedence over profile acquisition', async () => {
-    const registry = new EventHandlerRegistry();
-    const acquisition = acquisitionRollout();
-    const activationOnboarding = { processTextMessage: jest.fn() };
-    const coachCommand = {
-      shouldHandleBeforeProfileAcquisition: jest.fn().mockResolvedValue(true),
-      processTextMessage: jest.fn().mockResolvedValue({
-        handled: true,
-        duplicated: false,
-        intent: 'DIET',
-      }),
-    };
-    const proactiveResponse = { capture: jest.fn() };
-    const handlers = new IntegrationEventHandlersService(
-      registry,
-      {} as PagBankWebhookService,
-      {} as EvolutionWebhookService,
-      {} as NutritionService,
-      {} as NutritionVisionService,
-      {} as ResponseBuilderService,
-      {} as EvolutionSendService,
-      coachCommand as unknown as CoachCommandService,
-      {} as AutomationService,
-      {} as ActivationJourneyService,
-      activationOnboarding as unknown as ActivationOnboardingService,
-      acquisition as unknown as ProfileAcquisitionInternalRolloutService,
-      subscriptionLifecycle() as unknown as SubscriptionLifecycleService,
-      proactiveResponse as unknown as CoachProactiveResponseService,
-    );
-    handlers.onModuleInit();
-    const handler = registry.get(INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED);
-    if (!handler) throw new Error('Handler de texto não registrado');
+  it.each(['sim', 'não'])(
+    'preserves pending goal handling for %s after acquisition declines',
+    async (text) => {
+      const registry = new EventHandlerRegistry();
+      const acquisition = acquisitionRollout();
+      const activationOnboarding = { processTextMessage: jest.fn() };
+      const coachCommand = {
+        shouldHandleBeforeProfileAcquisition: jest.fn().mockResolvedValue(true),
+        processTextMessage: jest.fn().mockResolvedValue({
+          handled: true,
+          duplicated: false,
+          intent: 'DIET',
+        }),
+      };
+      const proactiveResponse = {
+        capture: jest.fn().mockResolvedValue({ handled: false }),
+      };
+      const handlers = new IntegrationEventHandlersService(
+        registry,
+        {} as PagBankWebhookService,
+        {} as EvolutionWebhookService,
+        {} as NutritionService,
+        {} as NutritionVisionService,
+        {} as ResponseBuilderService,
+        {} as EvolutionSendService,
+        coachCommand as unknown as CoachCommandService,
+        {} as AutomationService,
+        {} as ActivationJourneyService,
+        activationOnboarding as unknown as ActivationOnboardingService,
+        acquisition as unknown as ProfileAcquisitionInternalRolloutService,
+        subscriptionLifecycle() as unknown as SubscriptionLifecycleService,
+        proactiveResponse as unknown as CoachProactiveResponseService,
+      );
+      handlers.onModuleInit();
+      const handler = registry.get(
+        INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED,
+      );
+      if (!handler) throw new Error('Handler de texto não registrado');
 
-    await handler(
-      outboxEvent(INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED, {
-        userId: 'user-id',
-        messageId: 'goal-answer-message-id',
-      }),
-    );
+      await handler(
+        outboxEvent(INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED, {
+          userId: 'user-id',
+          messageId: `goal-answer:${text}`,
+        }),
+      );
 
-    expect(coachCommand.processTextMessage).toHaveBeenCalledTimes(1);
-    expect(acquisition.captureActiveResponse).not.toHaveBeenCalled();
-    expect(activationOnboarding.processTextMessage).not.toHaveBeenCalled();
-    expect(proactiveResponse.capture).not.toHaveBeenCalled();
-  });
+      expect(coachCommand.processTextMessage).toHaveBeenCalledTimes(1);
+      expect(acquisition.captureActiveResponse).toHaveBeenCalledTimes(1);
+      expect(activationOnboarding.processTextMessage).not.toHaveBeenCalled();
+      expect(proactiveResponse.capture).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it.each([false, true])(
     'routes proactive reply before acquisition and onboarding (freeform=%s)',

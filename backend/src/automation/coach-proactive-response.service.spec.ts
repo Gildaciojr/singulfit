@@ -68,19 +68,21 @@ describe('CoachProactiveResponseService', () => {
           id: 'newer-id',
         });
       else
-        subject.prisma.scheduledMessage.findFirst
-          .mockResolvedValueOnce({
-            id: 'intervention-id',
-            sentAt: new Date('2026-08-19T22:00:00Z'),
-            scheduledFor: new Date('2026-08-19T22:00:00Z'),
-            responseExpiresAt: new Date('2026-08-20T22:00:00Z'),
-            responseMessageId: null,
-            context: {
-              source: 'COACH_PROACTIVE_V1',
-              intent: 'HYDRATION_CHECK',
-            },
-          })
-          .mockResolvedValueOnce({ id: 'newer-id' });
+        subject.prisma.scheduledMessage.findFirst.mockResolvedValueOnce({
+          id: 'intervention-id',
+          sentAt: new Date('2026-08-19T22:00:00Z'),
+          scheduledFor: new Date('2026-08-19T22:00:00Z'),
+          responseExpiresAt: new Date('2026-08-20T22:00:00Z'),
+          responseMessageId: null,
+          context: {
+            source: 'COACH_PROACTIVE_V1',
+            intent: 'HYDRATION_CHECK',
+          },
+        });
+      if (kind === 'scheduled')
+        subject.prisma.scheduledMessage.findMany.mockResolvedValue([
+          { id: 'newer-id', context: {} },
+        ]);
       await expect(
         subject.service.capture({
           userId: 'ordinary-user-id',
@@ -104,6 +106,7 @@ describe('CoachProactiveResponseService', () => {
     activeProfileAskedAt?: Date | null;
     activeProfileStatus?: CoachProfileAcquisitionCycleStatus;
     name?: string | null;
+    outcome?: CoachProactiveWorkoutOutcome;
   }) {
     const timestamp = new Date('2026-08-19T22:15:00.000Z');
     const message = {
@@ -119,8 +122,25 @@ describe('CoachProactiveResponseService', () => {
     };
     const intervention = {
       id: 'intervention-id',
-      scheduledFor: new Date('2026-08-19T22:00:00.000Z'),
-      sentAt: new Date('2026-08-19T22:00:01.000Z'),
+      userId: 'ordinary-user-id',
+      conversationId: 'conversation-id',
+      content: 'Você conseguiu concluir o que combinamos?',
+      scheduledFor: new Date(
+        options?.expired
+          ? '2026-08-18T22:00:00.000Z'
+          : '2026-08-19T22:00:00.000Z',
+      ),
+      sentAt: new Date(
+        options?.expired
+          ? '2026-08-18T22:00:01.000Z'
+          : '2026-08-19T22:00:01.000Z',
+      ),
+      responseOutcome:
+        options?.outcome ??
+        (options?.consumed || options?.consumedByCurrent
+          ? CoachProactiveWorkoutOutcome.COMPLETED
+          : null),
+      respondedAt: options?.consumed ? new Date('2026-08-19T22:05:00Z') : null,
       responseExpiresAt: options?.expired
         ? new Date('2026-08-19T22:14:00.000Z')
         : new Date('2026-08-20T22:00:00.000Z'),
@@ -148,6 +168,7 @@ describe('CoachProactiveResponseService', () => {
         upsert: jest.fn().mockResolvedValue({ id: 'memory-id' }),
       },
       coachMessage: {
+        findUnique: jest.fn().mockResolvedValue(null),
         upsert: jest.fn().mockResolvedValue({ id: 'coach-message-id' }),
       },
       automationRule: {
@@ -161,6 +182,7 @@ describe('CoachProactiveResponseService', () => {
       message: { findFirst: jest.fn().mockResolvedValue(message) },
       outboundMessage: { findFirst: jest.fn().mockResolvedValue(null) },
       scheduledMessage: {
+        findMany: jest.fn().mockResolvedValue([]),
         findFirst: jest
           .fn()
           .mockImplementation((query: { where: { id?: unknown } }) =>
@@ -174,18 +196,16 @@ describe('CoachProactiveResponseService', () => {
           ),
       },
       coachProfileAcquisitionCycle: {
-        findFirst: jest
-          .fn()
-          .mockResolvedValue(
-            options?.activeProfileAskedAt
-              ? {
-                  id: 'active-cycle-id',
-                  status:
-                    options.activeProfileStatus ??
-                    CoachProfileAcquisitionCycleStatus.ASKED,
-                }
-              : null,
-          ),
+        findFirst: jest.fn().mockResolvedValue(
+          options?.activeProfileAskedAt
+            ? {
+                id: 'active-cycle-id',
+                status:
+                  options.activeProfileStatus ??
+                  CoachProfileAcquisitionCycleStatus.ASKED,
+              }
+            : null,
+        ),
       },
       $transaction: jest.fn(
         (operation: (client: typeof transaction) => unknown) =>
@@ -196,6 +216,8 @@ describe('CoachProactiveResponseService', () => {
       publish: jest.fn().mockResolvedValue({ id: 'outbox-id' }),
     };
     return {
+      message,
+      intervention,
       service: new CoachProactiveResponseService(
         prisma as unknown as PrismaService,
         eventBus as unknown as EventBusService,
@@ -205,6 +227,204 @@ describe('CoachProactiveResponseService', () => {
       eventBus,
     };
   }
+
+  it.each([
+    ['WORKOUT_CHECK', 'já fiz', 'COMPLETED'],
+    ['WORKOUT_CHECK', 'feito', 'COMPLETED'],
+    ['WORKOUT_CHECK', 'já pensei nisso', 'UNKNOWN'],
+    ['WORKOUT_CHECK', 'já queria', 'UNKNOWN'],
+    ['WORKOUT_CHECK', 'já estava vendo', 'UNKNOWN'],
+    ['WORKOUT_CHECK', 'não deu', 'SKIPPED'],
+    ['WORKOUT_CHECK', 'não', 'SKIPPED'],
+    ['WORKOUT_CHECK', 'faço mais tarde', 'DEFERRED'],
+    ['LUNCH_CHECK', 'já comi', 'COMPLETED'],
+    ['LUNCH_CHECK', 'comi outra coisa', 'PARTIAL'],
+    ['LUNCH_CHECK', 'não comi', 'SKIPPED'],
+  ] as const)(
+    'classifies P0 %s / %s as %s',
+    async (intent, content, outcome) => {
+      const s = createSubject({ intent, content });
+      expect(
+        await s.service.capture({
+          userId: 'ordinary-user-id',
+          messageId: s.message.id,
+        }),
+      ).toMatchObject({ handled: true, outcome });
+    },
+  );
+  it('keeps a quoted negative reminder answer with its reminder even with active acquisition', async () => {
+    const s = createSubject({
+      intent: 'WORKOUT_CHECK',
+      content: 'não',
+      activeProfileAskedAt: new Date('2026-08-19T22:10:00Z'),
+    });
+    await expect(
+      s.service.capture({
+        userId: 'ordinary-user-id',
+        messageId: s.message.id,
+      }),
+    ).resolves.toMatchObject({ handled: true, outcome: 'SKIPPED' });
+  });
+  it.each(['ok', 'sim', 'não'])(
+    'does not infer completion from ambiguous %s',
+    async (content) => {
+      const s = createSubject({ content });
+      s.intervention.content = 'Hora do seu treino.';
+      expect(
+        await s.service.capture({
+          userId: 'ordinary-user-id',
+          messageId: s.message.id,
+        }),
+      ).toMatchObject({ outcome: 'UNKNOWN' });
+    },
+  );
+  it.each(['já fiz', 'não consegui'])(
+    'allows DEFERRED to evolve for %s once per inbound',
+    async (content) => {
+      const s = createSubject({ content, consumed: true, outcome: 'DEFERRED' });
+      s.transaction.scheduledMessage.update.mockImplementation(
+        async (args: {
+          data: {
+            responseMessageId: string;
+            responseOutcome: CoachProactiveWorkoutOutcome;
+            respondedAt: Date;
+          };
+        }) => {
+          Object.assign(s.intervention, args.data);
+          return {};
+        },
+      );
+      const first = await s.service.capture({
+        userId: 'ordinary-user-id',
+        messageId: s.message.id,
+      });
+      expect(first).toMatchObject({
+        duplicated: false,
+        outcome: content === 'já fiz' ? 'COMPLETED' : 'SKIPPED',
+      });
+      expect(
+        await s.service.capture({
+          userId: 'ordinary-user-id',
+          messageId: s.message.id,
+        }),
+      ).toMatchObject({ duplicated: true });
+      expect(s.transaction.conversationMemory.upsert).toHaveBeenCalledTimes(1);
+      expect(s.eventBus.publish).toHaveBeenCalledTimes(1);
+    },
+  );
+  it('allows UNKNOWN to evolve but fences terminal results and old replays', async () => {
+    const s = createSubject({
+      content: 'fiz só metade',
+      consumed: true,
+      outcome: 'UNKNOWN',
+    });
+    expect(
+      await s.service.capture({
+        userId: 'ordinary-user-id',
+        messageId: s.message.id,
+      }),
+    ).toMatchObject({ outcome: 'PARTIAL', duplicated: false });
+    s.intervention.responseOutcome = 'PARTIAL';
+    expect(
+      await s.service.capture({
+        userId: 'ordinary-user-id',
+        messageId: s.message.id,
+      }),
+    ).toMatchObject({ duplicated: true, outcome: 'PARTIAL' });
+    expect(s.transaction.conversationMemory.upsert).toHaveBeenCalledTimes(1);
+  });
+  it('uses actual send time for delayed reminders and fences expiry after 24 hours', async () => {
+    const s = createSubject({ content: 'já fiz' });
+    s.intervention.scheduledFor = new Date('2026-08-18T20:00:00Z');
+    s.intervention.responseExpiresAt = new Date('2026-08-19T20:00:00Z');
+    expect(
+      await s.service.capture({
+        userId: 'ordinary-user-id',
+        messageId: s.message.id,
+      }),
+    ).toMatchObject({ handled: true });
+    s.message.timestamp = new Date('2026-08-20T22:00:02Z');
+    expect(
+      await s.service.capture({
+        userId: 'ordinary-user-id',
+        messageId: s.message.id,
+      }),
+    ).toMatchObject({ handled: false });
+    expect(s.transaction.scheduledMessage.update).toHaveBeenCalledTimes(1);
+  });
+  it('serializes competing terminal replies to a deferred intervention', async () => {
+    const s = createSubject({ consumed: true, outcome: 'DEFERRED' });
+    s.prisma.message.findFirst.mockImplementation(
+      async (args: { where: { id: string } }) => ({
+        ...s.message,
+        id: args.where.id,
+        content: args.where.id === 'first' ? 'já fiz' : 'não consegui',
+      }),
+    );
+    let queue: Promise<unknown> = Promise.resolve();
+    s.prisma.$transaction.mockImplementation(
+      (operation: (client: typeof s.transaction) => unknown) => {
+        const result = queue.then(() => operation(s.transaction));
+        queue = result.then(() => undefined);
+        return result;
+      },
+    );
+    s.transaction.scheduledMessage.update.mockImplementation(
+      async (args: {
+        data: {
+          responseMessageId: string;
+          responseOutcome: CoachProactiveWorkoutOutcome;
+          respondedAt: Date;
+        };
+      }) => {
+        Object.assign(s.intervention, args.data);
+        return {};
+      },
+    );
+    const results = await Promise.all(
+      ['first', 'second'].map((messageId) =>
+        s.service.capture({ userId: 'ordinary-user-id', messageId }),
+      ),
+    );
+    expect(results.filter((result) => !result.duplicated)).toHaveLength(1);
+    expect(s.intervention.responseOutcome).toBe('COMPLETED');
+    expect(s.transaction.scheduledMessage.update).toHaveBeenCalledTimes(1);
+    expect(s.transaction.conversationMemory.upsert).toHaveBeenCalledTimes(1);
+    expect(s.eventBus.publish).toHaveBeenCalledTimes(1);
+  });
+  it('allows an unquoted completion after the intervention own deferred acknowledgment', async () => {
+    const s = createSubject({
+      replyId: null,
+      consumed: true,
+      outcome: 'DEFERRED',
+      content: 'já fiz',
+    });
+    s.prisma.scheduledMessage.findMany.mockResolvedValue([
+      {
+        id: 'ack',
+        context: {
+          source: 'COACH_PROACTIVE_RESPONSE_V1',
+          interventionId: s.intervention.id,
+        },
+      },
+    ]);
+    expect(
+      await s.service.capture({
+        userId: 'ordinary-user-id',
+        messageId: s.message.id,
+      }),
+    ).toMatchObject({ duplicated: false, outcome: 'COMPLETED' });
+    s.prisma.scheduledMessage.findMany.mockResolvedValue([
+      { id: 'other', context: {} },
+    ]);
+    expect(
+      await s.service.capture({
+        userId: 'ordinary-user-id',
+        messageId: s.message.id,
+      }),
+    ).toMatchObject({ handled: false });
+    expect(s.transaction.conversationMemory.upsert).toHaveBeenCalledTimes(1);
+  });
 
   it.each([
     ['fiz tudo', CoachProactiveWorkoutOutcome.COMPLETED],
@@ -293,7 +513,7 @@ describe('CoachProactiveResponseService', () => {
     ['LUNCH_CHECK', 'já almocei', 'almoço feito'],
     ['LUNCH_CHECK', 'sim', 'almoço feito'],
     ['LUNCH_CHECK', 'ainda não', 'priorize seu almoço'],
-    ['DINNER_CHECK', 'já', 'jantar feito'],
+    ['DINNER_CHECK', 'já', 'registrar corretamente'],
     ['DINNER_CHECK', 'sim, jantei', 'jantar feito'],
     ['DINNER_CHECK', 'não jantei ainda', 'priorize seu jantar'],
     ['WORKOUT_CHECK', 'foi ótimo', 'Treino concluído'],

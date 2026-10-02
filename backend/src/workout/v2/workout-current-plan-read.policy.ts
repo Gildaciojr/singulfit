@@ -11,6 +11,12 @@ function normalize(message: string): string {
 export function isWorkoutCurrentPlanRead(message: string | undefined): boolean {
   if (!message?.trim()) return false;
   const text = normalize(message);
+  if (
+    /^(?:qual|quando e) (?:e )?meu proximo treino$|^o que (?:eu )?treino depois$|^hoje e (?:dia de )?descanso$/u.test(
+      text,
+    )
+  )
+    return true;
   const mutation =
     /\b(?:crie|criar|gere|gerar|monte|montar|novo|nova|outro|outra|adapte|adaptar|atualize|atualizar|ajuste|ajustar|altere|alterar|mude|mudar|troque|trocar|substitua|substituir|inclua|incluir|remova|remover)\b/u.test(
       text,

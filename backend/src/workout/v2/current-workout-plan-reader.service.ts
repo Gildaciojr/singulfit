@@ -49,6 +49,29 @@ export class CurrentWorkoutPlanReaderService {
     if (result.status === 'INVALID_V2_PLAN') {
       return 'Não consegui consultar seu plano de treino com segurança agora. Não vou usar um plano antigo ou escolher uma sessão por aproximação.';
     }
+    if (/\bproximo treino\b|\btreino depois\b/u.test(this.normalize(message))) {
+      if (result.status !== 'AVAILABLE')
+        return 'Seu plano atual não possui um calendário confirmado para determinar o próximo treino.';
+      const today = this.temporalWeekday(
+        'hoje',
+        referenceDate,
+        result.plan.timezone,
+      );
+      if (!today)
+        return 'Não consegui identificar o dia local para consultar seu próximo treino.';
+      for (let offset = 1; offset <= 7; offset += 1) {
+        const weekday = WEEKDAYS[(WEEKDAYS.indexOf(today) + offset) % 7];
+        const next = this.byWeekday(result.plan, weekday);
+        if (
+          next.kind === 'CALENDAR_UNAVAILABLE' ||
+          next.kind === 'CLARIFICATION'
+        )
+          return next.message;
+        if (next.kind === 'SESSION')
+          return `Seu próximo treino está programado para ${this.weekdayLabel(weekday)}${offset === 7 ? ' da próxima semana' : ''}.\n${this.formatSession(next.session)}`;
+      }
+      return 'Não encontrei uma próxima sessão confirmada no calendário do seu plano.';
+    }
     if (result.status === 'LEGACY_RELATIONAL') {
       return this.presentLegacy(result.plan, message, referenceDate);
     }
@@ -428,7 +451,9 @@ export class CurrentWorkoutPlanReaderService {
   ): WorkoutPlanReadSelection {
     if (
       plan.calendar.length !== plan.document.sessions.length ||
-      plan.calendar.some((entry) => entry.weekday === null)
+      plan.calendar.some((entry) => entry.weekday === null) ||
+      new Set(plan.calendar.map((entry) => entry.weekday)).size !==
+        plan.calendar.length
     ) {
       return Object.freeze({
         kind: 'CALENDAR_UNAVAILABLE',

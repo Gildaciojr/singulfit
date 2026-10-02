@@ -57,6 +57,47 @@ describe('ConversationTurnContextBuilderService', () => {
     legacyIntent: 'DIET' as const,
   };
 
+  it('never incorporates future messages or automations when processing a delayed inbound', async () => {
+    const s = createSubject({
+      messages: [
+        {
+          direction: MessageDirection.INBOUND,
+          content: 'Mensagem futura',
+          timestamp: new Date('2026-08-01T12:01:00Z'),
+        },
+        {
+          direction: MessageDirection.INBOUND,
+          content: 'Anterior',
+          timestamp: new Date('2026-08-01T11:59:00Z'),
+        },
+      ],
+    });
+    s.prisma.scheduledMessage.findMany.mockResolvedValue([
+      {
+        id: 'future',
+        content: 'Automação futura',
+        sentAt: new Date('2026-08-01T12:05:00Z'),
+        scheduledFor: new Date('2026-08-01T11:00:00Z'),
+        context: {},
+      },
+    ]);
+    const result = await s.service.build(input);
+    expect(
+      result.understandingInput.recentHistory.map((entry) => entry.text),
+    ).toEqual(['Anterior']);
+    expect(s.prisma.conversation.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          messages: expect.objectContaining({
+            where: expect.objectContaining({
+              timestamp: { lte: new Date(input.receivedAt) },
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
   it('builds one bounded recent-history query and one snapshot', async () => {
     const subject = createSubject({
       messages: [
@@ -279,12 +320,12 @@ describe('ConversationTurnContextBuilderService', () => {
       ...sentinels.map((sentinel, index) => ({
         direction: MessageDirection.OUTBOUND,
         content: `Turno contaminado ${sentinel} deve desaparecer por inteiro`,
-        timestamp: new Date(2026, 7, 1, 10, index),
+        timestamp: new Date(Date.UTC(2026, 7, 1, 10, index)),
       })),
       {
         direction: MessageDirection.INBOUND,
         content: 'Turno público preservado',
-        timestamp: new Date(2026, 7, 1, 11, 0),
+        timestamp: new Date('2026-08-01T11:00:00Z'),
       },
     ];
     const subject = createSubject({ messages });

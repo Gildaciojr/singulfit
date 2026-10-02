@@ -27,6 +27,11 @@ import { ProfileAcquisitionInternalRolloutService } from '../context/profile-acq
 import { isWorkoutCurrentPlanRead } from '../workout/v2/workout-current-plan-read.policy';
 import { CurrentWorkoutPlanReaderService } from '../workout/v2/current-workout-plan-reader.service';
 import { CONVERSATION_GOAL } from '../context/conversation-goal-planner.contract';
+import { ConversationDailyQueryService } from '../conversation/runtime/conversation-daily-query.service';
+import {
+  isIsolatedReminderReply,
+  UNCORRELATED_REPLY,
+} from '../conversation/understanding/daily-query.policy';
 
 const WORKOUT_SESSION_SELECTION_ACTION = 'WORKOUT_SESSION_SELECTION';
 const WORKOUT_SESSION_SELECTION_WINDOW_MS = 24 * 60 * 60 * 1_000;
@@ -67,7 +72,46 @@ export class CoachCommandService {
     private readonly profileAcquisitionRollout?: ProfileAcquisitionInternalRolloutService,
     @Optional()
     private readonly currentWorkoutPlanReader?: CurrentWorkoutPlanReaderService,
+    @Optional()
+    private readonly dailyQueries?: ConversationDailyQueryService,
   ) {}
+
+  async processReadOnlyText(input: ProcessCoachCommandInput): Promise<boolean> {
+    if (!this.dailyQueries) return false;
+    const message = await this.prisma.message.findFirst({
+      where: { id: input.messageId, conversation: { userId: input.userId } },
+      select: { content: true },
+    });
+    if (
+      !message ||
+      !(
+        this.dailyQueries.accepts(message.content) ||
+        isWorkoutCurrentPlanRead(message.content)
+      )
+    )
+      return false;
+    await this.processTextMessage(input);
+    return true;
+  }
+
+  async processUncorrelatedShortReply(
+    input: ProcessCoachCommandInput,
+  ): Promise<boolean> {
+    if (!this.dailyQueries) return false;
+    const message = await this.prisma.message.findFirst({
+      where: { id: input.messageId, conversation: { userId: input.userId } },
+      select: { content: true, replyToExternalMessageId: true },
+    });
+    // Quoted replies retain the existing acquisition correlation checks.
+    if (
+      !message ||
+      message.replyToExternalMessageId ||
+      !isIsolatedReminderReply(message.content)
+    )
+      return false;
+    await this.processTextMessage(input);
+    return true;
+  }
 
   async shouldHandleBeforeProfileAcquisition(
     input: ProcessCoachCommandInput,
@@ -97,7 +141,7 @@ export class CoachCommandService {
     ) {
       return true;
     }
-    if (!this.pendingActions) return false;
+    if (!this.pendingActions || message.replyToExternalMessageId) return false;
     const pending = await this.pendingActions.findPendingForInbound({
       userId: input.userId,
       conversationId: message.conversationId,
@@ -177,7 +221,13 @@ export class CoachCommandService {
         ? `sessão ${workoutContinuation.sequence}`
         : message.content);
 
-    if (!message.conversation.user.onboardingCompleted) {
+    if (
+      !message.conversation.user.onboardingCompleted &&
+      !(
+        this.dailyQueries?.accepts(commandText) ||
+        isWorkoutCurrentPlanRead(commandText)
+      )
+    ) {
       return {
         handled: false,
         duplicated: false,
@@ -225,11 +275,17 @@ export class CoachCommandService {
         intent,
         selectionContext,
       });
-      await this.activatePendingPrompt(
-        input.userId,
-        message,
-        message.timestamp,
-      );
+      if (
+        !(
+          this.dailyQueries?.accepts(commandText) ||
+          isIsolatedReminderReply(commandText)
+        )
+      )
+        await this.activatePendingPrompt(
+          input.userId,
+          message,
+          message.timestamp,
+        );
       return { handled: true, duplicated: true, intent };
     }
     if (pending.status === 'ALREADY_CONSUMED') {
@@ -240,7 +296,23 @@ export class CoachCommandService {
         reason: 'PENDING_ACTION_ALREADY_CONSUMED',
       };
     }
+    const dailyContent = this.dailyQueries
+      ? await this.dailyQueries.answer({
+          userId: input.userId,
+          conversationId: message.conversation.id,
+          messageId: message.id,
+          text: commandText,
+          referenceDate: message.timestamp,
+        })
+      : null;
+    const isolatedReply =
+      Boolean(this.dailyQueries) &&
+      pending.status !== 'ACTIONABLE' &&
+      pending.status !== 'COMPLETED' &&
+      isIsolatedReminderReply(commandText);
     const bypassRuntime =
+      dailyContent !== null ||
+      isolatedReply ||
       pending.status === 'ACTIONABLE' ||
       pending.status === 'EXPIRED' ||
       pending.status === 'COMPLETED' ||
@@ -276,27 +348,49 @@ export class CoachCommandService {
       intent = runtimeDecision.profileAcquisition.executionRoute.targetPlan;
     }
     const planningResult =
-      pending.status === 'COMPLETED'
-        ? { content: pending.content, responseRequired: true }
-        : runtimeDecision.source === 'CONVERSATION_RUNTIME'
-          ? { content: runtimeDecision.content, responseRequired: true }
-          : runtimeDecision.source === 'SAFE_RESPONSE'
+      dailyContent !== null || isolatedReply
+        ? {
+            content: dailyContent ?? UNCORRELATED_REPLY,
+            responseRequired: true,
+          }
+        : pending.status === 'COMPLETED'
+          ? { content: pending.content, responseRequired: true }
+          : runtimeDecision.source === 'CONVERSATION_RUNTIME'
             ? { content: runtimeDecision.content, responseRequired: true }
-            : runtimeDecision.source === 'PLANNING_HANDOFF'
-              ? runtimeDecision.reason ===
-                'PROFILE_ACQUISITION_REQUIRES_SINGLE_EXECUTION'
-                ? await this.executeProfileAcquisitionHandoff({
-                    userId: input.userId,
-                    messageId: message.id,
-                    referenceDate: message.timestamp,
-                    originalRequestMessageId:
-                      input.planningContinuation?.originalRequestMessageId,
-                    profileAcquisition: runtimeDecision.profileAcquisition,
-                  })
+            : runtimeDecision.source === 'SAFE_RESPONSE'
+              ? { content: runtimeDecision.content, responseRequired: true }
+              : runtimeDecision.source === 'PLANNING_HANDOFF'
+                ? runtimeDecision.reason ===
+                  'PROFILE_ACQUISITION_REQUIRES_SINGLE_EXECUTION'
+                  ? await this.executeProfileAcquisitionHandoff({
+                      userId: input.userId,
+                      messageId: message.id,
+                      referenceDate: message.timestamp,
+                      originalRequestMessageId:
+                        input.planningContinuation?.originalRequestMessageId,
+                      profileAcquisition: runtimeDecision.profileAcquisition,
+                    })
+                  : await this.executePlanning({
+                      userId: input.userId,
+                      intent,
+                      planningDecision: runtimeDecision.planningDecision,
+                      conversationId: message.conversation.id,
+                      messageId: message.id,
+                      text: commandText,
+                      referenceDate: message.timestamp,
+                      profileId: message.conversation.user.fitnessProfile?.id,
+                      pendingGoalConfirmation:
+                        pending.status === 'ACTIONABLE'
+                          ? pending.context
+                          : undefined,
+                      suppressCurrentGoalResolution:
+                        pending.status === 'EXPIRED',
+                      originalRequestMessageId:
+                        input.planningContinuation?.originalRequestMessageId,
+                    })
                 : await this.executePlanning({
                     userId: input.userId,
                     intent,
-                    planningDecision: runtimeDecision.planningDecision,
                     conversationId: message.conversation.id,
                     messageId: message.id,
                     text: commandText,
@@ -309,23 +403,7 @@ export class CoachCommandService {
                     suppressCurrentGoalResolution: pending.status === 'EXPIRED',
                     originalRequestMessageId:
                       input.planningContinuation?.originalRequestMessageId,
-                  })
-              : await this.executePlanning({
-                  userId: input.userId,
-                  intent,
-                  conversationId: message.conversation.id,
-                  messageId: message.id,
-                  text: commandText,
-                  referenceDate: message.timestamp,
-                  profileId: message.conversation.user.fitnessProfile?.id,
-                  pendingGoalConfirmation:
-                    pending.status === 'ACTIONABLE'
-                      ? pending.context
-                      : undefined,
-                  suppressCurrentGoalResolution: pending.status === 'EXPIRED',
-                  originalRequestMessageId:
-                    input.planningContinuation?.originalRequestMessageId,
-                });
+                  });
     if (!planningResult.responseRequired) {
       return {
         handled: true,
@@ -401,15 +479,21 @@ export class CoachCommandService {
       intent,
       selectionContext,
     });
-    await this.activatePendingPrompt(input.userId, message, message.timestamp);
-    this.conversationGoalShadow.execute({
-      userId: input.userId,
-      messageId: message.id,
-      legacyIntent: intent,
-      referenceTimestamp: message.timestamp.toISOString(),
-      onboardingActive: false,
-      equivalentGenerationInProgress: false,
-    });
+    if (dailyContent === null && !isolatedReply) {
+      await this.activatePendingPrompt(
+        input.userId,
+        message,
+        message.timestamp,
+      );
+      this.conversationGoalShadow.execute({
+        userId: input.userId,
+        messageId: message.id,
+        legacyIntent: intent,
+        referenceTimestamp: message.timestamp.toISOString(),
+        onboardingActive: false,
+        equivalentGenerationInProgress: false,
+      });
+    }
 
     return {
       handled: true,

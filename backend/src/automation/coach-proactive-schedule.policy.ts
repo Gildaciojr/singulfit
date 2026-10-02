@@ -385,7 +385,7 @@ export class CoachProactiveSchedulePolicy {
     return result;
   }
 
-  private parts(
+  parts(
     at: Date,
     timezone: string,
   ): {
@@ -415,6 +415,16 @@ export class CoachProactiveSchedulePolicy {
       day: Number(values.day),
       hour: Number(values.hour),
       minute: Number(values.minute),
+    });
+  }
+
+  localWeekRange(at: Date, timezoneValue?: string | null) {
+    const timezone = this.timezone(timezoneValue);
+    const localDate = this.localDate(at, timezone);
+    const offset = -(localDate.weekday === 0 ? 6 : localDate.weekday - 1);
+    return Object.freeze({
+      start: this.localToUtc(localDate, 0, timezone, offset),
+      end: this.localToUtc(localDate, 0, timezone, offset + 7),
     });
   }
 }

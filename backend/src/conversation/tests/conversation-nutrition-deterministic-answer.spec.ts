@@ -48,6 +48,24 @@ describe('ConversationNutritionDeterministicAnswerService', () => {
   } as ConversationExecutionRoute;
 
   it.each([
+    'quantas calorias consumi hoje?',
+    'quanto de proteína consumi hoje?',
+    'quanto gastei de calorias hoje?',
+    'quanto consumi essa semana?',
+  ])(
+    'never returns plan targets for consumption or expenditure: %s',
+    (request) => {
+      expect(
+        service.answer({
+          request,
+          route,
+          current: { status: 'AVAILABLE', plan },
+        }),
+      ).toBeNull();
+    },
+  );
+
+  it.each([
     [
       'qual meu almoço?',
       '*Almoço* (12:30): 4 colheres de Arroz branco, 120 g de Frango grelhado.',

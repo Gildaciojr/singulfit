@@ -17,10 +17,13 @@ import { AUTOMATION_RULE_CODES } from './automation.constants';
 import {
   COACH_PROACTIVE_INTENTS,
   COACH_PROACTIVE_SOURCE,
+  COACH_PROACTIVE_RESPONSE_WINDOW_HOURS,
   type CoachProactiveIntent,
 } from './coach-proactive.contract';
 
 const RESPONSE_SOURCE = 'COACH_PROACTIVE_RESPONSE_V1';
+const RESPONSE_WINDOW_MS =
+  COACH_PROACTIVE_RESPONSE_WINDOW_HOURS * 60 * 60 * 1_000;
 
 type HydrationEvidence = 'GOAL_COMPLETED' | 'WATER_CONSUMED' | null;
 
@@ -78,7 +81,25 @@ export class CoachProactiveResponseService {
           ? { externalMessageId: message.replyToExternalMessageId }
           : {
               scheduledFor: { lte: message.timestamp },
-              responseExpiresAt: { gte: message.timestamp },
+              OR: [
+                {
+                  sentAt: {
+                    gte: new Date(
+                      message.timestamp.getTime() - RESPONSE_WINDOW_MS,
+                    ),
+                    lte: message.timestamp,
+                  },
+                },
+                {
+                  sentAt: null,
+                  scheduledFor: {
+                    gte: new Date(
+                      message.timestamp.getTime() - RESPONSE_WINDOW_MS,
+                    ),
+                    lte: message.timestamp,
+                  },
+                },
+              ],
               context: { path: ['source'], equals: COACH_PROACTIVE_SOURCE },
             }),
       },
@@ -88,6 +109,8 @@ export class CoachProactiveResponseService {
         sentAt: true,
         responseExpiresAt: true,
         responseMessageId: true,
+        responseOutcome: true,
+        content: true,
         context: true,
       },
       orderBy: [{ scheduledFor: 'desc' }, { id: 'desc' }],
@@ -99,19 +122,13 @@ export class CoachProactiveResponseService {
       return this.notHandled();
     }
     if (
-      !intervention.responseExpiresAt ||
-      intervention.responseExpiresAt < message.timestamp
+      (intervention.sentAt ?? intervention.scheduledFor) > message.timestamp ||
+      (intervention.sentAt ?? intervention.scheduledFor).getTime() +
+        RESPONSE_WINDOW_MS <
+        message.timestamp.getTime()
     ) {
       return this.notHandled();
     }
-    if (
-      !quoted &&
-      intervention.responseMessageId &&
-      intervention.responseMessageId !== message.id
-    ) {
-      return this.notHandled();
-    }
-
     if (!quoted) {
       const activeProfile =
         await this.prisma.coachProfileAcquisitionCycle.findFirst({
@@ -149,7 +166,7 @@ export class CoachProactiveResponseService {
           },
           select: { id: true },
         }),
-        this.prisma.scheduledMessage.findFirst({
+        this.prisma.scheduledMessage.findMany({
           where: {
             id: { not: intervention.id },
             userId: input.userId,
@@ -157,14 +174,22 @@ export class CoachProactiveResponseService {
             status: ScheduledMessageStatus.SENT,
             sentAt: { gt: sentAt, lt: message.timestamp },
           },
-          select: { id: true },
+          select: { id: true, context: true },
+          orderBy: [{ sentAt: 'desc' }, { id: 'desc' }],
+          take: 32,
         }),
       ]);
-      if (newerOutbound || newerScheduled) return this.notHandled();
+      const intervening = newerScheduled.some(
+        (candidate) =>
+          !this.isRecord(candidate.context) ||
+          candidate.context.source !== RESPONSE_SOURCE ||
+          candidate.context.interventionId !== intervention.id,
+      );
+      if (newerOutbound || intervening) return this.notHandled();
     }
     const classification = independentCommand
       ? null
-      : this.classify(intent, message.content);
+      : this.classify(intent, message.content, intervention.content);
     if (classification === null)
       return Object.freeze({ ...this.notHandled(), continueInRuntime: true });
     return this.persist({
@@ -210,22 +235,60 @@ export class CoachProactiveResponseService {
       const current = await transaction.scheduledMessage.findUnique({
         where: { id: input.interventionId },
         select: {
+          userId: true,
+          conversationId: true,
+          scheduledFor: true,
+          sentAt: true,
           responseMessageId: true,
+          responseOutcome: true,
+          respondedAt: true,
           responseExpiresAt: true,
           context: true,
         },
       });
       if (!current) return this.notHandled();
-      if (current.responseMessageId) {
+      if (
+        current.userId !== input.userId ||
+        current.conversationId !== input.message.conversationId
+      )
+        return this.notHandled();
+      const replay = await transaction.coachMessage.findUnique({
+        where: {
+          idempotencyKey: `proactive-response:${input.interventionId}:${input.message.id}`,
+        },
+        select: { id: true },
+      });
+      const mutable =
+        current.responseOutcome === CoachProactiveWorkoutOutcome.DEFERRED ||
+        current.responseOutcome === CoachProactiveWorkoutOutcome.UNKNOWN;
+      const terminal =
+        input.outcome !== CoachProactiveWorkoutOutcome.DEFERRED &&
+        input.outcome !== CoachProactiveWorkoutOutcome.UNKNOWN;
+      const allowedTransition =
+        mutable &&
+        terminal &&
+        (current.responseOutcome !== CoachProactiveWorkoutOutcome.DEFERRED ||
+          input.outcome === CoachProactiveWorkoutOutcome.COMPLETED ||
+          input.outcome === CoachProactiveWorkoutOutcome.SKIPPED);
+      if (
+        replay ||
+        current.responseMessageId === input.message.id ||
+        (current.responseMessageId &&
+          (!allowedTransition ||
+            (current.respondedAt &&
+              current.respondedAt >= input.message.timestamp)))
+      ) {
         return Object.freeze({
           handled: true,
           duplicated: true,
-          outcome: input.outcome,
+          outcome: current.responseOutcome ?? input.outcome,
         });
       }
       if (
-        !current.responseExpiresAt ||
-        current.responseExpiresAt < input.message.timestamp
+        (current.sentAt ?? current.scheduledFor) > input.message.timestamp ||
+        (current.sentAt ?? current.scheduledFor).getTime() +
+          RESPONSE_WINDOW_MS <
+          input.message.timestamp.getTime()
       ) {
         return this.notHandled();
       }
@@ -243,14 +306,14 @@ export class CoachProactiveResponseService {
           userId_memoryType_sourceKey: {
             userId: input.userId,
             memoryType: MemoryType.SHORT_TERM,
-            sourceKey: `proactive-workout:${input.interventionId}`,
+            sourceKey: `proactive-workout:${input.interventionId}:${input.message.id}`,
           },
         },
         update: {},
         create: {
           userId: input.userId,
           memoryType: MemoryType.SHORT_TERM,
-          sourceKey: `proactive-workout:${input.interventionId}`,
+          sourceKey: `proactive-workout:${input.interventionId}:${input.message.id}`,
           content: {
             source: RESPONSE_SOURCE,
             interventionId: input.interventionId,
@@ -279,13 +342,13 @@ export class CoachProactiveResponseService {
       );
       const coachMessage = await transaction.coachMessage.upsert({
         where: {
-          idempotencyKey: `proactive-response:${input.interventionId}`,
+          idempotencyKey: `proactive-response:${input.interventionId}:${input.message.id}`,
         },
         update: {},
         create: {
           userId: input.userId,
           type: CoachMessageType.FOLLOW_UP,
-          idempotencyKey: `proactive-response:${input.interventionId}`,
+          idempotencyKey: `proactive-response:${input.interventionId}:${input.message.id}`,
           content,
           context: {
             source: RESPONSE_SOURCE,
@@ -364,9 +427,34 @@ export class CoachProactiveResponseService {
   private classify(
     intent: CoachProactiveIntent,
     value: string,
+    reminderContent = '',
   ): ProactiveResponseClassification | null {
     const text = this.normalize(value);
     if (!text) return null;
+    const meal = [
+      COACH_PROACTIVE_INTENTS.LUNCH_CHECK,
+      COACH_PROACTIVE_INTENTS.DINNER_CHECK,
+      COACH_PROACTIVE_INTENTS.MEAL_PLAN_CHECK,
+    ].some((candidate) => candidate === intent);
+    if (meal && /\bcomi outra coisa\b/u.test(text))
+      return this.classification(CoachProactiveWorkoutOutcome.PARTIAL);
+    if (/^(sim|nao|ok)$/u.test(text)) {
+      const question = this.normalize(reminderContent);
+      const explicitCompletionQuestion =
+        /\b(conseguiu|concluiu|terminou|ja fez|ja treinou|ja comeu|ja almocou|ja jantou)\b/u.test(
+          question,
+        );
+      if (text === 'ok' || !explicitCompletionQuestion)
+        return this.classification(CoachProactiveWorkoutOutcome.UNKNOWN);
+      return this.classification(
+        text === 'sim'
+          ? CoachProactiveWorkoutOutcome.COMPLETED
+          : CoachProactiveWorkoutOutcome.SKIPPED,
+        text === 'sim' && intent === COACH_PROACTIVE_INTENTS.HYDRATION_CHECK
+          ? 'WATER_CONSUMED'
+          : null,
+      );
+    }
     if (/\b(dor|doeu|doendo|incomodou|machucou|lesionei)\b/u.test(text)) {
       return intent === COACH_PROACTIVE_INTENTS.WORKOUT_CHECK
         ? this.classification(CoachProactiveWorkoutOutcome.ISSUE_REPORTED)
@@ -385,11 +473,15 @@ export class CoachProactiveResponseService {
     ) {
       return this.classification(CoachProactiveWorkoutOutcome.DEFERRED);
     }
-    if (/\b(vou fazer|mais tarde|depois eu faco|adiei|adiar)\b/u.test(text)) {
+    if (
+      /\b(vou fazer|mais tarde|depois eu faco|faco mais tarde|adiei|adiar)\b/u.test(
+        text,
+      )
+    ) {
       return this.classification(CoachProactiveWorkoutOutcome.DEFERRED);
     }
     if (
-      /\b(ainda nao|nao consegui|hoje nao|nao fiz|nao treinei|nao jantei|nao almoco|nao almocei|pulei)\b/u.test(
+      /\b(ainda nao|nao consegui|nao deu|hoje nao|nao fiz|nao treinei|nao comi|nao jantei|nao almoco|nao almocei|pulei)\b/u.test(
         text,
       )
     ) {
@@ -408,7 +500,7 @@ export class CoachProactiveResponseService {
     }
     if (
       intent === COACH_PROACTIVE_INTENTS.HYDRATION_CHECK &&
-      /\b(sim|ja|ja bebi|bebi agua|estou bebendo|to bebendo|consegui beber|tomei (?:uns? )?\d+\s*(?:ml|litros?))\b/u.test(
+      /\b(ja bebi|bebi agua|estou bebendo|to bebendo|consegui beber|tomei (?:uns? )?\d+\s*(?:ml|litros?))\b/u.test(
         text,
       )
     ) {
@@ -418,12 +510,22 @@ export class CoachProactiveResponseService {
       );
     }
     if (
-      /\b(sim|ja|fiz tudo|ja fiz|consegui|completei|treinei|foi otimo|bati a meta|almocei|jantei|estou bem|to bem|bom dia)\b/u.test(
+      /\b(fiz tudo|completei|conclui|terminei|foi otimo|bati a meta|estou bem|to bem|bom dia)\b/u.test(
         text,
       )
     ) {
       return this.classification(CoachProactiveWorkoutOutcome.COMPLETED);
     }
+    if (
+      (intent === COACH_PROACTIVE_INTENTS.WORKOUT_CHECK &&
+        /\b(fiz|feito|treinei)\b/u.test(text)) ||
+      (meal && /\b(comi|almocei|jantei|feito|segui o plano)\b/u.test(text)) ||
+      (intent === COACH_PROACTIVE_INTENTS.GOOD_MORNING &&
+        /\btomei cafe da manha\b/u.test(text))
+    )
+      return this.classification(CoachProactiveWorkoutOutcome.COMPLETED);
+    if (/^ja\b/u.test(text))
+      return this.classification(CoachProactiveWorkoutOutcome.UNKNOWN);
     if (
       /\b(cansad[oa]|exaust[oa]|sem energia|hoje esta corrido)\b/u.test(text)
     ) {
@@ -438,6 +540,8 @@ export class CoachProactiveResponseService {
     hydrationEvidence: HydrationEvidence,
     preferredName: string | null,
   ): string {
+    if (outcome === CoachProactiveWorkoutOutcome.UNKNOWN)
+      return 'Você concluiu o que combinamos, fez só uma parte ou precisou adiar? Me conte para eu registrar corretamente.';
     if (intent === COACH_PROACTIVE_INTENTS.HYDRATION_CHECK) {
       if (
         outcome === CoachProactiveWorkoutOutcome.COMPLETED &&
@@ -484,8 +588,6 @@ export class CoachProactiveResponseService {
         return 'Combinado. Quando terminar mais tarde, me conte como foi.';
       case CoachProactiveWorkoutOutcome.ISSUE_REPORTED:
         return 'Entendi. Evite movimentos que aumentem o desconforto. Em qual exercício isso aconteceu? Se a dor for forte ou persistente, procure avaliação profissional.';
-      case CoachProactiveWorkoutOutcome.UNKNOWN:
-        return 'Entendi. Você conseguiu concluir, fez só uma parte ou precisou adiar o treino?';
     }
   }
 
