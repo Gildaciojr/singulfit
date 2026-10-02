@@ -1,4 +1,9 @@
 import { Test } from '@nestjs/testing';
+import {
+  historicalWorkoutPlan,
+  longitudinalWorkoutSnapshot,
+} from '../workout/v2/workout-longitudinal.fixtures';
+import type { WorkoutPlanV2 } from '../workout/v2/workout-plan-v2.contract';
 import { AIJobStatus, AIJobType } from '@prisma/client';
 import { AIService } from '../ai/ai.service';
 import { ConversationModule } from '../conversation/conversation.module';
@@ -155,6 +160,8 @@ describe('CoachCommandService', () => {
     runtimeLegacy?: boolean;
     runtimeHandoff?: boolean;
     controlledPlanning?: boolean;
+    controlledPreviousPlan?: WorkoutPlanV2;
+    controlledAdherenceScore?: number;
     controlledProfileReady?: boolean;
     runtimePlanningDecision?: import('../context/conversation-goal-planner.contract').ConversationGoalDecision;
     runtimeProfileAcquisitionHandoff?: boolean;
@@ -197,6 +204,20 @@ describe('CoachCommandService', () => {
       },
     };
     const prisma = {
+      fitnessCheckIn: {
+        findMany: jest.fn().mockResolvedValue(
+          options?.controlledAdherenceScore === undefined
+            ? []
+            : [
+                {
+                  userId: 'user-id',
+                  profileId: 'profile-id',
+                  adherenceScore: options.controlledAdherenceScore,
+                  createdAt: new Date('2026-06-09T12:00:00Z'),
+                },
+              ],
+        ),
+      },
       message: {
         findFirst: jest.fn().mockResolvedValue({
           id: 'message-id',
@@ -343,11 +364,34 @@ describe('CoachCommandService', () => {
       }),
     };
     const controlledWorkoutReader = {
-      read: jest.fn().mockResolvedValue({ status: 'NO_PLAN', plan: null }),
+      readPrevious: jest
+        .fn()
+        .mockResolvedValue(
+          options?.controlledPreviousPlan
+            ? { userId: 'user-id', document: options.controlledPreviousPlan }
+            : null,
+        ),
+      read: jest.fn().mockResolvedValue(
+        options?.controlledPreviousPlan
+          ? {
+              status: 'AVAILABLE',
+              plan: {
+                userId: 'user-id',
+                document: options.controlledPreviousPlan,
+              },
+            }
+          : { status: 'NO_PLAN', plan: null },
+      ),
       present: jest.fn().mockResolvedValue('Plano atual controlado'),
     };
     const controlledSnapshotBuilder = {
-      build: jest.fn().mockResolvedValue(routingSnapshot()),
+      build: jest
+        .fn()
+        .mockResolvedValue(
+          options?.controlledPreviousPlan
+            ? longitudinalWorkoutSnapshot()
+            : routingSnapshot(),
+        ),
     };
     const planningDispatcher = new CoachPlanningExecutionDispatcherService(
       dietGenerator as unknown as DietGeneratorService,
@@ -414,6 +458,7 @@ describe('CoachCommandService', () => {
         ? new GenerateWorkoutPlanV2InputBuilder(
             controlledSnapshotBuilder as unknown as CoachProfileSnapshotBuilder,
             prisma as unknown as PrismaService,
+            controlledWorkoutReader as unknown as CurrentWorkoutPlanReaderService,
           )
         : undefined,
       options?.controlledPlanning
@@ -657,6 +702,69 @@ describe('CoachCommandService', () => {
       expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
       expect(subject.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
       expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['Refaça meu treino', 5, 'FULL_GYM', 1],
+    ['Quero um treino completamente diferente', 5, 'FULL_GYM', 1],
+    ['Agora só posso treinar em casa 3x', 3, 'HOME', 1],
+    ['Agora quero treinar 4x', 4, 'FULL_GYM', 1],
+    ['Troque supino por outro exercício', 5, 'FULL_GYM', 1],
+    ['Qual é meu treino atual?', 5, 'FULL_GYM', 0],
+    ['Qual é meu treino de hoje?', 5, 'FULL_GYM', 0],
+    ['Como funciona meu treino?', 5, 'FULL_GYM', 0],
+    ['Olá', 5, 'FULL_GYM', 0],
+  ] as const)(
+    'longitudinal public chain: %s',
+    async (content, frequency, environment, calls) => {
+      const previousPlan = historicalWorkoutPlan();
+      const subject = createSubject({
+        content,
+        controlledPlanning: true,
+        controlledPreviousPlan: previousPlan,
+        controlledAdherenceScore: 30,
+        runtimeHandoff: content.startsWith('Agora'),
+        runtimePlanningDecision: content.startsWith('Agora')
+          ? goalDecision('UPDATE_WORKOUT_PLAN', 'WORKOUT_PLAN_UPDATE_REQUEST', {
+              targetPlan: 'WORKOUT',
+            })
+          : undefined,
+      });
+      await subject.service.processTextMessage({
+        userId: 'user-id',
+        messageId: 'message-id',
+      });
+      expect(subject.controlledWorkoutExecutor.execute).toHaveBeenCalledTimes(
+        calls,
+      );
+      if (calls) {
+        const input =
+          subject.controlledWorkoutExecutor.execute.mock.calls[0][0]
+            .generationInput;
+        expect(input.previousPlan).toBe(previousPlan);
+        expect(input.progressEvidence).toMatchObject([
+          {
+            source: 'FITNESS_CHECK_IN',
+            adherenceScore: 30,
+            completedSessions: null,
+          },
+        ]);
+        expect(
+          input.recognizedContext.weeklyFrequency?.value ??
+            input.snapshot.training.weeklyFrequency.value,
+        ).toBe(frequency);
+        expect(
+          input.recognizedContext.environment?.value ??
+            input.snapshot.training.environment.value,
+        ).toBe(environment);
+        if (environment === 'HOME')
+          expect(input.recognizedContext.equipment.value).toEqual([
+            'BODYWEIGHT',
+          ]);
+      }
+      expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+      expect(subject.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
     },
   );
 

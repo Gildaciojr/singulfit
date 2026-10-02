@@ -177,10 +177,14 @@ export function declaredWorkoutProfileFacts(
       /\b(0?[1-7]|um|uma|dois|duas|tres|quatro|cinco|seis|sete)\s*(?:x|vezes?|dias?)(?:\s*(?:por|na|esta)?\s*semana)?\b/gu,
     ),
   ];
-  const frequencies = new Set(
-    frequencyMatches.map((match) => words[match[1]] ?? Number(match[1])),
+  const currentFrequencyMatches = frequencyMatches.filter(
+    (match) =>
+      !/\b(?:em vez de|ao inves de)\s*$/u.test(text.slice(0, match.index)),
   );
-  const invalidFrequency = frequencyMatches.some((match) =>
+  const frequencies = new Set(
+    currentFrequencyMatches.map((match) => words[match[1]] ?? Number(match[1])),
+  );
+  const invalidFrequency = currentFrequencyMatches.some((match) =>
     uncertainDeclaration(text, match.index),
   );
   const weeklyFrequency =

@@ -1,4 +1,9 @@
-import type { ActivityLevel, FitnessGoal, Gender } from '@prisma/client';
+import type {
+  ActivityLevel,
+  EnergyLevel,
+  FitnessGoal,
+  Gender,
+} from '@prisma/client';
 import type { CoachProfileSnapshot } from '../../context/coach-profile-snapshot.contract';
 import type {
   WorkoutArtifactType,
@@ -83,6 +88,7 @@ export interface WorkoutMovementConstraint {
 }
 
 export interface WorkoutRecognizedContext {
+  readonly previousPlanPolicy?: 'CONTEXT_ONLY' | 'REPLACE_FREELY';
   readonly artifactType?: WorkoutArtifactType;
   readonly modality?: WorkoutPlanningValue<WorkoutModality>;
   readonly objective?: WorkoutPlanningValue<WorkoutObjective>;
@@ -129,6 +135,9 @@ export interface WorkoutRecognizedContext {
 }
 
 export interface WorkoutProgressEvidence {
+  readonly energyLevel?: EnergyLevel;
+  readonly feedback?: string;
+  readonly source?: 'FITNESS_CHECK_IN';
   readonly observedAt: string;
   readonly adherenceScore: number | null;
   readonly perceivedEffort: number | null;
@@ -137,6 +146,8 @@ export interface WorkoutProgressEvidence {
 }
 
 export interface WorkoutPreviousPlanSummary {
+  readonly strategy?: WorkoutPlanV2['strategy'];
+  readonly sessionDetails?: WorkoutPlanV2['sessions'];
   readonly artifactType: WorkoutArtifactType;
   readonly modality: WorkoutModality;
   readonly objective: WorkoutObjective;
@@ -157,6 +168,7 @@ export interface WorkoutPreviousPlanSummary {
 }
 
 export interface WorkoutPlanningContext {
+  readonly previousPlanPolicy?: 'CONTEXT_ONLY' | 'REPLACE_FREELY';
   readonly schemaVersion: 2;
   readonly artifactType: WorkoutArtifactType;
   readonly modality: WorkoutPlanningValue<WorkoutModality>;

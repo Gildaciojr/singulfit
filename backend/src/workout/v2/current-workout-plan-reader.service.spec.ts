@@ -183,6 +183,7 @@ describe('CurrentWorkoutPlanReaderService', () => {
     const prisma = {
       workoutPlan: {
         findFirst,
+        findMany: jest.fn().mockResolvedValue(value ? [value] : []),
         create: mutations.workoutPlanCreate,
         update: mutations.workoutPlanUpdate,
         updateMany: mutations.workoutPlanUpdateMany,
@@ -207,8 +208,65 @@ describe('CurrentWorkoutPlanReaderService', () => {
       prisma as never,
       new WorkoutPlanV2StoredDocumentParser(),
     );
-    return { service, findFirst, mutations };
+    return {
+      service,
+      findFirst,
+      findMany: prisma.workoutPlan.findMany,
+      mutations,
+    };
   }
+
+  it('reads the latest valid V2 history, including archives, under user/profile ownership', async () => {
+    const { service, findMany } = setup();
+    await expect(
+      service.readPrevious('user-id', new Date('2026-08-18')),
+    ).resolves.toMatchObject({
+      userId: 'user-id',
+      document: { title: 'Plano V2 atual' },
+    });
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          userId: 'user-id',
+          profile: { userId: 'user-id' },
+          status: { in: ['ACTIVE', 'ARCHIVED'] },
+          generatedAt: { lt: new Date('2026-08-18') },
+        },
+      }),
+    );
+  });
+
+  it('skips invalid/foreign history without returning it as previousPlan', async () => {
+    const { service, findMany } = setup();
+    findMany.mockResolvedValueOnce([
+      record({ userId: 'other-user' }),
+      record({ document: { malformed: true } }),
+    ]);
+    await expect(
+      service.readPrevious('user-id', new Date('2026-08-18')),
+    ).resolves.toBeNull();
+    findMany.mockResolvedValueOnce([
+      record({ document: { malformed: true } }),
+      record(),
+    ]);
+    await expect(
+      service.readPrevious('user-id', new Date('2026-08-18')),
+    ).resolves.toMatchObject({ userId: 'user-id' });
+  });
+
+  it('does not feed a plan produced by the same request back into a retry', async () => {
+    const { service } = setup();
+    await expect(
+      service.readPrevious('user-id', new Date('2026-08-17T00:00:00.000Z')),
+    ).resolves.toBeNull();
+  });
+
+  it('never uses a plan generated after the current request', async () => {
+    const { service } = setup();
+    await expect(
+      service.readPrevious('user-id', new Date('2026-08-01')),
+    ).resolves.toBeNull();
+  });
 
   it('reads only the active plan owned by the requested user', async () => {
     const { service, findFirst } = setup();
@@ -418,6 +476,18 @@ describe('CurrentWorkoutPlanReaderService', () => {
       legacyRecord({ promptName: 'unknown_workout_prompt' }),
     );
 
+    await expect(service.read('user-id')).resolves.toEqual({
+      status: 'INVALID_V2_PLAN',
+      plan: null,
+    });
+  });
+
+  it('rejects a foreign aggregate even if a mocked query returns it with a local AIJob', async () => {
+    const value = record({ userId: 'other-user' });
+    const { service } = setup({
+      ...value,
+      aiJob: { ...value.aiJob, userId: 'user-id' },
+    });
     await expect(service.read('user-id')).resolves.toEqual({
       status: 'INVALID_V2_PLAN',
       plan: null,

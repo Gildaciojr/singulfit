@@ -4,7 +4,14 @@ import {
   declaredWorkoutProfileFacts,
 } from './workout-declared-profile-facts';
 import { workoutEquipmentBaseline } from './workout-equipment-defaults';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
+import { CurrentWorkoutPlanReaderService } from './current-workout-plan-reader.service';
+import { isFullPlanReplacementRequest } from '../../conversation/understanding/full-plan-replacement.policy';
 import { CoachProfileSnapshotBuilder } from '../../context/coach-profile-snapshot.builder';
 import type {
   CoachProfileDatum,
@@ -58,6 +65,8 @@ export class GenerateWorkoutPlanV2InputBuilder {
   constructor(
     private readonly snapshotBuilder: CoachProfileSnapshotBuilder,
     private readonly prisma: PrismaService,
+    @Optional()
+    private readonly previousPlanReader?: CurrentWorkoutPlanReaderService,
   ) {}
 
   async build(
@@ -71,6 +80,7 @@ export class GenerateWorkoutPlanV2InputBuilder {
         : this.profileId(source.userId),
     ]);
     const decision = this.generationDecision(source.decision, snapshot);
+    const history = await this.history(source, profileId);
     const recognizedContext = this.recognizedContext(
       source.recognizedContext,
       snapshot,
@@ -83,11 +93,17 @@ export class GenerateWorkoutPlanV2InputBuilder {
       generationInput: Object.freeze({
         userId: source.userId,
         decision,
-        recognizedContext,
+        recognizedContext:
+          recognizedContext.purpose === 'REPLACEMENT' && !history.previousPlan
+            ? Object.freeze({
+                ...recognizedContext,
+                purpose: 'CREATION' as const,
+              })
+            : recognizedContext,
         snapshot,
         referenceDate: source.referenceDate,
-        progressEvidence: source.progressEvidence,
-        previousPlan: source.previousPlan,
+        progressEvidence: history.progressEvidence,
+        previousPlan: history.previousPlan,
       }),
     });
   }
@@ -96,6 +112,86 @@ export class GenerateWorkoutPlanV2InputBuilder {
     message: string | undefined,
   ): WorkoutRecognizedContext {
     return this.declaredContext(message);
+  }
+
+  private async history(
+    source: GenerateWorkoutPlanV2InputSource,
+    profileId: string,
+  ): Promise<
+    Pick<GenerateWorkoutPlanV2Input, 'previousPlan' | 'progressEvidence'>
+  > {
+    if (!this.previousPlanReader) {
+      if (source.previousPlan || source.progressEvidence?.length)
+        throw new BadRequestException(
+          'Histórico Workout sem reader de ownership',
+        );
+      return {};
+    }
+    const cutoff = new Date(
+      source.referenceDate.getTime() - 56 * 24 * 60 * 60 * 1000,
+    );
+    const [previous, observations] = await Promise.all([
+      this.previousPlanReader.readPrevious(source.userId, source.referenceDate),
+      this.prisma.fitnessCheckIn.findMany({
+        where: {
+          userId: source.userId,
+          profileId,
+          profile: { userId: source.userId },
+          createdAt: { gte: cutoff, lte: source.referenceDate },
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: 12,
+        select: {
+          userId: true,
+          profileId: true,
+          adherenceScore: true,
+          energyLevel: true,
+          notes: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+    const previousPlan =
+      previous?.userId === source.userId ? previous.document : undefined;
+    if (
+      source.previousPlan &&
+      (!previousPlan ||
+        source.previousPlan.generationMetadata.aiJobId !==
+          previousPlan.generationMetadata.aiJobId)
+    )
+      throw new BadRequestException(
+        'Plano anterior Workout não corresponde ao usuário/histórico canônico',
+      );
+    const progressEvidence = observations
+      .filter(
+        (item) =>
+          item.userId === source.userId &&
+          item.profileId === profileId &&
+          item.createdAt >= cutoff &&
+          item.createdAt <= source.referenceDate &&
+          Number.isInteger(item.adherenceScore) &&
+          item.adherenceScore >= 0 &&
+          item.adherenceScore <= 100,
+      )
+      .map((item) =>
+        Object.freeze({
+          source: 'FITNESS_CHECK_IN' as const,
+          observedAt: item.createdAt.toISOString(),
+          adherenceScore: item.adherenceScore,
+          ...(item.energyLevel ? { energyLevel: item.energyLevel } : {}),
+          ...(item.notes ? { feedback: item.notes } : {}),
+          perceivedEffort: null,
+          completedSessions: null,
+          expectedSessions: null,
+        }),
+      )
+      .sort((left, right) => left.observedAt.localeCompare(right.observedAt));
+    return {
+      previousPlan,
+      progressEvidence: progressEvidence.length
+        ? Object.freeze(progressEvidence)
+        : undefined,
+    };
   }
 
   private async profileId(userId: string): Promise<string> {
@@ -154,17 +250,30 @@ export class GenerateWorkoutPlanV2InputBuilder {
         'value' in storedEnvironment &&
         storedEnvironment.value === 'LIMITED_GYM') ||
         currentEnvironment === 'LIMITED_GYM');
+    const environmentChanged =
+      !preserveLimitedGym &&
+      declaredEnvironment !== undefined &&
+      declaredEnvironment !==
+        (storedEnvironment && 'value' in storedEnvironment
+          ? storedEnvironment.value
+          : currentEnvironment);
     const equipment =
       declared.equipment?.status === 'INFERRED'
-        ? (current?.equipment ??
-          (preserveLimitedGym ||
-          (storedEquipment && storedEquipment.status !== 'UNKNOWN')
-            ? undefined
-            : declared.equipment))
+        ? environmentChanged
+          ? currentEnvironment === declaredEnvironment
+            ? (current?.equipment ?? declared.equipment)
+            : declared.equipment
+          : (current?.equipment ??
+            (preserveLimitedGym ||
+            (storedEquipment && storedEquipment.status !== 'UNKNOWN')
+              ? undefined
+              : declared.equipment))
         : (declared.equipment ?? current?.equipment);
     return this.resolveFrequencyAvailabilityConflict({
       ...current,
-      ...declared,
+      ...Object.fromEntries(
+        Object.entries(declared).filter(([, value]) => value !== undefined),
+      ),
       equipment,
       environment: preserveLimitedGym
         ? current?.environment
@@ -187,7 +296,11 @@ export class GenerateWorkoutPlanV2InputBuilder {
           ...(declared.safetySignals ?? []),
         ]),
       ]),
-      purpose: current?.purpose ?? 'CREATION',
+      purpose: declared.purpose ?? current?.purpose ?? 'CREATION',
+      previousPlanPolicy:
+        declared.previousPlanPolicy ??
+        current?.previousPlanPolicy ??
+        'CONTEXT_ONLY',
     });
   }
 
@@ -222,6 +335,13 @@ export class GenerateWorkoutPlanV2InputBuilder {
       environment: environment
         ? Object.freeze({ status: 'CONFIRMED' as const, value: environment })
         : undefined,
+      previousPlanPolicy:
+        /\b(?:completamente diferente|totalmente diferente|do zero)\b/u.test(
+          text,
+        )
+          ? 'REPLACE_FREELY'
+          : undefined,
+      purpose: isFullPlanReplacementRequest(text) ? 'REPLACEMENT' : undefined,
       experience: experience
         ? Object.freeze({ status: 'CONFIRMED' as const, value: experience })
         : undefined,

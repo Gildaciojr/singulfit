@@ -8,6 +8,7 @@ import type {
   WorkoutBlockType,
   WorkoutPersonalizationFactor,
   WorkoutPlanningStrategy,
+  WorkoutProgressionPolicy,
 } from './workout-planning-strategy.contract';
 
 @Injectable()
@@ -55,10 +56,16 @@ export class WorkoutPlanningStrategyService {
     if (context.previousPlan) factors.push('PREVIOUS_PLAN');
 
     const experience = context.training.experience;
+    const progressionState = this.progressionState(context);
+    const reduced =
+      progressionState === 'REGRESS' ||
+      progressionState === 'DELOAD' ||
+      progressionState === 'PAUSE';
     const level =
       experience.status === 'NOT_SET' ? 'BEGINNER' : experience.value;
-    const intensityLevel =
-      context.training.intensityPreference.status === 'CONFIRMED'
+    const intensityLevel = reduced
+      ? 'LIGHT'
+      : context.training.intensityPreference.status === 'CONFIRMED'
         ? context.training.intensityPreference.value
         : level === 'ADVANCED'
           ? 'HIGH'
@@ -78,6 +85,7 @@ export class WorkoutPlanningStrategyService {
         : context.training.objective.value,
     );
     const technicalMovementsAllowed =
+      !reduced &&
       level !== 'BEGINNER' &&
       context.training.experience.status === 'CONFIRMED';
 
@@ -129,9 +137,13 @@ export class WorkoutPlanningStrategyService {
         exactPowerAllowed: false,
       }),
       progressionPolicy: Object.freeze({
-        initialState:
-          context.safetySignals.length > 0 ? 'REASSESS' : 'MAINTAIN',
-        maximumWeeklyIncreasePercent: level === 'BEGINNER' ? 5 : 10,
+        initialState: progressionState,
+        maximumWeeklyIncreasePercent:
+          progressionState !== 'MAINTAIN' && progressionState !== 'PROGRESS'
+            ? 0
+            : level === 'BEGINNER'
+              ? 5
+              : 10,
         simultaneousVariablesAllowed: 1,
         requiresCompletedSessions: true,
         blocksOnSafetyFlag: true,
@@ -143,6 +155,83 @@ export class WorkoutPlanningStrategyService {
       ),
       personalizationFactors: Object.freeze(factors),
     });
+  }
+
+  private progressionState(
+    context: WorkoutPlanningContext,
+  ): WorkoutProgressionPolicy['initialState'] {
+    if (
+      context.safetySignals.some(
+        (flag) =>
+          flag === 'ACUTE_PAIN' ||
+          flag === 'FEVER' ||
+          flag === 'SIGNIFICANT_MALAISE' ||
+          flag === 'REPORTED_INCAPACITY',
+      )
+    )
+      return 'PAUSE';
+    if (context.safetySignals.includes('INSUFFICIENT_RECOVERY'))
+      return 'DELOAD';
+    if (context.safetySignals.includes('RETURN_AFTER_LONG_PAUSE'))
+      return 'REGRESS';
+    if (
+      context.safetySignals.length ||
+      context.movementConstraints.some(
+        (constraint) => constraint.status !== 'INFERRED',
+      )
+    )
+      return 'REASSESS';
+    if (!context.previousPlan) return 'MAINTAIN';
+    if (
+      context.previousPlanPolicy === 'REPLACE_FREELY' ||
+      (context.modality.status !== 'NOT_SET' &&
+        context.modality.value !== context.previousPlan.modality) ||
+      (context.training.objective.status !== 'NOT_SET' &&
+        context.training.objective.value !== context.previousPlan.objective)
+    )
+      return 'REASSESS';
+    const reference = Date.parse(context.referenceDate);
+    const evidence = context.progressEvidence
+      .filter((item) => {
+        const observed = Date.parse(item.observedAt);
+        return (
+          Number.isFinite(observed) &&
+          observed <= reference &&
+          observed >= reference - 28 * 24 * 60 * 60 * 1000
+        );
+      })
+      .sort((left, right) => left.observedAt.localeCompare(right.observedAt))
+      .at(-1);
+    if (!evidence) return 'MAINTAIN';
+    if (evidence.perceivedEffort !== null && evidence.perceivedEffort >= 9)
+      return 'DELOAD';
+    if (evidence.energyLevel === 'LOW') return 'REASSESS';
+    const hasSessions =
+      evidence.completedSessions !== null &&
+      evidence.expectedSessions !== null &&
+      evidence.expectedSessions > 0 &&
+      evidence.completedSessions >= 0;
+    if (
+      hasSessions &&
+      evidence.completedSessions! < evidence.expectedSessions! / 2 &&
+      evidence.perceivedEffort !== null &&
+      evidence.perceivedEffort >= 8
+    )
+      return 'REGRESS';
+    if (evidence.adherenceScore !== null && evidence.adherenceScore < 45)
+      return 'REASSESS';
+    if (
+      hasSessions &&
+      evidence.completedSessions! >= evidence.expectedSessions! &&
+      evidence.perceivedEffort !== null &&
+      evidence.perceivedEffort >= 0 &&
+      evidence.perceivedEffort <= 7 &&
+      evidence.adherenceScore !== null &&
+      evidence.adherenceScore >= 80 &&
+      evidence.source !== 'FITNESS_CHECK_IN'
+    )
+      return 'PROGRESS';
+    return 'MAINTAIN';
   }
 
   private sessionCount(context: WorkoutPlanningContext): number {

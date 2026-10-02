@@ -8,7 +8,10 @@ import type {
   CurrentWorkoutPlanV2,
   WorkoutPlanReadSelection,
 } from './current-workout-plan-reader.contract';
-import type { WorkoutSessionV2 } from './workout-plan-v2.contract';
+import type {
+  WorkoutSessionV2,
+  WorkoutPlanV2,
+} from './workout-plan-v2.contract';
 import { WorkoutPlanV2StoredDocumentParser } from './workout-plan-v2-stored-document.parser';
 import { WORKOUT_PROMPT_BY_GOAL } from '../workout.constants';
 import { WORKOUT_PLANNING_V2_PROMPT } from './workout-planning-v2.prompt.definition';
@@ -77,6 +80,59 @@ export class CurrentWorkoutPlanReaderService {
     ].join('\n');
   }
 
+  async readPrevious(
+    userId: string,
+    referenceDate: Date,
+  ): Promise<Readonly<{ userId: string; document: WorkoutPlanV2 }> | null> {
+    if (!userId.trim()) return null;
+    const records = await this.prisma.workoutPlan.findMany({
+      where: {
+        userId,
+        profile: { userId },
+        status: { in: ['ACTIVE', 'ARCHIVED'] },
+        generatedAt: { lt: referenceDate },
+      },
+      orderBy: [{ generatedAt: 'desc' }, { id: 'desc' }],
+      take: 12,
+      select: {
+        userId: true,
+        aiJob: {
+          select: {
+            id: true,
+            userId: true,
+            type: true,
+            status: true,
+            result: true,
+          },
+        },
+      },
+    });
+    for (const record of records) {
+      const job = record.aiJob;
+      if (
+        record.userId !== userId ||
+        !job ||
+        job.userId !== userId ||
+        job.type !== AIJobType.WORKOUT ||
+        job.status !== AIJobStatus.COMPLETED
+      )
+        continue;
+      const stored = this.record(job.result) ? job.result : null;
+      const document = stored
+        ? this.parser.parse(stored.acceptedOutput ?? null, job.id)
+        : null;
+      if (
+        !document ||
+        !Number.isFinite(Date.parse(document.generationMetadata.generatedAt)) ||
+        Date.parse(document.generationMetadata.generatedAt) >=
+          referenceDate.getTime()
+      )
+        continue;
+      return Object.freeze({ userId: record.userId, document });
+    }
+    return null;
+  }
+
   async read(userId: string): Promise<CurrentWorkoutPlanReadResult> {
     if (!userId.trim()) return Object.freeze({ status: 'NO_PLAN', plan: null });
     const record = await this.prisma.workoutPlan.findFirst({
@@ -96,6 +152,7 @@ export class CurrentWorkoutPlanReaderService {
     if (!record) return Object.freeze({ status: 'NO_PLAN', plan: null });
     const aiJob = record.aiJob;
     if (
+      record.userId !== userId ||
       !aiJob ||
       aiJob.userId !== userId ||
       aiJob.type !== AIJobType.WORKOUT ||

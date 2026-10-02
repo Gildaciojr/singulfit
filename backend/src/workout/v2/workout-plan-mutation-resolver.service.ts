@@ -150,7 +150,7 @@ export class WorkoutPlanMutationResolverService {
       /\b(agora|adapte|adapta|adaptar|ajuste|ajusta|inclua|incluir|so tenho|so vou treinar|vou treinar so|focar mais)\b/u.test(
         text,
       ) &&
-      /\b(minutos?|vezes?|dias?|semana|foco|focar|peito|costas|pernas?|corrida|correr|modalidade|treino|plano)\b/u.test(
+      /\b(minutos?|vezes?|dias?|semana|foco|focar|peito|costas|pernas?|corrida|correr|modalidade|treino|treinar|plano)\b/u.test(
         text,
       )
     ) {

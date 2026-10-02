@@ -122,6 +122,7 @@ export class WorkoutPlanningContextBuilder {
       previousPlan: input.previousPlan
         ? this.previousPlan(input.previousPlan)
         : null,
+      previousPlanPolicy: recognized.previousPlanPolicy ?? 'CONTEXT_ONLY',
       mutation: recognized.mutation ?? null,
       lifecyclePurpose: recognized.purpose ?? 'CREATION',
     });
@@ -395,6 +396,33 @@ export class WorkoutPlanningContextBuilder {
         plan.sessions.map((session) => session.label),
       ),
       validationStatus: plan.validation.status,
+      strategy: Object.freeze({ ...plan.strategy }),
+      sessionDetails: Object.freeze(
+        plan.sessions.map((session) =>
+          Object.freeze({
+            ...session,
+            blocks: Object.freeze(
+              session.blocks.map((block) =>
+                Object.freeze({
+                  ...block,
+                  activities: Object.freeze(
+                    block.activities.map((activity) =>
+                      Object.freeze({
+                        ...activity,
+                        equipment: Object.freeze([...activity.equipment]),
+                        alerts: Object.freeze([...activity.alerts]),
+                        appliedConstraintCodes: Object.freeze([
+                          ...activity.appliedConstraintCodes,
+                        ]),
+                      }),
+                    ),
+                  ),
+                }),
+              ),
+            ),
+          }),
+        ),
+      ),
       sessions: Object.freeze(
         plan.sessions.map((session) =>
           Object.freeze({
