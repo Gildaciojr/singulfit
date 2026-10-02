@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { productiveWorkoutProfileFacts } from '../context/profile-acquisition/productive-profile-facts';
 import { type NutritionArtifactType } from '@prisma/client';
 import { performance } from 'node:perf_hooks';
 import type {
@@ -765,12 +766,21 @@ export class CoachPlanningExecutionService {
       mutation.status === 'NO_CURRENT_PLAN'
         ? mutation.message
         : null;
-    const profileAcquisitionContext = this.profileAcquisitionContext(
+    const baseProfileAcquisitionContext = this.profileAcquisitionContext(
       declaredWorkoutContext,
       (intent === 'WORKOUT' || intent === 'BOTH') &&
         !readRequested &&
         mutation.status === 'NOT_A_MUTATION',
     );
+    const profileAcquisitionContext =
+      (intent === 'WORKOUT' || intent === 'BOTH') &&
+      !readRequested &&
+      mutation.status === 'NOT_A_MUTATION'
+        ? productiveWorkoutProfileFacts(
+            runtime?.currentMessage ?? '',
+            baseProfileAcquisitionContext,
+          )
+        : baseProfileAcquisitionContext;
     const adaptiveDecision = this.collector.decide(
       this.collectorInput(snapshot, adaptation, profileAcquisitionContext),
     );

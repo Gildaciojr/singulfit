@@ -1,3 +1,8 @@
+import {
+  declaredWorkoutEnvironment,
+  declaredWorkoutFrequency,
+  declaredWorkoutProfileFacts,
+} from './workout-declared-profile-facts';
 import { workoutEquipmentBaseline } from './workout-equipment-defaults';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { CoachProfileSnapshotBuilder } from '../../context/coach-profile-snapshot.builder';
@@ -18,7 +23,6 @@ import {
   type WorkoutSafetyFlag,
 } from './workout-planning-artifact.contract';
 import type {
-  WorkoutEnvironment,
   WorkoutEquipment,
   WorkoutExperienceLevel,
   WorkoutMovementConstraint,
@@ -192,15 +196,16 @@ export class GenerateWorkoutPlanV2InputBuilder {
   ): WorkoutRecognizedContext {
     if (!message?.trim()) return Object.freeze({});
     const text = this.normalize(message);
+    const equipmentScope = declaredWorkoutProfileFacts(text).equipmentScope;
     const modality = this.declaredModality(text);
-    const environment = this.declaredEnvironment(text);
+    const environment = declaredWorkoutEnvironment(text);
     const experience = this.declaredExperience(text);
     const objective = this.declaredObjective(text);
     const objectives = this.declaredObjectives(text);
     const muscleFocus = this.declaredMuscleFocus(text);
     const distances = this.runningDistances(text);
     const targetEventDate = this.declaredEventDate(text);
-    const frequency = this.declaredFrequency(text);
+    const frequency = declaredWorkoutFrequency(text);
     const duration = this.integer(
       text,
       /\b(\d{1,3})\s*(?:minutos?|min)\b/u,
@@ -243,7 +248,10 @@ export class GenerateWorkoutPlanV2InputBuilder {
           : Object.freeze({ status: 'CONFIRMED' as const, value: duration }),
       availableTrainingDays: this.declaredTrainingDays(text),
       equipment:
-        this.declaredEquipment(text) ?? workoutEquipmentBaseline(environment),
+        this.declaredEquipment(equipmentScope.text) ??
+        (equipmentScope.restricted
+          ? undefined
+          : workoutEquipmentBaseline(environment)),
       muscleFocus:
         muscleFocus.length > 0
           ? Object.freeze({
@@ -331,24 +339,6 @@ export class GenerateWorkoutPlanV2InputBuilder {
     return undefined;
   }
 
-  private declaredEnvironment(text: string): WorkoutEnvironment | undefined {
-    if (/\b(em casa|treino em casa)\b/u.test(text)) return 'HOME';
-    if (/\bcrossfit\b/u.test(text)) return 'CROSSFIT_BOX';
-    if (/\b(academia|musculacao)\b/u.test(text)) {
-      return /\b(limitada|pequena|condominio|hotel|so tenho|nao tem|sem|falta)\b/u.test(
-        text,
-      )
-        ? 'LIMITED_GYM'
-        : 'FULL_GYM';
-    }
-    if (/\btrilha\b/u.test(text)) return 'TRAIL';
-    if (/\bpista\b/u.test(text)) return 'TRACK';
-    if (/\bestrada\b/u.test(text)) return 'ROAD';
-    if (/\brua\b/u.test(text)) return 'STREET';
-    if (/\b(ao ar livre|parque)\b/u.test(text)) return 'OUTDOOR';
-    return undefined;
-  }
-
   private declaredExperience(text: string): WorkoutExperienceLevel | undefined {
     if (/\b(iniciante|comecando|nunca treinei)\b/u.test(text))
       return 'BEGINNER';
@@ -410,30 +400,6 @@ export class GenerateWorkoutPlanV2InputBuilder {
     if (/\b(saude|qualidade de vida|bem-estar|bem estar)\b/u.test(text))
       add('GENERAL_HEALTH');
     return Object.freeze(objectives);
-  }
-
-  private declaredFrequency(text: string): number | null {
-    const numeric = this.integer(
-      text,
-      /\b([1-7])\s*(?:x|vezes?|dias?)(?:\s*(?:por|na|esta)?\s*semana)?\b/u,
-      1,
-      7,
-    );
-    if (numeric !== null) return numeric;
-    const words: Readonly<Record<string, number>> = Object.freeze({
-      uma: 1,
-      duas: 2,
-      tres: 3,
-      quatro: 4,
-      cinco: 5,
-      seis: 6,
-      sete: 7,
-    });
-    const word =
-      /\b(uma|duas|tres|quatro|cinco|seis|sete)\s+(?:vezes?|dias?)(?:\s*(?:por|na|esta)?\s*semana)?\b/u.exec(
-        text,
-      )?.[1];
-    return word ? words[word] : null;
   }
 
   private declaredTrainingDays(

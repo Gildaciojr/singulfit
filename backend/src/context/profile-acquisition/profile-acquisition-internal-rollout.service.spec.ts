@@ -20,6 +20,8 @@ import { ProfileAcquisitionInternalRolloutService } from './profile-acquisition-
 import { ProfileAcquisitionOperationalConfigService } from './profile-acquisition-operational-config.service';
 import { ProfileAcquisitionRuntimeService } from './profile-acquisition-runtime.service';
 import { ProfileAnswerRecognizerService } from './profile-answer-recognizer.service';
+import { CoachProfileFieldRegistryService } from './coach-profile-field-registry.service';
+import { workoutEquipmentBaseline } from '../../workout/v2/workout-equipment-defaults';
 import {
   ProfileQuestionRealizerService,
   ProfileQuestionSpecificationService,
@@ -300,10 +302,546 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
       runtime,
       questionSpecifications,
       answerRecognizer,
+      mutationFactory,
       mutationService,
       cycles,
     };
   }
+
+  function freshProductiveSubject(
+    options: {
+      prepare?: boolean;
+      cycleUserId?: string;
+      cycleSourceId?: string;
+      foreignConversation?: boolean;
+    } = {},
+  ) {
+    const test = subject();
+    test.runtime.evaluate.mockResolvedValue({
+      evaluation: {
+        logicalTurn: 4,
+        selectedField: CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS,
+        canAsk: true,
+        reason: 'READY',
+      },
+      specification: {
+        ...specification,
+        field: CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS,
+      },
+    });
+    let storedCycle: ReturnType<typeof activeCycle> | null = null;
+    let storedOutbound: Awaited<
+      ReturnType<typeof test.tx.outboundMessage.create>
+    > | null = null;
+    const createOutbound =
+      test.tx.outboundMessage.create.getMockImplementation()!;
+    test.tx.outboundMessage.create.mockImplementation(async (input) => {
+      storedOutbound = await createOutbound(input);
+      return storedOutbound;
+    });
+    test.tx.outboundMessage.findUnique.mockImplementation(() =>
+      Promise.resolve(storedOutbound),
+    );
+    const persisted = new Map<
+      string,
+      { field: CoachProfileAcquisitionField; value: unknown; source: string }
+    >();
+    test.eligibility.evaluate.mockResolvedValue({
+      internal: false,
+      eligible: false,
+      reason: 'USER_NOT_INTERNAL',
+    });
+    test.prisma.message.findFirst.mockImplementation(
+      ({
+        where,
+      }: {
+        where: {
+          id: string;
+          conversationId?: string;
+          conversation?: { userId: string };
+        };
+      }) =>
+        Promise.resolve(
+          where.id === 'workout-request-id' &&
+            where.conversation?.userId === 'common-user-id' &&
+            (!where.conversationId ||
+              (!options.foreignConversation &&
+                where.conversationId === 'conversation-id'))
+            ? {
+                id: 'workout-request-id',
+                content: 'Quero um treino para academia 5x por semana',
+                timestamp: answerAt,
+                conversationId: 'conversation-id',
+                replyToExternalMessageId: null,
+              }
+            : null,
+        ),
+    );
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockImplementation(() =>
+      Promise.resolve(storedCycle),
+    );
+    test.cycles.prepare.mockImplementation(async () => {
+      expect(storedCycle).toBeNull();
+      expect(test.mutationService.execute).not.toHaveBeenCalled();
+      if (options.prepare === false)
+        return { status: 'REJECTED', cycleId: null };
+      storedCycle = activeCycle({
+        userId: options.cycleUserId ?? 'common-user-id',
+        sourceMessageId: options.cycleSourceId ?? 'workout-request-id',
+        field: CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS,
+        origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:workout-request-id',
+        askedAt: null,
+      });
+      return { status: 'CREATED', cycleId: storedCycle.id };
+    });
+    const recognizer = new ProfileAnswerRecognizerService(
+      new CoachProfileFieldRegistryService(),
+    );
+    const factory = new CoachProfileMutationCommandFactoryService(
+      new CoachProfileFieldRegistryService(),
+    );
+    test.answerRecognizer.recognize.mockImplementation((spec, text) =>
+      recognizer.recognize(spec, text),
+    );
+    test.questionSpecifications.forField.mockImplementation((field) => ({
+      ...specification,
+      field,
+    }));
+    test.mutationFactory.create.mockImplementation((input) =>
+      factory.create(input),
+    );
+    test.mutationService.execute.mockImplementation(async (command) => {
+      expect(storedCycle).not.toBeNull();
+      const duplicate = persisted.has(command.operationKey);
+      if (!duplicate)
+        persisted.set(command.operationKey, {
+          field: command.field,
+          value: command.value,
+          source: command.source,
+        });
+      return {
+        status: duplicate ? 'DUPLICATE' : 'CREATED',
+        field: command.field,
+        valueId: 'value-id',
+        reasonCode: 'MUTATION_APPLIED',
+      };
+    });
+    return { ...test, persisted };
+  }
+
+  it('persists a fresh common user request only after preparing its own productive cycle; retry is idempotent', async () => {
+    const test = freshProductiveSubject();
+    const input = {
+      userId: 'common-user-id',
+      sourceMessageId: 'workout-request-id',
+      referenceDate: answerAt,
+    };
+    await expect(
+      test.service.requestWorkoutClarification(input),
+    ).resolves.toMatchObject({ questionCreated: true });
+    expect(test.cycles.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'common-user-id',
+        sourceMessageId: 'workout-request-id',
+        origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:workout-request-id',
+      }),
+    );
+    expect([...test.persisted.values()]).toEqual([
+      {
+        field: CoachProfileAcquisitionField.TRAINING_ENVIRONMENT,
+        value: 'FULL_GYM',
+        source: 'USER_REPORTED',
+      },
+      {
+        field: CoachProfileAcquisitionField.WEEKLY_FREQUENCY,
+        value: 5,
+        source: 'USER_REPORTED',
+      },
+    ]);
+    await test.service.requestWorkoutClarification(input);
+    expect(test.cycles.prepare).toHaveBeenCalledTimes(1);
+    expect(test.persisted.size).toBe(2);
+    expect(test.mutationService.execute).toHaveBeenCalledTimes(4);
+    expect(test.eventBus.publish).toHaveBeenCalledTimes(1);
+    for (const field of [
+      CoachProfileAcquisitionField.TRAINING_ENVIRONMENT,
+      CoachProfileAcquisitionField.WEEKLY_FREQUENCY,
+    ]) {
+      expect(test.mutationFactory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceOperationKey: `productive-inline:workout-request-id:${field}`,
+        }),
+      );
+    }
+  });
+
+  it.each([
+    { prepare: false },
+    { cycleUserId: 'another-user-id' },
+    { cycleSourceId: 'another-request-id' },
+    { foreignConversation: true },
+  ])(
+    'does not persist fresh inline facts without its own authorized cycle: %j',
+    async (options) => {
+      const test = freshProductiveSubject(options);
+      await test.service.requestWorkoutClarification({
+        userId: 'common-user-id',
+        sourceMessageId: 'workout-request-id',
+        referenceDate: answerAt,
+      });
+      expect(test.mutationService.execute).not.toHaveBeenCalled();
+      expect(test.persisted.size).toBe(0);
+    },
+  );
+
+  it('does not persist on rejected preparation even for an eligible internal user', async () => {
+    const test = freshProductiveSubject({ prepare: false });
+    test.cycles.prepare.mockResolvedValue({
+      status: 'REJECTED',
+      cycleId: 'rejected-cycle-id',
+    });
+    test.eligibility.evaluate.mockResolvedValue({
+      internal: true,
+      eligible: true,
+      reason: 'READY',
+    });
+    await test.service.requestWorkoutClarification({
+      userId: 'common-user-id',
+      sourceMessageId: 'workout-request-id',
+      referenceDate: answerAt,
+    });
+    expect(test.eventBus.publish).not.toHaveBeenCalled();
+    expect(test.mutationService.execute).not.toHaveBeenCalled();
+  });
+
+  it('audits post-dispatch mutation failure and retries without another question', async () => {
+    const test = freshProductiveSubject();
+    test.mutationService.execute.mockRejectedValueOnce(
+      new Error('inline persistence failure'),
+    );
+    const input = {
+      userId: 'common-user-id',
+      sourceMessageId: 'workout-request-id',
+      referenceDate: answerAt,
+    };
+    await expect(
+      test.service.requestWorkoutClarification(input),
+    ).resolves.toMatchObject({ questionCreated: true });
+    const firstCommand = test.mutationService.execute.mock.calls[0][0];
+    expect(test.prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          metadata: expect.objectContaining({
+            event: 'PRODUCTIVE_INLINE_PERSISTENCE_FAILED',
+            operationKey: firstCommand.operationKey,
+          }),
+        }),
+      }),
+    );
+    await test.service.requestWorkoutClarification(input);
+    expect(test.eventBus.publish).toHaveBeenCalledTimes(1);
+    expect(test.cycles.prepare).toHaveBeenCalledTimes(1);
+    expect(test.cycles.complete).not.toHaveBeenCalled();
+    expect(test.mutationService.execute.mock.calls[2][0].operationKey).toBe(
+      firstCommand.operationKey,
+    );
+    expect(test.persisted.size).toBe(2);
+  });
+
+  it('does not persist when publishing/preparing the fresh productive question fails', async () => {
+    const test = freshProductiveSubject();
+    test.eventBus.publish.mockRejectedValue(new Error('outbound failure'));
+    await expect(
+      test.service.requestWorkoutClarification({
+        userId: 'common-user-id',
+        sourceMessageId: 'workout-request-id',
+        referenceDate: answerAt,
+      }),
+    ).rejects.toThrow('outbound failure');
+    expect(test.mutationService.execute).not.toHaveBeenCalled();
+  });
+
+  it('provides productive inline facts before selecting a question and persists user reports', async () => {
+    const test = subject();
+    test.prisma.message.findFirst.mockResolvedValue({
+      id: 'workout-request-id',
+      content: 'Quero montar um treino para academia 5 vezes por semana',
+      timestamp: answerAt,
+      conversationId: 'conversation-id',
+      replyToExternalMessageId: null,
+    });
+    const recognizer = new ProfileAnswerRecognizerService(
+      new CoachProfileFieldRegistryService(),
+    );
+    test.answerRecognizer.recognize.mockImplementation((spec, text) =>
+      recognizer.recognize(spec, text),
+    );
+    test.questionSpecifications.forField.mockImplementation((field) => ({
+      ...specification,
+      field,
+    }));
+    await test.service.requestWorkoutClarification({
+      userId: 'admin-id',
+      sourceMessageId: 'workout-request-id',
+      referenceDate: answerAt,
+    });
+    const context = test.runtime.evaluate.mock.calls[0][3];
+    expect(context.environment).toEqual({
+      value: 'FULL_GYM',
+      evidence: 'EXPLICIT',
+    });
+    expect(context.weeklyFrequency).toEqual({ value: 5, evidence: 'EXPLICIT' });
+    const baseline = workoutEquipmentBaseline('FULL_GYM');
+    if (baseline?.status === 'INFERRED')
+      expect(context.equipment.value).toBe(baseline.value);
+    expect(test.mutationService.execute).toHaveBeenCalledTimes(2);
+    expect(test.answerRecognizer.recognize).toHaveBeenCalledWith(
+      expect.objectContaining({
+        field: CoachProfileAcquisitionField.TRAINING_ENVIRONMENT,
+      }),
+      'FULL_GYM',
+    );
+    expect(test.answerRecognizer.recognize).toHaveBeenCalledWith(
+      expect.objectContaining({
+        field: CoachProfileAcquisitionField.WEEKLY_FREQUENCY,
+      }),
+      '5',
+    );
+  });
+
+  it('keeps inline persistence fail-closed in OFF mode', async () => {
+    const test = subject('OFF');
+    test.prisma.message.findFirst.mockResolvedValue({
+      id: 'workout-request-id',
+      content: 'Quero montar um treino para academia 5 vezes por semana',
+      timestamp: answerAt,
+      conversationId: 'conversation-id',
+      replyToExternalMessageId: null,
+    });
+    await test.service.requestWorkoutClarification({
+      userId: 'admin-id',
+      sourceMessageId: 'workout-request-id',
+      referenceDate: answerAt,
+    });
+    expect(test.mutationService.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'monte um treino completo para eu fazer na academia, 05 vezes por semana',
+    'Quero um treino para academia 5x por semana',
+    'Monte um treino sem corrida, não quero cardio',
+  ])(
+    'does not claim or reprompt equipment for the new productive command: %s',
+    async (content) => {
+      const test = subject();
+      test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+        activeCycle({
+          field: CoachProfileAcquisitionField.AVAILABLE_EQUIPMENT,
+          origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:source-message-id',
+        }),
+      );
+      test.prisma.message.findFirst.mockResolvedValue({
+        id: 'new-workout-id',
+        content,
+        timestamp: answerAt,
+        conversationId: 'conversation-id',
+        replyToExternalMessageId: null,
+      });
+      const recognizer = new ProfileAnswerRecognizerService(
+        new CoachProfileFieldRegistryService(),
+      );
+      test.answerRecognizer.recognize.mockImplementation((spec, text) =>
+        recognizer.recognize(spec, text),
+      );
+      test.questionSpecifications.forField.mockImplementation((field) => ({
+        ...specification,
+        field,
+      }));
+      await expect(
+        test.service.captureActiveResponse({
+          userId: 'admin-id',
+          messageId: 'new-workout-id',
+        }),
+      ).resolves.toMatchObject({ handled: false, reason: 'ANSWER_UNRELATED' });
+      expect(test.cycles.claimResponse).not.toHaveBeenCalled();
+      expect(test.eventBus.publish).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps a legitimate quoted Academia answer attached to its exact cycle', async () => {
+    const test = subject();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+      activeCycle({ field: CoachProfileAcquisitionField.TRAINING_ENVIRONMENT }),
+    );
+    test.prisma.message.findFirst.mockResolvedValue({
+      id: 'quoted-answer-id',
+      content: 'Academia',
+      timestamp: answerAt,
+      conversationId: 'conversation-id',
+      replyToExternalMessageId: 'question-external',
+    });
+    const recognizer = new ProfileAnswerRecognizerService(
+      new CoachProfileFieldRegistryService(),
+    );
+    test.answerRecognizer.recognize.mockImplementation((spec, text) =>
+      recognizer.recognize(spec, text),
+    );
+    test.questionSpecifications.forField.mockImplementation((field) => ({
+      ...specification,
+      field,
+    }));
+    await expect(
+      test.service.captureActiveResponse({
+        userId: 'admin-id',
+        messageId: 'quoted-answer-id',
+      }),
+    ).resolves.toMatchObject({
+      handled: true,
+      persisted: true,
+      reason: 'ANSWER_PERSISTED',
+      cycleId: 'cycle-id',
+      field: CoachProfileAcquisitionField.TRAINING_ENVIRONMENT,
+    });
+    expect(test.cycles.claimResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cycleId: 'cycle-id',
+        messageId: 'quoted-answer-id',
+      }),
+    );
+    expect(test.cycles.supersedeActiveAndPrepare).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { internal: false, eligible: false, reason: 'USER_NOT_INTERNAL' },
+    { internal: true, eligible: false, reason: 'USER_INACTIVE' },
+    { internal: true, eligible: false, reason: 'ONBOARDING_INCOMPLETE' },
+  ])(
+    'does not mutate inline facts without canonical authorization: $reason',
+    async (access) => {
+      const test = subject();
+      test.eligibility.evaluate.mockResolvedValue(access);
+      test.prisma.message.findFirst.mockResolvedValue({
+        id: 'workout-request-id',
+        content: 'Quero um treino para academia 5x por semana',
+        timestamp: answerAt,
+        conversationId: 'conversation-id',
+        replyToExternalMessageId: null,
+      });
+      await test.service.requestWorkoutClarification({
+        userId: 'admin-id',
+        sourceMessageId: 'workout-request-id',
+        referenceDate: answerAt,
+      });
+      expect(test.eligibility.evaluate).toHaveBeenCalledWith('admin-id');
+      expect(test.mutationService.execute).not.toHaveBeenCalled();
+    },
+  );
+
+  it('preserves productive-cycle authorization for a non-internal user', async () => {
+    const test = subject();
+    test.eligibility.evaluate.mockResolvedValue({
+      internal: false,
+      eligible: false,
+      reason: 'USER_NOT_INTERNAL',
+    });
+    test.prisma.message.findFirst.mockResolvedValue({
+      id: 'workout-request-id',
+      content: 'Quero um treino para academia 5x por semana',
+      timestamp: answerAt,
+      conversationId: 'conversation-id',
+      replyToExternalMessageId: null,
+    });
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+      activeCycle({
+        userId: 'common-user-id',
+        sourceMessageId: 'workout-request-id',
+        origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:workout-request-id',
+      }),
+    );
+    await test.service.requestWorkoutClarification({
+      userId: 'common-user-id',
+      sourceMessageId: 'workout-request-id',
+      referenceDate: answerAt,
+    });
+    expect(test.eligibility.evaluate).not.toHaveBeenCalled();
+    expect(test.mutationService.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['academia ou casa', '5 vezes ou 3 vezes por semana'])(
+    'does not persist conflicting inline facts: %s',
+    async (content) => {
+      const test = subject();
+      test.prisma.message.findFirst.mockResolvedValue({
+        id: 'workout-request-id',
+        content,
+        timestamp: answerAt,
+        conversationId: 'conversation-id',
+        replyToExternalMessageId: null,
+      });
+      await test.service.requestWorkoutClarification({
+        userId: 'admin-id',
+        sourceMessageId: 'workout-request-id',
+        referenceDate: answerAt,
+      });
+      expect(test.mutationService.execute).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [
+      CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS,
+      'PHYSICAL_LIMITATIONS',
+      false,
+    ],
+    [
+      CoachProfileAcquisitionField.TRAINING_ENVIRONMENT,
+      'TRAINING_ENVIRONMENT',
+      true,
+    ],
+    [CoachProfileAcquisitionField.WEEKLY_FREQUENCY, 'TRAINING_FREQUENCY', true],
+    [
+      CoachProfileAcquisitionField.AVAILABLE_EQUIPMENT,
+      'TRAINING_EQUIPMENT',
+      true,
+    ],
+  ] as const)(
+    'only re-evaluates preselection satisfied by inline facts: %s',
+    async (field, selectedProfileField, reevaluated) => {
+      const test = subject();
+      test.prisma.message.findFirst.mockResolvedValue({
+        id: 'workout-request-id',
+        content: 'Quero um treino para academia 5x por semana',
+        timestamp: answerAt,
+        conversationId: 'conversation-id',
+        replyToExternalMessageId: null,
+      });
+      test.questionSpecifications.fromSelectedField.mockReturnValue({
+        ...specification,
+        field,
+      });
+      await test.service.requestWorkoutClarification({
+        userId: 'admin-id',
+        sourceMessageId: 'workout-request-id',
+        referenceDate: answerAt,
+        preselectedQuestion: { selectedProfileField, logicalTurn: 9 },
+      });
+      if (reevaluated) expect(test.runtime.evaluate).toHaveBeenCalledTimes(1);
+      else {
+        expect(test.runtime.evaluate).not.toHaveBeenCalled();
+        expect(test.cycles.prepare).toHaveBeenCalledWith(
+          expect.objectContaining({
+            specification: expect.objectContaining({
+              field: CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS,
+            }),
+            logicalTurn: 9,
+          }),
+        );
+      }
+    },
+  );
 
   it('is inert in OFF and performs no lookup or send preparation', async () => {
     const test = subject('OFF');
@@ -419,7 +957,7 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
       'common-user-id',
       sentAt,
       PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,
-      context,
+      expect.objectContaining(context),
     );
     expect(test.eligibility.evaluate).not.toHaveBeenCalled();
 
@@ -631,7 +1169,6 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
     expect(test.eventBus.publish).not.toHaveBeenCalled();
   });
 
-
   it('supersedes a fenced failed-reprompt productive cycle when a new independent workout request arrives', async () => {
     const test = subject('INTERNAL');
 
@@ -770,7 +1307,6 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
       }),
     );
   });
-
 
   it('does not supersede while the active productive response is PROCESSING, even with a critical fence', async () => {
     const test = subject('INTERNAL');

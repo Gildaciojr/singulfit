@@ -1,6 +1,10 @@
 import { isWorkoutCurrentPlanRead } from '../../workout/v2/workout-current-plan-read.policy';
+import { workoutEquipmentBaseline } from '../../workout/v2/workout-equipment-defaults';
 import { isNutritionCurrentPlanRead } from '../../diet/nutrition-current-plan-read.policy';
-import { isFullPlanReplacementRequest } from '../../conversation/understanding/full-plan-replacement.policy';
+import {
+  isFullPlanReplacementRequest,
+  isProductivePlanCreationRequest,
+} from '../../conversation/understanding/full-plan-replacement.policy';
 import type { ContextualProfileConfirmation } from './profile-acquisition.contract';
 import { Injectable } from '@nestjs/common';
 import {
@@ -163,6 +167,7 @@ export class ProfileAnswerRecognizerService {
     return (
       isWorkoutCurrentPlanRead(text) ||
       isNutritionCurrentPlanRead(text) ||
+      isProductivePlanCreationRequest(text) ||
       isFullPlanReplacementRequest(this.normalize(text))
     );
   }
@@ -557,15 +562,8 @@ export class ProfileAnswerRecognizerService {
         value,
       )
     ) {
-      return Object.freeze([
-        'BARBELL',
-        'BENCH',
-        'CABLE',
-        'DUMBBELL',
-        'MACHINE',
-        'PULL_UP_BAR',
-        'TREADMILL',
-      ]);
+      const baseline = workoutEquipmentBaseline('FULL_GYM');
+      return baseline?.status === 'INFERRED' ? baseline.value : undefined;
     }
     const matches: string[] = [];
     const options: readonly (readonly [string, RegExp])[] = [

@@ -1,3 +1,4 @@
+import { workoutEquipmentBaseline } from '../workout/v2/workout-equipment-defaults';
 import type { CoachAdaptiveProfileCollectorService } from '../context/coach-adaptive-profile-collector.service';
 import type { CoachProfileSnapshotBuilder } from '../context/coach-profile-snapshot.builder';
 import type { CoachProfileSnapshot } from '../context/coach-profile-snapshot.contract';
@@ -393,9 +394,16 @@ describe('CoachPlanningExecutionService', () => {
     });
 
     expect(result.selectedSource).toBe('WORKOUT_V2');
+    const equipmentBaseline = workoutEquipmentBaseline('FULL_GYM');
+    if (equipmentBaseline?.status !== 'INFERRED')
+      throw new Error('Canonical baseline missing');
     expect(result.profileAcquisitionContext).toEqual({
       modality: { value: 'GYM', evidence: 'EXPLICIT' },
       environment: { value: 'FULL_GYM', evidence: 'EXPLICIT' },
+      equipment: {
+        value: equipmentBaseline.value,
+        evidence: 'INFERRED',
+      },
       weeklyFrequency: { value: 4, evidence: 'EXPLICIT' },
       sessionDurationMinutes: { value: 60, evidence: 'EXPLICIT' },
       requiresRunningDistanceProfile: false,
@@ -409,6 +417,10 @@ describe('CoachPlanningExecutionService', () => {
         conversationContext: {
           modality: { value: 'GYM', evidence: 'EXPLICIT' },
           environment: { value: 'FULL_GYM', evidence: 'EXPLICIT' },
+          equipment: {
+            value: equipmentBaseline.value,
+            evidence: 'INFERRED',
+          },
           weeklyFrequency: { value: 4, evidence: 'EXPLICIT' },
           sessionDurationMinutes: { value: 60, evidence: 'EXPLICIT' },
           requiresRunningDistanceProfile: false,

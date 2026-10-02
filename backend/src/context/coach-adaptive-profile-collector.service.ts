@@ -1,4 +1,7 @@
-import { isWorkoutEquipmentBaseline } from '../workout/v2/workout-equipment-defaults';
+import {
+  isWorkoutEquipmentBaseline,
+  workoutEquipmentBaseline,
+} from '../workout/v2/workout-equipment-defaults';
 import { Injectable } from '@nestjs/common';
 import {
   COACH_PROFILE_KNOWLEDGE_STATUS,
@@ -606,10 +609,16 @@ export class CoachAdaptiveProfileCollectorService {
           input.snapshot.training.environment.status === 'KNOWN' &&
           input.snapshot.training.environment.value === 'LIMITED_GYM'
         ) &&
-        isWorkoutEquipmentBaseline(
+        (isWorkoutEquipmentBaseline(
           input.conversationContext?.environment?.value,
           input.conversationContext?.equipment?.value,
-        ),
+        ) ||
+          (!input.conversationContext?.equipment &&
+            !input.conversationContext?.environment &&
+            input.snapshot.training.environment.status === 'KNOWN' &&
+            !!workoutEquipmentBaseline(
+              input.snapshot.training.environment.value,
+            ))),
       datum,
       definition,
       interaction,

@@ -1,5 +1,7 @@
 import { createHash } from 'crypto';
-import { Injectable } from '@nestjs/common';
+import { productiveWorkoutProfileFacts } from './productive-profile-facts';
+import { CoachProfileAcquisitionField } from '@prisma/client';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   CoachProfileAcquisitionCycle,
   CoachProfileAcquisitionCycleStatus,
@@ -69,6 +71,9 @@ type PreparedProfileQuestion = Readonly<{
 
 @Injectable()
 export class ProfileAcquisitionInternalRolloutService {
+  private readonly logger = new Logger(
+    ProfileAcquisitionInternalRolloutService.name,
+  );
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventBus: EventBusService,
@@ -117,6 +122,7 @@ export class ProfileAcquisitionInternalRolloutService {
         id: true,
         conversationId: true,
         replyToExternalMessageId: true,
+        content: true,
       },
     });
     if (!source) {
@@ -138,7 +144,18 @@ export class ProfileAcquisitionInternalRolloutService {
         this.config.get().mode,
       );
     }
-    return this.dispatchQuestion(
+    const inlineFacts =
+      input.intent === 'DIET'
+        ? undefined
+        : productiveWorkoutProfileFacts(source.content ?? '');
+    const conversationContext =
+      input.intent === 'DIET'
+        ? input.conversationContext
+        : productiveWorkoutProfileFacts(
+            source.content ?? '',
+            input.conversationContext,
+          );
+    const dispatched = await this.dispatchQuestion(
       {
         userId: input.userId,
         conversationId: source.conversationId,
@@ -153,9 +170,84 @@ export class ProfileAcquisitionInternalRolloutService {
           ? PROFILE_ACQUISITION_INTENT.DIET_PLAN_REQUEST
           : PROFILE_ACQUISITION_INTENT.COMBINED_PLAN_REQUEST,
       `${this.productiveOrigin(input.intent)}:${input.originalRequestMessageId ?? input.sourceMessageId}`,
-      input.conversationContext,
-      preparedPreselectedQuestion ?? undefined,
+      conversationContext,
+      this.inlineFactsSatisfyQuestion(preparedPreselectedQuestion, inlineFacts)
+        ? undefined
+        : (preparedPreselectedQuestion ?? undefined),
     );
+    if (
+      dispatched.cycleId !== null &&
+      dispatched.reason !== 'ROLLOUT_FAILURE' &&
+      this.config.get().mode === PROFILE_ACQUISITION_MODE.INTERNAL &&
+      (inlineFacts?.environment || inlineFacts?.weeklyFrequency) &&
+      (await this.acquisitionAuthorizedForSource(
+        {
+          userId: input.userId,
+          conversationId: source.conversationId,
+          sourceMessageId: source.id,
+        },
+        this.config.get().mode,
+      ))
+    ) {
+      for (const [field, fact] of [
+        [
+          CoachProfileAcquisitionField.TRAINING_ENVIRONMENT,
+          inlineFacts?.environment,
+        ],
+        [
+          CoachProfileAcquisitionField.WEEKLY_FREQUENCY,
+          inlineFacts?.weeklyFrequency,
+        ],
+      ] as const) {
+        if (!fact || fact.evidence !== 'EXPLICIT') continue;
+        const answer = this.answerRecognizer.recognize(
+          this.questionSpecifications.forField(
+            field,
+            'MISSING_CONTEXTUAL_FIELD',
+          ),
+          String(fact.value),
+        );
+        const command = this.mutationFactory.create({
+          userId: input.userId,
+          answer,
+          source: CoachProfileValueSource.USER_REPORTED,
+          referenceDate: input.referenceDate.toISOString(),
+          sourceOperationKey: `productive-inline:${source.id}:${field}`,
+          reason: 'PROFILE_UPDATE',
+        });
+        if (command) {
+          try {
+            await this.mutationService.execute(command);
+          } catch (error: unknown) {
+            const metadata = {
+              event: 'PRODUCTIVE_INLINE_PERSISTENCE_FAILED',
+              sourceMessageId: source.id,
+              field,
+              operationKey: command.operationKey,
+            };
+            this.logger.error(
+              metadata,
+              error instanceof Error ? error.stack : String(error),
+            );
+            try {
+              await this.audit(
+                input.userId,
+                dispatched.cycleId ?? null,
+                metadata,
+              );
+            } catch (auditError: unknown) {
+              this.logger.error(
+                'PRODUCTIVE_INLINE_FAILURE_AUDIT_FAILED',
+                auditError instanceof Error
+                  ? auditError.stack
+                  : String(auditError),
+              );
+            }
+          }
+        }
+      }
+    }
+    return dispatched;
   }
 
   async authorizeQuestionSend(outboundMessageId: string): Promise<boolean> {
@@ -176,21 +268,10 @@ export class ProfileAcquisitionInternalRolloutService {
     ) {
       return false;
     }
-    const productiveCycle = await this.findCycleForOutbound(outbound, true);
-    if (
-      productiveCycle &&
-      (await this.cycleBelongsToConversation(
-        productiveCycle,
-        outbound.conversationId,
-      ))
-    ) {
-      return true;
-    }
-    const access =
-      operational.mode === PROFILE_ACQUISITION_MODE.INTERNAL
-        ? await this.eligibility.evaluate(outbound.userId)
-        : null;
-    const authorized = access?.internal === true && access.eligible;
+    const authorized = await this.acquisitionAuthorizedForSource(
+      outbound,
+      operational.mode,
+    );
     if (authorized) return true;
 
     const cancelledAt = new Date();
@@ -525,6 +606,46 @@ export class ProfileAcquisitionInternalRolloutService {
         : this.captureAnswer(cycle, message);
     } catch {
       return this.captureResult(false, false, false, 'ROLLOUT_FAILURE');
+    }
+  }
+
+  /** Same authorization used for sending: scoped productive cycle or eligible internal user. */
+  private async acquisitionAuthorizedForSource(
+    source: {
+      readonly userId: string;
+      readonly conversationId: string;
+      readonly sourceMessageId: string;
+    },
+    mode: ProfileAcquisitionMode,
+  ): Promise<boolean> {
+    const productiveCycle = await this.findCycleForOutbound(source, true);
+    if (
+      productiveCycle &&
+      productiveCycle.userId === source.userId &&
+      (await this.cycleBelongsToConversation(
+        productiveCycle,
+        source.conversationId,
+      ))
+    )
+      return true;
+    if (mode !== PROFILE_ACQUISITION_MODE.INTERNAL) return false;
+    const access = await this.eligibility.evaluate(source.userId);
+    return access.internal && access.eligible;
+  }
+
+  private inlineFactsSatisfyQuestion(
+    question: PreparedProfileQuestion | null | undefined,
+    facts: ProfileAcquisitionConversationContext | undefined,
+  ): boolean {
+    switch (question?.specification.field) {
+      case CoachProfileAcquisitionField.TRAINING_ENVIRONMENT:
+        return !!facts?.environment;
+      case CoachProfileAcquisitionField.WEEKLY_FREQUENCY:
+        return !!facts?.weeklyFrequency;
+      case CoachProfileAcquisitionField.AVAILABLE_EQUIPMENT:
+        return !!facts?.equipment;
+      default:
+        return false;
     }
   }
 
@@ -1255,6 +1376,9 @@ export class ProfileAcquisitionInternalRolloutService {
             content: input.content,
           },
         }));
+      // Creation and event publication commit atomically. A committed outbound
+      // already owns its dispatch, including retries before askedAt is recorded.
+      if (existing) return;
       await this.eventBus.publish(
         {
           eventType: INTERNAL_EVENT.OUTBOUND_MESSAGE_REQUESTED,

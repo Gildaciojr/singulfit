@@ -1,4 +1,5 @@
 import { workoutEquipmentBaseline } from '../workout/v2/workout-equipment-defaults';
+import { productiveWorkoutProfileFacts } from './profile-acquisition/productive-profile-facts';
 import { ActivityLevel, FitnessGoal } from '@prisma/client';
 import {
   CoachAdaptiveProfileCollectorInput,
@@ -283,6 +284,54 @@ describe('CoachAdaptiveProfileCollectorService', () => {
       );
     },
   );
+
+  it.each([
+    'Quero montar um treino para academia 5 vezes por semana',
+    'monte um treino completo para eu fazer na academia, 05 vezes por semana',
+    'Treino na academia 5x por semana; meu irmão fica sem halteres',
+  ])(
+    'does not ask explicit productive facts or canonical equipment: %s',
+    (message) => {
+      const result = decide(
+        PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,
+        completeProfile({
+          environment: unknown(),
+          equipment: unknown(),
+          frequency: unknown(),
+        }),
+        { conversationContext: productiveWorkoutProfileFacts(message) },
+      );
+      for (const field of [
+        PROFILE_ACQUISITION_FIELD.TRAINING_ENVIRONMENT,
+        PROFILE_ACQUISITION_FIELD.TRAINING_EQUIPMENT,
+        PROFILE_ACQUISITION_FIELD.TRAINING_FREQUENCY,
+      ]) {
+        expect(candidate(result, field).state).toBe('ALREADY_KNOWN');
+        expect(result.selectedCandidate?.field).not.toBe(field);
+      }
+    },
+  );
+  it('keeps equipment acquisition necessary for a small gym request', () => {
+    const result = decide(
+      PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,
+      completeProfile({
+        environment: unknown(),
+        equipment: unknown(),
+        frequency: unknown(),
+      }),
+      {
+        conversationContext: productiveWorkoutProfileFacts(
+          'Quero treinar em uma academia pequena 5 vezes por semana',
+        ),
+      },
+    );
+    expect(
+      candidate(result, PROFILE_ACQUISITION_FIELD.TRAINING_ENVIRONMENT).state,
+    ).toBe('ALREADY_KNOWN');
+    expect(
+      candidate(result, PROFILE_ACQUISITION_FIELD.TRAINING_EQUIPMENT).state,
+    ).not.toBe('ALREADY_KNOWN');
+  });
 
   it('still confirms arbitrary inferred equipment outside the canonical baseline', () => {
     const result = decide(
@@ -685,7 +734,10 @@ describe('CoachAdaptiveProfileCollectorService', () => {
   ] as const)(
     'does not reopen confirmed empty %s but keeps its unconfirmed value pending',
     (_label, intent, field, profileWithValue) => {
-      const confirmed = decide(intent, profileWithValue(known(Object.freeze([]))));
+      const confirmed = decide(
+        intent,
+        profileWithValue(known(Object.freeze([]))),
+      );
       const pending = decide(
         intent,
         profileWithValue(confirmation(Object.freeze([]))),

@@ -3,12 +3,15 @@ import { join } from 'node:path';
 import { WORKOUT_PLANNING_V2_PROMPT } from './workout-planning-v2.prompt.definition';
 
 describe('workout planning prompt rollout', () => {
-  const migration = readFileSync(
-    join(
-      __dirname,
-      '../../../prisma/migrations/20260903120000_workout_planning_v3_prompt/migration.sql',
+  const normalizeEol = (text: string): string => text.replace(/\r\n?/gu, '\n');
+  const migration = normalizeEol(
+    readFileSync(
+      join(
+        __dirname,
+        '../../../prisma/migrations/20260903120000_workout_planning_v3_prompt/migration.sql',
+      ),
+      'utf8',
     ),
-    'utf8',
   );
 
   it('pins the material definition to version 3 and its immutable migration', () => {
@@ -20,7 +23,9 @@ describe('workout planning prompt rollout', () => {
     )?.[1];
 
     expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(3);
-    expect(persistedPrompt).toBe(WORKOUT_PLANNING_V2_PROMPT.instructions);
+    expect(persistedPrompt).toBe(
+      normalizeEol(WORKOUT_PLANNING_V2_PROMPT.instructions),
+    );
     expect(JSON.parse(persistedSchema ?? '')).toEqual(
       WORKOUT_PLANNING_V2_PROMPT.schema,
     );
