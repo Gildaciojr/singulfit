@@ -118,9 +118,9 @@ describe('standalone TEXT AI job migration contract', () => {
     },
   );
 
-  it('keeps the previously applied context-hardening migration byte-identical', () => {
+  it('keeps the context-hardening migration LF content byte-identical across checkouts', () => {
     const digest = createHash('sha256')
-      .update(readFileSync(oldMigration))
+      .update(readFileSync(oldMigration, 'utf8').replace(/\r\n/gu, '\n'))
       .digest('hex');
 
     expect(digest).toBe(OLD_MIGRATION_SHA256);

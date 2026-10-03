@@ -149,7 +149,16 @@ describe('DietController', () => {
   it('resolves the real Automation/Diet/Context/Nutrition module graph and preserves POST generate', async () => {
     const module = await Test.createTestingModule({
       imports: [
-        ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }),
+        ConfigModule.forRoot({
+          isGlobal: true,
+          ignoreEnvFile: true,
+          load: [
+            () => ({
+              JWT_ACCESS_SECRET: 'isolated-module-test-access',
+              JWT_REFRESH_SECRET: 'isolated-module-test-refresh',
+            }),
+          ],
+        }),
         PrismaModule,
         EventBusModule,
         AutomationModule,

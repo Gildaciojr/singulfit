@@ -56,6 +56,12 @@ export class ProfileAnswerRecognizerService {
       return this.result(specification, 'UNRELATED', 'NOT_APPLICABLE');
     if (this.ambiguous(normalized))
       return this.result(specification, 'UNKNOWN', 'AMBIGUOUS_ANSWER');
+    if (
+      specification.field ===
+        CoachProfileAcquisitionField.TRAINING_ENVIRONMENT &&
+      this.trainingEnvironments(normalized).length > 1
+    )
+      return this.result(specification, 'UNKNOWN', 'AMBIGUOUS_ANSWER');
     const correction = this.correctionBody(answer);
     const value = this.value(
       specification.field,
@@ -254,7 +260,7 @@ export class ProfileAnswerRecognizerService {
     let names = text.replace(/^(?:eu\s+)?(?:tenho|possuo)\s+/iu, '');
     if (field === CoachProfileAcquisitionField.ALLERGIES)
       names = names.replace(
-        /^alergias?(?:\s+alimentar(?:es)?)?\s+(?:a|ao|aos|à)\s+/iu,
+        /^(?:alergias?(?:\s+alimentar(?:es)?)?|(?:eu\s+)?sou\s+al[eé]rgic[oa])\s+(?:a|ao|aos|à)\s+/iu,
         '',
       );
     if (field === CoachProfileAcquisitionField.FOOD_INTOLERANCES) {
@@ -317,24 +323,14 @@ export class ProfileAnswerRecognizerService {
       case CoachProfileAcquisitionField.WEEKLY_FREQUENCY:
         return this.integer(
           normalized,
-          '(?:vezes?|dias?)(?: (?:por|na|pela) semana)?',
+          '(?:vez(?:es)?|dias?)(?: (?:por|na|pela) semana)?',
         );
       case CoachProfileAcquisitionField.DESIRED_MEAL_COUNT:
         return this.integer(normalized, 'refeicoes?(?: (?:por|ao) dia)?');
       case CoachProfileAcquisitionField.SESSION_DURATION_MINUTES:
         return this.duration(normalized);
       case CoachProfileAcquisitionField.TRAINING_ENVIRONMENT:
-        return this.first(normalized, [
-          ['CROSSFIT_BOX', /box|crossfit/],
-          ['LIMITED_GYM', /academia pequena|academia limitada/],
-          ['FULL_GYM', /^academia$|academia (?:comum|completa)/],
-          ['HOME', /casa|home/],
-          ['TRACK', /pista/],
-          ['TRAIL', /trilha/],
-          ['ROAD', /estrada|rua/],
-          ['OUTDOOR', /ar livre|parque/],
-          ['INDOOR', /indoor|fechado/],
-        ]);
+        return this.trainingEnvironments(normalized)[0];
       case CoachProfileAcquisitionField.AVAILABLE_EQUIPMENT:
         return this.equipment(normalized);
       case CoachProfileAcquisitionField.PERCEIVED_CONDITIONING:
@@ -518,15 +514,62 @@ export class ProfileAnswerRecognizerService {
         ')?$',
       'u',
     );
-    const match = pattern.exec(value);
+    const match = pattern.exec(
+      value
+        .replace(/^(?:umas|uns|cerca de|aproximadamente) /u, '')
+        .replace(/^(\d+)\s*x$/u, '$1'),
+    );
     if (!match) return undefined;
     return words[match[1]] ?? Number(match[1]);
   }
 
+  /** Resolve affirmative clauses independently; a negated mention cannot win
+   * over another environment, and multiple positive environments need clarification. */
+  private trainingEnvironments(text: string): readonly string[] {
+    const clauses = text.split(
+      /[,;.!?]|\b(?:mas|porem)\b|\s+e\s+(?=(?:eu\s+)?(?:treino|corro|vou|faco|em|na|no)\b)/u,
+    );
+    const environments = new Set<string>();
+    for (const clause of clauses.map((part) => part.trim())) {
+      if (/\b(?:nao|nunca|sem|se)\b/u.test(clause)) continue;
+      if (
+        !/^(?:(?:eu )?(?:treino|corro|faco|vou treinar)\b|minha academia\b|(?:em |na |no |ao )?(?:academia|casa|home|box|crossfit|pista|trilha|estrada|rua|ar livre|parque|indoor|fechado)\b)/u.test(
+          clause,
+        )
+      )
+        continue;
+      const mentions: readonly (readonly [string, RegExp])[] = [
+        ['CROSSFIT_BOX', /\b(?:box|crossfit)\b/u],
+        ['LIMITED_GYM', /\bacademia (?:e )?(?:pequena|limitada)\b/u],
+        ['FULL_GYM', /\bacademia\b/u],
+        ['HOME', /\b(?:casa|home)\b/u],
+        ['TRACK', /\bpista\b/u],
+        ['TRAIL', /\btrilha\b/u],
+        ['ROAD', /\b(?:estrada|rua)\b/u],
+        ['OUTDOOR', /\b(?:ar livre|parque)\b/u],
+        ['INDOOR', /\b(?:indoor|fechado)\b/u],
+      ];
+      for (const [environment, pattern] of mentions) {
+        if (!pattern.test(clause)) continue;
+        if (
+          environment === 'FULL_GYM' &&
+          /\bacademia (?:e )?(?:pequena|limitada)\b/u.test(clause)
+        )
+          continue;
+        environments.add(environment);
+      }
+    }
+    return [...environments];
+  }
+
   private duration(value: string): number | undefined {
+    const duration = value.replace(
+      /^(?:mais ou menos|uns?|cerca de|aproximadamente) /u,
+      '',
+    );
     const hours =
       /^(?:(?:sao|tenho) )?(\d+(?:[.,]\d+)?|uma|um)\s*(?:hora|horas|h)$/u.exec(
-        value,
+        duration,
       );
     if (hours)
       return Math.round(
@@ -534,9 +577,7 @@ export class ProfileAnswerRecognizerService {
           ? 1
           : Number(hours[1].replace(',', '.'))) * 60,
       );
-    return this.integer(
-      value.replace(/^(?:uns|cerca de|aproximadamente) /u, ''),
-    );
+    return this.integer(duration);
   }
 
   private boolean(value: string): boolean | undefined {

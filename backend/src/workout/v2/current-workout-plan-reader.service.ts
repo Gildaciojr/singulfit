@@ -15,6 +15,7 @@ import type {
 import { WorkoutPlanV2StoredDocumentParser } from './workout-plan-v2-stored-document.parser';
 import { WORKOUT_PROMPT_BY_GOAL } from '../workout.constants';
 import { WORKOUT_PLANNING_V2_PROMPT } from './workout-planning-v2.prompt.definition';
+import { WorkoutPlanV2Formatter } from './workout-plan-v2.formatter';
 
 const LEGACY_WORKOUT_PROMPT_NAMES = new Set<string>(
   Object.values(WORKOUT_PROMPT_BY_GOAL),
@@ -549,36 +550,7 @@ export class CurrentWorkoutPlanReaderService {
   }
 
   private formatSession(session: WorkoutSessionV2): string {
-    return [
-      `*Sessão ${session.sequence}: ${session.label}*\n${session.estimatedDurationMinutes} min`,
-      ...session.blocks.flatMap((block) => [
-        `\n*${block.title}*`,
-        ...block.activities.map((activity) => this.formatActivity(activity)),
-      ]),
-    ]
-      .join('\n')
-      .trimEnd();
-  }
-
-  private formatActivity(
-    activity: WorkoutSessionV2['blocks'][number]['activities'][number],
-  ): string {
-    const equipment = activity.equipment.length
-      ? activity.equipment.join(' + ')
-      : 'nenhum';
-    const parameters =
-      activity.kind === 'STRENGTH'
-        ? `${activity.sets} × ${activity.repetitions}\nDescanso: ${activity.restSeconds} s\nEquipamento: ${equipment}\nIntensidade: ${activity.intensity}`
-        : activity.kind === 'TIMED'
-          ? `${activity.rounds} rodada(s) · ${activity.durationSeconds} s${activity.workSeconds === null ? '' : `\nTrabalho: ${activity.workSeconds} s`}${activity.recoverySeconds === null ? '' : ` · Recuperação: ${activity.recoverySeconds} s`}\nIntensidade: ${activity.intensity}`
-          : activity.kind === 'ENDURANCE'
-            ? `${activity.durationMinutes} min${activity.distanceKm === null ? '' : ` · ${activity.distanceKm} km`}\nIntensidade: ${activity.intensity}`
-            : activity.durationSeconds !== null
-              ? `${activity.durationSeconds} s`
-              : activity.holdSeconds !== null
-                ? `Sustentar ${activity.holdSeconds} s`
-                : (activity.repetitions ?? 'Movimento controlado');
-    return `\n*${activity.name}*\n${parameters}\n${activity.instruction}`;
+    return new WorkoutPlanV2Formatter().formatSession(session);
   }
 
   private weekdayLabel(weekday: WorkoutWeekday): string {

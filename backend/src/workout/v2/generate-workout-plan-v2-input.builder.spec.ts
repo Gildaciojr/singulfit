@@ -218,6 +218,7 @@ describe('GenerateWorkoutPlanV2InputBuilder', () => {
     ['Quero começar a correr', undefined],
     ['Quero correr na rua', 'STREET'],
     ['Quero me preparar para 5 km', undefined],
+    ['Quero correr 10 km', undefined],
     ['Corrida de rua 3 vezes por semana', 'STREET'],
     ['Quero correr na estrada', 'ROAD'],
     ['Quero correr na pista', 'TRACK'],
@@ -228,6 +229,8 @@ describe('GenerateWorkoutPlanV2InputBuilder', () => {
     expect(declared.equipment).toBeUndefined();
     if (message.includes('5 km'))
       expect(declared.targetDistanceKm?.value).toBe(5);
+    if (message.includes('10 km'))
+      expect(declared.targetDistanceKm?.value).toBe(10);
   });
 
   it.each([

@@ -395,6 +395,23 @@ describe('ConversationProfileConsentService through the canonical writer', () =>
     expect(await s.service.process(s.input)).toContain('Registrei');
     expect(s.records).toHaveLength(1);
   });
+  it('recognizes não curto peixe but waits for permanent consent and preserves idempotence', async () => {
+    const declaration = setup('não curto peixe');
+    expect(await declaration.service.process(declaration.input)).toBe(
+      FOOD_PREFERENCE_CONFIRMATION,
+    );
+    expect(declaration.records).toHaveLength(0);
+    const confirmation = setup(
+      'quero que você lembre disso',
+      'não curto peixe',
+    );
+    expect(await confirmation.service.process(confirmation.input)).toContain(
+      'Registrei',
+    );
+    await confirmation.service.process(confirmation.input);
+    expect(confirmation.records).toHaveLength(1);
+    expect(confirmation.records[0].textListValue).toEqual(['peixe']);
+  });
 
   it('does not permanently write the initial declaration', async () => {
     const s = setup('não gosto de peixe');

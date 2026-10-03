@@ -108,6 +108,8 @@ export class ConversationDailyQueryService {
           referenceDate: input.referenceDate,
           timezone,
         });
+        if (summary.mealCount === 0)
+          return `Ainda não há refeições com análise nutricional registrada ${query.period === 'TODAY' ? 'hoje' : 'nesta semana'}. Sem essa análise, não consigo informar seu consumo de calorias e nutrientes.`;
         const number = (value: number | null, unit: string) =>
           value === null
             ? 'valor incompleto'
@@ -192,9 +194,22 @@ export class ConversationDailyQueryService {
       if (day.meals.some((meal) => this.minute(meal.suggestedTime) === null))
         return `Os horários de hoje não estão completos. As refeições disponíveis são ${day.meals.map((meal) => meal.name).join(', ')}. Qual delas você quer consultar?`;
       const minute = parts.hour * 60 + parts.minute;
+      const resolvedPeriods = await this.resolvedMealPeriods(
+        userId,
+        at,
+        timezone,
+      );
+      if (
+        [...resolvedPeriods].some(
+          (period) =>
+            day.meals.filter((meal) => meal.period === period).length > 1,
+        )
+      )
+        return 'Há mais de uma refeição desse tipo no plano de hoje. Qual delas você já fez?';
       const future = day.meals
         .filter(
           (meal) =>
+            !resolvedPeriods.has(meal.period) &&
             this.minute(meal.suggestedTime) !== null &&
             (this.minute(meal.suggestedTime) ?? -1) >= minute,
         )
@@ -256,6 +271,63 @@ export class ConversationDailyQueryService {
     return matches.length === 1
       ? this.formatMeal(matches[0])
       : 'Não há uma única refeição correspondente a esse pedido no dia selecionado. Qual nome de refeição aparece no seu plano?';
+  }
+
+  /** Reminder adherence is not observed nutrition. Only a unique meal period
+   * on this local day can remove a scheduled meal from the next-meal list. */
+  private async resolvedMealPeriods(
+    userId: string,
+    at: Date,
+    timezone: string,
+  ): Promise<ReadonlySet<NutritionPlanMeal['period']>> {
+    const range = this.clock.localDayRange(at, timezone);
+    const reminders = await this.prisma.scheduledMessage.findMany({
+      where: {
+        userId,
+        status: 'SENT',
+        scheduledFor: { gte: range.start, lt: range.end, lte: at },
+        respondedAt: { lte: at },
+        responseOutcome: { in: ['COMPLETED', 'PARTIAL', 'SKIPPED'] },
+        context: { path: ['source'], equals: 'COACH_PROACTIVE_V1' },
+      },
+      select: {
+        userId: true,
+        conversationId: true,
+        conversation: { select: { id: true, userId: true } },
+        status: true,
+        scheduledFor: true,
+        respondedAt: true,
+        responseOutcome: true,
+        context: true,
+      },
+      orderBy: [{ respondedAt: 'desc' }, { id: 'desc' }],
+    });
+    const resolved = new Set<NutritionPlanMeal['period']>();
+    for (const reminder of reminders) {
+      if (
+        reminder.userId !== userId ||
+        reminder.conversation?.userId !== userId ||
+        reminder.conversation.id !== reminder.conversationId ||
+        reminder.status !== 'SENT' ||
+        reminder.scheduledFor < range.start ||
+        reminder.scheduledFor >= range.end ||
+        reminder.scheduledFor > at ||
+        !reminder.respondedAt ||
+        reminder.respondedAt < reminder.scheduledFor ||
+        reminder.respondedAt > at ||
+        !['COMPLETED', 'PARTIAL', 'SKIPPED'].includes(
+          reminder.responseOutcome ?? '',
+        ) ||
+        !reminder.context ||
+        typeof reminder.context !== 'object' ||
+        Array.isArray(reminder.context) ||
+        reminder.context.source !== 'COACH_PROACTIVE_V1'
+      )
+        continue;
+      if (reminder.context.intent === 'LUNCH_CHECK') resolved.add('LUNCH');
+      if (reminder.context.intent === 'DINNER_CHECK') resolved.add('DINNER');
+    }
+    return resolved;
   }
 
   private minute(value: string | null): number | null {

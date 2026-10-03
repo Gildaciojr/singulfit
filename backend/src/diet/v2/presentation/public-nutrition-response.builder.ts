@@ -1,4 +1,5 @@
 import { FitnessGoal } from '@prisma/client';
+import { ConversationPublicAnswerBoundaryService } from '../../../conversation/runtime/conversation-public-answer-boundary.service';
 import type {
   NutritionPlanFoodItem,
   NutritionPlanV2,
@@ -34,6 +35,8 @@ export interface BuildPublicNutritionResponseInput {
 }
 
 export class PublicNutritionResponseBuilder {
+  private readonly publicBoundary =
+    new ConversationPublicAnswerBoundaryService();
   build(input: BuildPublicNutritionResponseInput): PublicNutritionResponse {
     const plan = input.plan;
     const items = this.itemIndex(plan);
@@ -218,7 +221,8 @@ export class PublicNutritionResponseBuilder {
     return trimmed &&
       !INTERNAL_TERM.test(trimmed) &&
       !UUID.test(trimmed) &&
-      !TECHNICAL_SENTINEL.test(trimmed)
+      !TECHNICAL_SENTINEL.test(trimmed) &&
+      this.publicBoundary.projectText(trimmed) !== null
       ? trimmed
       : undefined;
   }

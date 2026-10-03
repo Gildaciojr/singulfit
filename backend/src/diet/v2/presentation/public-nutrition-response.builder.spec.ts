@@ -323,6 +323,12 @@ describe('PublicNutritionResponseBuilder', () => {
           'Conteúdo [object Object].',
           'ONBOARDING não deve aparecer.',
           'Orientação pública preservada.',
+          'Dados do pipeline.',
+          'O schema foi usado.',
+          'A resposta do provider.',
+          'Valor canônico.',
+          'Modo internal.',
+          'persistence rollout runtime.',
         ]),
         adaptationRules: Object.freeze([
           'executor interno.',
@@ -346,7 +352,7 @@ describe('PublicNutritionResponseBuilder', () => {
     const content = new NutritionWhatsAppPresenter().present(response);
 
     expect(content).not.toMatch(
-      /\b(?:null|undefined)\b|\bNaN\b|\[object Object\]|\b(?:operationKey|correlationId|executor|pilotStatus|NUTRITION_V2|DIET_V2|artifact|artefato|ONBOARDING)\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/iu,
+      /\b(?:null|undefined)\b|\bNaN\b|\[object Object\]|\b(?:operationKey|correlationId|executor|pilotStatus|NUTRITION_V2|DIET_V2|artifact|artefato|ONBOARDING|pipeline|schema|provider|canônico|internal|persistence|rollout|runtime)\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/iu,
     );
     expect(content).toContain('Orientação pública preservada.');
     expect(content).toContain('Mantenha água por perto.');

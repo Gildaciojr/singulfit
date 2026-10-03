@@ -7,7 +7,16 @@ describe('ConversationRuntimeModule', () => {
   it('compiles as the isolated production integration boundary', async () => {
     const module = await Test.createTestingModule({
       imports: [
-        ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }),
+        ConfigModule.forRoot({
+          isGlobal: true,
+          ignoreEnvFile: true,
+          load: [
+            () => ({
+              JWT_ACCESS_SECRET: 'isolated-module-test-access',
+              JWT_REFRESH_SECRET: 'isolated-module-test-refresh',
+            }),
+          ],
+        }),
         ConversationRuntimeModule,
       ],
     }).compile();

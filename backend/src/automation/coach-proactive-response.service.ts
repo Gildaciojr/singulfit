@@ -487,7 +487,7 @@ export class CoachProactiveResponseService {
       return this.classification(CoachProactiveWorkoutOutcome.DEFERRED);
     }
     if (
-      /\b(vou fazer|mais tarde|depois eu faco|faco mais tarde|adiei|adiar)\b/u.test(
+      /\b(vou (?:fazer|comer|almocar|jantar|beber|treinar)|mais tarde|depois eu faco|faco mais tarde|adiei|adiar)\b/u.test(
         text,
       )
     ) {
@@ -554,7 +554,7 @@ export class CoachProactiveResponseService {
     preferredName: string | null,
   ): string {
     if (outcome === CoachProactiveWorkoutOutcome.UNKNOWN)
-      return 'Você concluiu o que combinamos, fez só uma parte ou precisou adiar? Me conte para eu registrar corretamente.';
+      return 'Como ficou o que combinamos? Me conte para eu registrar corretamente.';
     if (intent === COACH_PROACTIVE_INTENTS.HYDRATION_CHECK) {
       if (
         outcome === CoachProactiveWorkoutOutcome.COMPLETED &&
@@ -565,12 +565,23 @@ export class CoachProactiveResponseService {
         return `${this.acknowledgment('Boa', preferredName)} Continue mantendo a hidratação distribuída ao longo do dia 💧`;
       if (outcome === CoachProactiveWorkoutOutcome.PARTIAL)
         return `${this.acknowledgment('Entendi', preferredName)} Vale deixar a garrafa por perto e seguir com pequenos goles ao longo do dia, sem tentar compensar tudo de uma vez.`;
+      if (outcome === CoachProactiveWorkoutOutcome.DEFERRED)
+        return 'Combinado. Quando puder, retome a hidratação aos poucos ao longo do dia.';
       return 'Tudo bem. Comece com alguns goles quando puder e deixe a garrafa por perto; constância costuma funcionar melhor que beber muito de uma vez.';
     }
     if (intent === COACH_PROACTIVE_INTENTS.MEAL_PLAN_CHECK) {
-      return outcome === CoachProactiveWorkoutOutcome.COMPLETED
-        ? `${this.acknowledgment('Boa', preferredName)} Continue seguindo o plano alimentar ao longo do restante do dia.`
-        : `${this.acknowledgment('Entendi', preferredName)} Vamos retomar o plano na próxima refeição possível, sem compensações exageradas.`;
+      switch (outcome) {
+        case CoachProactiveWorkoutOutcome.COMPLETED:
+          return `${this.acknowledgment('Boa', preferredName)} Continue seguindo o plano alimentar ao longo do restante do dia.`;
+        case CoachProactiveWorkoutOutcome.PARTIAL:
+          return 'Entendi, sua alimentação foi diferente do planejado. Retome seu plano na próxima refeição, sem tentar compensar.';
+        case CoachProactiveWorkoutOutcome.SKIPPED:
+          return 'Entendi, você não seguiu o plano nessa refeição. Retome na próxima refeição planejada, sem compensações exageradas.';
+        case CoachProactiveWorkoutOutcome.DEFERRED:
+          return 'Combinado, você vai comer depois. Quando puder, siga a refeição planejada sem tentar compensar o atraso.';
+        case CoachProactiveWorkoutOutcome.ISSUE_REPORTED:
+          return 'Entendi. Se a alimentação está causando desconforto, procure orientação profissional antes de insistir. O que aconteceu?';
+      }
     }
     if (
       intent === COACH_PROACTIVE_INTENTS.LUNCH_CHECK ||
@@ -578,17 +589,35 @@ export class CoachProactiveResponseService {
     ) {
       const meal =
         intent === COACH_PROACTIVE_INTENTS.DINNER_CHECK ? 'jantar' : 'almoço';
-      return outcome === CoachProactiveWorkoutOutcome.COMPLETED
-        ? `${meal === 'jantar' ? 'Boa, jantar feito' : 'Boa, almoço feito'}! Siga o restante do dia com tranquilidade e consistência.`
-        : `Tranquilo. Quando conseguir parar, priorize seu ${meal} sem culpa e sem tentar compensar de forma exagerada.`;
+      switch (outcome) {
+        case CoachProactiveWorkoutOutcome.COMPLETED:
+          return `Boa, ${meal} feito! Siga o restante do dia normalmente.`;
+        case CoachProactiveWorkoutOutcome.PARTIAL:
+          return `Entendi, seu ${meal} foi diferente do planejado. Na próxima refeição, retome seu plano normalmente, sem tentar compensar.`;
+        case CoachProactiveWorkoutOutcome.SKIPPED:
+          return `Entendi, você não fez o ${meal}. Siga normalmente na próxima refeição planejada, sem tentar compensar.`;
+        case CoachProactiveWorkoutOutcome.DEFERRED:
+          return `Combinado, você vai fazer o ${meal} depois. Quando puder, siga a refeição planejada sem tentar compensar o atraso.`;
+        case CoachProactiveWorkoutOutcome.ISSUE_REPORTED:
+          return 'Se a refeição causou desconforto, procure orientação profissional antes de insistir. O que aconteceu?';
+      }
     }
     if (
       intent === COACH_PROACTIVE_INTENTS.DAILY_CHECK_IN ||
       intent === COACH_PROACTIVE_INTENTS.GOOD_MORNING
     ) {
-      return outcome === CoachProactiveWorkoutOutcome.PARTIAL
-        ? 'Entendi. Vamos respeitar seu ritmo hoje e focar no próximo passo que couber de forma realista.'
-        : 'Que bom! Vamos manter esse ritmo com um passo de cada vez ao longo do dia.';
+      switch (outcome) {
+        case CoachProactiveWorkoutOutcome.PARTIAL:
+          return 'Entendi. Vamos respeitar seu ritmo hoje e focar no próximo passo que couber de forma realista.';
+        case CoachProactiveWorkoutOutcome.SKIPPED:
+          return 'Entendi, hoje não foi possível. Retome no próximo momento que couber na sua rotina, sem compensar.';
+        case CoachProactiveWorkoutOutcome.DEFERRED:
+          return 'Combinado. Podemos retomar mais tarde, quando você tiver disponibilidade.';
+        case CoachProactiveWorkoutOutcome.ISSUE_REPORTED:
+          return 'Entendi. Respeite seu desconforto e procure avaliação se ele for forte ou persistente.';
+        case CoachProactiveWorkoutOutcome.COMPLETED:
+          return 'Que bom! Vamos manter esse ritmo com um passo de cada vez ao longo do dia.';
+      }
     }
     switch (outcome) {
       case CoachProactiveWorkoutOutcome.COMPLETED:

@@ -24,6 +24,92 @@ describe('Structured profile acquisition registry and recognition', () => {
   }
 
   it.each([
+    ['TRAINING_MODALITY', 'academia', 'GYM_STRENGTH'],
+    ['TRAINING_ENVIRONMENT', 'academia normal', 'FULL_GYM'],
+    ['TRAINING_ENVIRONMENT', 'treino numa academia', 'FULL_GYM'],
+    ['TRAINING_ENVIRONMENT', 'em casa', 'HOME'],
+    ['TRAINING_ENVIRONMENT', 'treino em casa', 'HOME'],
+    ['WEEKLY_FREQUENCY', 'cinco vezes', 5],
+    ['WEEKLY_FREQUENCY', '5x', 5],
+    ['WEEKLY_FREQUENCY', 'umas cinco vezes', 5],
+    ['WEEKLY_FREQUENCY', 'uma vez', 1],
+    ['SESSION_DURATION_MINUTES', '45 minutos', 45],
+    ['SESSION_DURATION_MINUTES', 'mais ou menos uma hora', 60],
+    ['PHYSICAL_LIMITATIONS', 'não tenho nenhuma limitação', []],
+    ['PHYSICAL_LIMITATIONS', 'meu joelho incomoda', ['meu joelho incomoda']],
+    ['ALLERGIES', 'sou alérgico a amendoim', ['amendoim']],
+    ['CURRENT_RUNNING_DISTANCE', 'hoje corro uns 3 km', 3000],
+  ] as const)(
+    'recognizes natural %s declaration %s without inventing a value',
+    (field, text, value) => {
+      expect(recognizer.recognize(specification(field), text)).toMatchObject({
+        disposition: 'RECOGNIZED',
+        value,
+      });
+    },
+  );
+  it.each([
+    ['academia', 'FULL_GYM'],
+    ['academia normal', 'FULL_GYM'],
+    ['treino numa academia', 'FULL_GYM'],
+    ['eu treino na academia', 'FULL_GYM'],
+    ['academia completa', 'FULL_GYM'],
+    ['minha academia é pequena', 'LIMITED_GYM'],
+    ['treino em casa', 'HOME'],
+    ['corro na rua', 'ROAD'],
+    ['não treino em academia, treino em casa', 'HOME'],
+    ['academia não, treino em casa', 'HOME'],
+    ['não treino em casa, treino na academia', 'FULL_GYM'],
+    ['não vou à academia, corro na rua', 'ROAD'],
+  ])('resolves affirmative environment in %s as %s', (text, value) => {
+    expect(
+      recognizer.recognize(specification('TRAINING_ENVIRONMENT'), text),
+    ).toMatchObject({
+      disposition: 'RECOGNIZED',
+      value,
+    });
+  });
+  it.each([
+    'não treino em academia',
+    'não faço academia',
+    'não vou à academia',
+    'não tenho academia perto',
+    'não gosto de academia',
+    'academia não',
+    'hoje não vou treinar na academia',
+    'não tenho acesso a academia',
+  ])('does not infer permanent gym access from %s', (text) => {
+    const answer = recognizer.recognize(
+      specification('TRAINING_ENVIRONMENT'),
+      text,
+    );
+    expect(answer.disposition).not.toBe('RECOGNIZED');
+    expect(answer.value).toBeUndefined();
+  });
+  it.each(['treino na academia e em casa', 'academia e casa'])(
+    'asks for clarification for multiple affirmative environments: %s',
+    (text) => {
+      expect(
+        recognizer.recognize(specification('TRAINING_ENVIRONMENT'), text),
+      ).toMatchObject({
+        disposition: 'UNKNOWN',
+        reasonCode: 'AMBIGUOUS_ANSWER',
+      });
+    },
+  );
+  it('does not diagnose lactose intolerance from an ambiguous negative declaration', () => {
+    const answer = recognizer.recognize(
+      specification('FOOD_INTOLERANCES'),
+      'não posso com lactose',
+    );
+    expect(answer.disposition).not.toBe('RECOGNIZED');
+    expect(answer.value).toBeUndefined();
+    expect(realizer.realize(specification('FOOD_INTOLERANCES')).text).toContain(
+      '?',
+    );
+  });
+
+  it.each([
     'Não',
     'Não.',
     'nada',

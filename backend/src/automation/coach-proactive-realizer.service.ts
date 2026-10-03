@@ -5,8 +5,26 @@ import type { OpenAIResponseResult } from '../ai/interfaces/openai.interface';
 import { PrismaService } from '../prisma/prisma.service';
 import type { CoachProactiveRealizationInput } from './coach-proactive.contract';
 import { COACH_PROACTIVE_OUTREACH_PROMPT } from './coach-proactive-outreach.prompt.definition';
+import { ConversationPublicAnswerBoundaryService } from '../conversation/runtime/conversation-public-answer-boundary.service';
 
 const MAXIMUM_PROACTIVE_LENGTH = 320;
+
+/** Outreach has no mutation receipt. These claims cannot describe its effects. */
+export function hasProactiveSideEffectClaim(text: string): boolean {
+  return /\b(?:troquei|alterei|atualizei|mudei|salvei|registrei|criei|montei|conclu[ií]|registrad[oa]s?)\b|\b(?:foi|foram|est[aá]|est[aã]o)(?:\s+j[aá])?\s+(?:atualizad|alterad|modificad|trocad|salv|registrad|criad|montad|conclu[ií]d)[oa]s?\b|\b(?:treino|refei[cç][aã]o|an[aá]lise|meta)(?:\s+di[aá]ria)?\s+conclu[ií]d[oa]\b/iu.test(
+    text,
+  );
+}
+
+export function isSafeProactiveText(text: string): boolean {
+  return (
+    text.length > 0 &&
+    text.length <= MAXIMUM_PROACTIVE_LENGTH &&
+    new ConversationPublicAnswerBoundaryService().projectText(text) !== null &&
+    (text.match(/\?/gu) ?? []).length <= 1 &&
+    !hasProactiveSideEffectClaim(text)
+  );
+}
 
 @Injectable()
 export class CoachProactiveRealizerService {
@@ -85,9 +103,6 @@ export class CoachProactiveRealizerService {
     const text = Reflect.get(value, 'text');
     if (typeof text !== 'string') return null;
     const normalized = text.replace(/\s+/gu, ' ').trim();
-    return normalized.length > 0 &&
-      normalized.length <= MAXIMUM_PROACTIVE_LENGTH
-      ? normalized
-      : null;
+    return isSafeProactiveText(normalized) ? normalized : null;
   }
 }

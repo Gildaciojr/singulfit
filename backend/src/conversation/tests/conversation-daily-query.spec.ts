@@ -27,6 +27,7 @@ describe('ConversationDailyQueryService', () => {
           .mockResolvedValue({ timezone: 'America/Sao_Paulo' }),
       },
       message: { findFirst: jest.fn().mockResolvedValue(null) },
+      scheduledMessage: { findMany: jest.fn().mockResolvedValue([]) },
     };
     const consumption = {
       summarize: jest.fn().mockResolvedValue({
@@ -183,6 +184,104 @@ describe('ConversationDailyQueryService', () => {
     for (const text of ['já comi', 'comi', 'não comi', 'comi outra coisa'])
       expect(await s.service.answer({ ...s.input, text })).toBeNull();
     expect(s.consumption.summarize).not.toHaveBeenCalled();
+  });
+  function lunchReminder() {
+    return {
+      userId: 'user',
+      conversationId: 'conversation',
+      conversation: { id: 'conversation', userId: 'user' },
+      status: 'SENT',
+      scheduledFor: new Date('2026-08-24T13:30:00Z'),
+      respondedAt: new Date('2026-08-24T13:45:00Z'),
+      responseOutcome: 'PARTIAL',
+      context: { source: 'COACH_PROACTIVE_V1', intent: 'LUNCH_CHECK' },
+    };
+  }
+  it.each(['PARTIAL', 'COMPLETED', 'SKIPPED'])(
+    'does not offer the same resolved lunch as next after %s, even before its planned time',
+    async (responseOutcome) => {
+      const s = subject();
+      s.prisma.scheduledMessage.findMany.mockResolvedValue([
+        { ...lunchReminder(), responseOutcome },
+      ]);
+      const answer = await s.service.answer({
+        ...s.input,
+        text: 'qual minha próxima refeição?',
+      });
+      expect(answer).toContain('Jantar segunda');
+      expect(answer).not.toContain('Almoço segunda');
+      expect(s.prisma.scheduledMessage.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ userId: 'user' }),
+        }),
+      );
+      expect(s.consumption.summarize).not.toHaveBeenCalled();
+    },
+  );
+  it.each([
+    'DEFERRED',
+    'UNKNOWN',
+    'FOREIGN',
+    'FUTURE',
+    'YESTERDAY',
+    'OTHER_SOURCE',
+    'GENERAL_PLAN',
+    'UNSENT',
+  ])(
+    'does not silently remove lunch from the plan using %s evidence',
+    async (variant) => {
+      const s = subject();
+      const row = lunchReminder();
+      if (variant === 'DEFERRED' || variant === 'UNKNOWN')
+        row.responseOutcome = variant;
+      if (variant === 'FOREIGN') row.conversation.userId = 'other';
+      if (variant === 'FUTURE')
+        row.respondedAt = new Date('2026-08-24T16:00:00Z');
+      if (variant === 'YESTERDAY')
+        row.scheduledFor = new Date('2026-08-23T13:30:00Z');
+      if (variant === 'OTHER_SOURCE') row.context.source = 'UNVERIFIED';
+      if (variant === 'GENERAL_PLAN') row.context.intent = 'MEAL_PLAN_CHECK';
+      if (variant === 'UNSENT') row.status = 'PENDING';
+      s.prisma.scheduledMessage.findMany.mockResolvedValue([row]);
+      expect(
+        await s.service.answer({
+          ...s.input,
+          text: 'qual minha próxima refeição?',
+        }),
+      ).toContain('Almoço segunda');
+    },
+  );
+  it('clarifies a resolved period with multiple meals rather than removing both', async () => {
+    const s = subject();
+    s.current.document.days[1].meals.push(
+      meal('LUNCH', 'Segundo almoço', '14:00'),
+    );
+    s.prisma.scheduledMessage.findMany.mockResolvedValue([lunchReminder()]);
+    expect(
+      await s.service.answer({
+        ...s.input,
+        text: 'qual minha próxima refeição?',
+      }),
+    ).toContain('Qual delas');
+  });
+  it('does not turn a partial meal reminder into observed consumption', async () => {
+    const s = subject();
+    s.prisma.scheduledMessage.findMany.mockResolvedValue([lunchReminder()]);
+    s.consumption.summarize.mockResolvedValue({
+      calories: null,
+      protein: null,
+      carbs: null,
+      fat: null,
+      mealCount: 0,
+    });
+    const answer = await s.service.answer({
+      ...s.input,
+      text: 'quanto consumi hoje?',
+    });
+    expect(answer).toContain('Sem essa análise');
+    expect(answer).not.toMatch(/\d+\s*(kcal|g)|500|120/iu);
+    expect(s.nutrition.getCurrent).not.toHaveBeenCalled();
+    expect(s.prisma.scheduledMessage.findMany).not.toHaveBeenCalled();
   });
   it.each([
     ['2026-08-24T02:30:00Z', 'Almoço domingo'],

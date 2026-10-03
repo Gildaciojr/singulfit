@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { ConversationAnswerCandidate } from './conversation-qa.contract';
 
 const INTERNAL_VALUE =
-  /(?:\b(?:null|undefined|NaN)\b|\[object Object\]|\b(?:can[oô]nic[oa]|canonical|grounding|runtime|fallback|planner|pipeline|persist[eê]ncia|persistido|V2|DIET_V2|NUTRITION_V2|executor|provider|AIJob|prompt|schema|operationKey|correlationId|pilot\w*|aiJobId|providerId|promptVersionId|prismaId|artifact|artefato|metadata|ONBOARDING)\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b)/iu;
+  /(?:\b(?:null|undefined|NaN)\b|\[object Object\]|\b(?:can[oô]nic[oa]|canonical|grounding|runtime|fallback|planner|pipeline|persist[eê]ncia|persistence|persistido|V2|DIET_V2|NUTRITION_V2|executor|provider|AIJob|prompt|schema|operationKey|correlationId|pilot\w*|rollout|internal|aiJobId|providerId|promptVersionId|prismaId|artifact|artefato|metadata|ONBOARDING)\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b)/iu;
 const MARKDOWN_TABLE = /(?:^\s*\|.*\|\s*$|^\s*:?-{3,}:?\s*(?:\|.*)?$)/u;
 const BULLET = /^[-•]\s+/u;
 

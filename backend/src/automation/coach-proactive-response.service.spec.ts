@@ -543,10 +543,10 @@ describe('CoachProactiveResponseService', () => {
     ['HYDRATION_CHECK', 'bebi pouco hoje', 'pequenos goles'],
     ['LUNCH_CHECK', 'já almocei', 'almoço feito'],
     ['LUNCH_CHECK', 'sim', 'almoço feito'],
-    ['LUNCH_CHECK', 'ainda não', 'priorize seu almoço'],
+    ['LUNCH_CHECK', 'ainda não', 'não fez o almoço'],
     ['DINNER_CHECK', 'já', 'registrar corretamente'],
     ['DINNER_CHECK', 'sim, jantei', 'jantar feito'],
-    ['DINNER_CHECK', 'não jantei ainda', 'priorize seu jantar'],
+    ['DINNER_CHECK', 'não jantei ainda', 'não fez o jantar'],
     ['WORKOUT_CHECK', 'foi ótimo', 'Treino concluído'],
     ['WORKOUT_CHECK', 'não consegui treinar hoje', 'Sem culpa'],
     ['DAILY_CHECK_IN', 'estou bem', 'Que bom'],
@@ -673,6 +673,75 @@ describe('CoachProactiveResponseService', () => {
       expect(response).not.toMatch(/almoço feito|jantar feito/iu);
     },
   );
+  it.each([
+    ['LUNCH_CHECK', 'comi outra coisa', 'PARTIAL', 'almoço foi diferente'],
+    ['DINNER_CHECK', 'comi outra coisa', 'PARTIAL', 'jantar foi diferente'],
+    [
+      'MEAL_PLAN_CHECK',
+      'comi outra coisa',
+      'PARTIAL',
+      'alimentação foi diferente',
+    ],
+    ['LUNCH_CHECK', 'vou comer depois', 'DEFERRED', 'almoço depois'],
+    ['DINNER_CHECK', 'vou jantar depois', 'DEFERRED', 'jantar depois'],
+    ['MEAL_PLAN_CHECK', 'vou comer depois', 'DEFERRED', 'vai comer depois'],
+    ['LUNCH_CHECK', 'não comi', 'SKIPPED', 'não fez o almoço'],
+    ['DINNER_CHECK', 'não jantei', 'SKIPPED', 'não fez o jantar'],
+    ['MEAL_PLAN_CHECK', 'não comi', 'SKIPPED', 'não seguiu o plano'],
+    ['LUNCH_CHECK', 'já almocei', 'COMPLETED', 'almoço feito'],
+    ['DINNER_CHECK', 'já jantei', 'COMPLETED', 'jantar feito'],
+    ['MEAL_PLAN_CHECK', 'segui o plano', 'COMPLETED', 'Continue seguindo'],
+    ['LUNCH_CHECK', 'ok', 'UNKNOWN', 'registrar corretamente'],
+    ['DAILY_CHECK_IN', 'não consegui', 'SKIPPED', 'não foi possível'],
+    ['GOOD_MORNING', 'vou fazer depois', 'DEFERRED', 'retomar mais tarde'],
+    ['HYDRATION_CHECK', 'vou beber depois', 'DEFERRED', 'retome a hidratação'],
+    [
+      'WORKOUT_CHECK',
+      'meu joelho está doendo',
+      'ISSUE_REPORTED',
+      'Evite movimentos',
+    ],
+  ] as const)(
+    'preserves public state semantics for %s / %s',
+    async (intent, content, outcome, expected) => {
+      const s = createSubject({ intent, content });
+      expect(
+        await s.service.capture({
+          userId: 'ordinary-user-id',
+          messageId: 'inbound-message-id',
+        }),
+      ).toMatchObject({ outcome });
+      const response: string =
+        s.transaction.coachMessage.upsert.mock.calls[0][0].create.content;
+      expect(response).toContain(expected);
+      expect(response).not.toMatch(
+        /\b(?:V2|pipeline|schema|provider|runtime|canonical|canônico|rollout|internal|persistence)\b|\d+\s*(?:kcal|calorias|g de proteína)/iu,
+      );
+      expect((response.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1);
+      if (outcome === 'PARTIAL' || outcome === 'SKIPPED')
+        expect(response).not.toMatch(
+          /Quando conseguir parar|priorize seu|vai fazer .* depois/iu,
+        );
+      if (outcome !== 'COMPLETED') expect(response).not.toContain('Que bom!');
+    },
+  );
+  it('does not acknowledge a meal when its persistence transaction fails', async () => {
+    const s = createSubject({
+      intent: 'LUNCH_CHECK',
+      content: 'comi outra coisa',
+    });
+    s.transaction.scheduledMessage.update.mockRejectedValue(
+      new Error('database unavailable'),
+    );
+    await expect(
+      s.service.capture({
+        userId: 'ordinary-user-id',
+        messageId: 'inbound-message-id',
+      }),
+    ).rejects.toThrow('database unavailable');
+    expect(s.transaction.coachMessage.upsert).not.toHaveBeenCalled();
+    expect(s.eventBus.publish).not.toHaveBeenCalled();
+  });
 
   it.each([
     ['MEAL_PLAN_CHECK', 'sim'],

@@ -17,9 +17,11 @@ describe('Nutrition current-plan read side-effect regression', () => {
     async (message, legacyIntent) => {
       const persistence = {
         nutritionPlanV2: {
-          findFirst: jest
-            .fn()
-            .mockResolvedValue({ id: 'pre-existing-plan-id' }),
+          findFirst: jest.fn().mockResolvedValue({
+            id: 'pre-existing-plan-id',
+            userId: 'user-id',
+            profileId: 'profile-id',
+          }),
           create: jest.fn(),
           update: jest.fn(),
           updateMany: jest.fn(),
@@ -32,6 +34,7 @@ describe('Nutrition current-plan read side-effect regression', () => {
         },
         nutritionPlanOwnership: {
           findUnique: jest.fn().mockResolvedValue({
+            userId: 'user-id',
             implementation: 'V2',
             planId: 'pre-existing-plan-id',
             profileId: 'profile-id',

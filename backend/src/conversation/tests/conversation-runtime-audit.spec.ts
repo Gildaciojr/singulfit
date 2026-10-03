@@ -1,7 +1,7 @@
 import { ConversationRuntimeAuditService } from '../runtime/conversation-runtime-audit.service';
 
 describe('ConversationRuntimeAuditService', () => {
-  it('persists only hashes and decision metadata', async () => {
+  it('persists traceable identifiers and decision metadata without message bodies', async () => {
     const audit = { record: jest.fn().mockResolvedValue({ id: 'audit-id' }) };
     const service = new ConversationRuntimeAuditService(audit as never);
 
@@ -57,11 +57,16 @@ describe('ConversationRuntimeAuditService', () => {
     const serialized = JSON.stringify(audit.record.mock.calls[0][0]);
     expect(serialized).not.toContain('private message body');
     expect(serialized).not.toContain('private runtime response');
-    expect(serialized).not.toContain('sensitive-user');
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'CONVERSATION_RUNTIME_EVALUATED',
         entityType: 'CONVERSATION_RUNTIME',
+        userId: 'sensitive-user',
+        metadata: expect.objectContaining({
+          conversationId: 'sensitive-conversation',
+          messageId: 'sensitive-message',
+          selectedSource: 'CONVERSATION_RUNTIME',
+        }),
       }),
     );
   });

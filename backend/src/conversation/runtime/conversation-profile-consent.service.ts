@@ -253,9 +253,8 @@ export class ConversationProfileConsentService {
       )
     )
       return null;
-    const rejection = /^(?:eu )?nao gosto de ([a-z][a-z0-9 -]{0,79})$/u.exec(
-      folded,
-    );
+    const rejection =
+      /^(?:eu )?nao (?:gosto de|curto) ([a-z][a-z0-9 -]{0,79})$/u.exec(folded);
     const preference =
       /^(?:eu )?gosto (?:muito )?de ([a-z][a-z0-9 -]{0,79})$/u.exec(folded);
     const candidate = rejection ?? preference;

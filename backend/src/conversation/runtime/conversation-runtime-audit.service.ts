@@ -24,10 +24,13 @@ export class ConversationRuntimeAuditService {
   }): Promise<void> {
     try {
       await this.audit.record({
+        userId: input.request.userId,
         action: 'CONVERSATION_RUNTIME_EVALUATED',
         entityType: 'CONVERSATION_RUNTIME',
         entityId: this.hash(input.request.messageId),
         metadata: {
+          messageId: input.request.messageId,
+          conversationId: input.request.conversationId,
           userHash: this.hash(input.request.userId),
           conversationHash: this.hash(input.request.conversationId),
           mode: input.evaluation.summary.mode,

@@ -75,6 +75,66 @@ describe('CoachProactiveRealizerService', () => {
     expect(setup.aiService.completeJobInTransaction).toHaveBeenCalledTimes(1);
     expect(setup.aiService.failJob).not.toHaveBeenCalled();
   });
+  it.each([
+    'Seu pipeline está pronto.',
+    'Seu rollout foi concluído.',
+    'A persistence está ativa.',
+    'Registrei seu treino como concluído.',
+    'Troquei seu treino.',
+    'Troquei seu exercício.',
+    'Alterei seu treino.',
+    'Atualizei sua dieta.',
+    'Atualizei seu plano.',
+    'Mudei sua dieta.',
+    'Salvei sua preferência.',
+    'Salvei no seu perfil.',
+    'Registrei seu treino.',
+    'Registrei sua refeição.',
+    'Criei seu novo treino.',
+    'Montei seu novo plano.',
+    'Seu treino foi atualizado.',
+    'Sua dieta foi alterada.',
+    'Seu plano já foi modificado.',
+    'Seu treino está concluído e registrado.',
+    'Meta diária concluída.',
+    'Treino concluído.',
+    'Como você está? Já treinou? Vai comer agora?',
+  ])(
+    'rejects unsafe outreach %s before acknowledging persistence',
+    async (text) => {
+      const s = subject({ outputText: JSON.stringify({ text }) });
+      expect(await s.service.realize(input)).toBe(input.fallback);
+      expect(s.aiService.completeJobInTransaction).not.toHaveBeenCalled();
+      expect(s.aiService.failJob).toHaveBeenCalledTimes(1);
+      expect(s.aiService.runTextJob).toHaveBeenCalledTimes(1);
+      const reused = subject({
+        status: AIJobStatus.COMPLETED,
+        result: { text },
+      });
+      expect(await reused.service.realize(input)).toBe(input.fallback);
+      expect(reused.aiService.runTextJob).not.toHaveBeenCalled();
+      expect(reused.aiService.failJob).not.toHaveBeenCalled();
+      expect(reused.aiService.completeJobInTransaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    'Seu treino de hoje está previsto para as 18h.',
+    'Hoje você tem treino de pernas.',
+    'Seu almoço planejado é arroz, feijão e frango.',
+    'Seu plano prevê descanso hoje.',
+    'Quer revisar seu treino?',
+    'Se quiser, posso te ajudar a ajustar seu treino.',
+  ])('accepts legitimate outreach fresh and cached: %s', async (text) => {
+    const fresh = subject({ outputText: JSON.stringify({ text }) });
+    expect(await fresh.service.realize(input)).toBe(text);
+    expect(fresh.aiService.completeJobInTransaction).toHaveBeenCalledTimes(1);
+    expect(fresh.aiService.failJob).not.toHaveBeenCalled();
+    const cached = subject({ status: AIJobStatus.COMPLETED, result: { text } });
+    expect(await cached.service.realize(input)).toBe(text);
+    expect(cached.aiService.runTextJob).not.toHaveBeenCalled();
+    expect(cached.aiService.completeJobInTransaction).not.toHaveBeenCalled();
+  });
 
   it.each([
     ['provider failure', { providerFailure: true }],

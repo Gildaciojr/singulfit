@@ -36,6 +36,9 @@ describe('ConversationPublicAnswerBoundaryService', () => {
     'prompt',
     'schema',
     'pilot',
+    'rollout',
+    'internal',
+    'persistence',
     '8fe3f460-1c2d-4a5b-9c6d-0123456789ab',
   ])('rejects the complete field containing internal value %s', (internal) => {
     const candidate: ConversationAnswerCandidate = {
