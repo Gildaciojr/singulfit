@@ -12,6 +12,7 @@ import { WorkoutArtifactResolverService } from './workout-artifact-resolver.serv
 import { freezeWorkoutPlanV2 } from './workout-plan-v2.freeze';
 import { WorkoutPlanV2Parser } from './workout-plan-v2.parser';
 import { applyWorkoutTargetedMutation } from './workout-targeted-mutation.policy';
+import { canonicalizeWorkoutTimedDurations } from './workout-timed-duration.canonicalizer';
 import { WorkoutPlanV2Validator } from './workout-plan-v2.validator';
 import type {
   GeneratedWorkoutPlanV2Candidate,
@@ -32,6 +33,9 @@ import {
   WORKOUT_PLANNING_V2_PROMPT,
   workoutSchemaForAuthorizedEquipment,
 } from './workout-planning-v2.prompt.definition';
+
+export const WORKOUT_PLANNING_V2_EXECUTION_REVISION =
+  'timed-clock-canonical-v1' as const;
 
 export class WorkoutPostGenerationValidationError extends BadGatewayException {
   constructor(readonly validation: WorkoutPlanValidationResult) {
@@ -130,7 +134,7 @@ export class WorkoutPlanningEngineV2Service {
       }),
     });
     const canonical = this.canonicalJson(payload);
-    const operationKey = `workout-planning-v2:${createHash('sha256').update(`${input.userId}:${WORKOUT_PLANNING_V2_PROMPT.version}:${canonical}`).digest('hex')}`;
+    const operationKey = `workout-planning-v2:${createHash('sha256').update(`${input.userId}:${WORKOUT_PLANNING_V2_PROMPT.version}:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${canonical}`).digest('hex')}`;
     const job = await this.aiService.createStandaloneJob({
       userId: input.userId,
       type: AIJobType.WORKOUT,
@@ -254,6 +258,7 @@ export class WorkoutPlanningEngineV2Service {
         input.previousPlan,
         input.recognizedContext.mutation.sourceActivityKey,
       );
+    candidate = canonicalizeWorkoutTimedDurations(candidate);
     const validation = this.validator.validate(
       candidate,
       prepared.context,

@@ -9,6 +9,14 @@ import {
 } from './workout-planning-v2.prompt.definition';
 
 describe('workout planning prompt rollout', () => {
+  it('freezes the current v6 instructions without a new prompt version', () => {
+    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(6);
+    expect(
+      createHash('sha256')
+        .update(WORKOUT_PLANNING_V2_PROMPT.instructions)
+        .digest('hex'),
+    ).toBe('2d94eff78b1dff71226957c3a07e4f4ae24a2c6565fe390e16795cb4ecb57436');
+  });
   it('uses the requested duration generically in the v5 extension', () => {
     const extension = WORKOUT_PLANNING_V2_PROMPT_V5.instructions.slice(
       WORKOUT_PLANNING_V2_PROMPT_V4.instructions.length,

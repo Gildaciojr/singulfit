@@ -45,6 +45,7 @@ import type {
 } from './workout-planning-context.contract';
 import {
   WorkoutPlanningEngineV2Service,
+  WORKOUT_PLANNING_V2_EXECUTION_REVISION,
   WorkoutPostGenerationValidationError,
 } from './workout-planning-engine-v2.service';
 import { WorkoutPlanningReadinessService } from './workout-planning-readiness.service';
@@ -1288,7 +1289,13 @@ describe('Workout Planning Engine V2', () => {
     );
     const keyForVersion = (version: number) =>
       `workout-planning-v2:${createHash('sha256').update(`user-id:${version}:${providerRequest.input}`).digest('hex')}`;
-    expect(generation.operationKey).toBe(keyForVersion(6));
+    expect(generation.operationKey).toBe(
+      `workout-planning-v2:${createHash('sha256').update(`user-id:6:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${providerRequest.input}`).digest('hex')}`,
+    );
+    expect(WORKOUT_PLANNING_V2_EXECUTION_REVISION).toBe(
+      'timed-clock-canonical-v1',
+    );
+    expect(generation.operationKey).not.toBe(keyForVersion(6));
     expect(generation.operationKey).not.toBe(keyForVersion(3));
     expect(generation.operationKey).not.toBe(keyForVersion(5));
     expect(ai.completeJobInTransaction).not.toHaveBeenCalled();
@@ -1366,6 +1373,126 @@ describe('Workout Planning Engine V2', () => {
     expect(aiService.failJob).not.toHaveBeenCalled();
   });
 
+  it.each([AIJobStatus.PENDING, AIJobStatus.COMPLETED])(
+    'canonicalizes the production incident for %s while preserving the raw provider clock',
+    async (status) => {
+      const input = recognized('GYM_STRENGTH', ['BODYWEIGHT', 'DUMBBELL'], {
+        frequency: 5,
+        duration: 60,
+        environment: 'FULL_GYM',
+      });
+      const base = candidate(input);
+      const raw = {
+        ...base,
+        sessions: base.sessions.map((session, index) =>
+          index !== 4
+            ? session
+            : {
+                ...session,
+                blocks: session.blocks.map((block) =>
+                  block.type !== 'STRENGTH'
+                    ? block
+                    : {
+                        ...block,
+                        activities: [
+                          ...block.activities,
+                          {
+                            activityKey: 'FRIDAY_STRENGTH_3',
+                            name: 'Farmer walk com halteres',
+                            source: 'MODEL_GENERATED' as const,
+                            movementPattern: 'CARRY' as const,
+                            equipment: ['DUMBBELL' as const],
+                            instruction: 'Caminhe com controle.',
+                            alerts: [],
+                            appliedConstraintCodes: [],
+                            kind: 'TIMED' as const,
+                            durationSeconds: 40,
+                            workSeconds: 40,
+                            recoverySeconds: 60,
+                            rounds: 4,
+                            intensity: 'MODERATE' as const,
+                          },
+                        ],
+                      },
+                ),
+              },
+        ),
+      };
+      const rawOutput = `  ${JSON.stringify(raw)}\n`;
+      const storedResult = { candidateOutput: rawOutput, model: 'model' };
+      const response = {
+        responseId: 'provider-response',
+        model: 'model',
+        outputText: rawOutput,
+        promptTokens: 10,
+        completionTokens: 20,
+        totalTokens: 30,
+      };
+      const ai = {
+        createStandaloneJob: jest.fn().mockResolvedValue({
+          id: 'job-id',
+          status,
+          promptVersionId: 'prompt-id',
+          result: status === AIJobStatus.COMPLETED ? storedResult : null,
+        }),
+        runTextJob: jest.fn().mockResolvedValue(response),
+        failJob: jest.fn(),
+      };
+      const result = await (
+        await engineWith(ai)
+      ).generateCandidate({
+        userId: 'user-id',
+        decision: decision(),
+        snapshot: snapshot(),
+        recognizedContext: input,
+        referenceDate,
+      });
+      const activity = result.output.sessions
+        .flatMap((session) =>
+          session.blocks.flatMap((block) => block.activities),
+        )
+        .find((item) => item.activityKey === 'FRIDAY_STRENGTH_3');
+      expect(activity).toMatchObject({
+        kind: 'TIMED',
+        durationSeconds: 340,
+        workSeconds: 40,
+        recoverySeconds: 60,
+        rounds: 4,
+      });
+      expect(result.output.validation.status).not.toBe('INVALID');
+      expect(
+        result.output.validation.issues.some(
+          (issue) => issue.code === 'TIMED_DURATION_IMPOSSIBLE',
+        ),
+      ).toBe(false);
+      expect(result.storedResult).toEqual(storedResult);
+      expect(result.output.generationMetadata).toMatchObject({
+        engineVersion: 2,
+        promptVersionId: 'prompt-id',
+        reused: status === AIJobStatus.COMPLETED,
+      });
+      expect(result.output.schemaVersion).toBe(2);
+      expect(result.status).toBe(
+        status === AIJobStatus.COMPLETED
+          ? 'ALREADY_COMPLETED'
+          : 'PENDING_COMPLETION',
+      );
+      expect(ai.runTextJob).toHaveBeenCalledTimes(
+        status === AIJobStatus.COMPLETED ? 0 : 1,
+      );
+      expect(ai.failJob).not.toHaveBeenCalled();
+      if (result.status === 'PENDING_COMPLETION') {
+        expect(result.completion.response.outputText).toBe(rawOutput);
+        expect(result.completion.result).toEqual(storedResult);
+      }
+      expect(
+        raw.sessions[4].blocks
+          .flatMap((block) => block.activities)
+          .find((item) => item.activityKey === 'FRIDAY_STRENGTH_3'),
+      ).toMatchObject({ durationSeconds: 40 });
+    },
+  );
+
   it('preserves the exact rejected provider candidate without persisting or archiving an ACTIVE plan', async () => {
     const input = recognized('HOME_WORKOUT', ['BODYWEIGHT']);
     const base = candidate(input);
@@ -1385,7 +1512,7 @@ describe('Workout Planning Engine V2', () => {
                         {
                           ...block.activities[0],
                           activityKey: 'incident',
-                          name: 'Circuito intervalado',
+                          name: 'equipamento indisponível',
                           kind: 'TIMED' as const,
                           rounds: 5,
                           workSeconds: 60,
@@ -1450,7 +1577,7 @@ describe('Workout Planning Engine V2', () => {
           stage: 'POST_GENERATION_VALIDATION',
           issues: expect.arrayContaining([
             {
-              code: 'TIMED_DURATION_IMPOSSIBLE',
+              code: 'ACTIVITY_NAME_INVALID',
               severity: 'ERROR',
               path: 'incident',
             },
