@@ -16,6 +16,7 @@ import { WorkoutPlanV2Validator } from './workout-plan-v2.validator';
 import type {
   GeneratedWorkoutPlanV2Candidate,
   WorkoutPlanV2,
+  WorkoutPlanValidationResult,
 } from './workout-plan-v2.contract';
 import { WorkoutPlanningContextBuilder } from './workout-planning-context.builder';
 import type {
@@ -31,6 +32,14 @@ import {
   WORKOUT_PLANNING_V2_PROMPT,
   workoutSchemaForAuthorizedEquipment,
 } from './workout-planning-v2.prompt.definition';
+
+export class WorkoutPostGenerationValidationError extends BadGatewayException {
+  constructor(readonly validation: WorkoutPlanValidationResult) {
+    super(
+      `Treino V2 reprovado: ${validation.issues.map((issue) => issue.code).join(',')}`,
+    );
+  }
+}
 
 @Injectable()
 export class WorkoutPlanningEngineV2Service {
@@ -211,7 +220,18 @@ export class WorkoutPlanningEngineV2Service {
         }),
       });
     } catch (error: unknown) {
-      await this.aiService.failJob(job.id, error, response);
+      if (response && error instanceof WorkoutPostGenerationValidationError) {
+        await this.aiService.failJob(job.id, error, response, undefined, {
+          candidateOutput: response.outputText,
+          model: response.model,
+          rejection: {
+            stage: 'POST_GENERATION_VALIDATION',
+            issues: error.validation.issues.map((issue) => ({ ...issue })),
+          },
+        });
+      } else {
+        await this.aiService.failJob(job.id, error, response);
+      }
       throw error;
     }
   }
@@ -240,9 +260,7 @@ export class WorkoutPlanningEngineV2Service {
       prepared.strategy,
     );
     if (this.safety.evaluateAfterGeneration(validation).outcome === 'BLOCKED')
-      throw new BadGatewayException(
-        `Treino V2 reprovado: ${validation.issues.map((issue) => issue.code).join(',')}`,
-      );
+      throw new WorkoutPostGenerationValidationError(validation);
     const reference = prepared.context.previousPlan
       ? `workout-plan-v2:${createHash('sha256').update(this.canonicalJson(prepared.context.previousPlan)).digest('hex')}`
       : null;

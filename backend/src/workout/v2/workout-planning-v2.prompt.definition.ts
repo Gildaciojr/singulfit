@@ -426,12 +426,20 @@ Cada activity.equipment deve ser um subconjunto exato de strategy.authorizedEqui
 Use precisamente strategy.sessionCount sessões e respeite a duração de cada sessão e a soma dos blocos. Se houver limitação explícita de equipamento, ela prevalece sobre o ambiente de academia completa.`,
 });
 
-export const WORKOUT_PLANNING_V2_PROMPT = Object.freeze({
+export const WORKOUT_PLANNING_V2_PROMPT_V5 = Object.freeze({
   ...WORKOUT_PLANNING_V2_PROMPT_V4,
   version: 5,
   instructions:
     WORKOUT_PLANNING_V2_PROMPT_V4.instructions +
     '\nCada activity.name deve identificar uma atividade real executável, nunca disponibilidade, ausência, placeholder ou meta-instrução. Nunca use "Bicicleta não disponível", "equipamento indisponível", "substituir se necessário" ou "exercício não definido" como nome. Se uma atividade pretendida não for possível, escolha outra válida dentro de authorizedEquipment, com nome e instrução coerentes. A duração total declarada deve refletir aquecimento, execução, descansos entre séries, transições e cooldown; respeite strategy.sessionDurationMinutes, sem preencher a duração-alvo com conteúdo materialmente menor. Em TIMED durationSeconds é o tempo total e já inclui as rodadas/trabalho/recuperação. Em MOBILITY durationSeconds é o total, holdSeconds é por sustentação e repetitions descreve repetições, sem dupla contagem. Distribua sessões consecutivas considerando dias confirmados, intensidade, volume e padrões de movimento, inclusive domingo para segunda. Evite estímulos pesados semelhantes consecutivos sem justificativa; preserve criatividade dentro das constraints, sem impor split fixo.',
+});
+
+export const WORKOUT_PLANNING_V2_PROMPT = Object.freeze({
+  ...WORKOUT_PLANNING_V2_PROMPT_V5,
+  version: 6,
+  instructions: `${WORKOUT_PLANNING_V2_PROMPT_V5.instructions}
+TIMED representa o relógio total de uma atividade intervalada ou circuito. Quando workSeconds e recoverySeconds forem informados, confira antes de retornar o JSON: durationSeconds = workSeconds * rounds + recoverySeconds * (rounds - 1). Não inclua recuperação obrigatória depois da última rodada. Se a atividade tiver apenas duração total, sem estrutura intervalada real, não invente workSeconds, recoverySeconds ou rounds artificiais: use workSeconds e recoverySeconds nulos e rounds = 1 para o relógio simples, sem inventar uma estrutura intervalada. Para aquecimento ou cooldown contínuo de caminhada, corrida ou bike, prefira ENDURANCE quando semanticamente correto; para mobilidade, use MOBILITY quando semanticamente correto. Não use TIMED apenas para preencher minutos.
+session.estimatedDurationMinutes e block.estimatedDurationMinutes não são decoração: a prescrição executável das activities deve ocupar duração plausível compatível com strategy.sessionDurationMinutes. Não declare sessão longa com conteúdo materialmente curto. Confira execução, descanso ENTRE séries, transições, warm-up e cooldown; não adicione descanso depois da última série para inflar a duração. Esta regra vale para qualquer duração-alvo da strategy, preservando todas as modalidades, equipamento autorizado, safety e criatividade, sem split fixo ou contagem universal de exercícios.`,
 });
 
 /** Keep the strict candidate schema, restricting every equipment array per request. */

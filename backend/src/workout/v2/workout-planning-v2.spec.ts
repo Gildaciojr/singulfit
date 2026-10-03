@@ -1,3 +1,5 @@
+import { WorkoutApplicationExecutorService } from './execution/workout-application-executor.service';
+import type { WorkoutPlanV2PersistenceService } from './persistence/workout-plan-v2-persistence.service';
 import { createHash } from 'node:crypto';
 import { GenerateWorkoutPlanV2InputBuilder } from './generate-workout-plan-v2-input.builder';
 import type { CoachProfileSnapshotBuilder } from '../../context/coach-profile-snapshot.builder';
@@ -41,7 +43,10 @@ import type {
   WorkoutPlanningContext,
   WorkoutRecognizedContext,
 } from './workout-planning-context.contract';
-import { WorkoutPlanningEngineV2Service } from './workout-planning-engine-v2.service';
+import {
+  WorkoutPlanningEngineV2Service,
+  WorkoutPostGenerationValidationError,
+} from './workout-planning-engine-v2.service';
 import { WorkoutPlanningReadinessService } from './workout-planning-readiness.service';
 import { WorkoutPlanningSafetyService } from './workout-planning-safety.service';
 import { WorkoutPlanningStrategyService } from './workout-planning-strategy.service';
@@ -481,7 +486,7 @@ describe('Workout Planning Engine V2', () => {
       workoutSchemaForAuthorizedEquipment([]).schema,
     ))
       expect(variant.maxItems).toBe(0);
-    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(5);
+    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(6);
     expect(WORKOUT_PLANNING_V2_PROMPT_V3.version).toBe(3);
   });
   it('reproduces five 60-minute FULL_GYM sessions with bodyweight warm-up without unavailable-equipment failures', () => {
@@ -1283,8 +1288,9 @@ describe('Workout Planning Engine V2', () => {
     );
     const keyForVersion = (version: number) =>
       `workout-planning-v2:${createHash('sha256').update(`user-id:${version}:${providerRequest.input}`).digest('hex')}`;
-    expect(generation.operationKey).toBe(keyForVersion(5));
+    expect(generation.operationKey).toBe(keyForVersion(6));
     expect(generation.operationKey).not.toBe(keyForVersion(3));
+    expect(generation.operationKey).not.toBe(keyForVersion(5));
     expect(ai.completeJobInTransaction).not.toHaveBeenCalled();
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(prisma).not.toHaveProperty('workoutPlan');
@@ -1357,6 +1363,130 @@ describe('Workout Planning Engine V2', () => {
     ).rejects.toThrow('em andamento');
     expect(aiService.runTextJob).not.toHaveBeenCalled();
     expect(aiService.completeJobInTransaction).not.toHaveBeenCalled();
+    expect(aiService.failJob).not.toHaveBeenCalled();
+  });
+
+  it('preserves the exact rejected provider candidate without persisting or archiving an ACTIVE plan', async () => {
+    const input = recognized('HOME_WORKOUT', ['BODYWEIGHT']);
+    const base = candidate(input);
+    const invalid = {
+      ...base,
+      sessions: base.sessions.map((session, index) =>
+        index !== 0
+          ? session
+          : {
+              ...session,
+              blocks: session.blocks.map((block, blockIndex) =>
+                blockIndex !== 0
+                  ? block
+                  : {
+                      ...block,
+                      activities: [
+                        {
+                          ...block.activities[0],
+                          activityKey: 'incident',
+                          name: 'Circuito intervalado',
+                          kind: 'TIMED' as const,
+                          rounds: 5,
+                          workSeconds: 60,
+                          recoverySeconds: 30,
+                          durationSeconds: 300,
+                        },
+                      ],
+                    },
+              ),
+            },
+      ),
+    };
+    const response = {
+      responseId: 'provider-response',
+      model: 'model',
+      outputText: `  ${JSON.stringify(invalid)}\n`,
+      promptTokens: 10,
+      completionTokens: 20,
+      totalTokens: 30,
+    };
+    const aiService = {
+      createStandaloneJob: jest.fn().mockResolvedValue({
+        id: 'job-id',
+        status: AIJobStatus.PENDING,
+        promptVersionId: 'prompt-id',
+        result: null,
+      }),
+      runTextJob: jest.fn().mockResolvedValue(response),
+      completeJobInTransaction: jest.fn(),
+      failJob: jest.fn().mockResolvedValue(undefined),
+    };
+    const engine = await engineWith(aiService);
+    const persistence = { persist: jest.fn() };
+    const executor = new WorkoutApplicationExecutorService(
+      engine,
+      persistence as unknown as WorkoutPlanV2PersistenceService,
+    );
+    await expect(
+      executor.execute({
+        generationInput: {
+          userId: 'user-id',
+          decision: decision(),
+          snapshot: snapshot(),
+          recognizedContext: input,
+          referenceDate,
+        },
+        ownership: { userId: 'user-id', profileId: 'profile-id' },
+        executionContext: { correlationId: 'correlation-id' },
+      }),
+    ).rejects.toBeInstanceOf(WorkoutPostGenerationValidationError);
+    expect(aiService.runTextJob).toHaveBeenCalledTimes(1);
+    expect(aiService.failJob).toHaveBeenCalledTimes(1);
+    expect(aiService.failJob).toHaveBeenCalledWith(
+      'job-id',
+      expect.any(WorkoutPostGenerationValidationError),
+      response,
+      undefined,
+      {
+        candidateOutput: response.outputText,
+        model: response.model,
+        rejection: {
+          stage: 'POST_GENERATION_VALIDATION',
+          issues: expect.arrayContaining([
+            {
+              code: 'TIMED_DURATION_IMPOSSIBLE',
+              severity: 'ERROR',
+              path: 'incident',
+            },
+          ]),
+        },
+      },
+    );
+    expect(persistence.persist).not.toHaveBeenCalled();
+    expect(aiService.completeJobInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('never reuses a FAILED job even when it carries a parseable diagnostic candidate', async () => {
+    const input = recognized('HOME_WORKOUT', ['BODYWEIGHT']);
+    const aiService = {
+      createStandaloneJob: jest.fn().mockResolvedValue({
+        id: 'failed-job',
+        status: AIJobStatus.FAILED,
+        result: {
+          candidateOutput: JSON.stringify(candidate(input)),
+          model: 'model',
+          rejection: { stage: 'POST_GENERATION_VALIDATION', issues: [] },
+        },
+      }),
+      runTextJob: jest.fn(),
+      failJob: jest.fn(),
+    };
+    await expect(
+      (await engineWith(aiService)).generateCandidate({
+        userId: 'user-id',
+        decision: decision(),
+        snapshot: snapshot(),
+        recognizedContext: input,
+        referenceDate,
+      }),
+    ).rejects.toThrow('já falhou');
+    expect(aiService.runTextJob).not.toHaveBeenCalled();
     expect(aiService.failJob).not.toHaveBeenCalled();
   });
 
@@ -1662,7 +1792,7 @@ describe('Workout Planning Engine V2', () => {
   it('publishes prompt V2 with explicit personalization and stereotype guards', () => {
     expect(WORKOUT_PLANNING_V2_PROMPT).toMatchObject({
       name: 'workout_planning_v2',
-      version: 5,
+      version: 6,
       capability: 'WORKOUT_PLANNING_V2',
     });
     expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(

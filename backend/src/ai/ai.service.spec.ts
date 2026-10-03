@@ -1,5 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import { AIJobStatus, AIJobType, MessageType } from '@prisma/client';
+import { AIJobStatus, AIJobType, MessageType, Prisma } from '@prisma/client';
 import { ReservationService } from '../entitlements/reservation.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
@@ -136,14 +136,12 @@ describe('AIService', () => {
   it('does not mutate or reverse a foreign IMAGE job returned during rejection', async () => {
     const tx = {
       aIJob: {
-        findUnique: jest
-          .fn()
-          .mockResolvedValue({
-            id: 'job-id',
-            userId: 'user-b',
-            type: AIJobType.IMAGE,
-            status: AIJobStatus.PROCESSING,
-          }),
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'job-id',
+          userId: 'user-b',
+          type: AIJobType.IMAGE,
+          status: AIJobStatus.PROCESSING,
+        }),
         update: jest.fn(),
       },
     };
@@ -164,6 +162,157 @@ describe('AIService', () => {
     expect(tx.aIJob.update).not.toHaveBeenCalled();
     expect(usageService.reverseInTransaction).not.toHaveBeenCalled();
   });
+
+  it.each([false, true])(
+    'fails a Workout job once with explicit diagnostic=%s',
+    async (withDiagnostic) => {
+      const diagnostic: Prisma.InputJsonValue = {
+        candidateOutput: '  {"sessions": []}\n',
+        model: 'model',
+        rejection: {
+          stage: 'POST_GENERATION_VALIDATION',
+          issues: [
+            {
+              code: 'TIMED_DURATION_IMPOSSIBLE',
+              severity: 'ERROR',
+              path: 'activity',
+            },
+          ],
+        },
+      };
+      const job = {
+        id: 'job-id',
+        userId: 'user-id',
+        type: AIJobType.WORKOUT,
+        status: AIJobStatus.PROCESSING as AIJobStatus,
+        result: null as Prisma.InputJsonValue | null,
+      };
+      const tx = {
+        aIJob: {
+          findUnique: jest.fn().mockResolvedValue(job),
+          update: jest
+            .fn()
+            .mockImplementation(
+              (input: {
+                data: { status: AIJobStatus; result?: Prisma.InputJsonValue };
+              }) => {
+                job.status = input.data.status;
+                if (input.data.result !== undefined)
+                  job.result = input.data.result;
+                return Promise.resolve(job);
+              },
+            ),
+        },
+      };
+      const aiUsageService = {
+        recordInTransaction: jest.fn().mockResolvedValue({ id: 'usage' }),
+      };
+      const usageService = {
+        reverseInTransaction: jest.fn(),
+        confirmInTransaction: jest.fn(),
+      };
+      const service = createService({
+        prisma: {
+          $transaction: async (
+            callback: (client: typeof tx) => Promise<void>,
+          ) => callback(tx),
+        },
+        aiUsageService,
+        usageService,
+      });
+      const response = {
+        responseId: 'provider-response',
+        model: 'model',
+        outputText: '  {"sessions": []}\n',
+        promptTokens: 10,
+        completionTokens: 20,
+        totalTokens: 30,
+      };
+      await service.failJob(
+        job.id,
+        new Error('candidate rejected'),
+        response,
+        undefined,
+        withDiagnostic ? diagnostic : undefined,
+      );
+      await service.failJob(
+        job.id,
+        new Error('duplicate failure'),
+        response,
+        undefined,
+        withDiagnostic ? diagnostic : undefined,
+      );
+      expect(job.status).toBe(AIJobStatus.FAILED);
+      expect(job.result).toEqual(withDiagnostic ? diagnostic : null);
+      const update = tx.aIJob.update.mock.calls[0][0];
+      expect(update.data).toMatchObject({
+        status: AIJobStatus.FAILED,
+        providerResponseId: 'provider-response',
+        error: expect.stringContaining('candidate rejected'),
+        leaseExpiresAt: null,
+      });
+      if (withDiagnostic) expect(update.data.result).toEqual(diagnostic);
+      else expect(update.data).not.toHaveProperty('result');
+      expect(tx.aIJob.update).toHaveBeenCalledTimes(1);
+      expect(aiUsageService.recordInTransaction).toHaveBeenCalledTimes(1);
+      expect(aiUsageService.recordInTransaction).toHaveBeenCalledWith(tx, {
+        userId: 'user-id',
+        aiJobId: 'job-id',
+        jobType: AIJobType.WORKOUT,
+        model: 'model',
+        promptTokens: 10,
+        completionTokens: 20,
+        totalTokens: 30,
+      });
+      expect(usageService.reverseInTransaction).toHaveBeenCalledTimes(1);
+      expect(usageService.reverseInTransaction).toHaveBeenCalledWith(
+        tx,
+        job.id,
+      );
+      expect(usageService.confirmInTransaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([AIJobType.TEXT, AIJobType.IMAGE, AIJobType.DIET])(
+    'leaves an existing %s result unchanged when no failureResult is supplied',
+    async (type) => {
+      const result = { existing: 'preserved' };
+      const job = {
+        id: 'job-id',
+        userId: 'user-id',
+        type,
+        status: AIJobStatus.PROCESSING,
+        result,
+      };
+      const tx = {
+        aIJob: {
+          findUnique: jest.fn().mockResolvedValue(job),
+          update: jest.fn().mockResolvedValue(job),
+        },
+      };
+      const aiUsageService = { recordInTransaction: jest.fn() };
+      const usageService = { reverseInTransaction: jest.fn() };
+      const service = createService({
+        prisma: {
+          $transaction: async (
+            callback: (client: typeof tx) => Promise<void>,
+          ) => callback(tx),
+        },
+        aiUsageService,
+        usageService,
+      });
+      await service.failJob(job.id, new Error('traditional failure'));
+      expect(tx.aIJob.update.mock.calls[0][0].data).not.toHaveProperty(
+        'result',
+      );
+      expect(job.result).toBe(result);
+      expect(aiUsageService.recordInTransaction).not.toHaveBeenCalled();
+      expect(usageService.reverseInTransaction).toHaveBeenCalledWith(
+        tx,
+        job.id,
+      );
+    },
+  );
 
   it('creates one standalone job after taking the operation lock', async () => {
     const createdJob = {

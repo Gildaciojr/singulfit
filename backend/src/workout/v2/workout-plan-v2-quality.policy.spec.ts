@@ -84,6 +84,37 @@ describe('Workout quality before persistence', () => {
         severity: 'WARNING',
       });
   });
+  it.each([300, 420])(
+    'keeps the incident TIMED clock fail-closed at %s seconds',
+    (durationSeconds) => {
+      const timed = {
+        ...strength('incident'),
+        kind: 'TIMED' as const,
+        rounds: 5,
+        workSeconds: 60,
+        recoverySeconds: 30,
+        durationSeconds,
+      };
+      const ctx = qualityContext(['MONDAY']);
+      const result = new WorkoutPlanV2Validator().validate(
+        qualityCandidate([qualitySession('incident-session', [timed])]),
+        ctx,
+        new WorkoutPlanningStrategyService().build(ctx),
+      );
+      const issue = result.issues.find(
+        (item) => item.code === 'TIMED_DURATION_IMPOSSIBLE',
+      );
+      if (durationSeconds === 300) {
+        expect(issue).toEqual({
+          code: 'TIMED_DURATION_IMPOSSIBLE',
+          severity: 'ERROR',
+          path: 'incident',
+        });
+        expect(result.status).toBe('INVALID');
+      } else expect(issue).toBeUndefined();
+    },
+  );
+
   it('warns on loaded overlap across five consecutive days and adapts beginner tolerance', () => {
     const context = qualityContext();
     const sessions =

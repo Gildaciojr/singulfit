@@ -472,6 +472,7 @@ export class AIService {
     error: unknown,
     response?: OpenAIResponseResult,
     expectedUserId?: string,
+    failureResult?: Prisma.InputJsonValue,
   ): Promise<void> {
     const safeError = this.getSafeError(error);
 
@@ -526,6 +527,7 @@ export class AIService {
           failedAt: new Date(),
           leaseExpiresAt: null,
           error: safeError,
+          ...(failureResult !== undefined ? { result: failureResult } : {}),
         },
       });
       await this.usageService.reverseInTransaction(transaction, job.id);
