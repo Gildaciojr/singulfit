@@ -73,10 +73,31 @@ describe('NutritionWhatsAppPresenter', () => {
     });
   }
 
+  it('combines practical tips and removes redundant sections and the long ending', () => {
+    const content = presenter.present(
+      response({
+        generalGuidance: ['Coma com calma.', 'Varie os vegetais.'],
+        adaptationGuidance: [
+          'Coma com calma.',
+          'Ajuste o horário.',
+          'Prepare porções.',
+          'Extra dica.',
+        ],
+        safetyGuidance: [],
+      }),
+    );
+    expect(content).toContain('💡 *Dicas práticas*');
+    expect(content).not.toMatch(
+      /Orientações para o dia a dia|Ajustes importantes|Cuidados importantes|Use este plano como guia/iu,
+    );
+    expect(content.match(/Coma com calma\./gu)).toHaveLength(1);
+    expect(content).not.toContain('Extra dica.');
+    expect(content).not.toContain('⚠️');
+  });
   it('renders a personalized WhatsApp response with all public blocks', () => {
     const content = presenter.present(response());
 
-    expect(content).toContain('Ana, preparei seu plano');
+    expect(content).toContain('Ana, organizei as refeições');
     expect(content).toContain('≈ 2.440 kcal');
     expect(content).toContain('• Proteínas: 118 g');
     expect(content).toContain('*08:00 — Café da manhã*');
@@ -86,7 +107,7 @@ describe('NutritionWhatsAppPresenter', () => {
     expect(content).toContain('*20:00 — Jantar*');
     expect(content).toContain('Frango grelhado ↔ Patinho moído');
     expect(content).toContain('💧 *Hidratação*');
-    expect(content).toContain('🛡️ *Cuidados importantes*');
+    expect(content).toContain('⚠️ *Atenção*');
   });
 
   it('stays natural without a name and omits absent optional values', () => {
@@ -100,7 +121,7 @@ describe('NutritionWhatsAppPresenter', () => {
       }),
     );
 
-    expect(content).toContain('Preparei seu plano');
+    expect(content).toContain('Organizei as refeições');
     expect(content).not.toContain('Ana,');
     expect(content).toContain('• Proteínas: 118 g');
     expect(content).not.toContain('Carboidratos');

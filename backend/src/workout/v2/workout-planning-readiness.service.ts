@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { workoutEquipmentBaseline } from './workout-equipment-defaults';
 import { RUNNING_COMPLETE_DISTANCE_REQUIRED_FIELDS } from '../../context/planning-profile-requirements.contract';
 import type { CoachProfileSnapshot } from '../../context/coach-profile-snapshot.contract';
 import {
@@ -203,6 +204,14 @@ export class WorkoutPlanningReadinessService {
         : 'AVAILABLE';
     }
     const snapshotDatum = this.snapshotDatum(snapshot, field);
+    if (
+      field === 'EQUIPMENT' &&
+      (!snapshotDatum || snapshotDatum.status === 'UNKNOWN') &&
+      workoutEquipmentBaseline(
+        this.trainingEnvironment(snapshot, recognized) ?? undefined,
+      )
+    )
+      return 'AVAILABLE';
     if (
       !snapshotDatum ||
       snapshotDatum.status === 'UNKNOWN' ||

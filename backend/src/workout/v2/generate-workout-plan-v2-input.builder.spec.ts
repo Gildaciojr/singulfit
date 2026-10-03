@@ -24,6 +24,35 @@ describe('GenerateWorkoutPlanV2InputBuilder', () => {
     {} as CoachProfileSnapshotBuilder,
     {} as PrismaService,
   );
+  it.each([
+    'quero treino de musculação na academia',
+    'treino em academia completa',
+    'quero treino completo para academia',
+  ])('keeps the FULL_GYM baseline inferred for %s', (message) => {
+    const declared = builder.declaredContext(message);
+    expect(declared.environment).toMatchObject({ value: 'FULL_GYM' });
+    expect(declared.equipment).toMatchObject({
+      status: 'INFERRED',
+      value: expect.arrayContaining([
+        'BODYWEIGHT',
+        'BARBELL',
+        'DUMBBELL',
+        'CABLE',
+      ]),
+    });
+  });
+  it('preserves explicit limited equipment over the gym baseline', () => {
+    const declared = builder.declaredContext('academia, mas só tenho halteres');
+    expect(declared.equipment?.status).toBe('CONFIRMED');
+    expect(declared.equipment?.value).toContain('DUMBBELL');
+    expect(declared.equipment?.value).not.toContain('MACHINE');
+    expect(declared.equipment?.value).not.toContain('CABLE');
+  });
+  it('resolves home without equipment as bodyweight', () => {
+    const declared = builder.declaredContext('treino em casa sem equipamento');
+    expect(declared.environment?.value).toBe('HOME');
+    expect(declared.equipment?.value).toEqual(['BODYWEIGHT']);
+  });
   it('lets confirmed profile facts override inherited plan defaults while a temporary current declaration wins', async () => {
     const personalSnapshot = {
       ...snapshot,
@@ -165,6 +194,7 @@ describe('GenerateWorkoutPlanV2InputBuilder', () => {
     expect(declared.equipment).toEqual({
       status: 'INFERRED',
       value: [
+        'BODYWEIGHT',
         'BARBELL',
         'BENCH',
         'CABLE',

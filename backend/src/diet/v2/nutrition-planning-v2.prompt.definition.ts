@@ -70,7 +70,7 @@ const foodItemSchema = Object.freeze({
   additionalProperties: false,
 });
 
-export const NUTRITION_PLANNING_V2_PROMPT = Object.freeze({
+export const NUTRITION_PLANNING_V2_PROMPT_V1 = Object.freeze({
   name: 'nutrition_planning_v2',
   version: 1,
   capability: 'NUTRITION_PLANNING_V2',
@@ -194,4 +194,15 @@ Retorne somente JSON válido no schema solicitado.`,
       additionalProperties: false,
     },
   } satisfies OpenAIJsonSchema & Prisma.InputJsonObject),
+});
+
+export const NUTRITION_PLANNING_V2_PROMPT = Object.freeze({
+  ...NUTRITION_PLANNING_V2_PROMPT_V1,
+  version: 2,
+  instructions: `${NUTRITION_PLANNING_V2_PROMPT_V1.instructions}
+Qualidade profissional: respeite o alvo energético e os macros do motor; emagrecimento não autoriza déficit adicional. Distribua porções plausíveis, proteína, saciedade e praticidade ao longo dos horários individuais.
+Varie combinações principais e fontes de alimento entre refeições. Não repita arroz/feijão/carne ou outra tríade em quase todas as refeições. Inclua frutas, vegetais e fontes de fibra compatíveis com as restrições, disponibilidade, orçamento e preferências reais; nunca imponha alimento rejeitado ou alergênico.
+Café e lanche precisam ser coerentes com o período e a rotina. Refeições salgadas são válidas quando intencionais ou justificadas pelo padrão/histórico do usuário; não reproduza almoço no café e no lanche por falta de variedade, nem imponha estereótipos culturais.
+Trocas devem ser alternativas reais com função equivalente e alguma variedade, nunca duplicatas do mesmo alimento. Preserve restrições também nas trocas.
+Guidance, adaptationRules e hydrationGuidance devem conter somente dicas curtas e executáveis. Não explique o contexto, cadastro, campos, strategy, applied constraints, excluded foods, dados ausentes, alvo energético estimado ou macros estimados. Não enumere rejeições alimentares como orientação pública. Alergias ou riscos reais podem ser comunicados humanamente em safetyNotes quando necessários, sem transformar preferência em diagnóstico.`,
 });

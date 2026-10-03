@@ -6,6 +6,7 @@ import type {
 const BASELINES: Readonly<Record<string, readonly WorkoutEquipment[]>> =
   Object.freeze({
     FULL_GYM: Object.freeze([
+      'BODYWEIGHT',
       'BARBELL',
       'BENCH',
       'CABLE',

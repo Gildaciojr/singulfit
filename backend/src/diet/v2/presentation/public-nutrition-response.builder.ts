@@ -1,4 +1,8 @@
 import { FitnessGoal } from '@prisma/client';
+import {
+  classifyNutritionPublicNote,
+  isNutritionMetaText,
+} from '../nutrition-public-text.policy';
 import { ConversationPublicAnswerBoundaryService } from '../../../conversation/runtime/conversation-public-answer-boundary.service';
 import type {
   NutritionPlanFoodItem,
@@ -46,7 +50,9 @@ export class PublicNutritionResponseBuilder {
       const sourceName = source && this.publicText(source.foodName);
       const alternativeName =
         alternative && this.publicText(alternative.foodName);
-      return sourceName && alternativeName
+      return sourceName &&
+        alternativeName &&
+        this.lineKey(sourceName) !== this.lineKey(alternativeName)
         ? [
             Object.freeze({
               source: sourceName,
@@ -55,10 +61,12 @@ export class PublicNutritionResponseBuilder {
           ]
         : [];
     });
-    const safetyGuidance = this.publicSafety(plan.safetyNotes);
-    const generalGuidance = this.distinctPublicLines(plan.guidance);
+    const safetyGuidance = this.publicSafety(plan);
+    const generalGuidance = this.distinctPublicLines(
+      this.practicalGuidance(plan.guidance, plan),
+    );
     const adaptationGuidance = this.distinctPublicLines(
-      plan.adaptationRules,
+      this.practicalGuidance(plan.adaptationRules, plan),
       new Set(generalGuidance.map((value) => this.lineKey(value))),
     );
 
@@ -97,7 +105,9 @@ export class PublicNutritionResponseBuilder {
         ),
       ),
       substitutions: Object.freeze(substitutions),
-      hydrationGuidance: this.publicLines(plan.hydrationGuidance),
+      hydrationGuidance: this.publicLines(
+        this.practicalGuidance(plan.hydrationGuidance, plan),
+      ),
       generalGuidance,
       adaptationGuidance,
       safetyGuidance,
@@ -150,12 +160,24 @@ export class PublicNutritionResponseBuilder {
     return items;
   }
 
-  private publicSafety(values: readonly string[]): readonly string[] {
+  private publicSafety(plan: NutritionPlanV2): readonly string[] {
+    const values = plan.safetyNotes;
     if (values.length === 0) return Object.freeze([]);
     const projected: string[] = [];
     for (const value of values) {
       const safe = this.publicText(value);
       if (!safe) continue;
+      if (
+        classifyNutritionPublicNote(safe, plan.strategy) === 'COMMON_REJECTION'
+      )
+        continue;
+      if (
+        GENERIC_CLINICAL_DISCLAIMER.test(safe) ||
+        GENERIC_NON_CLINICAL_DISCLAIMER.test(safe) ||
+        GENERIC_PRESCRIPTION_DISCLAIMER.test(safe) ||
+        GENERIC_UNKNOWN_HEALTH_DISCLAIMER.test(safe)
+      )
+        continue;
       const projection = this.safetyProjection(safe);
       if (!projected.includes(projection)) projected.push(projection);
     }
@@ -203,6 +225,17 @@ export class PublicNutritionResponseBuilder {
       .toLocaleLowerCase('pt-BR');
   }
 
+  private practicalGuidance(
+    values: readonly string[],
+    plan: NutritionPlanV2,
+  ): readonly string[] {
+    return values.filter(
+      (value) =>
+        classifyNutritionPublicNote(value, plan.strategy) !==
+        'COMMON_REJECTION',
+    );
+  }
+
   private publicLines(values: readonly string[]): readonly string[] {
     return Object.freeze(
       values.flatMap((value) => {
@@ -222,6 +255,7 @@ export class PublicNutritionResponseBuilder {
       !INTERNAL_TERM.test(trimmed) &&
       !UUID.test(trimmed) &&
       !TECHNICAL_SENTINEL.test(trimmed) &&
+      !isNutritionMetaText(trimmed) &&
       this.publicBoundary.projectText(trimmed) !== null
       ? trimmed
       : undefined;

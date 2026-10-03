@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { BadGatewayException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import {
@@ -41,6 +42,10 @@ import { NutritionPlanningEngineV2Service } from './nutrition-planning-engine-v2
 import { NutritionPlanningReadinessService } from './nutrition-planning-readiness.service';
 import { NutritionPlanningSafetyService } from './nutrition-planning-safety.service';
 import { NutritionPlanningStrategyService } from './nutrition-planning-strategy.service';
+import {
+  NUTRITION_PLANNING_V2_PROMPT,
+  NUTRITION_PLANNING_V2_PROMPT_V1,
+} from './nutrition-planning-v2.prompt.definition';
 
 describe('Nutrition Planning Engine V2', () => {
   const referenceDate = new Date('2026-07-16T12:00:00.000Z');
@@ -286,6 +291,287 @@ describe('Nutrition Planning Engine V2', () => {
       safetyNotes: Object.freeze([]),
     });
   }
+
+  function qualityCandidate(
+    combinations: readonly (readonly string[])[],
+  ): GeneratedNutritionPlanCandidate {
+    const count = combinations.reduce((sum, names) => sum + names.length, 0);
+    const meals: GeneratedNutritionPlanCandidate['days'][number]['meals'] =
+      combinations.map((names, index) => ({
+        mealKey: `quality-meal-${index}`,
+        name: ['Café', 'Almoço', 'Lanche', 'Jantar'][index],
+        period: (['BREAKFAST', 'LUNCH', 'AFTERNOON_SNACK', 'DINNER'] as const)[
+          index
+        ],
+        suggestedTime: ['08:00', '12:00', '16:00', '21:00'][index],
+        items: names.map((foodName, itemIndex) => ({
+          itemKey: `quality-${index}-${itemIndex}`,
+          foodName,
+          role: /banana|maçã/iu.test(foodName)
+            ? 'FRUIT'
+            : /brócolis|cenoura/iu.test(foodName)
+              ? 'VEGETABLE'
+              : 'OTHER',
+          quantity: '1 porção',
+          caloriesKcal: 2440 / count,
+          macros: {
+            proteinGrams: 118 / count,
+            carbohydrateGrams: 340 / count,
+            fatGrams: 68 / count,
+          },
+          allergenTags: [],
+          dietaryTags: [],
+        })),
+        alternatives: [],
+      }));
+    return {
+      ...validDailyCandidate(),
+      days: [{ dayNumber: 1, label: 'Dia-base', trainingDay: false, meals }],
+    };
+  }
+  function qualityStrategy() {
+    const context = buildContext(
+      'DAILY_STRUCTURE',
+      snapshot({ withoutFoodRestrictions: true }),
+    );
+    return {
+      context,
+      strategy: {
+        ...new NutritionPlanningStrategyService().build(context),
+        mealCountPerDay: { status: 'CONFIRMED', value: 4 } as const,
+        energyTargetKcal: { status: 'ESTIMATED', value: 2440 } as const,
+        macroTargets: {
+          status: 'ESTIMATED',
+          value: { proteinGrams: 118, carbohydrateGrams: 340, fatGrams: 68 },
+        } as const,
+        appliedConstraintCodes: [],
+        excludedFoods: [],
+      },
+    };
+  }
+  it('rejects the real repetitive rice/beans/meat production incident without changing the 2440 kcal target', () => {
+    const { context, strategy } = qualityStrategy();
+    const output = qualityCandidate([
+      ['Arroz', 'Frango', 'Feijão'],
+      ['Arroz', 'Feijão', 'Bife'],
+      ['Macarrão', 'Frango', 'Feijão'],
+      ['Arroz', 'Bife', 'Feijão'],
+    ]);
+    const result = new NutritionPlanV2Validator().validate(
+      output,
+      context,
+      strategy,
+    );
+    expect(result.status).toBe('INVALID');
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'MEAL_VARIETY_INSUFFICIENT',
+        severity: 'ERROR',
+      }),
+    );
+    expect(
+      result.issues.filter((issue) => issue.code === 'MEAL_PERIOD_QUALITY'),
+    ).toHaveLength(2);
+    expect(
+      result.issues.some(
+        (issue) =>
+          issue.code === 'ENERGY_INCOHERENT' ||
+          issue.code === 'MACROS_INCOHERENT',
+      ),
+    ).toBe(false);
+    expect(strategy.energyTargetKcal.value).toBe(2440);
+  });
+  it('accepts varied meals and does not stereotype an explicit savory breakfast', () => {
+    const { context, strategy } = qualityStrategy();
+    const output = qualityCandidate([
+      ['Arroz', 'Feijão', 'Frango'],
+      ['Batata', 'Peixe', 'Brócolis'],
+      ['Banana', 'Aveia', 'Iogurte'],
+      ['Mandioca', 'Ovos', 'Cenoura'],
+    ]);
+    const ordinary = new NutritionPlanV2Validator().validate(
+      output,
+      context,
+      strategy,
+    );
+    expect(ordinary.status).toBe('VALID_WITH_WARNINGS');
+    const cultural = {
+      ...context,
+      routine: {
+        ...context.routine,
+        eatingPattern: {
+          status: 'CONFIRMED',
+          value: 'Prefiro café da manhã salgado com arroz e feijão.',
+        } as const,
+      },
+    };
+    expect(
+      new NutritionPlanV2Validator().validate(output, cultural, strategy)
+        .status,
+    ).toBe('VALID');
+    const varied = qualityCandidate([
+      ['Ovos', 'Pão', 'Banana'],
+      ['Arroz', 'Peixe', 'Brócolis'],
+      ['Maçã', 'Aveia', 'Iogurte'],
+      ['Batata', 'Frango', 'Cenoura'],
+    ]);
+    expect(
+      new NutritionPlanV2Validator().validate(varied, context, strategy).status,
+    ).toBe('VALID');
+  });
+  it('blocks excessive identical meal signatures and warns about useless substitutions', () => {
+    const { context, strategy } = qualityStrategy();
+    const repeated = qualityCandidate(
+      Array.from({ length: 4 }, () => ['Ovos', 'Pão', 'Banana']),
+    );
+    const validation = new NutritionPlanV2Validator().validate(
+      repeated,
+      context,
+      strategy,
+    );
+    expect(validation.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'MEAL_REPETITION_EXCESSIVE',
+        severity: 'ERROR',
+      }),
+    );
+    const varied = qualityCandidate([
+      ['Ovos', 'Pão', 'Banana'],
+      ['Arroz', 'Peixe', 'Brócolis'],
+      ['Maçã', 'Aveia', 'Iogurte'],
+      ['Batata', 'Frango', 'Cenoura'],
+    ]);
+    const source = varied.days[0].meals[0].items[0];
+    const alternative = { ...source, itemKey: 'redundant-alternative' };
+    const withRedundantSwap: GeneratedNutritionPlanCandidate = {
+      ...varied,
+      days: [
+        {
+          ...varied.days[0],
+          meals: varied.days[0].meals.map((meal, index) =>
+            index === 0 ? { ...meal, alternatives: [alternative] } : meal,
+          ),
+        },
+      ],
+      substitutions: [
+        {
+          substitutionKey: 'redundant',
+          sourceItemKey: source.itemKey,
+          alternativeItemKey: alternative.itemKey,
+          rationaleCode: 'VARIETY',
+        },
+      ],
+    };
+    expect(
+      new NutritionPlanV2Validator().validate(
+        withRedundantSwap,
+        context,
+        strategy,
+      ).issues,
+    ).toContainEqual(
+      expect.objectContaining({
+        code: 'SUBSTITUTION_REDUNDANT',
+        severity: 'WARNING',
+      }),
+    );
+  });
+  it('rejects internal guidance and still enforces rejected foods in a varied plan', () => {
+    const { context, strategy } = qualityStrategy();
+    const output = qualityCandidate([
+      ['Ovos', 'Pão', 'Banana'],
+      ['Arroz', 'Tomate', 'Brócolis'],
+      ['Maçã', 'Aveia', 'Iogurte'],
+      ['Batata', 'Frango', 'Cenoura'],
+    ]);
+    const result = new NutritionPlanV2Validator().validate(
+      { ...output, guidance: ['Evitar tomate conforme exclusão definida.'] },
+      context,
+      { ...strategy, excludedFoods: ['tomate', 'beterraba'] },
+    );
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'REJECTED_FOOD', severity: 'ERROR' }),
+        expect.objectContaining({
+          code: 'INTERNAL_GUIDANCE',
+          severity: 'ERROR',
+        }),
+      ]),
+    );
+    expect(NUTRITION_PLANNING_V2_PROMPT.version).toBe(2);
+    expect(NUTRITION_PLANNING_V2_PROMPT_V1.version).toBe(1);
+    expect(NUTRITION_PLANNING_V2_PROMPT.instructions).toContain(
+      'déficit adicional',
+    );
+  });
+
+  it.each(['guidance', 'adaptationRules', 'safetyNotes'] as const)(
+    'rejects plural exclusion metatext in %s through the shared public policy',
+    (section) => {
+      const { context, strategy } = qualityStrategy();
+      const output = qualityCandidate([
+        ['Ovos', 'Pão', 'Banana'],
+        ['Arroz', 'Peixe', 'Brócolis'],
+        ['Maçã', 'Aveia', 'Iogurte'],
+        ['Batata', 'Frango', 'Cenoura'],
+      ]);
+      const result = new NutritionPlanV2Validator().validate(
+        {
+          ...output,
+          [section]: ['Evitar tomate conforme exclusões definidas.'],
+        },
+        context,
+        { ...strategy, excludedFoods: ['tomate'] },
+      );
+      expect(result.status).toBe('INVALID');
+      expect(result.issues).toContainEqual(
+        expect.objectContaining({
+          code: 'INTERNAL_GUIDANCE',
+          severity: 'ERROR',
+          path: `${section}.0`,
+        }),
+      );
+    },
+  );
+
+  it('keeps ordinary private rejections valid while still blocking those foods in meals', () => {
+    const { context, strategy } = qualityStrategy();
+    const output = qualityCandidate([
+      ['Ovos', 'Pão', 'Banana'],
+      ['Arroz', 'Peixe', 'Brócolis'],
+      ['Maçã', 'Aveia', 'Iogurte'],
+      ['Batata', 'Frango', 'Cenoura'],
+    ]);
+    const restricted = { ...strategy, excludedFoods: ['tomate', 'beterraba'] };
+    expect(
+      new NutritionPlanV2Validator().validate(
+        { ...output, safetyNotes: ['Evite tomate e beterraba.'] },
+        context,
+        restricted,
+      ).status,
+    ).toBe('VALID');
+    const contaminated = {
+      ...output,
+      days: output.days.map((day) => ({
+        ...day,
+        meals: day.meals.map((meal, index) =>
+          index === 0
+            ? {
+                ...meal,
+                items: meal.items.map((item, itemIndex) =>
+                  itemIndex === 0 ? { ...item, foodName: 'Tomate' } : item,
+                ),
+              }
+            : meal,
+        ),
+      })),
+    };
+    expect(
+      new NutritionPlanV2Validator().validate(contaminated, context, restricted)
+        .issues,
+    ).toContainEqual(
+      expect.objectContaining({ code: 'REJECTED_FOOD', severity: 'ERROR' }),
+    );
+  });
 
   function pointGuidanceCandidate(): NutritionConversationalCandidate {
     return Object.freeze({
@@ -787,6 +1073,43 @@ describe('Nutrition Planning Engine V2', () => {
     ).toEqual({ status: 'VALID', issues: [] });
   });
 
+  it('uses a fresh versioned operation key for the same daily plan request', async () => {
+    const response = {
+      responseId: 'quality-response',
+      model: 'model',
+      outputText: JSON.stringify(validDailyCandidate()),
+      promptTokens: 10,
+      completionTokens: 10,
+      totalTokens: 20,
+    };
+    const ai = {
+      createStandaloneJob: jest.fn().mockResolvedValue({
+        id: 'quality-job',
+        status: AIJobStatus.PENDING,
+        promptVersionId: 'prompt-v2',
+        result: null,
+      }),
+      runTextJob: jest.fn().mockResolvedValue(response),
+      failJob: jest.fn(),
+    };
+    const result = await (
+      await engineWith(ai)
+    ).generate({
+      userId: 'user-id',
+      decision: decision(CONVERSATION_GOAL.GENERATE_DIET_PLAN),
+      snapshot: snapshot(),
+      referenceDate,
+      explicitArtifactType: 'DAILY_STRUCTURE',
+    });
+    const request = ai.runTextJob.mock.calls[0][1];
+    const keyForVersion = (version: number) =>
+      `nutrition-planning-v2:${createHash('sha256').update(`user-id:nutrition_planning_v2:${version}:${request.input}`).digest('hex')}`;
+    expect(result.operationKey).toBe(keyForVersion(2));
+    expect(result.operationKey).not.toBe(keyForVersion(1));
+    expect(ai.createStandaloneJob).toHaveBeenCalledWith(
+      expect.objectContaining({ operationKey: result.operationKey }),
+    );
+  });
   it('parses strict candidates and rejects malformed model output', () => {
     const parser = new NutritionPlanV2Parser();
     expect(

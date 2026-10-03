@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { isNutritionMetaText } from './nutrition-public-text.policy';
 import type { NutritionPlanningContext } from './nutrition-planning-context.contract';
 import type {
   GeneratedNutritionPlanCandidate,
@@ -69,6 +70,12 @@ export class NutritionPlanV2Validator {
         issues,
         `days.${day.dayNumber}`,
       );
+      this.validateMealQuality(
+        day.meals,
+        context,
+        issues,
+        `days.${day.dayNumber}`,
+      );
     }
     for (const substitution of candidate.substitutions) {
       this.unique(
@@ -98,6 +105,34 @@ export class NutritionPlanV2Validator {
           `substitutions.${substitution.substitutionKey}`,
         );
       }
+      if (
+        source &&
+        alternative &&
+        this.normalize(source.foodName) === this.normalize(alternative.foodName)
+      )
+        this.issue(
+          issues,
+          'SUBSTITUTION_REDUNDANT',
+          'WARNING',
+          `substitutions.${substitution.substitutionKey}`,
+        );
+    }
+
+    for (const [section, lines] of [
+      ['guidance', candidate.guidance],
+      ['adaptationRules', candidate.adaptationRules],
+      ['hydrationGuidance', candidate.hydrationGuidance],
+      ['safetyNotes', candidate.safetyNotes],
+    ] as const) {
+      lines.forEach((line, index) => {
+        if (isNutritionMetaText(line))
+          this.issue(
+            issues,
+            'INTERNAL_GUIDANCE',
+            'ERROR',
+            `${section}.${index}`,
+          );
+      });
     }
 
     const status = issues.some((issue) => issue.severity === 'ERROR')
@@ -109,6 +144,92 @@ export class NutritionPlanV2Validator {
       status,
       issues: Object.freeze(issues.map((issue) => Object.freeze(issue))),
     });
+  }
+
+  private validateMealQuality(
+    meals: GeneratedNutritionPlanCandidate['days'][number]['meals'],
+    context: NutritionPlanningContext,
+    issues: NutritionPlanValidationIssue[],
+    path: string,
+  ): void {
+    if (meals.length < 3) return;
+    const signatures = meals.map((meal) =>
+      [
+        ...new Set(meal.items.map((item) => this.normalize(item.foodName))),
+      ].sort(),
+    );
+    const counts = new Map<string, number>();
+    for (const names of signatures) {
+      const signature = names.join('|');
+      if (signature) counts.set(signature, (counts.get(signature) ?? 0) + 1);
+    }
+    const repeats = Math.max(0, ...counts.values());
+    if (repeats >= 3 && repeats / meals.length >= 0.75)
+      this.issue(
+        issues,
+        'MEAL_REPETITION_EXCESSIVE',
+        meals.length >= 4 ? 'ERROR' : 'WARNING',
+        path,
+      );
+
+    // A recurring combination in at least three of four meals, with no fruit or
+    // vegetable anywhere, reproduces a defensible variety failure without forcing foods.
+    const pairs = new Map<string, number>();
+    for (const names of signatures) {
+      for (let first = 0; first < names.length; first++) {
+        for (let second = first + 1; second < names.length; second++) {
+          const key = `${names[first]}|${names[second]}`;
+          pairs.set(key, (pairs.get(key) ?? 0) + 1);
+        }
+      }
+    }
+    const repeatedPair = Math.max(0, ...pairs.values());
+    const hasPlantVariety = meals.some((meal) =>
+      meal.items.some(
+        (item) => item.role === 'FRUIT' || item.role === 'VEGETABLE',
+      ),
+    );
+    if (
+      meals.length >= 4 &&
+      repeatedPair >= 3 &&
+      repeatedPair / meals.length >= 0.75 &&
+      !hasPlantVariety
+    )
+      this.issue(issues, 'MEAL_VARIETY_INSUFFICIENT', 'ERROR', path);
+
+    const eatingPattern = context.routine.eatingPattern;
+    const intentionalSavory =
+      (eatingPattern.status === 'CONFIRMED' &&
+        /salgad|arroz|feijao/u.test(this.normalize(eatingPattern.value))) ||
+      context.nutritionEvidence.some(
+        (evidence) =>
+          /cafe|breakfast|lanche|snack/u.test(
+            this.normalize(evidence.summaryCode),
+          ) &&
+          Object.values(evidence.values).some(
+            (value) =>
+              typeof value === 'string' &&
+              /salgad|arroz|feijao/u.test(this.normalize(value)),
+          ),
+      );
+    if (!intentionalSavory) {
+      for (const [index, meal] of meals.entries()) {
+        if (
+          (meal.period === 'BREAKFAST' || meal.period.endsWith('_SNACK')) &&
+          meal.items.filter((item) =>
+            /\b(?:arroz|feijao|macarrao|bife|frango)\b/u.test(
+              this.normalize(item.foodName),
+            ),
+          ).length >= 3
+        )
+          this.issue(
+            issues,
+            'MEAL_PERIOD_QUALITY',
+            'WARNING',
+            `${path}.meals.${index}`,
+          );
+      }
+    }
   }
 
   private validateItem(

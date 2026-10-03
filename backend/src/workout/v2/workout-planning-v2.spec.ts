@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { GenerateWorkoutPlanV2InputBuilder } from './generate-workout-plan-v2-input.builder';
 import type { CoachProfileSnapshotBuilder } from '../../context/coach-profile-snapshot.builder';
 import { Test } from '@nestjs/testing';
@@ -44,7 +45,11 @@ import { WorkoutPlanningEngineV2Service } from './workout-planning-engine-v2.ser
 import { WorkoutPlanningReadinessService } from './workout-planning-readiness.service';
 import { WorkoutPlanningSafetyService } from './workout-planning-safety.service';
 import { WorkoutPlanningStrategyService } from './workout-planning-strategy.service';
-import { WORKOUT_PLANNING_V2_PROMPT } from './workout-planning-v2.prompt.definition';
+import {
+  WORKOUT_PLANNING_V2_PROMPT,
+  WORKOUT_PLANNING_V2_PROMPT_V3,
+  workoutSchemaForAuthorizedEquipment,
+} from './workout-planning-v2.prompt.definition';
 
 describe('Workout Planning Engine V2', () => {
   const referenceDate = new Date('2026-07-16T12:00:00.000Z');
@@ -398,6 +403,149 @@ describe('Workout Planning Engine V2', () => {
 
     return module.get(WorkoutPlanningEngineV2Service);
   }
+
+  it('makes persisted FULL_GYM ready and preserves inferred equipment provenance', () => {
+    const base = snapshot();
+    const profile = {
+      ...base,
+      training: {
+        ...base.training,
+        environment: known('FULL_GYM'),
+        availableEquipment: unknown<readonly string[]>(),
+      },
+    };
+    const declared = recognized('GYM_STRENGTH', [], {
+      frequency: 5,
+      duration: 60,
+      environment: 'FULL_GYM',
+    });
+    const { equipment: ignored, ...withoutInventory } = declared;
+    void ignored;
+    const readiness = new WorkoutPlanningReadinessService().evaluate(
+      profile,
+      'WEEKLY_PLAN',
+      'GYM_STRENGTH',
+      withoutInventory,
+      false,
+    );
+    expect(readiness.missingFields).not.toContain('EQUIPMENT');
+    expect(readiness.status).toBe('READY');
+    const ctx = context(withoutInventory, profile);
+    expect(ctx.training.equipment).toMatchObject({
+      status: 'INFERRED',
+      value: expect.arrayContaining(['BODYWEIGHT', 'BARBELL', 'MACHINE']),
+    });
+    expect(profile.training.availableEquipment.status).toBe('UNKNOWN');
+  });
+
+  function equipmentSchemas(
+    value: unknown,
+  ): readonly Record<string, unknown>[] {
+    if (Array.isArray(value)) return value.flatMap(equipmentSchemas);
+    if (value === null || typeof value !== 'object') return [];
+    const record = value as Record<string, unknown>;
+    return Object.entries(record).flatMap(([key, child]) =>
+      key === 'equipment' && child !== null && typeof child === 'object'
+        ? [child as Record<string, unknown>]
+        : equipmentSchemas(child),
+    );
+  }
+  it('restricts every strict activity variant to request equipment without changing the historical schema', () => {
+    const schema = workoutSchemaForAuthorizedEquipment([
+      'DUMBBELL',
+      'BODYWEIGHT',
+    ]);
+    const variants = equipmentSchemas(schema.schema);
+    expect(variants).toHaveLength(4);
+    for (const variant of variants)
+      expect(variant.items).toEqual({
+        type: 'string',
+        enum: ['DUMBBELL', 'BODYWEIGHT'],
+      });
+    expect(JSON.stringify(schema.schema)).toContain(
+      '"additionalProperties":false',
+    );
+    expect(JSON.stringify(WORKOUT_PLANNING_V2_PROMPT_V3.schema)).toContain(
+      'KETTLEBELL',
+    );
+    for (const variant of equipmentSchemas(
+      workoutSchemaForAuthorizedEquipment([]).schema,
+    ))
+      expect(variant.maxItems).toBe(0);
+    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(4);
+    expect(WORKOUT_PLANNING_V2_PROMPT_V3.version).toBe(3);
+  });
+  it('reproduces five 60-minute FULL_GYM sessions with bodyweight warm-up without unavailable-equipment failures', () => {
+    const input = recognized(
+      'GYM_STRENGTH',
+      [
+        'BARBELL',
+        'BENCH',
+        'CABLE',
+        'DUMBBELL',
+        'MACHINE',
+        'PULL_UP_BAR',
+        'TREADMILL',
+      ],
+      { frequency: 5, duration: 60, environment: 'FULL_GYM' },
+    );
+    const ctx = context(input);
+    const strategy = new WorkoutPlanningStrategyService().build(ctx);
+    const output = candidate(input);
+    const withBodyweight = {
+      ...output,
+      sessions: output.sessions.map((session) => ({
+        ...session,
+        blocks: session.blocks.map((block) => ({
+          ...block,
+          activities: block.activities.map((item) => ({
+            ...item,
+            equipment: ['BODYWEIGHT'] as const,
+          })),
+        })),
+      })),
+    };
+    const result = new WorkoutPlanV2Validator().validate(
+      withBodyweight,
+      ctx,
+      strategy,
+    );
+    expect(strategy.sessionCount).toBe(5);
+    expect(result.status).not.toBe('INVALID');
+    expect(
+      result.issues.filter((issue) => issue.code === 'EQUIPMENT_UNAVAILABLE'),
+    ).toEqual([]);
+    const limited = new WorkoutPlanningStrategyService().build(
+      context(
+        recognized('GYM_STRENGTH', ['DUMBBELL'], {
+          frequency: 5,
+          duration: 60,
+        }),
+      ),
+    );
+    const unauthorized = {
+      ...withBodyweight,
+      sessions: withBodyweight.sessions.map((session) => ({
+        ...session,
+        blocks: session.blocks.map((block) => ({
+          ...block,
+          activities: block.activities.map((item) => ({
+            ...item,
+            equipment: ['CABLE'] as const,
+          })),
+        })),
+      })),
+    };
+    expect(
+      new WorkoutPlanV2Validator()
+        .validate(unauthorized, ctx, limited)
+        .issues.some(
+          (issue) =>
+            issue.code === 'EQUIPMENT_UNAVAILABLE' &&
+            issue.severity === 'ERROR',
+        ),
+    ).toBe(true);
+  });
 
   it('uses persisted running distances when the current message has none, while current values win', () => {
     const base = snapshot();
@@ -889,7 +1037,7 @@ describe('Workout Planning Engine V2', () => {
       'CROSSFIT',
     ]);
     expect(strategies[2].requiredBlocks).toContain('ENDURANCE');
-    expect(strategies[3].authorizedEquipment).toEqual(['BIKE']);
+    expect(strategies[3].authorizedEquipment).toEqual(['BIKE', 'BODYWEIGHT']);
     expect(strategies[4]).toMatchObject({
       technicalMovementsAllowed: false,
       requiredBlocks: expect.arrayContaining(['TECHNIQUE', 'CONDITIONING']),
@@ -1096,6 +1244,16 @@ describe('Workout Planning Engine V2', () => {
       }),
     );
     expect(ai.runTextJob.mock.calls[0][1].input).not.toContain('user-id');
+    const providerRequest = ai.runTextJob.mock.calls[0][1];
+    expect(providerRequest.jsonSchema).toEqual(
+      workoutSchemaForAuthorizedEquipment(
+        generation.output.strategy.authorizedEquipment,
+      ),
+    );
+    const keyForVersion = (version: number) =>
+      `workout-planning-v2:${createHash('sha256').update(`user-id:${version}:${providerRequest.input}`).digest('hex')}`;
+    expect(generation.operationKey).toBe(keyForVersion(4));
+    expect(generation.operationKey).not.toBe(keyForVersion(3));
     expect(ai.completeJobInTransaction).not.toHaveBeenCalled();
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(prisma).not.toHaveProperty('workoutPlan');
@@ -1466,14 +1624,14 @@ describe('Workout Planning Engine V2', () => {
       expect(strategy.requiredBlocks).toContain('CONDITIONING');
       expect(strategy.requiredBlocks).not.toContain('STRENGTH');
       expect(strategy.requiredBlocks).not.toContain('HYPERTROPHY');
-      expect(strategy.authorizedEquipment).toEqual([]);
+      expect(strategy.authorizedEquipment).toEqual(['BODYWEIGHT']);
     },
   );
 
   it('publishes prompt V2 with explicit personalization and stereotype guards', () => {
     expect(WORKOUT_PLANNING_V2_PROMPT).toMatchObject({
       name: 'workout_planning_v2',
-      version: 3,
+      version: 4,
       capability: 'WORKOUT_PLANNING_V2',
     });
     expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(

@@ -27,7 +27,10 @@ import type {
 import { WorkoutPlanningReadinessService } from './workout-planning-readiness.service';
 import { WorkoutPlanningSafetyService } from './workout-planning-safety.service';
 import { WorkoutPlanningStrategyService } from './workout-planning-strategy.service';
-import { WORKOUT_PLANNING_V2_PROMPT } from './workout-planning-v2.prompt.definition';
+import {
+  WORKOUT_PLANNING_V2_PROMPT,
+  workoutSchemaForAuthorizedEquipment,
+} from './workout-planning-v2.prompt.definition';
 
 @Injectable()
 export class WorkoutPlanningEngineV2Service {
@@ -170,7 +173,9 @@ export class WorkoutPlanningEngineV2Service {
     try {
       response = await this.aiService.runTextJob(job.id, {
         input: canonical,
-        jsonSchema: WORKOUT_PLANNING_V2_PROMPT.schema,
+        jsonSchema: workoutSchemaForAuthorizedEquipment(
+          prepared.strategy.authorizedEquipment,
+        ),
       });
       const output = this.finalize(
         this.parser.parse(response.outputText),

@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { WORKOUT_PLANNING_V2_PROMPT } from './workout-planning-v2.prompt.definition';
+import {
+  WORKOUT_PLANNING_V2_PROMPT,
+  WORKOUT_PLANNING_V2_PROMPT_V3,
+} from './workout-planning-v2.prompt.definition';
 
 describe('workout planning prompt rollout', () => {
   const normalizeEol = (text: string): string => text.replace(/\r\n?/gu, '\n');
@@ -14,7 +17,7 @@ describe('workout planning prompt rollout', () => {
     ),
   );
 
-  it('pins the material definition to version 3 and its immutable migration', () => {
+  it('preserves historical version 3 against its immutable migration', () => {
     const persistedPrompt = migration.match(
       /\$prompt\$([\s\S]*?)\$prompt\$/,
     )?.[1];
@@ -22,15 +25,23 @@ describe('workout planning prompt rollout', () => {
       /\$schema\$([\s\S]*?)\$schema\$/,
     )?.[1];
 
-    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(3);
+    expect(WORKOUT_PLANNING_V2_PROMPT_V3.version).toBe(3);
     expect(persistedPrompt).toBe(
-      normalizeEol(WORKOUT_PLANNING_V2_PROMPT.instructions),
+      normalizeEol(WORKOUT_PLANNING_V2_PROMPT_V3.instructions),
     );
     expect(JSON.parse(persistedSchema ?? '')).toEqual(
-      WORKOUT_PLANNING_V2_PROMPT.schema,
+      WORKOUT_PLANNING_V2_PROMPT_V3.schema,
     );
     expect(migration).toContain("'workout_planning_v2',\n  3,");
     expect(migration).toContain("'WORKOUT_PLANNING_V2',\n  'TEXT',");
+  });
+
+  it('selects version 4 without mutating the historical definition', () => {
+    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(4);
+    expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(
+      'strategy.authorizedEquipment',
+    );
+    expect(WORKOUT_PLANNING_V2_PROMPT_V3.version).toBe(3);
   });
 
   it('deactivates only the prior active definition and preserves history', () => {

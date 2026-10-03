@@ -5,9 +5,8 @@ export class NutritionWhatsAppPresenter {
     const sections: string[] = [
       `🥗 *${response.title}*`,
       response.userFirstName
-        ? `${response.userFirstName}, preparei seu plano com uma organização simples para você consultar no dia a dia.`
-        : 'Preparei seu plano com uma organização simples para você consultar no dia a dia.',
-      response.summary,
+        ? `${response.userFirstName}, ${response.summary.charAt(0).toLocaleLowerCase('pt-BR')}${response.summary.slice(1)}`
+        : response.summary,
     ];
     if (response.goal) {
       sections.push(`🎯 *Objetivo*\n${response.goal}`);
@@ -25,25 +24,22 @@ export class NutritionWhatsAppPresenter {
           .join('\n')}`,
       );
     }
-    this.optionalList(sections, '💧 *Hidratação*', response.hydrationGuidance);
     this.optionalList(
       sections,
-      '💡 *Orientações para o dia a dia*',
-      response.generalGuidance,
-    );
-    this.optionalList(
-      sections,
-      '📌 *Ajustes importantes*',
-      response.adaptationGuidance,
+      '💧 *Hidratação*',
+      response.hydrationGuidance.slice(0, 2),
     );
     this.optionalList(
       sections,
-      '🛡️ *Cuidados importantes*',
-      response.safetyGuidance,
+      '💡 *Dicas práticas*',
+      [
+        ...new Set([
+          ...response.generalGuidance,
+          ...response.adaptationGuidance,
+        ]),
+      ].slice(0, 4),
     );
-    sections.push(
-      'Use este plano como guia e me conte como ele se encaixa na sua rotina.',
-    );
+    this.optionalList(sections, '⚠️ *Atenção*', response.safetyGuidance);
     return sections
       .filter((section) => section.trim())
       .join('\n\n')

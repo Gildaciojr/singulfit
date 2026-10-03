@@ -176,7 +176,7 @@ const activitySchema = {
   ],
 } as const;
 
-export const WORKOUT_PLANNING_V2_PROMPT = Object.freeze({
+export const WORKOUT_PLANNING_V2_PROMPT_V3 = Object.freeze({
   name: 'workout_planning_v2',
   version: 3,
   capability: 'WORKOUT_PLANNING_V2',
@@ -417,3 +417,47 @@ Retorne somente JSON válido no schema solicitado.`,
     },
   } satisfies OpenAIJsonSchema & Prisma.InputJsonObject),
 });
+
+export const WORKOUT_PLANNING_V2_PROMPT = Object.freeze({
+  ...WORKOUT_PLANNING_V2_PROMPT_V3,
+  version: 4,
+  instructions: `${WORKOUT_PLANNING_V2_PROMPT_V3.instructions}
+Cada activity.equipment deve ser um subconjunto exato de strategy.authorizedEquipment, inclusive em aquecimento e mobilidade. BODYWEIGHT só pode ser usado quando autorizado; não adicione kettlebell, bicicleta, elástico ou ergômetro apenas por serem comuns em algumas academias.
+Use precisamente strategy.sessionCount sessões e respeite a duração de cada sessão e a soma dos blocos. Se houver limitação explícita de equipamento, ela prevalece sobre o ambiente de academia completa.`,
+});
+
+/** Keep the strict candidate schema, restricting every equipment array per request. */
+export function workoutSchemaForAuthorizedEquipment(
+  authorizedEquipment: readonly import('./workout-planning-context.contract').WorkoutEquipment[],
+): OpenAIJsonSchema {
+  const allowed = [...new Set(authorizedEquipment)];
+  function objectSchema(
+    value: Readonly<Record<string, unknown>>,
+  ): Record<string, unknown> {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, property]) => [
+        key,
+        key === 'equipment'
+          ? {
+              type: 'array',
+              ...(allowed.length === 0 ? { maxItems: 0 } : {}),
+              items: {
+                type: 'string',
+                ...(allowed.length > 0 ? { enum: allowed } : {}),
+              },
+            }
+          : nested(property),
+      ]),
+    );
+  }
+  function nested(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(nested);
+    if (value !== null && typeof value === 'object')
+      return objectSchema(value as Record<string, unknown>);
+    return value;
+  }
+  return {
+    ...WORKOUT_PLANNING_V2_PROMPT.schema,
+    schema: objectSchema(WORKOUT_PLANNING_V2_PROMPT.schema.schema),
+  };
+}

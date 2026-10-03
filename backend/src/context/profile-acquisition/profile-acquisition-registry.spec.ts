@@ -350,6 +350,7 @@ describe('Structured profile acquisition registry and recognition', () => {
       CoachProfileAcquisitionField.AVAILABLE_EQUIPMENT,
       'Todos de uma academia comum',
       [
+        'BODYWEIGHT',
         'BARBELL',
         'BENCH',
         'CABLE',

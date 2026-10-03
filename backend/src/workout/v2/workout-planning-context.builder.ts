@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { workoutEquipmentBaseline } from './workout-equipment-defaults';
 import { FitnessGoal } from '@prisma/client';
 import type {
   CoachProfileDatum,
@@ -66,6 +67,16 @@ export class WorkoutPlanningContextBuilder {
           this.environment(input.snapshot.training.environment),
         equipment: this.arrayValue(
           recognized.equipment ??
+            (input.snapshot.training.availableEquipment.status === 'UNKNOWN'
+              ? workoutEquipmentBaseline(
+                  recognized.environment &&
+                    recognized.environment.status !== 'NOT_SET'
+                    ? recognized.environment.value
+                    : input.snapshot.training.environment.status === 'KNOWN'
+                      ? input.snapshot.training.environment.value
+                      : undefined,
+                )
+              : undefined) ??
             this.equipment(input.snapshot.training.availableEquipment),
         ),
         perceivedConditioning:

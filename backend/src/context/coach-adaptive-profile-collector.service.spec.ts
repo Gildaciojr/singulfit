@@ -311,6 +311,41 @@ describe('CoachAdaptiveProfileCollectorService', () => {
       }
     },
   );
+  it('accepts persisted FULL_GYM capacity without a new message or equipment inventory', () => {
+    const result = decide(
+      PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,
+      completeProfile({ equipment: unknown(), environment: known('FULL_GYM') }),
+    );
+    expect(
+      candidate(result, PROFILE_ACQUISITION_FIELD.TRAINING_EQUIPMENT),
+    ).toMatchObject({
+      state: 'ALREADY_KNOWN',
+      reason: 'INFERRED_VALUE_ACCEPTED',
+    });
+    expect(result.selectedCandidate?.field).not.toBe(
+      PROFILE_ACQUISITION_FIELD.TRAINING_EQUIPMENT,
+    );
+  });
+  it.each([
+    'quero treino de musculação na academia',
+    'treino em academia completa',
+    'quero treino completo para academia',
+    'treino em casa sem equipamento',
+  ])('does not ask redundant equipment inventory for %s', (message) => {
+    const profile = completeProfile({
+      equipment: unknown(),
+      environment: unknown(),
+    });
+    const result = decide(
+      PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,
+      profile,
+      { conversationContext: productiveWorkoutProfileFacts(message) },
+    );
+    expect(
+      candidate(result, PROFILE_ACQUISITION_FIELD.TRAINING_EQUIPMENT).state,
+    ).toBe('ALREADY_KNOWN');
+    expect(profile.training.availableEquipment.status).toBe('UNKNOWN');
+  });
   it('keeps equipment acquisition necessary for a small gym request', () => {
     const result = decide(
       PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,

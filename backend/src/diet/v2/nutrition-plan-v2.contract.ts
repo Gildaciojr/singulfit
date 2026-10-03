@@ -80,7 +80,12 @@ export interface NutritionPlanValidationIssue {
     | 'SUBSTITUTION_REFERENCE_INVALID'
     | 'SUBSTITUTION_UNSAFE'
     | 'EMPTY_PLAN'
-    | 'EXTREME_VALUE';
+    | 'EXTREME_VALUE'
+    | 'MEAL_REPETITION_EXCESSIVE'
+    | 'MEAL_VARIETY_INSUFFICIENT'
+    | 'MEAL_PERIOD_QUALITY'
+    | 'SUBSTITUTION_REDUNDANT'
+    | 'INTERNAL_GUIDANCE';
   readonly severity: 'ERROR' | 'WARNING';
   readonly path: string;
 }

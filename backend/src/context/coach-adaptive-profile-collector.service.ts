@@ -614,10 +614,11 @@ export class CoachAdaptiveProfileCollectorService {
           input.conversationContext?.equipment?.value,
         ) ||
           (!input.conversationContext?.equipment &&
-            !input.conversationContext?.environment &&
-            input.snapshot.training.environment.status === 'KNOWN' &&
             !!workoutEquipmentBaseline(
-              input.snapshot.training.environment.value,
+              input.conversationContext?.environment?.value ??
+                (input.snapshot.training.environment.status === 'KNOWN'
+                  ? input.snapshot.training.environment.value
+                  : undefined),
             ))),
       datum,
       definition,
@@ -700,6 +701,9 @@ export class CoachAdaptiveProfileCollectorService {
     if (input.unmetDependencies.length > 0) {
       return this.stateResult('WAITING_DEPENDENCY', 'DEPENDENCY_NOT_MET');
     }
+
+    if (input.canonicalEquipmentBaseline)
+      return this.stateResult('ALREADY_KNOWN', 'INFERRED_VALUE_ACCEPTED');
 
     if (
       input.contextualValue?.evidence === 'INFERRED' &&

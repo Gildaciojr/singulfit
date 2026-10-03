@@ -4,6 +4,100 @@ import { NutritionWhatsAppPresenter } from './nutrition-whatsapp.presenter';
 import { PublicNutritionResponseBuilder } from './public-nutrition-response.builder';
 
 describe('PublicNutritionResponseBuilder', () => {
+  it.each([
+    'Evite tomate e beterraba.',
+    'Não consumir tomate.',
+    'Não incluir beterraba.',
+    'Evitar tomate conforme exclusões definidas.',
+  ])(
+    'never promotes an ordinary rejection into a public safety alert: %s',
+    (line) => {
+      const source = plan();
+      const response = new PublicNutritionResponseBuilder().build({
+        plan: {
+          ...source,
+          strategy: {
+            ...source.strategy,
+            excludedFoods: ['tomate', 'beterraba'],
+          },
+          safetyNotes: [line],
+        },
+      });
+      expect(response.safetyGuidance).toEqual([]);
+      expect(JSON.stringify(response.days)).not.toMatch(/tomate|beterraba/iu);
+      const text = new NutritionWhatsAppPresenter().present(response);
+      expect(text).not.toContain(line);
+      expect(text).not.toContain('⚠️');
+    },
+  );
+
+  it.each([
+    [
+      'PEANUT',
+      'amendoim',
+      'Você informou alergia a amendoim; confira rótulos para evitar exposição.',
+    ],
+    ['LACTOSE', 'leite', 'Evite leite por sua intolerância à lactose.'],
+  ] as const)(
+    'preserves a necessary human warning supported by %s',
+    (code, food, line) => {
+      const source = plan();
+      const response = new PublicNutritionResponseBuilder().build({
+        plan: {
+          ...source,
+          strategy: {
+            ...source.strategy,
+            excludedFoods: [food],
+            appliedConstraintCodes: [code],
+          },
+          safetyNotes: [line],
+        },
+      });
+      expect(response.safetyGuidance).toEqual([line]);
+      const text = new NutritionWhatsAppPresenter().present(response);
+      expect(text).toContain(line);
+      expect(text).toContain('⚠️');
+      expect(text).not.toMatch(
+        /PEANUT|LACTOSE|applied constraints|profile field/u,
+      );
+    },
+  );
+
+  it('preserves legitimate guidance using conforme without internal commentary', () => {
+    const source = plan();
+    const response = new PublicNutritionResponseBuilder().build({
+      plan: {
+        ...source,
+        guidance: ['Organizei os horários conforme sua rotina.'],
+        hydrationGuidance: ['Ajuste a hidratação conforme sua sede e rotina.'],
+      },
+    });
+    const text = new NutritionWhatsAppPresenter().present(response);
+    expect(text).toContain('Organizei os horários conforme sua rotina.');
+    expect(text).toContain('Ajuste a hidratação conforme sua sede e rotina.');
+  });
+  it('keeps ordinary food rejections private while preserving a real allergy alert', () => {
+    const source = plan();
+    const response = new PublicNutritionResponseBuilder().build({
+      plan: {
+        ...source,
+        strategy: {
+          ...source.strategy,
+          excludedFoods: ['Tomate', 'Beterraba', 'Amendoim'],
+          appliedConstraintCodes: ['PEANUT'],
+        },
+        guidance: ['Evite tomate e beterraba.', 'Faça as refeições com calma.'],
+        adaptationRules: ['Não incluir tomate.', 'Ajuste o horário à rotina.'],
+        safetyNotes: [
+          'Alergia grave a amendoim: evite também contaminação cruzada.',
+        ],
+      },
+    });
+    const text = new NutritionWhatsAppPresenter().present(response);
+    expect(text).not.toMatch(/tomate|beterraba/iu);
+    expect(text).toContain('Alergia grave a amendoim');
+    expect(text).toContain('Faça as refeições com calma.');
+  });
   function plan(): NutritionPlanV2 {
     const item = (itemKey: string, foodName: string, quantity: string) =>
       Object.freeze({
@@ -115,7 +209,7 @@ describe('PublicNutritionResponseBuilder', () => {
       { source: 'Ovos mexidos', alternative: 'Frango desfiado' },
     ]);
     expect(content).toContain('Ovos mexidos ↔ Frango desfiado');
-    expect(content).toContain('condição de saúde');
+    expect(content).not.toContain('condição de saúde');
     expect(content).not.toMatch(
       /ONBOARDING|NUTRITION_V2|NUTRITION_V2_ELIGIBLE|DIET_V2|LEGACY|operationKey|correlationId|executor|pilotStatus|artifact|artefato/iu,
     );
@@ -133,7 +227,7 @@ describe('PublicNutritionResponseBuilder', () => {
     ).toBeUndefined();
   });
 
-  it('replaces generic clinical boilerplate without losing allergy guidance', () => {
+  it('omits generic clinical boilerplate without losing allergy guidance', () => {
     const source = plan();
     const response = new PublicNutritionResponseBuilder().build({
       plan: {
@@ -146,19 +240,16 @@ describe('PublicNutritionResponseBuilder', () => {
     });
 
     expect(response.safetyGuidance).toEqual([
-      expect.stringContaining('condição de saúde'),
       'Evite alimentos aos quais você é alérgico.',
     ]);
   });
 
-  it('replaces a lone generic clinical disclaimer with public guidance', () => {
+  it('omits a lone generic clinical disclaimer', () => {
     const response = new PublicNutritionResponseBuilder().build({
       plan: plan(),
     });
 
-    expect(response.safetyGuidance).toEqual([
-      expect.stringContaining('condição de saúde'),
-    ]);
+    expect(response.safetyGuidance).toEqual([]);
     expect(response.safetyGuidance).not.toContain(
       'Este plano não configura tratamento clínico.',
     );
@@ -213,7 +304,45 @@ describe('PublicNutritionResponseBuilder', () => {
     );
   });
 
-  it('humanizes the exact production canary safety boilerplate', () => {
+  it.each([
+    'Evitar beterraba e tomate, conforme exclusão definida.',
+    'Não incluir tomate conforme cadastro.',
+    'Como o contexto não informa preferências adicionais...',
+    'Preferências adicionais não informadas.',
+    'Ajustar as porções para respeitar o alvo energético estimado.',
+    'Macronutrientes conforme strategy e profile field.',
+    'applied constraints; excluded foods; context.',
+    'macros estimados.',
+  ])(
+    'drops internal commentary %s without dropping human allergy safety',
+    (line) => {
+      const source = plan();
+      const response = new PublicNutritionResponseBuilder().build({
+        plan: {
+          ...source,
+          strategy: {
+            ...source.strategy,
+            excludedFoods: ['tomate', 'beterraba'],
+          },
+          guidance: [line, 'Faça as refeições com calma.'],
+          adaptationRules: [line],
+          hydrationGuidance: [line],
+          safetyNotes: [
+            line,
+            'Se você tem alergia grave a amendoim, evite contato e siga a orientação médica.',
+          ],
+        },
+      });
+      const content = new NutritionWhatsAppPresenter().present(response);
+      expect(content).not.toContain(line);
+      expect(content).not.toMatch(
+        /tomate|beterraba|context|strategy|exclusão|alvo energético estimado/iu,
+      );
+      expect(content).toContain('alergia grave a amendoim');
+      expect(content).toContain('Faça as refeições com calma.');
+    },
+  );
+  it('omits generic safety boilerplate when there is no specific warning', () => {
     const source = plan();
     const response = new PublicNutritionResponseBuilder().build({
       plan: {
@@ -227,9 +356,11 @@ describe('PublicNutritionResponseBuilder', () => {
     });
     const content = new NutritionWhatsAppPresenter().present(response);
 
-    expect(content).toContain('condição de saúde');
-    expect(content).toContain('suplementos ou medicamentos por conta própria');
-    expect(content).toContain('alguma alergia');
+    expect(content).not.toContain('condição de saúde');
+    expect(content).not.toContain(
+      'suplementos ou medicamentos por conta própria',
+    );
+    expect(content).not.toContain('alguma alergia');
     expect(content).not.toMatch(
       /estrutural|caráter clínico|não foram inferidas|prescrição de suplementos/iu,
     );
@@ -263,8 +394,8 @@ describe('PublicNutritionResponseBuilder', () => {
       'Distribua as refeições conforme sua rotina.',
       'Ajuste os horários conforme sua rotina.',
     ]);
-    expect(content).toContain('💡 *Orientações para o dia a dia*');
-    expect(content).toContain('📌 *Ajustes importantes*');
+    expect(content).toContain('💡 *Dicas práticas*');
+    expect(content).not.toContain('📌 *Ajustes importantes*');
     expect(content.match(/Faça as refeições com calma\./gu)).toHaveLength(1);
     expect(content).toContain('Distribua as refeições ao longo do dia.');
     expect(content).toContain('Distribua as refeições conforme sua rotina.');
@@ -284,9 +415,7 @@ describe('PublicNutritionResponseBuilder', () => {
     });
 
     expect(response.safetyGuidance).toContain(specific);
-    expect(response.safetyGuidance).toContainEqual(
-      expect.stringContaining('condição de saúde'),
-    );
+    expect(response.safetyGuidance).not.toContainEqual();
   });
 
   it('drops the exact production sentinel line without losing valid nutrition or safety content', () => {

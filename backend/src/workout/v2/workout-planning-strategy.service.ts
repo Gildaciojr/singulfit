@@ -114,7 +114,12 @@ export class WorkoutPlanningStrategyService {
       authorizedEquipment:
         context.training.equipment.status === 'NOT_SET'
           ? Object.freeze([])
-          : Object.freeze([...context.training.equipment.value]),
+          : Object.freeze([
+              ...new Set([
+                ...context.training.equipment.value,
+                'BODYWEIGHT' as const,
+              ]),
+            ]),
       muscleFocus:
         context.training.muscleFocus.status === 'NOT_SET'
           ? Object.freeze([])
@@ -213,7 +218,7 @@ export class WorkoutPlanningStrategyService {
       evidence.completedSessions >= 0;
     if (
       hasSessions &&
-      evidence.completedSessions! < evidence.expectedSessions! / 2 &&
+      evidence.completedSessions < evidence.expectedSessions / 2 &&
       evidence.perceivedEffort !== null &&
       evidence.perceivedEffort >= 8
     )
@@ -222,7 +227,7 @@ export class WorkoutPlanningStrategyService {
       return 'REASSESS';
     if (
       hasSessions &&
-      evidence.completedSessions! >= evidence.expectedSessions! &&
+      evidence.completedSessions >= evidence.expectedSessions &&
       evidence.perceivedEffort !== null &&
       evidence.perceivedEffort >= 0 &&
       evidence.perceivedEffort <= 7 &&
