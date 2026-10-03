@@ -280,6 +280,7 @@ describe('Workout Planning Engine V2', () => {
     block: string,
     modality: WorkoutModality,
     equipment: WorkoutEquipment = 'BODYWEIGHT',
+    durationMinutes = 5,
   ): WorkoutActivityV2 {
     const base = {
       activityKey: key,
@@ -304,7 +305,7 @@ describe('Workout Planning Engine V2', () => {
             : modality === 'WALKING'
               ? 'WALK'
               : 'RUN',
-        durationMinutes: 20,
+        durationMinutes,
         distanceKm: null,
         intensity: 'CONVERSATIONAL',
       });
@@ -314,15 +315,15 @@ describe('Workout Planning Engine V2', () => {
         kind: 'MOBILITY',
         repetitions: null,
         holdSeconds: null,
-        durationSeconds: 300,
+        durationSeconds: Math.round(durationMinutes * 60),
       });
     return Object.freeze({
       ...base,
       kind: 'TIMED',
-      durationSeconds: 300,
+      durationSeconds: Math.round(durationMinutes * 60),
       workSeconds: 30,
       recoverySeconds: 30,
-      rounds: 5,
+      rounds: Math.max(1, Math.floor(durationMinutes)),
       intensity: 'MODERATE',
     });
   }
@@ -356,13 +357,21 @@ describe('Workout Planning Engine V2', () => {
                   blockKey: `block-${sessionIndex + 1}-${blockIndex + 1}`,
                   type: block,
                   title: block,
-                  estimatedDurationMinutes: 5,
+                  estimatedDurationMinutes:
+                    (strategy.sessionDurationMinutes.status === 'NOT_SET'
+                      ? 30
+                      : strategy.sessionDurationMinutes.value) /
+                    strategy.requiredBlocks.length,
                   activities: Object.freeze([
                     activity(
                       `activity-${sessionIndex + 1}-${blockIndex + 1}`,
                       block,
                       strategy.modality,
                       strategy.authorizedEquipment[0] ?? 'BODYWEIGHT',
+                      (strategy.sessionDurationMinutes.status === 'NOT_SET'
+                        ? 30
+                        : strategy.sessionDurationMinutes.value) /
+                        strategy.requiredBlocks.length,
                     ),
                   ]),
                 }),
@@ -472,7 +481,7 @@ describe('Workout Planning Engine V2', () => {
       workoutSchemaForAuthorizedEquipment([]).schema,
     ))
       expect(variant.maxItems).toBe(0);
-    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(4);
+    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(5);
     expect(WORKOUT_PLANNING_V2_PROMPT_V3.version).toBe(3);
   });
   it('reproduces five 60-minute FULL_GYM sessions with bodyweight warm-up without unavailable-equipment failures', () => {
@@ -732,6 +741,28 @@ describe('Workout Planning Engine V2', () => {
         modalityPayloads.map((payload) => JSON.stringify(payload.strategy)),
       ).size,
     ).toBe(3);
+    const renamed = {
+      ...a,
+      snapshot: {
+        ...a.snapshot,
+        identity: {
+          ...a.snapshot.identity,
+          displayName: known('Nome Alterado'),
+        },
+      },
+    };
+    await expect(engine.generateCandidate(renamed)).rejects.toThrow(
+      'mock payload captured',
+    );
+    expect(ai.createStandaloneJob.mock.calls.at(-1)?.[0].operationKey).toBe(
+      keys[0],
+    );
+    expect(ai.runTextJob.mock.calls.at(-1)?.[1].input).toBe(
+      ai.runTextJob.mock.calls[0][1].input,
+    );
+    expect(ai.runTextJob.mock.calls.at(-1)?.[1].input).not.toContain(
+      'Nome Alterado',
+    );
   });
 
   it('prepares Workout V2 without AIJob or provider side effects', async () => {
@@ -1252,7 +1283,7 @@ describe('Workout Planning Engine V2', () => {
     );
     const keyForVersion = (version: number) =>
       `workout-planning-v2:${createHash('sha256').update(`user-id:${version}:${providerRequest.input}`).digest('hex')}`;
-    expect(generation.operationKey).toBe(keyForVersion(4));
+    expect(generation.operationKey).toBe(keyForVersion(5));
     expect(generation.operationKey).not.toBe(keyForVersion(3));
     expect(ai.completeJobInTransaction).not.toHaveBeenCalled();
     expect(prisma.$transaction).not.toHaveBeenCalled();
@@ -1631,7 +1662,7 @@ describe('Workout Planning Engine V2', () => {
   it('publishes prompt V2 with explicit personalization and stereotype guards', () => {
     expect(WORKOUT_PLANNING_V2_PROMPT).toMatchObject({
       name: 'workout_planning_v2',
-      version: 4,
+      version: 5,
       capability: 'WORKOUT_PLANNING_V2',
     });
     expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(

@@ -272,7 +272,7 @@ export class CoachPlanningExecutionService {
       return this.suppressedPendingResult(preparation, routeSelection, runtime);
     }
     if (goalCommit === 'STALE') {
-      return this.staleGoalResult(preparation, routeSelection, runtime);
+      return this.staleGoalResult(preparation, routeSelection, runtime, userId);
     }
     if (
       runtime?.pendingGoalConfirmation?.resolution.status === 'RESOLVED' &&
@@ -470,6 +470,7 @@ export class CoachPlanningExecutionService {
       humanContext:
         preparation && this.humanContextBuilder
           ? this.humanContextBuilder.build(preparation.snapshot, {
+              expectedUserId: userId,
               currentMessage: runtime?.currentMessage,
             })
           : null,
@@ -996,6 +997,7 @@ export class CoachPlanningExecutionService {
     preparation: PreparedV2PlanningContext | null,
     routeSelection: PlanningExecutionRouteSelection,
     runtime: CoachPlanningRuntimeContext | undefined,
+    userId: string,
   ): CoachPlanningExecutionResult {
     const dispatch = Object.freeze({
       content:
@@ -1018,6 +1020,7 @@ export class CoachPlanningExecutionService {
       humanContext:
         preparation && this.humanContextBuilder
           ? this.humanContextBuilder.build(preparation.snapshot, {
+              expectedUserId: userId,
               currentMessage: runtime?.currentMessage,
             })
           : null,

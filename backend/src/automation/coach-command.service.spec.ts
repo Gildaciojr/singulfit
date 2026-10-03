@@ -364,7 +364,8 @@ describe('CoachCommandService', () => {
     const controlledWorkoutExecutor = {
       execute: jest.fn().mockResolvedValue({
         kind: 'PLAN',
-        document: {},
+        document: { sessions: [] },
+        projection: { days: [] },
         aiJobCompleted: true,
       }),
     };
@@ -546,7 +547,7 @@ describe('CoachCommandService', () => {
       options?.dailyEnabled
         ? ({
             accepts: () => options.dailyContent !== undefined,
-            answer: async () => options.dailyContent ?? null,
+            answer: () => Promise.resolve(options.dailyContent ?? null),
           } as unknown as ConversationDailyQueryService)
         : undefined,
       options?.profileConsentContent
@@ -2402,6 +2403,52 @@ describe('CoachCommandService', () => {
     );
   });
 
+  it('preserves a long BOTH response with semantic Workout boundaries and one header', async () => {
+    const nutrition =
+      '*Plano alimentar*\n' + 'Refeições variadas. '.repeat(60).trim();
+    const sessions = Array.from(
+      { length: 5 },
+      (_, index) =>
+        `*Sessão ${index + 1} — Treino*\n${'Exercício controlado. '.repeat(60).trim()}`,
+    );
+    const content = [nutrition, '*Sua semana de treino*', ...sessions].join(
+      '\n\n',
+    );
+    const subject = createSubject({
+      content: 'quero dieta e treino',
+      runtimeContent: content,
+    });
+    const effects = installPersistentEffectHarness(subject);
+    await expect(
+      subject.service.processTextMessage({
+        userId: 'user-id',
+        messageId: 'message-id',
+      }),
+    ).resolves.toMatchObject({ intent: 'BOTH' });
+    const sequence = [...effects.scheduledMessages.values()];
+    const parts = sequence.map((part) => part.content);
+    expect(parts.length).toBeGreaterThan(1);
+    expect(parts.every((part) => part.length <= 3400)).toBe(true);
+    expect(parts.join('\n\n')).toBe(content);
+    for (const session of sessions)
+      expect(parts.some((part) => part.includes(session))).toBe(true);
+    expect(parts.slice(1).every((part) => part.startsWith('*Sessão'))).toBe(
+      true,
+    );
+    expect(parts.join('').split('*Sua semana de treino*')).toHaveLength(2);
+    expect(sequence.map((part) => part.context.partIndex)).toEqual(
+      parts.map((_, index) => index),
+    );
+    expect(
+      sequence.every((part) => part.context.partCount === parts.length),
+    ).toBe(true);
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+    expect(effects.scheduledMessages.size).toBe(parts.length);
+  });
+
   it('splits long outbound content deterministically without losing text', () => {
     const service = createSubject().service as unknown as {
       messageParts(content: string, maximumLength?: number): readonly string[];
@@ -2416,5 +2463,34 @@ describe('CoachCommandService', () => {
     expect(first.length).toBeGreaterThan(1);
     expect(first.every((part) => part.length <= 180)).toBe(true);
     expect(first.join('\n')).toBe(content);
+  });
+
+  it('keeps whole Workout sessions at semantic boundaries with safe long-session fallback', () => {
+    const service = createSubject().service as unknown as {
+      messageParts(
+        content: string,
+        maximumLength: number,
+        workout: boolean,
+      ): readonly string[];
+    };
+    const sessions = Array.from(
+      { length: 5 },
+      (_, index) =>
+        `*Sessão ${index + 1} — Corpo inteiro*\n${'Movimento controlado. '.repeat(60).trim()}`,
+    );
+    const content = ['Abertura única.', ...sessions].join('\n\n');
+    const parts = service.messageParts(content, 3400, true);
+    expect(parts.every((part) => part.length <= 3400)).toBe(true);
+    for (const session of sessions)
+      expect(parts.some((part) => part.includes(session))).toBe(true);
+    expect(parts.join('\n\n')).toBe(content);
+    expect(service.messageParts(content, 3400, true)).toEqual(parts);
+    const long =
+      `*Sessão 1 — Corpo inteiro*\n${'Orientação técnica. '.repeat(400)}`.trim();
+    const longParts = service.messageParts(long, 3400, true);
+    expect(longParts.every((part) => part.length <= 3400)).toBe(true);
+    expect(longParts.join(' ').replace(/\s+/gu, ' ')).toBe(
+      long.replace(/\s+/gu, ' '),
+    );
   });
 });

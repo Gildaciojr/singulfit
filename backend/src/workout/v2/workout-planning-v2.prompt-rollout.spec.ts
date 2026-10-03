@@ -1,11 +1,20 @@
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import {
   WORKOUT_PLANNING_V2_PROMPT,
   WORKOUT_PLANNING_V2_PROMPT_V3,
+  WORKOUT_PLANNING_V2_PROMPT_V4,
 } from './workout-planning-v2.prompt.definition';
 
 describe('workout planning prompt rollout', () => {
+  it('uses the requested duration generically in the v5 extension', () => {
+    const extension = WORKOUT_PLANNING_V2_PROMPT.instructions.slice(
+      WORKOUT_PLANNING_V2_PROMPT_V4.instructions.length,
+    );
+    expect(extension).toContain('strategy.sessionDurationMinutes');
+    expect(extension).not.toMatch(/\b60\s*(?:min|minutos)\b/iu);
+  });
   const normalizeEol = (text: string): string => text.replace(/\r\n?/gu, '\n');
   const migration = normalizeEol(
     readFileSync(
@@ -36,8 +45,19 @@ describe('workout planning prompt rollout', () => {
     expect(migration).toContain("'WORKOUT_PLANNING_V2',\n  'TEXT',");
   });
 
-  it('selects version 4 without mutating the historical definition', () => {
-    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(4);
+  it('selects version 5 without mutating the historical definitions', () => {
+    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(5);
+    expect(WORKOUT_PLANNING_V2_PROMPT_V4.version).toBe(4);
+    expect(
+      createHash('sha256')
+        .update(WORKOUT_PLANNING_V2_PROMPT_V4.instructions)
+        .digest('hex'),
+    ).toBe('343ced01b4456dfd5dd7213d0105158fa3aa7088eee9dba53a2f1d406817f32f');
+    expect(
+      WORKOUT_PLANNING_V2_PROMPT.instructions.startsWith(
+        WORKOUT_PLANNING_V2_PROMPT_V4.instructions,
+      ),
+    ).toBe(true);
     expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(
       'strategy.authorizedEquipment',
     );

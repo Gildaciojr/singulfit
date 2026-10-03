@@ -89,3 +89,11 @@ export const COACH_CONVERSATIONAL_QA_V3_PROMPT_SEED = Object.freeze({
   ...COACH_CONVERSATIONAL_QA_V3_PROMPT,
   schema: COACH_CONVERSATIONAL_QA_V3_PROMPT.schema as Prisma.InputJsonValue,
 });
+
+export const COACH_CONVERSATIONAL_QA_V4_PROMPT = Object.freeze({
+  ...COACH_CONVERSATIONAL_QA_V3_PROMPT,
+  version: 4,
+  instructions:
+    COACH_CONVERSATIONAL_QA_V3_PROMPT.instructions +
+    ' O único nome autorizado é trustedContext.identity.preferredName (ou trustedContext.preferredName no contexto compatível). Use-o somente quando presente, de forma natural e esporádica em boas-vindas ou abertura útil. Nunca invente nome nem extraia nome de memória, histórico ou mensagem. Não chame pelo nome em toda resposta; evite repetir um vocativo usado recentemente. Sem nome autorizado, responda naturalmente sem vocativo.',
+});

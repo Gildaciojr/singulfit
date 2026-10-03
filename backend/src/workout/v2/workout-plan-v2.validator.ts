@@ -1,4 +1,10 @@
 import { Injectable } from '@nestjs/common';
+import { estimateWorkoutSession } from './workout-duration-estimator';
+import {
+  hasInvalidWorkoutActivityName,
+  workoutWeeklyRecoveryIssues,
+  workoutStructuralActivityIssue,
+} from './workout-plan-v2-quality.policy';
 import { WORKOUT_MODALITY } from './workout-planning-artifact.contract';
 import type {
   GeneratedWorkoutPlanV2Candidate,
@@ -35,6 +41,44 @@ export class WorkoutPlanV2Validator {
     const activities = new Map<string, WorkoutActivityV2>();
     for (const session of candidate.sessions) {
       this.unique(keys, session.sessionKey, issues);
+      const estimate = estimateWorkoutSession(session);
+      if (strategy.sessionDurationMinutes.status !== 'NOT_SET') {
+        const target = strategy.sessionDurationMinutes.value;
+        const tooShort = estimate.maximumMinutes < target * 0.8;
+        const tooLong = estimate.minimumMinutes > target * 1.2;
+        if (estimate.confidence === 'LOW')
+          this.add(
+            issues,
+            'SESSION_DURATION_UNCERTAIN',
+            'WARNING',
+            session.sessionKey,
+          );
+        if (tooShort || tooLong) {
+          const material = tooShort
+            ? estimate.maximumMinutes < target * 0.55
+            : estimate.minimumMinutes > target * 1.5;
+          this.add(
+            issues,
+            tooShort ? 'SESSION_CONTENT_TOO_SHORT' : 'SESSION_CONTENT_TOO_LONG',
+            material && estimate.confidence === 'HIGH' ? 'ERROR' : 'WARNING',
+            session.sessionKey,
+          );
+        }
+      }
+      const blockTotal = session.blocks.reduce(
+        (sum, block) => sum + block.estimatedDurationMinutes,
+        0,
+      );
+      if (
+        Math.abs(blockTotal - session.estimatedDurationMinutes) >
+        Math.max(5, session.estimatedDurationMinutes * 0.25)
+      )
+        this.add(
+          issues,
+          'BLOCK_DURATION_INCOHERENT',
+          'WARNING',
+          session.sessionKey,
+        );
       if (
         strategy.sessionDurationMinutes.status !== 'NOT_SET' &&
         session.estimatedDurationMinutes > strategy.sessionDurationMinutes.value
@@ -98,6 +142,7 @@ export class WorkoutPlanV2Validator {
           substitution.substitutionKey,
         );
     }
+    issues.push(...workoutWeeklyRecoveryIssues(candidate, context));
     const status = issues.some((issue) => issue.severity === 'ERROR')
       ? 'INVALID'
       : issues.length
@@ -114,6 +159,10 @@ export class WorkoutPlanV2Validator {
     strategy: WorkoutPlanningStrategy,
     issues: WorkoutPlanValidationIssue[],
   ): void {
+    const structural = workoutStructuralActivityIssue(activity);
+    if (structural) issues.push(structural);
+    if (hasInvalidWorkoutActivityName(activity.name))
+      this.add(issues, 'ACTIVITY_NAME_INVALID', 'ERROR', activity.activityKey);
     for (const equipment of activity.equipment)
       if (!strategy.authorizedEquipment.includes(equipment))
         this.add(

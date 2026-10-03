@@ -418,12 +418,20 @@ Retorne somente JSON válido no schema solicitado.`,
   } satisfies OpenAIJsonSchema & Prisma.InputJsonObject),
 });
 
-export const WORKOUT_PLANNING_V2_PROMPT = Object.freeze({
+export const WORKOUT_PLANNING_V2_PROMPT_V4 = Object.freeze({
   ...WORKOUT_PLANNING_V2_PROMPT_V3,
   version: 4,
   instructions: `${WORKOUT_PLANNING_V2_PROMPT_V3.instructions}
 Cada activity.equipment deve ser um subconjunto exato de strategy.authorizedEquipment, inclusive em aquecimento e mobilidade. BODYWEIGHT só pode ser usado quando autorizado; não adicione kettlebell, bicicleta, elástico ou ergômetro apenas por serem comuns em algumas academias.
 Use precisamente strategy.sessionCount sessões e respeite a duração de cada sessão e a soma dos blocos. Se houver limitação explícita de equipamento, ela prevalece sobre o ambiente de academia completa.`,
+});
+
+export const WORKOUT_PLANNING_V2_PROMPT = Object.freeze({
+  ...WORKOUT_PLANNING_V2_PROMPT_V4,
+  version: 5,
+  instructions:
+    WORKOUT_PLANNING_V2_PROMPT_V4.instructions +
+    '\nCada activity.name deve identificar uma atividade real executável, nunca disponibilidade, ausência, placeholder ou meta-instrução. Nunca use "Bicicleta não disponível", "equipamento indisponível", "substituir se necessário" ou "exercício não definido" como nome. Se uma atividade pretendida não for possível, escolha outra válida dentro de authorizedEquipment, com nome e instrução coerentes. A duração total declarada deve refletir aquecimento, execução, descansos entre séries, transições e cooldown; respeite strategy.sessionDurationMinutes, sem preencher a duração-alvo com conteúdo materialmente menor. Em TIMED durationSeconds é o tempo total e já inclui as rodadas/trabalho/recuperação. Em MOBILITY durationSeconds é o total, holdSeconds é por sustentação e repetitions descreve repetições, sem dupla contagem. Distribua sessões consecutivas considerando dias confirmados, intensidade, volume e padrões de movimento, inclusive domingo para segunda. Evite estímulos pesados semelhantes consecutivos sem justificativa; preserve criatividade dentro das constraints, sem impor split fixo.',
 });
 
 /** Keep the strict candidate schema, restricting every equipment array per request. */

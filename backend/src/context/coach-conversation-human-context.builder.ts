@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { coachUserFirstName } from './coach-user-name.policy';
 import {
   BehavioralCommunicationStyle,
   FitnessGoal,
@@ -39,11 +40,17 @@ export class CoachConversationHumanContextBuilder {
   ): CoachConversationHumanContext {
     const behavioral = this.value(snapshot.conversation.behavioralStyle);
     const coachStyle = this.value(snapshot.conversation.coachStyle);
+    const preferredName = coachUserFirstName(
+      snapshot.identity,
+      input.expectedUserId,
+    );
 
     return Object.freeze({
       currentMessage: input.currentMessage?.trim().slice(0, 1_000) ?? '',
       turnCue: this.turnCue(input.currentMessage),
-      preferredName: this.firstName(snapshot.identity.displayName),
+      preferredName: preferredName
+        ? this.fact(preferredName, snapshot.identity.displayName.sources)
+        : null,
       goal: this.map(snapshot.nutrition.primaryGoal, (goal) =>
         this.goalLabel(goal),
       ),
@@ -118,15 +125,6 @@ export class CoachConversationHumanContextBuilder {
         ),
       }),
     });
-  }
-
-  private firstName(
-    datum: CoachProfileDatum<string>,
-  ): CoachConversationHumanFact<string> | null {
-    const available = this.value(datum);
-    if (!available) return null;
-    const name = available.value.trim().split(/\s+/u)[0];
-    return name ? this.fact(name, available.sources) : null;
   }
 
   private constraints(

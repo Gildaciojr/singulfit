@@ -1,3 +1,4 @@
+import { routingSnapshot } from '../conversation/tests/conversation-routing.fixtures';
 import { Prisma } from '@prisma/client';
 import {
   CONVERSATION_GOAL,
@@ -11,13 +12,73 @@ import type { CoachPlanningBothApplicationExecutorService } from './coach-planni
 import type { NutritionApplicationExecutorService } from '../diet/v2/execution/nutrition-application-executor.service';
 import type { NutritionPublicResultFormatter } from '../diet/v2/execution/nutrition-public-result.formatter';
 import type { WorkoutApplicationExecutorService } from '../workout/v2/execution/workout-application-executor.service';
-import type { WorkoutPlanV2Formatter } from '../workout/v2/workout-plan-v2.formatter';
+import { WorkoutPlanV2Formatter } from '../workout/v2/workout-plan-v2.formatter';
+import { qualityPlan } from '../workout/v2/workout-quality.fixtures';
+import type { WorkoutPlanV2 } from '../workout/v2/workout-plan-v2.contract';
 import type { CurrentWorkoutPlanReaderService } from '../workout/v2/current-workout-plan-reader.service';
 import type { CurrentNutritionPlanReaderService } from '../diet/current-nutrition-plan-reader.service';
 import type { CanonicalNutritionPlanPresenterService } from '../diet/canonical-nutrition-plan-presenter.service';
 import { CoachPlanningExecutionService } from './coach-planning-execution.service';
 
 describe('CoachPlanningExecutionDispatcherService', () => {
+  it('presents persisted calendar by sequence, including preserved and null weekdays', async () => {
+    const subject = createSubject();
+    const plan = qualityPlan();
+    subject.workoutV2Executor.execute.mockResolvedValueOnce({
+      kind: 'PLAN',
+      document: plan,
+      projection: {
+        days: [
+          { dayNumber: 2, weekday: 'SUNDAY' },
+          { dayNumber: 1, weekday: 'FRIDAY' },
+          { dayNumber: 3, weekday: null },
+          { dayNumber: 5, weekday: 'THURSDAY' },
+          { dayNumber: 4, weekday: 'SATURDAY' },
+        ],
+      },
+      aiJobCompleted: true,
+    });
+    subject.workoutV2Formatter.format.mockImplementation(
+      (
+        document: WorkoutPlanV2,
+        context: Parameters<WorkoutPlanV2Formatter['format']>[1],
+      ) => new WorkoutPlanV2Formatter().format(document, context),
+    );
+    const result = await subject.dispatcher.dispatchStructured({
+      userId: 'user-id',
+      legacyIntent: 'WORKOUT',
+      decision: decision(CONVERSATION_GOAL.GENERATE_WORKOUT_PLAN),
+      routeSelection: {
+        nutrition: null,
+        workout: 'V2',
+        reason: 'WORKOUT_V2_PRODUCTIVE_GENERATION',
+        nutritionPilotStatus: null,
+        suppressNutritionShadow: false,
+      },
+      workoutV2: {
+        profileId: 'profile',
+        correlationId: 'calendar',
+        generationInput: {
+          userId: 'user-id',
+          snapshot: routingSnapshot(),
+          referenceDate: new Date(),
+          recognizedContext: {
+            availableTrainingDays: {
+              status: 'CONFIRMED',
+              value: ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'],
+            },
+          },
+        },
+      },
+    });
+    expect(result.content).toContain('*Sexta —');
+    expect(result.content).toContain('*Domingo —');
+    expect(result.content).toContain('*Sessão 3 —');
+    expect(result.content).not.toContain('*Segunda —');
+    expect(subject.workoutV2Formatter.format.mock.calls[0][1].weekdays).toEqual(
+      ['FRIDAY', 'SUNDAY', null, 'SATURDAY', 'THURSDAY'],
+    );
+  });
   const unsupportedGoals: readonly ConversationGoal[] = [
     CONVERSATION_GOAL.ANSWER_MESSAGE,
     CONVERSATION_GOAL.ASK_PROFILE_INFORMATION,
@@ -85,7 +146,8 @@ describe('CoachPlanningExecutionDispatcherService', () => {
       preflight: jest.fn().mockReturnValue({ kind: 'READY' }),
       execute: jest.fn().mockResolvedValue({
         kind: 'PLAN',
-        document: { artifactType: 'WEEKLY_PLAN' },
+        document: { artifactType: 'WEEKLY_PLAN', sessions: [] },
+        projection: { days: [] },
         aiJobCompleted: true,
       }),
     };
@@ -158,7 +220,12 @@ describe('CoachPlanningExecutionDispatcherService', () => {
           nutritionPilotStatus: null,
           suppressNutritionShadow: false,
         },
-        workoutV2: { generationInput: { userId: 'user-id' } as never },
+        workoutV2: {
+          generationInput: {
+            userId: 'user-id',
+            snapshot: routingSnapshot(),
+          } as never,
+        },
       });
       expect(subject.workoutV2Executor.execute).not.toHaveBeenCalled();
       expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
@@ -175,8 +242,18 @@ describe('CoachPlanningExecutionDispatcherService', () => {
       userId: 'user-id',
       legacyIntent: 'BOTH',
       decision: { ...decision(goal), canExecute: false },
-      workoutV2: { generationInput: { userId: 'user-id' } as never },
-      nutritionV2: { generationInput: { userId: 'user-id' } as never },
+      workoutV2: {
+        generationInput: {
+          userId: 'user-id',
+          snapshot: routingSnapshot(),
+        } as never,
+      },
+      nutritionV2: {
+        generationInput: {
+          userId: 'user-id',
+          snapshot: routingSnapshot(),
+        } as never,
+      },
     });
     expect(subject.workoutV2Executor.execute).not.toHaveBeenCalled();
     expect(subject.nutritionV2Executor.execute).not.toHaveBeenCalled();
@@ -192,8 +269,18 @@ describe('CoachPlanningExecutionDispatcherService', () => {
         userId: 'user-id',
         legacyIntent: 'BOTH',
         decision: decision(goal),
-        workoutV2: { generationInput: { userId: 'user-id' } as never },
-        nutritionV2: { generationInput: { userId: 'user-id' } as never },
+        workoutV2: {
+          generationInput: {
+            userId: 'user-id',
+            snapshot: routingSnapshot(),
+          } as never,
+        },
+        nutritionV2: {
+          generationInput: {
+            userId: 'user-id',
+            snapshot: routingSnapshot(),
+          } as never,
+        },
       }),
     ).rejects.toThrow('sem infraestrutura executável');
     expect(subject.workoutV2Executor.execute).not.toHaveBeenCalled();
@@ -215,7 +302,12 @@ describe('CoachPlanningExecutionDispatcherService', () => {
         nutritionPilotStatus: null,
         suppressNutritionShadow: false,
       },
-      workoutV2: { generationInput: { userId: 'user-id' } as never },
+      workoutV2: {
+        generationInput: {
+          userId: 'user-id',
+          snapshot: routingSnapshot(),
+        } as never,
+      },
     });
     expect(subject.workoutV2Executor.execute).toHaveBeenCalledTimes(1);
   });
@@ -420,7 +512,10 @@ describe('CoachPlanningExecutionDispatcherService', () => {
         continuationOperationKey: 'combined-nutrition-operation-id',
       },
       workoutV2: {
-        generationInput: { userId: 'user-id' } as never,
+        generationInput: {
+          userId: 'user-id',
+          snapshot: routingSnapshot(),
+        } as never,
         profileId: 'profile-id',
         correlationId: 'combined-correlation-id',
       },
@@ -545,7 +640,10 @@ describe('CoachPlanningExecutionDispatcherService', () => {
           suppressNutritionShadow: false,
         },
         workoutV2: {
-          generationInput: { userId: 'user-id' } as never,
+          generationInput: {
+            userId: 'user-id',
+            snapshot: routingSnapshot(),
+          } as never,
           profileId: 'profile-id',
           correlationId: 'correlation-id',
         },
@@ -581,7 +679,10 @@ describe('CoachPlanningExecutionDispatcherService', () => {
         suppressNutritionShadow: false,
       },
       workoutV2: {
-        generationInput: { userId: 'user-id' } as never,
+        generationInput: {
+          userId: 'user-id',
+          snapshot: routingSnapshot(),
+        } as never,
         profileId: 'profile-id',
         correlationId: 'correlation-id',
       },
@@ -657,7 +758,10 @@ describe('CoachPlanningExecutionDispatcherService', () => {
             suppressNutritionShadow: true,
           },
           nutritionV2: {
-            generationInput: { userId: 'user-id' } as never,
+            generationInput: {
+              userId: 'user-id',
+              snapshot: routingSnapshot(),
+            } as never,
             profileId: 'profile-id',
             correlationId: 'correlation-id',
           },

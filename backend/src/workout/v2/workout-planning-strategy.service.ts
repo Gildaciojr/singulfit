@@ -442,8 +442,10 @@ export class WorkoutPlanningStrategyService {
       );
     }
 
+    const distribution =
+      count >= 4 ? this.recoveryOrderedFocuses(focuses, context) : focuses;
     return Object.freeze(
-      focuses.map((focus) =>
+      distribution.map((focus) =>
         shortSession ? `${focus} — seleção essencial` : focus,
       ),
     );
@@ -494,6 +496,80 @@ export class WorkoutPlanningStrategyService {
       'Inferiores B e core',
     ];
     return this.takeCycle(base, count);
+  }
+
+  private recoveryOrderedFocuses(
+    focuses: readonly string[],
+    context: WorkoutPlanningContext,
+  ): readonly string[] {
+    const days = context.training.availableTrainingDays;
+    const weekdays = [
+      'MONDAY',
+      'TUESDAY',
+      'WEDNESDAY',
+      'THURSDAY',
+      'FRIDAY',
+      'SATURDAY',
+      'SUNDAY',
+    ];
+    const remaining = [...focuses];
+    const result: string[] = [];
+    const patterns = (focus: string): readonly string[] => {
+      if (/leve|mobilidade|técnica|controle/iu.test(focus)) return [];
+      if (/corpo inteiro|condicionamento de força/iu.test(focus))
+        return ['LOWER', 'UPPER'];
+      if (
+        /inferiores|quadríceps|glúteos|posteriores|hinge|agachamento|cadeia posterior/iu.test(
+          focus,
+        )
+      )
+        return ['LOWER'];
+      return ['UPPER'];
+    };
+    while (remaining.length) {
+      const index = result.length;
+      const consecutive =
+        index > 0 &&
+        (days.status !== 'CONFIRMED' ||
+          (weekdays.indexOf(days.value[index]) -
+            weekdays.indexOf(days.value[index - 1]) +
+            7) %
+            7 ===
+            1);
+      const previous = patterns(result[index - 1] ?? '');
+      const best = consecutive
+        ? remaining.reduce(
+            (chosen, focus, candidate) =>
+              patterns(focus).filter((pattern) => previous.includes(pattern))
+                .length <
+              patterns(remaining[chosen]).filter((pattern) =>
+                previous.includes(pattern),
+              ).length
+                ? candidate
+                : chosen,
+            0,
+          )
+        : 0;
+      const selected = remaining.splice(best, 1)[0];
+      const unavoidableOverlap =
+        consecutive &&
+        patterns(selected).some((pattern) => previous.includes(pattern));
+      const objective = context.training.objective;
+      const prioritizeRecovery =
+        this.requiresConservativeDistribution(context) ||
+        (context.training.experience.status !== 'NOT_SET' &&
+          context.training.experience.value === 'BEGINNER') ||
+        (objective.status !== 'NOT_SET' &&
+          ['WEIGHT_LOSS', 'GENERAL_HEALTH', 'ACTIVE_RECOVERY'].includes(
+            objective.value,
+          ));
+      result.push(
+        unavoidableOverlap && prioritizeRecovery
+          ? `${selected} — esforço leve e volume reduzido`
+          : selected,
+      );
+    }
+    return result;
   }
 
   private crossfitSessionFocuses(

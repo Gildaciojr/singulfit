@@ -23,7 +23,14 @@ describe('PersonalizedCoachContextService', () => {
   });
   function setup() {
     const snapshot = {
-      identity: { userId: known('user') },
+      identity: {
+        userId: { status: 'KNOWN', value: 'user', sources: ['USER'] },
+        displayName: {
+          status: 'KNOWN',
+          value: '  Gildacio   Junior ',
+          sources: ['USER'],
+        },
+      },
       training: {
         primaryGoal: known('WEIGHT_LOSS'),
         environment: known('HOME'),
@@ -105,6 +112,15 @@ describe('PersonalizedCoachContextService', () => {
       input,
     };
   }
+  it('exposes only the canonical first name in personalized identity', async () => {
+    const s = setup();
+    const context = await s.service.build(s.input);
+    expect(context).toMatchObject({ identity: { preferredName: 'Gildacio' } });
+    s.snapshot.identity.displayName.value = '  ';
+    expect(await s.service.build(s.input)).toMatchObject({
+      identity: { preferredName: null },
+    });
+  });
   it.each([
     ['qual é meu objetivo?', 'emagrecimento'],
     ['onde eu disse que treino?', 'em casa'],
@@ -324,7 +340,7 @@ describe('PersonalizedCoachContextService', () => {
       ai as unknown as AIService,
       s.prisma as unknown as PrismaService,
       {
-        read: async () => ({ status: 'UNAVAILABLE', plan: null }),
+        read: () => Promise.resolve({ status: 'UNAVAILABLE', plan: null }),
       } as unknown as ConversationCurrentNutritionContextService,
       new ConversationPublicAnswerBoundaryService(),
       undefined,

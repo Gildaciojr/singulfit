@@ -846,7 +846,11 @@ export class CoachCommandService {
       },
     });
 
-    const parts = this.messageParts(input.content);
+    const parts = this.messageParts(
+      input.content,
+      3_400,
+      input.intent === 'WORKOUT' || input.intent === 'BOTH',
+    );
     await this.prisma.$transaction(async (transaction) => {
       for (const [partIndex, content] of parts.entries()) {
         const scheduledFor = new Date(input.scheduledFor.getTime() + partIndex);
@@ -1068,6 +1072,7 @@ export class CoachCommandService {
   private messageParts(
     content: string,
     maximumLength = 3_400,
+    workout = false,
   ): readonly string[] {
     const remaining = content.trim();
     if (remaining.length <= maximumLength) return Object.freeze([remaining]);
@@ -1078,14 +1083,28 @@ export class CoachCommandService {
       const paragraph = window.lastIndexOf('\n\n');
       const line = window.lastIndexOf('\n');
       const space = window.lastIndexOf(' ');
+      const semantic = workout
+        ? ([
+            ...window.matchAll(
+              /\n(?=\*(?:Sessão \d+|Segunda|Terça|Quarta|Quinta|Sexta|Sábado|Domingo)\b)/gu,
+            ),
+          ].at(-1)?.index ?? -1)
+        : -1;
+      const unit = workout
+        ? ([...window.matchAll(/\n(?=\*[^\n*]+\*\n)/gu)].at(-1)?.index ?? -1)
+        : -1;
       const boundary =
-        paragraph >= maximumLength / 2
-          ? paragraph
-          : line >= maximumLength / 2
-            ? line
-            : space >= maximumLength / 2
-              ? space
-              : -1;
+        semantic > 0
+          ? semantic
+          : unit >= maximumLength / 2
+            ? unit
+            : paragraph >= maximumLength / 2
+              ? paragraph
+              : line >= maximumLength / 2
+                ? line
+                : space >= maximumLength / 2
+                  ? space
+                  : -1;
       const cut = boundary > 0 ? boundary : maximumLength;
       parts.push(cursor.slice(0, cut).trimEnd());
       cursor = cursor.slice(cut).trimStart();

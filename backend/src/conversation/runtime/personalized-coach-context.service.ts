@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { coachUserFirstName } from '../../context/coach-user-name.policy';
 import { MessageDirection, MessageType } from '@prisma/client';
 import type { ConversationAIValue } from '../../ai/conversation-ai.contract';
 import { CoachProfileSnapshotBuilder } from '../../context/coach-profile-snapshot.builder';
@@ -178,6 +179,9 @@ export class PersonalizedCoachContextService {
           )
         : null;
     return this.freeze({
+      identity: {
+        preferredName: coachUserFirstName(snapshot.identity, input.userId),
+      },
       goals: {
         training: snapshot.training.primaryGoal,
         nutrition: snapshot.nutrition.primaryGoal,
@@ -384,7 +388,9 @@ export class PersonalizedCoachContextService {
       return typeof value === 'string'
         ? (labels[value] ??
             value.replace(/_/gu, ' ').toLocaleLowerCase('pt-BR'))
-        : String(value);
+        : typeof value === 'number' || typeof value === 'boolean'
+          ? String(value)
+          : '';
     };
     const value = human(datum.value);
     if (!value)

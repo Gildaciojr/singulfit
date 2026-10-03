@@ -74,6 +74,7 @@ export interface CoachConversationHumanContext {
 }
 
 export interface CoachConversationHumanContextBuildInput {
+  readonly expectedUserId?: string;
   readonly currentMessage?: string;
   readonly recentHistory?: readonly {
     readonly direction: 'INBOUND' | 'OUTBOUND';

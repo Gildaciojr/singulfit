@@ -23,6 +23,7 @@ import type { PlanningExecutionRouteSelection } from './planning-execution-route
 import type { GenerateWorkoutPlanV2Input } from '../workout/v2/workout-planning-generation.contract';
 import { WorkoutApplicationExecutorService } from '../workout/v2/execution/workout-application-executor.service';
 import { WorkoutPlanV2Formatter } from '../workout/v2/workout-plan-v2.formatter';
+import { coachUserFirstName } from '../context/coach-user-name.policy';
 import { CurrentWorkoutPlanReaderService } from '../workout/v2/current-workout-plan-reader.service';
 import { CurrentNutritionPlanReaderService } from '../diet/current-nutrition-plan-reader.service';
 import { CanonicalNutritionPlanPresenterService } from '../diet/canonical-nutrition-plan-presenter.service';
@@ -376,7 +377,18 @@ export class CoachPlanningExecutionDispatcherService {
       );
     }
     const content = this.workoutV2Formatter
-      .format(result.document)
+      .format(result.document, {
+        preferredName: coachUserFirstName(
+          input.workoutV2.generationInput.snapshot.identity,
+          input.userId,
+        ),
+        weekdays: result.document.sessions.map(
+          (session) =>
+            result.projection.days.find(
+              (day) => day.dayNumber === session.sequence,
+            )?.weekday ?? null,
+        ),
+      })
       .join('\n\n')
       .trimEnd();
     return this.result(content, 'WORKOUT_V2', true, 'PLAN');

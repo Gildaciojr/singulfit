@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { presentWorkoutSeconds } from './workout-duration.presenter';
 import type {
   WorkoutActivityV2,
   WorkoutPlanV2,
@@ -12,7 +13,13 @@ import { ConversationPublicAnswerBoundaryService } from '../../conversation/runt
 export class WorkoutPlanV2Formatter {
   private readonly publicBoundary =
     new ConversationPublicAnswerBoundaryService();
-  format(plan: WorkoutPlanV2): readonly string[] {
+  format(
+    plan: WorkoutPlanV2,
+    context: {
+      readonly preferredName?: string | null;
+      readonly weekdays?: readonly (string | null)[];
+    } = {},
+  ): readonly string[] {
     const messages: string[] = [];
     const secondary = plan.secondaryObjectives?.length
       ? `\nObjetivos complementares: ${plan.secondaryObjectives.map((objective) => this.objective(objective)).join(', ')}`
@@ -20,24 +27,50 @@ export class WorkoutPlanV2Formatter {
     const header = `*${plan.title}*\nModalidade: ${this.modality(plan.modality)}\nObjetivo: ${this.objective(plan.objective)}${secondary}`;
     if (plan.sessions.length === 0)
       return Object.freeze([this.publicText(header)]);
-    for (const session of plan.sessions) {
+    const duration =
+      plan.strategy.sessionDurationMinutes.status !== 'NOT_SET'
+        ? `, com cerca de ${plan.strategy.sessionDurationMinutes.value} min por sessão`
+        : '';
+    messages.push(
+      this.publicText(
+        `${context.preferredName ? `${context.preferredName}, preparei` : 'Preparei'} ${plan.sessions.length} sessões para sua semana${duration}. Veja a sequência e as orientações abaixo.\n\n${header}`,
+      ),
+    );
+    for (const [index, session] of plan.sessions.entries()) {
+      const days: Readonly<Record<string, string>> = {
+        MONDAY: 'Segunda',
+        TUESDAY: 'Terça',
+        WEDNESDAY: 'Quarta',
+        THURSDAY: 'Quinta',
+        FRIDAY: 'Sexta',
+        SATURDAY: 'Sábado',
+        SUNDAY: 'Domingo',
+      };
       messages.push(
-        this.publicText(`${header}\n\n${this.formatSession(session, ' — ')}`),
+        this.formatSession(
+          session,
+          ' — ',
+          days[context.weekdays?.[index] ?? ''],
+        ),
       );
     }
     return Object.freeze(messages);
   }
 
-  formatSession(session: WorkoutSessionV2, separator = ': '): string {
-    return this.publicText(
-      [
-        `*Sessão ${session.sequence}${separator}${session.label}*\n${session.estimatedDurationMinutes} min`,
-        ...session.blocks.flatMap((block) => [
-          `\n*${block.title}*`,
-          ...block.activities.map((activity) => this.formatActivity(activity)),
-        ]),
-      ].join('\n'),
-    );
+  formatSession(
+    session: WorkoutSessionV2,
+    separator = ': ',
+    weekday?: string,
+  ): string {
+    return [
+      this.publicText(
+        `*${weekday ?? `Sessão ${session.sequence}`}${separator}${session.label}*\n${session.estimatedDurationMinutes} min`,
+      ),
+      ...session.blocks.flatMap((block) => [
+        this.publicText(`\n*${block.title}*`),
+        ...block.activities.map((activity) => this.formatActivity(activity)),
+      ]),
+    ].join('\n');
   }
 
   formatActivity(activity: WorkoutActivityV2): string {
@@ -96,14 +129,22 @@ export class WorkoutPlanV2Formatter {
     if (activity.kind === 'STRENGTH')
       return `${activity.sets} × ${activity.repetitions}\nDescanso: ${activity.restSeconds} s\nEquipamento: ${this.equipment(activity.equipment)}\nIntensidade: ${this.intensity(activity.intensity)}`;
     if (activity.kind === 'TIMED')
-      return `${activity.rounds} rodada(s) · ${activity.durationSeconds} s no total${activity.workSeconds === null ? '' : `\nTrabalho: ${activity.workSeconds} s`}${activity.recoverySeconds === null ? '' : ` · Recuperação: ${activity.recoverySeconds} s`}\nEquipamento: ${this.equipment(activity.equipment)}\nIntensidade: ${this.intensity(activity.intensity)}`;
+      return `${activity.rounds} rodada(s) · ${presentWorkoutSeconds(activity.durationSeconds)} no total${activity.workSeconds === null ? '' : `\nTrabalho: ${presentWorkoutSeconds(activity.workSeconds)}`}${activity.recoverySeconds === null ? '' : ` · Recuperação: ${presentWorkoutSeconds(activity.recoverySeconds)}`}\nEquipamento: ${this.equipment(activity.equipment)}\nIntensidade: ${this.intensity(activity.intensity)}`;
     if (activity.kind === 'ENDURANCE')
       return `${activity.durationMinutes} min${activity.distanceKm === null ? '' : ` · ${activity.distanceKm} km`}\nIntensidade: ${this.intensity(activity.intensity)}`;
-    return activity.durationSeconds !== null
-      ? `${activity.durationSeconds}s.`
-      : activity.holdSeconds !== null
-        ? `sustentar ${activity.holdSeconds}s.`
-        : `${activity.repetitions ?? 'movimento controlado'}.`;
+    return (
+      [
+        activity.durationSeconds !== null
+          ? `${presentWorkoutSeconds(activity.durationSeconds)} no total`
+          : '',
+        activity.holdSeconds !== null
+          ? `sustente ${presentWorkoutSeconds(activity.holdSeconds)} por posição`
+          : '',
+        activity.repetitions ?? '',
+      ]
+        .filter(Boolean)
+        .join(' · ') || 'Movimento controlado.'
+    );
   }
 
   private equipment(values: readonly string[]): string {

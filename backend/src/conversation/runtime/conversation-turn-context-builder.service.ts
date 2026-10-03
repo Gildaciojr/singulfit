@@ -280,6 +280,7 @@ export class ConversationTurnContextBuilderService {
       referenceDate: snapshot.referenceDate,
     });
     const humanContext = this.humanContextBuilder.build(snapshot, {
+      expectedUserId: input.userId,
       currentMessage: input.text,
       recentHistory: history,
     });

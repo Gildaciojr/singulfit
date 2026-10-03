@@ -7,7 +7,7 @@ import type { CoachConversationHumanContext } from '../../context/coach-conversa
 import { PrismaService } from '../../prisma/prisma.service';
 import type { PublicNutritionResponse } from '../../diet/v2/presentation/public-nutrition-response.contract';
 import type { ConversationExecutionRoute } from '../contracts/conversation-execution-route.contract';
-import { COACH_CONVERSATIONAL_QA_V3_PROMPT } from './coach-conversational-qa.prompt.definition';
+import { COACH_CONVERSATIONAL_QA_V4_PROMPT } from './coach-conversational-qa.prompt.definition';
 import { ConversationCurrentNutritionContextService } from './conversation-current-nutrition-context.service';
 import { ConversationPublicAnswerBoundaryService } from './conversation-public-answer-boundary.service';
 import { normalizeConversationQACandidate } from './conversation-qa-candidate-normalizer';
@@ -151,7 +151,7 @@ export class ConversationQAExecutorService {
         conversationId: input.conversationId,
         messageId: input.messageId,
         type: AIJobType.TEXT,
-        promptName: COACH_CONVERSATIONAL_QA_V3_PROMPT.name,
+        promptName: COACH_CONVERSATIONAL_QA_V4_PROMPT.name,
       });
     } catch {
       return this.failed('AI_JOB_PREPARATION_FAILED');
@@ -204,7 +204,7 @@ export class ConversationQAExecutorService {
             personalized,
           ),
         ),
-        jsonSchema: COACH_CONVERSATIONAL_QA_V3_PROMPT.schema,
+        jsonSchema: COACH_CONVERSATIONAL_QA_V4_PROMPT.schema,
         timeoutMs: providerBudgetMs,
       });
     } catch (error: unknown) {

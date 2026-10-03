@@ -254,6 +254,7 @@ describe('ConversationQAExecutorService', () => {
   });
   it('sends the authorized personal context to reasoning QA instead of unverified human history', async () => {
     const context = {
+      identity: { preferredName: 'Gildacio' },
       goals: { training: 'emagrecimento' },
       training: { perceivedConditioning: 'iniciante' },
       safety: { physicalLimitations: 'joelho' },
