@@ -184,6 +184,52 @@ describe('IntegrationEventHandlersService', () => {
     expect(activationJourney.processUser).toHaveBeenCalledWith('user-id');
   });
 
+  it('rejects a foreign meal from image handling before Vision or public response', async () => {
+    const registry = new EventHandlerRegistry();
+    const nutrition = {
+      createMealFromMedia: jest
+        .fn()
+        .mockResolvedValue({
+          id: 'meal-id',
+          userId: 'user-b',
+          messageId: 'message-id',
+          mediaFileId: 'media-id',
+        }),
+    };
+    const vision = { analyzeMeal: jest.fn() };
+    const responses = { buildNutritionResponse: jest.fn() };
+    const handlers = new IntegrationEventHandlersService(
+      registry,
+      {} as PagBankWebhookService,
+      {} as EvolutionWebhookService,
+      nutrition as unknown as NutritionService,
+      vision as unknown as NutritionVisionService,
+      responses as unknown as ResponseBuilderService,
+      {} as EvolutionSendService,
+      {} as CoachCommandService,
+      {} as AutomationService,
+      {} as ActivationJourneyService,
+      {} as ActivationOnboardingService,
+      acquisitionRollout() as unknown as ProfileAcquisitionInternalRolloutService,
+      subscriptionLifecycle() as unknown as SubscriptionLifecycleService,
+    );
+    handlers.onModuleInit();
+    const handler = registry.get(INTERNAL_EVENT.MEDIA_RECEIVED);
+    if (!handler) throw new Error('Missing image handler');
+    await expect(
+      handler(
+        outboxEvent(INTERNAL_EVENT.MEDIA_RECEIVED, {
+          mediaType: MediaType.IMAGE,
+          mediaFileId: 'media-id',
+          userId: 'user-id',
+          messageId: 'message-id',
+        }),
+      ),
+    ).rejects.toThrow(/ownership mismatch/);
+    expect(vision.analyzeMeal).not.toHaveBeenCalled();
+    expect(responses.buildNutritionResponse).not.toHaveBeenCalled();
+  });
+
   it('keeps media handling unchanged for non-image events', async () => {
     const registry = new EventHandlerRegistry();
     const nutritionService = {

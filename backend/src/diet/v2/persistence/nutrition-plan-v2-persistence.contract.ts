@@ -16,6 +16,7 @@ export interface NutritionPlanV2Ownership {
 }
 
 export interface PersistNutritionPlanV2Input {
+  readonly expectedActivePlanId?: string;
   readonly generation:
     | PendingNutritionPlanGenerationResult
     | CompletedNutritionPlanGenerationResult;

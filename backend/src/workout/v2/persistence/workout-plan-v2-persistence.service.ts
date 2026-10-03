@@ -63,6 +63,25 @@ export class WorkoutPlanV2PersistenceService {
         throw new ConflictException(
           'AIJob concluído sem plano de treino V2 persistido',
         );
+      if (input.expectedActivePlanId) {
+        const current = await transaction.workoutPlan.findFirst({
+          where: {
+            userId: input.ownership.userId,
+            profileId: input.ownership.profileId,
+            status: WorkoutStatus.ACTIVE,
+          },
+          select: { id: true, userId: true, profileId: true },
+        });
+        if (
+          !current ||
+          current.id !== input.expectedActivePlanId ||
+          current.userId !== input.ownership.userId ||
+          current.profileId !== input.ownership.profileId
+        )
+          throw new ConflictException(
+            'O plano de treino mudou durante a troca. Consulte o plano atual antes de tentar novamente.',
+          );
+      }
       await this.repository.archiveActive(transaction, input.ownership.userId);
       const persisted = await this.repository.create(transaction, {
         userId: input.ownership.userId,

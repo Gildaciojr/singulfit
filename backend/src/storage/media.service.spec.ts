@@ -98,6 +98,25 @@ describe('MediaService', () => {
     };
   }
 
+  it.each(['userId', 'conversationId', 'messageId'])(
+    'rejects a foreign image %s before storage access',
+    async (field) => {
+      const s = createSubject();
+      s.prisma.mediaFile.findUnique.mockResolvedValue({
+        ...s.mediaFile,
+        [field]: 'foreign',
+      });
+      await expect(
+        s.service.getImageDataUrl('media-file-id', {
+          userId: 'user-id',
+          conversationId: 'conversation-id',
+          messageId: 'message-id',
+        }),
+      ).rejects.toThrow();
+      expect(s.storageProvider.open).not.toHaveBeenCalled();
+    },
+  );
+
   it('validates a JPEG signature, stores it and persists metadata', async () => {
     const subject = createSubject();
     const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0x00, 0x01, 0x02, 0x03]);

@@ -57,7 +57,11 @@ export class ConversationUnderstandingEngineService {
       tokenized,
     );
     const entities = this.entityRecognizer.recognize(normalized);
-    const operation = this.operationResolver.resolve(input, normalized);
+    const operation = this.operationResolver.resolve(
+      input,
+      normalized,
+      entities,
+    );
     const domain = this.domainResolver.resolve(
       input,
       normalized,

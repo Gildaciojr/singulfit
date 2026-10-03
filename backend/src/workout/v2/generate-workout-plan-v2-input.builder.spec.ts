@@ -24,6 +24,63 @@ describe('GenerateWorkoutPlanV2InputBuilder', () => {
     {} as CoachProfileSnapshotBuilder,
     {} as PrismaService,
   );
+  it('lets confirmed profile facts override inherited plan defaults while a temporary current declaration wins', async () => {
+    const personalSnapshot = {
+      ...snapshot,
+      training: {
+        ...snapshot.training,
+        environment: {
+          status: 'KNOWN',
+          value: 'HOME',
+          sources: ['COACH_PROFILE'],
+        },
+        weeklyFrequency: {
+          status: 'KNOWN',
+          value: 4,
+          sources: ['COACH_PROFILE'],
+        },
+      },
+    } as unknown as CoachProfileSnapshot;
+    const recognizedContext = {
+      environment: { status: 'CONFIRMED', value: 'FULL_GYM' },
+      weeklyFrequency: { status: 'CONFIRMED', value: 5 },
+      mutation: {
+        kind: 'PLAN_ADAPTATION',
+        sourceActivityKey: null,
+        sourceActivityName: null,
+        reason: 'FREQUENCY',
+        inheritedProfileFields: ['environment', 'weeklyFrequency'],
+      },
+    } as const;
+    const base = {
+      userId: 'user-id',
+      profileId: 'profile-id',
+      snapshot: personalSnapshot,
+      recognizedContext,
+      referenceDate: new Date('2026-08-18T12:00:00Z'),
+    };
+    const inherited = await builder.build(base);
+    expect(
+      inherited.generationInput.recognizedContext.environment,
+    ).toBeUndefined();
+    expect(
+      inherited.generationInput.recognizedContext.weeklyFrequency,
+    ).toBeUndefined();
+    const temporary = await builder.build({
+      ...base,
+      currentMessage: 'essa semana só consigo treinar em casa 3 vezes',
+    });
+    expect(temporary.generationInput.recognizedContext.environment).toEqual({
+      status: 'CONFIRMED',
+      value: 'HOME',
+    });
+    expect(temporary.generationInput.recognizedContext.weeklyFrequency).toEqual(
+      { status: 'CONFIRMED', value: 3 },
+    );
+    expect(personalSnapshot.training.weeklyFrequency).toMatchObject({
+      value: 4,
+    });
+  });
 
   it.each([
     'UNKNOWN',

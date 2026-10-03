@@ -188,6 +188,45 @@ function subject(existing: PersistedNutritionPlanV2 | null = null) {
 }
 
 describe('NutritionPlanV2PersistenceService', () => {
+  it.each([
+    {
+      userId: 'user-id',
+      profileId: 'profile-id',
+      implementation: 'V2',
+      planId: 'newer-plan',
+    },
+    {
+      userId: 'other',
+      profileId: 'profile-id',
+      implementation: 'V2',
+      planId: 'source-plan',
+    },
+    null,
+  ])(
+    'rejects stale or foreign mutation sources before archiving: %s',
+    async (current) => {
+      const test = subject();
+      const findUnique = jest.fn().mockResolvedValue(current);
+      test.repository.inTransaction.mockImplementation(async (operation) =>
+        operation({
+          nutritionPlanOwnership: { findUnique },
+        } as unknown as Prisma.TransactionClient),
+      );
+      await expect(
+        test.service.persist({
+          ...input(),
+          expectedActivePlanId: 'source-plan',
+        }),
+      ).rejects.toThrow();
+      expect(
+        test.nutritionPlanOwnership.acquireCanonicalLockInTransaction,
+      ).toHaveBeenCalled();
+      expect(findUnique).toHaveBeenCalled();
+      expect(test.repository.archiveActive).not.toHaveBeenCalled();
+      expect(test.repository.create).not.toHaveBeenCalled();
+      expect(test.aiService.completeJobInTransaction).not.toHaveBeenCalled();
+    },
+  );
   it('persists, prepares the inert projection and audits in one transaction', async () => {
     const test = subject();
 

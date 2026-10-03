@@ -7,6 +7,34 @@ import type { PrismaService } from '../prisma/prisma.service';
 import { CoachProactiveResponseService } from './coach-proactive-response.service';
 
 describe('CoachProactiveResponseService', () => {
+  it.each(['inbound', 'intervention'] as const)(
+    'rejects foreign %s before reminder mutation or outcome',
+    async (source) => {
+      const s = createSubject();
+      if (source === 'inbound')
+        s.prisma.message.findFirst.mockResolvedValue({
+          id: 'inbound-message-id',
+          conversationId: 'conversation-id',
+          content: 'fiz tudo',
+          timestamp: new Date('2026-08-19T22:15:00Z'),
+          conversation: { userId: 'user-b', user: { name: null } },
+        });
+      else
+        s.prisma.scheduledMessage.findFirst.mockResolvedValue({
+          id: 'foreign',
+          userId: 'user-b',
+          conversationId: 'conversation-id',
+        });
+      await expect(
+        s.service.capture({
+          userId: 'ordinary-user-id',
+          messageId: 'inbound-message-id',
+        }),
+      ).resolves.toMatchObject({ handled: false });
+      expect(s.transaction.scheduledMessage.upsert).not.toHaveBeenCalled();
+      expect(s.eventBus.publish).not.toHaveBeenCalled();
+    },
+  );
   it.each([
     ['HYDRATION_CHECK', 'sim, já bebi água', 'COMPLETED'],
     ['HYDRATION_CHECK', 'já bebi 1 litro', 'COMPLETED'],
@@ -117,11 +145,14 @@ describe('CoachProactiveResponseService', () => {
       replyToExternalMessageId:
         options?.replyId === undefined ? 'outbound-wa-id' : options.replyId,
       conversation: {
+        userId: 'ordinary-user-id',
         user: { name: options?.name === undefined ? null : options.name },
       },
     };
     const intervention = {
       id: 'intervention-id',
+      userId: 'ordinary-user-id',
+      conversationId: 'conversation-id',
       userId: 'ordinary-user-id',
       conversationId: 'conversation-id',
       content: 'Você conseguiu concluir o que combinamos?',

@@ -110,6 +110,21 @@ describe('CoachProfileAcquisitionProjectionService', () => {
       sources: [COACH_PROFILE_DATA_SOURCE.PROFILE_ACQUISITION],
     });
   });
+  it('prioritizes confirmed acquisition facts over a newer inferred active value', () => {
+    const service = new CoachProfileAcquisitionProjectionService();
+    const field = CoachProfileAcquisitionField.TRAINING_ENVIRONMENT;
+    const projection = service.project([
+      fieldValue(field, CoachProfileValueType.TEXT, {
+        status: CoachProfileValueStatus.INFERRED,
+        textValue: 'FULL_GYM',
+      }),
+      fieldValue(field, CoachProfileValueType.TEXT, { textValue: 'HOME' }),
+    ]);
+    expect(service.text(projection, field)).toMatchObject({
+      status: 'KNOWN',
+      value: 'HOME',
+    });
+  });
 
   it('projects confirmed empty medical conditions as known empty constraints', () => {
     const service = new CoachProfileAcquisitionProjectionService();
@@ -154,28 +169,25 @@ describe('CoachProfileAcquisitionProjectionService', () => {
     CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS,
     CoachProfileAcquisitionField.ALLERGIES,
     CoachProfileAcquisitionField.FOOD_INTOLERANCES,
-  ])(
-    'keeps active confirmed empty %s above historical conflicts',
-    (field) => {
-      const service = new CoachProfileAcquisitionProjectionService();
-      const projection = service.project([
-        textListRecord(field, {
-          id: `${field}-historical-conflict`,
-          status: CoachProfileValueStatus.CONFLICTED,
-          confirmationState: CoachProfileConfirmationState.REJECTED,
-          isActive: false,
-          confirmedAt: null,
-        }),
-        textListRecord(field),
-      ]);
+  ])('keeps active confirmed empty %s above historical conflicts', (field) => {
+    const service = new CoachProfileAcquisitionProjectionService();
+    const projection = service.project([
+      textListRecord(field, {
+        id: `${field}-historical-conflict`,
+        status: CoachProfileValueStatus.CONFLICTED,
+        confirmationState: CoachProfileConfirmationState.REJECTED,
+        isActive: false,
+        confirmedAt: null,
+      }),
+      textListRecord(field),
+    ]);
 
-      expect(service.textList(projection, field)).toEqual({
-        status: COACH_PROFILE_KNOWLEDGE_STATUS.KNOWN,
-        value: [],
-        sources: [COACH_PROFILE_DATA_SOURCE.PROFILE_ACQUISITION],
-      });
-    },
-  );
+    expect(service.textList(projection, field)).toEqual({
+      status: COACH_PROFILE_KNOWLEDGE_STATUS.KNOWN,
+      value: [],
+      sources: [COACH_PROFILE_DATA_SOURCE.PROFILE_ACQUISITION],
+    });
+  });
 
   it.each([
     CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS,
@@ -204,15 +216,28 @@ describe('CoachProfileAcquisitionProjectionService', () => {
       'TEXT',
       CoachProfileAcquisitionField.TRAINING_MODALITY,
       CoachProfileValueType.TEXT,
-      (service: CoachProfileAcquisitionProjectionService, projection: ReturnType<CoachProfileAcquisitionProjectionService['project']>) =>
-        service.text(projection, CoachProfileAcquisitionField.TRAINING_MODALITY),
+      (
+        service: CoachProfileAcquisitionProjectionService,
+        projection: ReturnType<
+          CoachProfileAcquisitionProjectionService['project']
+        >,
+      ) =>
+        service.text(
+          projection,
+          CoachProfileAcquisitionField.TRAINING_MODALITY,
+        ),
       'running',
     ],
     [
       'INTEGER',
       CoachProfileAcquisitionField.TRAINING_FREQUENCY,
       CoachProfileValueType.INTEGER,
-      (service: CoachProfileAcquisitionProjectionService, projection: ReturnType<CoachProfileAcquisitionProjectionService['project']>) =>
+      (
+        service: CoachProfileAcquisitionProjectionService,
+        projection: ReturnType<
+          CoachProfileAcquisitionProjectionService['project']
+        >,
+      ) =>
         service.integer(
           projection,
           CoachProfileAcquisitionField.TRAINING_FREQUENCY,
@@ -223,7 +248,12 @@ describe('CoachProfileAcquisitionProjectionService', () => {
       'BOOLEAN false',
       CoachProfileAcquisitionField.CARDIO_AVAILABILITY,
       CoachProfileValueType.BOOLEAN,
-      (service: CoachProfileAcquisitionProjectionService, projection: ReturnType<CoachProfileAcquisitionProjectionService['project']>) =>
+      (
+        service: CoachProfileAcquisitionProjectionService,
+        projection: ReturnType<
+          CoachProfileAcquisitionProjectionService['project']
+        >,
+      ) =>
         service.boolean(
           projection,
           CoachProfileAcquisitionField.CARDIO_AVAILABILITY,
@@ -234,8 +264,12 @@ describe('CoachProfileAcquisitionProjectionService', () => {
       'non-empty TEXT_LIST',
       CoachProfileAcquisitionField.ALLERGIES,
       CoachProfileValueType.TEXT_LIST,
-      (service: CoachProfileAcquisitionProjectionService, projection: ReturnType<CoachProfileAcquisitionProjectionService['project']>) =>
-        service.textList(projection, CoachProfileAcquisitionField.ALLERGIES),
+      (
+        service: CoachProfileAcquisitionProjectionService,
+        projection: ReturnType<
+          CoachProfileAcquisitionProjectionService['project']
+        >,
+      ) => service.textList(projection, CoachProfileAcquisitionField.ALLERGIES),
       ['amendoim'],
     ],
   ] as const)(
@@ -245,9 +279,11 @@ describe('CoachProfileAcquisitionProjectionService', () => {
       const projection = service.project([
         fieldValue(field, valueType, {
           id: `${field}-historical-conflict`,
-          textValue: valueType === CoachProfileValueType.TEXT ? 'obsolete' : null,
+          textValue:
+            valueType === CoachProfileValueType.TEXT ? 'obsolete' : null,
           integerValue: valueType === CoachProfileValueType.INTEGER ? 9 : null,
-          booleanValue: valueType === CoachProfileValueType.BOOLEAN ? true : null,
+          booleanValue:
+            valueType === CoachProfileValueType.BOOLEAN ? true : null,
           textListValue:
             valueType === CoachProfileValueType.TEXT_LIST ? ['obsolete'] : [],
           status: CoachProfileValueStatus.CONFLICTED,
@@ -257,7 +293,8 @@ describe('CoachProfileAcquisitionProjectionService', () => {
           confirmedAt: null,
         }),
         fieldValue(field, valueType, {
-          textValue: valueType === CoachProfileValueType.TEXT ? 'running' : null,
+          textValue:
+            valueType === CoachProfileValueType.TEXT ? 'running' : null,
           textListValue:
             valueType === CoachProfileValueType.TEXT_LIST ? ['amendoim'] : [],
         }),

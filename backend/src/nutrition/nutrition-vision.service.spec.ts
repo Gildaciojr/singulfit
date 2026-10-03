@@ -39,6 +39,9 @@ describe('NutritionVisionService', () => {
     };
     const transaction = {
       mealAnalysis: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ id: 'analysis-id', mealId: 'meal-id', meal }),
         updateMany: jest.fn().mockResolvedValue({
           count: 1,
         }),
@@ -64,6 +67,26 @@ describe('NutritionVisionService', () => {
       },
     };
     const prisma = {
+      message: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'message-id',
+          conversationId: 'conversation-id',
+          conversation: { id: 'conversation-id', userId: 'user-id' },
+        }),
+      },
+      mediaFile: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'media-id',
+          userId: 'user-id',
+          conversationId: 'conversation-id',
+          messageId: 'message-id',
+        }),
+      },
+      mealAnalysis: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ id: 'analysis-id', mealId: 'meal-id', meal }),
+      },
       $transaction: jest.fn(
         async (callback: (client: typeof transaction) => Promise<unknown>) =>
           callback(transaction),
@@ -76,6 +99,9 @@ describe('NutritionVisionService', () => {
       createJob: jest.fn().mockResolvedValue({
         id: 'job-id',
         status: AIJobStatus.PENDING,
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
         promptVersion: {
           prompt: 'Prompt nutricional',
         },
@@ -164,6 +190,118 @@ describe('NutritionVisionService', () => {
       completedMeal,
     };
   }
+
+  it.each(['meal', 'message', 'media', 'analysis', 'context'] as const)(
+    'rejects foreign %s before quota and provider',
+    async (source) => {
+      const s = createSubject('{}');
+      if (source === 'meal')
+        s.nutritionService.getMeal.mockResolvedValue({
+          ...s.completedMeal,
+          userId: 'foreign',
+        });
+      if (source === 'message')
+        s.prisma.message.findUnique.mockResolvedValue({
+          id: 'message-id',
+          conversationId: 'conversation-id',
+          conversation: { id: 'conversation-id', userId: 'foreign' },
+        });
+      if (source === 'media')
+        s.prisma.mediaFile.findUnique.mockResolvedValue({
+          id: 'media-id',
+          userId: 'foreign',
+          conversationId: 'conversation-id',
+          messageId: 'message-id',
+        });
+      if (source === 'analysis')
+        s.prisma.mealAnalysis.findUnique.mockResolvedValue({
+          id: 'analysis-id',
+          mealId: 'meal-id',
+          meal: { ...s.completedMeal, userId: 'foreign' },
+        });
+      if (source === 'context')
+        s.intelligenceService.buildUserNutritionContext.mockResolvedValue({
+          userId: 'foreign',
+        });
+      await expect(s.service.analyzeMeal('meal-id', 'user-id')).rejects.toThrow(
+        /ownership mismatch/,
+      );
+      expect(s.aiService.createJob).not.toHaveBeenCalled();
+      expect(s.aiService.runVisionJob).not.toHaveBeenCalled();
+      expect(s.transaction.mealAnalysis.update).not.toHaveBeenCalled();
+      expect(s.eventBus.publish).not.toHaveBeenCalled();
+    },
+  );
+
+  it('reverses the owned reservation on a mismatched job before provider', async () => {
+    const s = createSubject('{}');
+    s.aiService.createJob.mockResolvedValue({
+      id: 'job-id',
+      userId: 'user-id',
+      conversationId: 'foreign',
+      messageId: 'message-id',
+    });
+    await expect(s.service.analyzeMeal('meal-id', 'user-id')).rejects.toThrow(
+      /ownership mismatch/,
+    );
+    expect(s.aiService.runVisionJob).not.toHaveBeenCalled();
+    expect(s.aiService.failJob).toHaveBeenCalledWith(
+      'job-id',
+      expect.any(Error),
+      undefined,
+      'user-id',
+    );
+  });
+
+  it('rejects late foreign analysis before item persistence and reverses the canonical reservation', async () => {
+    const s = createSubject(
+      JSON.stringify({
+        foods: [],
+        totalCalories: 0,
+        protein: 0,
+        carbs: 0,
+        fat: 0,
+        fiber: 0,
+        sugar: 0,
+        ultraProcessedRatio: 0,
+        vegetableGrams: 0,
+        hydrationMl: 0,
+        mealCategory: 'LUNCH',
+        confidence: 0.9,
+      }),
+    );
+    s.transaction.mealAnalysis.findUnique.mockResolvedValue({
+      id: 'analysis-id',
+      mealId: 'meal-id',
+      meal: { ...s.completedMeal, userId: 'foreign' },
+    });
+    await expect(s.service.analyzeMeal('meal-id', 'user-id')).rejects.toThrow(
+      /ownership mismatch/,
+    );
+    expect(s.transaction.mealAnalysis.update).not.toHaveBeenCalled();
+    expect(s.transaction.mealItem.createMany).not.toHaveBeenCalled();
+    expect(s.aiService.completeJobInTransaction).not.toHaveBeenCalled();
+    expect(s.aiService.failJob).toHaveBeenCalledWith(
+      'job-id',
+      expect.any(Error),
+      expect.objectContaining({ model: 'vision-model' }),
+      'user-id',
+    );
+    expect(s.eventBus.publish).not.toHaveBeenCalled();
+  });
+
+  it('preserves canonical reversal when the processing claim loses its fence', async () => {
+    const s = createSubject('{}');
+    s.transaction.mealAnalysis.updateMany.mockResolvedValue({ count: 0 });
+    await expect(s.service.analyzeMeal('meal-id', 'user-id')).rejects.toThrow();
+    expect(s.aiService.runVisionJob).not.toHaveBeenCalled();
+    expect(s.aiService.failJob).toHaveBeenCalledWith(
+      'job-id',
+      expect.any(Error),
+      undefined,
+      'user-id',
+    );
+  });
 
   it('persists meal items, totals, AI job completion and usage atomically', async () => {
     const subject = createSubject(
@@ -283,6 +421,7 @@ describe('NutritionVisionService', () => {
       where: {
         id: 'analysis-id',
         status: MealAnalysisStatus.PROCESSING,
+        meal: { userId: 'user-id' },
       },
       data: expect.objectContaining({
         status: MealAnalysisStatus.FAILED,
@@ -297,6 +436,7 @@ describe('NutritionVisionService', () => {
       expect.objectContaining({
         responseId: 'response-id',
       }),
+      'user-id',
     );
     expect(subject.eventService.recordInTransaction).toHaveBeenCalledWith(
       subject.transaction,

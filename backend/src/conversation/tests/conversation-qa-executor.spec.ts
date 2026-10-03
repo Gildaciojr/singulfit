@@ -3,6 +3,7 @@ import { ConflictException } from '@nestjs/common';
 import { ConversationPublicAnswerBoundaryService } from '../runtime/conversation-public-answer-boundary.service';
 import { ConversationQAExecutorService } from '../runtime/conversation-qa-executor.service';
 import { ConversationNutritionDeterministicAnswerService } from '../runtime/conversation-nutrition-deterministic-answer.service';
+import type { PersonalizedCoachContextService } from '../runtime/personalized-coach-context.service';
 import type { CoachConversationHumanContext } from '../../context/coach-conversation-human-context.contract';
 import type { PublicNutritionResponse } from '../../diet/v2/presentation/public-nutrition-response.contract';
 import type { ConversationExecutionRoute } from '../contracts/conversation-execution-route.contract';
@@ -104,6 +105,7 @@ describe('ConversationQAExecutorService', () => {
     output: object,
     status = AIJobStatus.PENDING,
     deterministicNutrition = false,
+    personalized?: PersonalizedCoachContextService,
   ) {
     const response = {
       responseId: 'provider-response',
@@ -116,6 +118,7 @@ describe('ConversationQAExecutorService', () => {
     const ai = {
       createJob: jest.fn().mockResolvedValue({
         id: 'job-id',
+        userId: 'user-id',
         status,
         result: status === AIJobStatus.COMPLETED ? output : null,
       }),
@@ -125,6 +128,7 @@ describe('ConversationQAExecutorService', () => {
       failPendingJob: jest.fn().mockResolvedValue(undefined),
       getJob: jest.fn().mockResolvedValue({
         id: 'job-id',
+        userId: 'user-id',
         status: AIJobStatus.COMPLETED,
         result: output,
       }),
@@ -151,12 +155,145 @@ describe('ConversationQAExecutorService', () => {
         deterministicNutrition
           ? new ConversationNutritionDeterministicAnswerService()
           : undefined,
+        personalized,
       ),
       ai,
       prisma,
       currentNutrition,
     };
   }
+
+  it.each([AIJobStatus.PENDING, AIJobStatus.COMPLETED, AIJobStatus.PROCESSING])(
+    'validates personalized assertions before exposing fresh, stored or joined answers: %s',
+    async (status) => {
+      const personalized = {
+        build: jest
+          .fn()
+          .mockResolvedValue({ policy: { noExpenditureSource: true } }),
+        answer: jest.fn().mockReturnValue(null),
+        validatesAnswer: jest.fn().mockReturnValue(false),
+      };
+      const subject = createSubject(
+        {
+          disposition: 'ANSWER',
+          domain: 'PROGRESS',
+          answer: 'Você queimou 600 kcal.',
+          followUpQuestion: null,
+          grounding: 'PROFILE',
+          confidence: 'HIGH',
+        },
+        status,
+        false,
+        personalized as unknown as PersonalizedCoachContextService,
+      );
+      await expect(
+        subject.service.execute({
+          userId: 'user-id',
+          conversationId: 'conversation-id',
+          messageId: 'message-id',
+          route: route('ANSWER_MESSAGE'),
+          humanContext: human('Como estou indo?'),
+        }),
+      ).resolves.toMatchObject({
+        status: 'FAILED',
+        reason: 'UNSUPPORTED_PERSONAL_ASSERTION',
+      });
+      expect(subject.ai.completeJobInTransaction).not.toHaveBeenCalled();
+      expect(personalized.validatesAnswer).toHaveBeenCalled();
+    },
+  );
+  it('fails closed on personalized ownership failure before creating an AI job', async () => {
+    const personalized = {
+      build: jest.fn().mockRejectedValue(new Error('ownership')),
+    };
+    const subject = createSubject(
+      {},
+      AIJobStatus.PENDING,
+      false,
+      personalized as unknown as PersonalizedCoachContextService,
+    );
+    await expect(
+      subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+        route: route('ANSWER_MESSAGE'),
+        humanContext: human('Qual meu objetivo?'),
+      }),
+    ).resolves.toMatchObject({
+      status: 'FAILED',
+      reason: 'PERSONALIZED_CONTEXT_UNAVAILABLE',
+    });
+    expect(subject.ai.createJob).not.toHaveBeenCalled();
+  });
+  it('answers a confirmed profile read without the provider or any job write', async () => {
+    const personalized = {
+      build: jest.fn().mockResolvedValue({}),
+      answer: jest.fn().mockReturnValue('Seu objetivo é emagrecimento.'),
+    };
+    const subject = createSubject(
+      {},
+      AIJobStatus.PENDING,
+      false,
+      personalized as unknown as PersonalizedCoachContextService,
+    );
+    await expect(
+      subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+        route: route('ANSWER_MESSAGE'),
+        humanContext: human('Qual meu objetivo?'),
+      }),
+    ).resolves.toMatchObject({
+      status: 'COMPLETED',
+      content: 'Seu objetivo é emagrecimento.',
+    });
+    expect(subject.ai.createJob).not.toHaveBeenCalled();
+    expect(subject.ai.runTextJob).not.toHaveBeenCalled();
+  });
+  it('sends the authorized personal context to reasoning QA instead of unverified human history', async () => {
+    const context = {
+      goals: { training: 'emagrecimento' },
+      training: { perceivedConditioning: 'iniciante' },
+      safety: { physicalLimitations: 'joelho' },
+      recentConversation: [],
+    };
+    const personalized = {
+      build: jest.fn().mockResolvedValue(context),
+      answer: jest.fn().mockReturnValue(null),
+      validatesAnswer: jest.fn().mockReturnValue(true),
+    };
+    const subject = createSubject(
+      {
+        disposition: 'ANSWER',
+        domain: 'WORKOUT',
+        answer: 'Vamos considerar seu objetivo e suas limitações.',
+        followUpQuestion: null,
+        grounding: 'PROFILE',
+        confidence: 'HIGH',
+      },
+      AIJobStatus.PENDING,
+      false,
+      personalized as unknown as PersonalizedCoachContextService,
+    );
+    await expect(
+      subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+        route: route('ANSWER_MESSAGE'),
+        humanContext: human('Para mim é melhor caminhar ou correr?', [
+          { direction: 'USER', text: 'unverified foreign history' },
+        ]),
+      }),
+    ).resolves.toMatchObject({ status: 'COMPLETED' });
+    const payload = JSON.parse(
+      subject.ai.runTextJob.mock.calls[0][1].input,
+    ) as { trustedContext: unknown };
+    expect(payload.trustedContext).toEqual(context);
+    expect(JSON.stringify(payload)).not.toContain('unverified foreign history');
+  });
 
   it('answers canonical nutrition facts without creating or running an AI job', async () => {
     const subject = createSubject({}, AIJobStatus.PENDING, true);
@@ -867,4 +1004,48 @@ describe('ConversationQAExecutorService', () => {
       reason: 'PUBLIC_BOUNDARY_REJECTED',
     });
   });
+  it.each([AIJobStatus.COMPLETED, AIJobStatus.PROCESSING])(
+    'rejects a foreign job returned by a mock: %s',
+    async (status) => {
+      const subject = createSubject(
+        {
+          disposition: 'ANSWER',
+          domain: 'GENERAL',
+          answer: 'Foreign answer',
+          followUpQuestion: null,
+          grounding: 'PROFILE',
+          confidence: 'HIGH',
+        },
+        status,
+      );
+      if (status === AIJobStatus.COMPLETED)
+        subject.ai.createJob.mockResolvedValue({
+          id: 'job-id',
+          status,
+          userId: 'other',
+          result: {},
+        });
+      else
+        subject.ai.getJob.mockResolvedValue({
+          id: 'job-id',
+          status: AIJobStatus.COMPLETED,
+          userId: 'other',
+          result: {},
+        });
+      await expect(
+        subject.service.execute({
+          userId: 'user-id',
+          conversationId: 'conversation-id',
+          messageId: 'message-id',
+          route: route('ANSWER_MESSAGE'),
+          humanContext: human('Qual meu objetivo?'),
+        }),
+      ).resolves.toMatchObject({
+        status: 'FAILED',
+        reason: 'AI_JOB_OWNERSHIP_MISMATCH',
+      });
+      expect(subject.ai.runTextJob).not.toHaveBeenCalled();
+      expect(subject.ai.completeJobInTransaction).not.toHaveBeenCalled();
+    },
+  );
 });

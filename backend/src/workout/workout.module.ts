@@ -23,11 +23,13 @@ import { GenerateWorkoutPlanV2InputBuilder } from './v2/generate-workout-plan-v2
 import { CurrentWorkoutPlanReaderService } from './v2/current-workout-plan-reader.service';
 import { WorkoutPlanV2StoredDocumentParser } from './v2/workout-plan-v2-stored-document.parser';
 import { WorkoutPlanMutationResolverService } from './v2/workout-plan-mutation-resolver.service';
+import { ConversationPlanReferenceService } from '../conversation/understanding/conversation-plan-reference.service';
 
 @Module({
   imports: [AuthModule, AIModule, SubscriptionsModule, ContextModule],
   controllers: [WorkoutController],
   providers: [
+    ConversationPlanReferenceService,
     WorkoutService,
     WorkoutGeneratorService,
     WorkoutArtifactResolverService,
@@ -52,6 +54,7 @@ import { WorkoutPlanMutationResolverService } from './v2/workout-plan-mutation-r
     WorkoutApplicationExecutorService,
   ],
   exports: [
+    ConversationPlanReferenceService,
     WorkoutService,
     WorkoutGeneratorService,
     WorkoutPlanningEngineV2Service,

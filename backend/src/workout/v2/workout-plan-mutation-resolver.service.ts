@@ -1,4 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import {
+  ConversationPlanReferenceService,
+  type ConversationPlanReferenceInput,
+} from '../../conversation/understanding/conversation-plan-reference.service';
+import { ConversationReferenceResolverService } from '../../conversation/understanding/conversation-reference-resolver.service';
 import type {
   WorkoutPlanV2,
   WorkoutActivityV2,
@@ -23,18 +28,23 @@ export type WorkoutPlanMutationResolution =
 
 @Injectable()
 export class WorkoutPlanMutationResolverService {
-  constructor(private readonly reader: CurrentWorkoutPlanReaderService) {}
+  constructor(
+    private readonly reader: CurrentWorkoutPlanReaderService,
+    @Optional()
+    private readonly recentReferences?: ConversationPlanReferenceService,
+  ) {}
 
   async resolve(
     userId: string,
     message: string | undefined,
     declared: WorkoutRecognizedContext,
+    referenceInput?: ConversationPlanReferenceInput,
   ): Promise<WorkoutPlanMutationResolution> {
     const text = this.normalize(message ?? '');
     const kind = this.kind(text);
     if (!kind) return Object.freeze({ status: 'NOT_A_MUTATION' });
     const current = await this.reader.read(userId);
-    if (current.status !== 'AVAILABLE') {
+    if (current.status !== 'AVAILABLE' || current.plan.userId !== userId) {
       if (kind === 'SUBSTITUTION_CANDIDATE' || kind === 'AMBIGUOUS_MODALITY') {
         return Object.freeze({ status: 'NOT_A_MUTATION' });
       }
@@ -72,6 +82,7 @@ export class WorkoutPlanMutationResolverService {
           purpose: 'ADAPTATION',
           mutation: Object.freeze({
             kind: 'PLAN_ADAPTATION',
+            inheritedProfileFields: this.inheritedFields(declared),
             sourceActivityKey: null,
             sourceActivityName: null,
             reason,
@@ -80,7 +91,63 @@ export class WorkoutPlanMutationResolverService {
       });
     }
 
-    const target = this.substitutionTarget(current.plan.document, text);
+    let target = this.substitutionTarget(current.plan.document, text);
+    if (
+      target.status !== 'RESOLVED' &&
+      referenceInput &&
+      this.recentReferences
+    ) {
+      const recent =
+        await this.recentReferences.recentAssistant(referenceInput);
+      if (recent) {
+        const presented = current.plan.document.sessions.filter(
+          (session) =>
+            this.normalize(recent).includes(this.normalize(session.label)) &&
+            session.blocks
+              .flatMap((block) => block.activities)
+              .some((activity) =>
+                this.normalize(recent).includes(this.normalize(activity.name)),
+              ),
+        );
+        if (presented.length === 1) {
+          const scoped = { ...current.plan.document, sessions: presented };
+          target = this.substitutionTarget(scoped, text);
+          const ordinal = new ConversationReferenceResolverService().ordinal(
+            text,
+          );
+          if (
+            target.status !== 'RESOLVED' &&
+            ordinal !== null &&
+            /\b(primeir[oa]|segund[oa]|terceir[oa]|quart[oa]|quint[oa]|sext[oa]|setim[oa])\b/u.test(
+              text,
+            )
+          ) {
+            const activity = presented[0].blocks.flatMap(
+              (block) => block.activities,
+            )[ordinal - 1];
+            if (activity)
+              target = Object.freeze({ status: 'RESOLVED' as const, activity });
+          }
+        }
+        if (
+          target.status !== 'RESOLVED' &&
+          /\b(esse|este) exercicio\b/u.test(text)
+        ) {
+          const mentioned = current.plan.document.sessions
+            .flatMap((session) =>
+              session.blocks.flatMap((block) => block.activities),
+            )
+            .filter((activity) =>
+              this.normalize(recent).includes(this.normalize(activity.name)),
+            );
+          if (mentioned.length === 1)
+            target = Object.freeze({
+              status: 'RESOLVED' as const,
+              activity: mentioned[0],
+            });
+        }
+      }
+    }
     if (target.status !== 'RESOLVED') {
       return Object.freeze({
         status: 'CLARIFICATION',
@@ -115,6 +182,11 @@ export class WorkoutPlanMutationResolverService {
         purpose: 'ADAPTATION',
         mutation: Object.freeze({
           kind: 'EXERCISE_SUBSTITUTION',
+          inheritedProfileFields: this.inheritedFields(declared).filter(
+            (field) => field !== 'equipment' || !equipment,
+          ),
+          sourcePlanId: current.plan.aggregateId,
+          sourceCalendar: current.plan.calendar,
           sourceActivityKey: target.activity.activityKey,
           sourceActivityName: target.activity.name,
           reason,
@@ -139,7 +211,7 @@ export class WorkoutPlanMutationResolverService {
       return 'AMBIGUOUS_MODALITY';
     }
     if (
-      /\b(troque|trocar|substitua|substituir|nao posso fazer|nao tenho essa maquina|sem essa maquina)\b/u.test(
+      /\b(troque|trocar|substitua|substituir|nao posso fazer|nao consigo fazer|nao tenho essa maquina|sem essa maquina|do[i]? (?:meu|o) joelho|doendo (?:meu|o) joelho|outro exercicio)\b/u.test(
         text,
       )
     ) {
@@ -175,16 +247,25 @@ export class WorkoutPlanMutationResolverService {
   ):
     | Readonly<{ status: 'RESOLVED'; activity: WorkoutActivityV2 }>
     | Readonly<{ status: 'MISSING' | 'AMBIGUOUS' }> {
-    if (/\b(esse|este) exercicio\b/u.test(text)) {
-      return Object.freeze({ status: 'MISSING' });
-    }
     const activities = plan.sessions.flatMap((session) =>
       session.blocks.flatMap((block) => block.activities),
     );
     let matches = activities.filter((activity) =>
       text.includes(this.normalize(activity.name)),
     );
+    if (matches.length === 0) {
+      const named =
+        /^(?:troque|trocar|substitua|substituir|nao tenho) (?:o |a )?(.+?)(?: por .+)?$/u.exec(
+          text,
+        )?.[1];
+      if (named)
+        matches = activities.filter((activity) => {
+          const name = this.normalize(activity.name);
+          return name === named || name.startsWith(`${named} `);
+        });
+    }
     if (
+      matches.length === 0 &&
       /\b(essa maquina|sem essa maquina|nao tenho essa maquina)\b/u.test(text)
     ) {
       matches = activities.filter((activity) =>
@@ -200,7 +281,7 @@ export class WorkoutPlanMutationResolverService {
     text: string,
   ): NonNullable<WorkoutRecognizedContext['mutation']>['reason'] {
     if (/\b(maquina|equipamento|nao tenho)\b/u.test(text)) return 'EQUIPMENT';
-    return /\b(dor|lesao|nao posso)\b/u.test(text)
+    return /\b(dor|doi|doendo|lesao|nao posso|nao consigo)\b/u.test(text)
       ? 'LIMITATION'
       : 'PREFERENCE';
   }
@@ -243,6 +324,24 @@ export class WorkoutPlanMutationResolverService {
         Object.entries(declared).filter(([, value]) => value !== undefined),
       ),
     });
+  }
+
+  private inheritedFields(
+    declared: WorkoutRecognizedContext,
+  ): readonly (keyof WorkoutRecognizedContext)[] {
+    const fields: readonly (keyof WorkoutRecognizedContext)[] = [
+      'modality',
+      'objective',
+      'experience',
+      'weeklyFrequency',
+      'sessionDurationMinutes',
+      'environment',
+      'equipment',
+      'muscleFocus',
+    ];
+    return Object.freeze(
+      fields.filter((field) => declared[field] === undefined),
+    );
   }
 
   private normalize(value: string): string {

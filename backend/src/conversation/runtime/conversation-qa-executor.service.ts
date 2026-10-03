@@ -7,11 +7,13 @@ import type { CoachConversationHumanContext } from '../../context/coach-conversa
 import { PrismaService } from '../../prisma/prisma.service';
 import type { PublicNutritionResponse } from '../../diet/v2/presentation/public-nutrition-response.contract';
 import type { ConversationExecutionRoute } from '../contracts/conversation-execution-route.contract';
-import { COACH_CONVERSATIONAL_QA_V2_PROMPT } from './coach-conversational-qa.prompt.definition';
+import { COACH_CONVERSATIONAL_QA_V3_PROMPT } from './coach-conversational-qa.prompt.definition';
 import { ConversationCurrentNutritionContextService } from './conversation-current-nutrition-context.service';
 import { ConversationPublicAnswerBoundaryService } from './conversation-public-answer-boundary.service';
 import { normalizeConversationQACandidate } from './conversation-qa-candidate-normalizer';
 import { ConversationNutritionDeterministicAnswerService } from './conversation-nutrition-deterministic-answer.service';
+import { PersonalizedCoachContextService } from './personalized-coach-context.service';
+import type { ConversationEntity } from '../contracts/conversation-entity.contract';
 import type {
   ConversationAnswerCandidate,
   ConversationAnswerDisposition,
@@ -29,6 +31,8 @@ export interface ConversationQAExecutionInput {
   readonly previousAnswer?: string | null;
   readonly previousFollowUpQuestion?: string | null;
   readonly deadlineAtMs?: number;
+  readonly referenceDate?: Date;
+  readonly entities?: readonly ConversationEntity[];
 }
 
 export type ConversationQAExecutionResult =
@@ -82,6 +86,8 @@ export class ConversationQAExecutorService {
     private readonly boundary: ConversationPublicAnswerBoundaryService,
     @Optional()
     private readonly deterministicNutrition?: ConversationNutritionDeterministicAnswerService,
+    @Optional()
+    private readonly personalized?: PersonalizedCoachContextService,
   ) {}
 
   async execute(
@@ -92,6 +98,35 @@ export class ConversationQAExecutorService {
     if (!this.providerBudget(deadlineAtMs)) {
       return this.failed('INSUFFICIENT_RUNTIME_BUDGET');
     }
+    let personalized: ConversationAIValue = null;
+    if (this.personalized) {
+      try {
+        personalized = await this.personalized.build({
+          ...input,
+          referenceDate: input.referenceDate ?? new Date(),
+        });
+      } catch {
+        return this.failed('PERSONALIZED_CONTEXT_UNAVAILABLE');
+      }
+    }
+    const personalAnswer = this.personalized?.answer(
+      personalized,
+      input.entities ?? [],
+      input.humanContext.currentMessage,
+    );
+    if (personalAnswer)
+      return this.candidateResult(
+        Object.freeze({
+          disposition: 'ANSWER',
+          domain: 'GENERAL',
+          answer: personalAnswer,
+          followUpQuestion: null,
+          grounding: 'PROFILE',
+          confidence: 'HIGH',
+        }),
+        'DETERMINISTIC_FALLBACK',
+        0,
+      );
     const currentNutrition = await this.currentNutrition.read(input.userId);
     const deterministic = this.deterministicNutrition?.answer({
       request: input.humanContext.currentMessage,
@@ -116,20 +151,31 @@ export class ConversationQAExecutorService {
         conversationId: input.conversationId,
         messageId: input.messageId,
         type: AIJobType.TEXT,
-        promptName: COACH_CONVERSATIONAL_QA_V2_PROMPT.name,
+        promptName: COACH_CONVERSATIONAL_QA_V3_PROMPT.name,
       });
     } catch {
       return this.failed('AI_JOB_PREPARATION_FAILED');
     }
 
+    if (job.userId !== undefined && job.userId !== input.userId)
+      return this.failed('AI_JOB_OWNERSHIP_MISMATCH');
     if (job.status === AIJobStatus.COMPLETED) {
       const stored = this.parseCandidate(job.result);
+      if (
+        stored &&
+        this.personalized &&
+        !this.personalized.validatesAnswer(
+          personalized,
+          [stored.answer, stored.followUpQuestion].filter(Boolean).join('\n'),
+        )
+      )
+        return this.failed('UNSUPPORTED_PERSONAL_ASSERTION');
       return stored
         ? this.candidateResult(stored, 'AI_REUSED', 0)
         : this.failed('STORED_ANSWER_INVALID');
     }
     if (job.status === AIJobStatus.PROCESSING) {
-      return this.join(job.id, deadlineAtMs);
+      return this.join(job.id, deadlineAtMs, personalized, input.userId);
     }
     if (job.status !== AIJobStatus.PENDING) {
       return this.failed(`AI_JOB_${job.status}`);
@@ -155,14 +201,15 @@ export class ConversationQAExecutorService {
             currentNutrition,
             input.previousAnswer ?? null,
             input.previousFollowUpQuestion ?? null,
+            personalized,
           ),
         ),
-        jsonSchema: COACH_CONVERSATIONAL_QA_V2_PROMPT.schema,
+        jsonSchema: COACH_CONVERSATIONAL_QA_V3_PROMPT.schema,
         timeoutMs: providerBudgetMs,
       });
     } catch (error: unknown) {
       if (error instanceof ConflictException) {
-        return this.join(job.id, deadlineAtMs);
+        return this.join(job.id, deadlineAtMs, personalized, input.userId);
       }
       await this.ai.failJob(job.id, error);
       return this.failed(
@@ -176,6 +223,26 @@ export class ConversationQAExecutorService {
     if (!candidate) {
       await this.ai.failJob(job.id, new Error('INVALID_QA_RESPONSE'), response);
       return this.failed('INVALID_AI_RESPONSE', providerDurationMs, response);
+    }
+    if (
+      this.personalized &&
+      !this.personalized.validatesAnswer(
+        personalized,
+        [candidate.answer, candidate.followUpQuestion]
+          .filter(Boolean)
+          .join('\n'),
+      )
+    ) {
+      await this.ai.failJob(
+        job.id,
+        new Error('UNSUPPORTED_PERSONAL_ASSERTION'),
+        response,
+      );
+      return this.failed(
+        'UNSUPPORTED_PERSONAL_ASSERTION',
+        providerDurationMs,
+        response,
+      );
     }
 
     try {
@@ -204,12 +271,25 @@ export class ConversationQAExecutorService {
   private async join(
     aiJobId: string,
     deadlineAtMs: number,
+    personalized: ConversationAIValue = null,
+    userId?: string,
   ): Promise<ConversationQAExecutionResult> {
     const joinDeadlineAtMs = deadlineAtMs - OFFICIAL_SELECTION_MARGIN_MS;
     while (Date.now() < joinDeadlineAtMs) {
       const job = await this.ai.getJob(aiJobId);
+      if (job.userId !== undefined && job.userId !== userId)
+        return this.failed('AI_JOB_OWNERSHIP_MISMATCH');
       if (job.status === AIJobStatus.COMPLETED) {
         const stored = this.parseCandidate(job.result);
+        if (
+          stored &&
+          this.personalized &&
+          !this.personalized.validatesAnswer(
+            personalized,
+            [stored.answer, stored.followUpQuestion].filter(Boolean).join('\n'),
+          )
+        )
+          return this.failed('UNSUPPORTED_PERSONAL_ASSERTION');
         return stored
           ? this.candidateResult(stored, 'AI_REUSED', 0)
           : this.failed('STORED_ANSWER_INVALID');
@@ -270,28 +350,33 @@ export class ConversationQAExecutorService {
     >,
     previousAnswer: string | null = null,
     previousFollowUpQuestion: string | null = null,
+    personalized: ConversationAIValue = null,
   ): ConversationAIValue {
     return Object.freeze({
       request: context.currentMessage,
       route: route.kind,
       previousAnswer,
       previousFollowUpQuestion,
-      trustedContext: Object.freeze({
-        preferredName: context.preferredName?.value ?? null,
-        goal: context.goal?.value ?? null,
-        desiredOutcome: context.desiredOutcome?.value ?? null,
-        mealTimes: context.routine.mealTimes?.value ?? Object.freeze([]),
-        trainingTime: context.routine.trainingTime?.value ?? null,
-        preferredFoods:
-          context.nutrition.preferredFoods?.value ?? Object.freeze([]),
-        rejectedFoods:
-          context.nutrition.rejectedFoods?.value ?? Object.freeze([]),
-        restrictions: context.restrictions?.value ?? Object.freeze([]),
-        progress: context.progress?.value ?? null,
-        memories: Object.freeze(context.memory.map((memory) => memory.summary)),
-      }),
+      trustedContext:
+        personalized ??
+        Object.freeze({
+          preferredName: context.preferredName?.value ?? null,
+          goal: context.goal?.value ?? null,
+          desiredOutcome: context.desiredOutcome?.value ?? null,
+          mealTimes: context.routine.mealTimes?.value ?? Object.freeze([]),
+          trainingTime: context.routine.trainingTime?.value ?? null,
+          preferredFoods:
+            context.nutrition.preferredFoods?.value ?? Object.freeze([]),
+          rejectedFoods:
+            context.nutrition.rejectedFoods?.value ?? Object.freeze([]),
+          restrictions: context.restrictions?.value ?? Object.freeze([]),
+          progress: context.progress?.value ?? null,
+          memories: Object.freeze(
+            context.memory.map((memory) => memory.summary),
+          ),
+        }),
       recentConversation: Object.freeze(
-        (context.recentConversation ?? []).map((turn) =>
+        (personalized ? [] : (context.recentConversation ?? [])).map((turn) =>
           Object.freeze({
             direction: turn.direction,
             text: turn.text,

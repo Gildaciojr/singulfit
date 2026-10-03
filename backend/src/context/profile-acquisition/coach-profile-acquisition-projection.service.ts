@@ -43,6 +43,11 @@ export class CoachProfileAcquisitionProjectionService {
     > = {};
     for (const [field, values] of grouped) {
       const selected =
+        values.find(
+          (value) =>
+            value.isActive &&
+            value.status === CoachProfileValueStatus.CONFIRMED,
+        ) ??
         values.find((value) => value.isActive) ??
         values.find(
           (value) => value.status === CoachProfileValueStatus.CONFLICTED,

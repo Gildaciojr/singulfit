@@ -18,6 +18,8 @@ import { ProfileAcquisitionCycleService } from './profile-acquisition-cycle.serv
 import { ProfileAcquisitionInternalEligibilityService } from './profile-acquisition-internal-eligibility.service';
 import { ProfileAcquisitionInternalRolloutService } from './profile-acquisition-internal-rollout.service';
 import { ProfileAcquisitionOperationalConfigService } from './profile-acquisition-operational-config.service';
+import { ProfileAcquisitionAuthorizationService } from './profile-acquisition-authorization.service';
+import { SubscriptionAccessService } from '../../subscriptions/subscription-access.service';
 import { ProfileAcquisitionRuntimeService } from './profile-acquisition-runtime.service';
 import { ProfileAnswerRecognizerService } from './profile-answer-recognizer.service';
 import { CoachProfileFieldRegistryService } from './coach-profile-field-registry.service';
@@ -89,7 +91,7 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
     };
   }
 
-  function subject(mode: 'OFF' | 'INTERNAL' = 'INTERNAL') {
+  function subject(mode: 'OFF' | 'INTERNAL' | 'PRODUCTIVE' = 'INTERNAL') {
     const tx = {
       outboundMessage: {
         findUnique: jest.fn().mockResolvedValue(null),
@@ -120,6 +122,34 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
       },
     };
     const prisma = {
+      user: {
+        findUnique: jest
+          .fn()
+          .mockImplementation(({ where }: { where: { id: string } }) =>
+            Promise.resolve({
+              id: where.id,
+              role: UserRole.USER,
+              isActive: true,
+              onboardingCompleted: true,
+            }),
+          ),
+      },
+      subscription: {
+        findFirst: jest
+          .fn()
+          .mockImplementation(({ where }: { where: { userId: string } }) =>
+            Promise.resolve({
+              id: 'subscription',
+              userId: where.userId,
+              status: 'ACTIVE',
+              plan: { isActive: true, type: 'BASIC' },
+              currentPeriodEnd: new Date('2030-01-01'),
+              endedAt: null,
+              cancelAtPeriodEnd: false,
+            }),
+          ),
+        updateMany: jest.fn(),
+      },
       outboundMessage: {
         findUnique: jest.fn().mockResolvedValue({
           id: 'official-outbound-id',
@@ -290,6 +320,12 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
       mutationFactory as unknown as CoachProfileMutationCommandFactoryService,
       mutationService as unknown as CoachProfileMutationService,
       cycles as unknown as ProfileAcquisitionCycleService,
+      new ProfileAcquisitionAuthorizationService(
+        prisma as unknown as PrismaService,
+        config as unknown as ProfileAcquisitionOperationalConfigService,
+        eligibility as unknown as ProfileAcquisitionInternalEligibilityService,
+        new SubscriptionAccessService(prisma as unknown as PrismaService),
+      ),
     );
 
     return {
@@ -308,6 +344,57 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
     };
   }
 
+  it.each(new CoachProfileFieldRegistryService().all())(
+    'materializes and authorizes the selected $field for commercial USER',
+    async (definition) => {
+      const s = subject('PRODUCTIVE');
+      const questions = new ProfileQuestionSpecificationService(
+        new CoachProfileFieldRegistryService(),
+      );
+      s.questionSpecifications.fromSelectedField.mockImplementation(
+        (
+          ...args: Parameters<
+            ProfileQuestionSpecificationService['fromSelectedField']
+          >
+        ) => questions.fromSelectedField(...args),
+      );
+      await expect(
+        s.service.requestProductiveClarification({
+          userId: 'common-user-id',
+          sourceMessageId: 'answer-message-id',
+          referenceDate: sentAt,
+          intent: 'BOTH',
+          preselectedQuestion: {
+            selectedProfileField: questions.toCollectorField(definition.field)!,
+            logicalTurn: 1,
+          },
+        }),
+      ).resolves.toMatchObject({
+        questionCreated: true,
+        field: definition.field,
+      });
+      s.prisma.outboundMessage.findUnique.mockResolvedValue({
+        id: 'question-outbound-id',
+        userId: 'common-user-id',
+        conversationId: 'conversation-id',
+        sourceMessageId: 'answer-message-id',
+        responseType: ResponseType.PROFILE_ACQUISITION,
+      });
+      s.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+        activeCycle({
+          userId: 'common-user-id',
+          sourceMessageId: 'answer-message-id',
+          field: definition.field,
+          origin: 'COMBINED_V2_PRODUCTIVE_GENERATION:answer-message-id',
+        }),
+      );
+      await expect(
+        s.service.authorizeQuestionSend('question-outbound-id'),
+      ).resolves.toBe(true);
+      expect(s.eligibility.evaluate).not.toHaveBeenCalled();
+    },
+  );
+
   function freshProductiveSubject(
     options: {
       prepare?: boolean;
@@ -316,7 +403,7 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
       foreignConversation?: boolean;
     } = {},
   ) {
-    const test = subject();
+    const test = subject('PRODUCTIVE');
     test.runtime.evaluate.mockResolvedValue({
       evaluation: {
         logicalTurn: 4,
@@ -757,7 +844,7 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
   );
 
   it('preserves productive-cycle authorization for a non-internal user', async () => {
-    const test = subject();
+    const test = subject('PRODUCTIVE');
     test.eligibility.evaluate.mockResolvedValue({
       internal: false,
       eligible: false,
@@ -917,124 +1004,203 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
     );
   });
 
-  it('runs the productive Workout V2 clarification lifecycle for a non-ADMIN user with the canonical context', async () => {
-    const test = subject('INTERNAL');
-    const context = Object.freeze({
-      modality: Object.freeze({
-        value: 'GYM' as const,
-        evidence: 'EXPLICIT' as const,
-      }),
-      environment: Object.freeze({
-        value: 'FULL_GYM',
-        evidence: 'EXPLICIT' as const,
-      }),
-      weeklyFrequency: Object.freeze({
-        value: 4,
-        evidence: 'EXPLICIT' as const,
-      }),
-      sessionDurationMinutes: Object.freeze({
-        value: 60,
-        evidence: 'EXPLICIT' as const,
-      }),
-    });
-    const workoutSpecification = Object.freeze({
-      ...specification,
-      field: CoachProfileAcquisitionField.TRAINING_EXPERIENCE,
-      templateCode: 'PROFILE_QUESTION_TRAINING_EXPERIENCE_V1',
-    });
-    test.prisma.message.findFirst.mockResolvedValue({
-      id: 'workout-request-id',
-      conversationId: 'conversation-id',
-    });
-    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
-    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(null);
-    test.runtime.evaluate.mockResolvedValue({
-      evaluation: {
-        logicalTurn: 4,
-        selectedField: workoutSpecification.field,
-        canAsk: true,
-        reason: 'READY',
-      },
-      specification: workoutSpecification,
-    });
+  it.each(['BASIC', 'PREMIUM'])(
+    'runs the productive Workout V2 clarification lifecycle for a paid USER %s with the canonical context',
+    async (plan) => {
+      const test = subject('PRODUCTIVE');
+      test.prisma.subscription.findFirst.mockImplementation(
+        ({ where }: { where: { userId: string } }) =>
+          Promise.resolve({
+            id: 'subscription',
+            userId: where.userId,
+            status: 'ACTIVE',
+            plan: { isActive: true, type: plan },
+            currentPeriodEnd: new Date('2030-01-01'),
+            endedAt: null,
+            cancelAtPeriodEnd: false,
+          }),
+      );
+      test.eligibility.evaluate.mockResolvedValue({
+        internal: false,
+        eligible: false,
+        reason: 'USER_NOT_INTERNAL',
+      });
+      const context = Object.freeze({
+        modality: Object.freeze({
+          value: 'GYM' as const,
+          evidence: 'EXPLICIT' as const,
+        }),
+        environment: Object.freeze({
+          value: 'FULL_GYM',
+          evidence: 'EXPLICIT' as const,
+        }),
+        weeklyFrequency: Object.freeze({
+          value: 4,
+          evidence: 'EXPLICIT' as const,
+        }),
+        sessionDurationMinutes: Object.freeze({
+          value: 60,
+          evidence: 'EXPLICIT' as const,
+        }),
+      });
+      const workoutSpecification = Object.freeze({
+        ...specification,
+        field: CoachProfileAcquisitionField.TRAINING_EXPERIENCE,
+        templateCode: 'PROFILE_QUESTION_TRAINING_EXPERIENCE_V1',
+      });
+      test.prisma.message.findFirst.mockResolvedValue({
+        id: 'workout-request-id',
+        conversationId: 'conversation-id',
+      });
+      test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+      test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+        null,
+      );
+      test.runtime.evaluate.mockResolvedValue({
+        evaluation: {
+          logicalTurn: 4,
+          selectedField: workoutSpecification.field,
+          canAsk: true,
+          reason: 'READY',
+        },
+        specification: workoutSpecification,
+      });
 
-    await expect(
-      test.service.requestWorkoutClarification({
-        userId: 'common-user-id',
-        sourceMessageId: 'workout-request-id',
-        referenceDate: sentAt,
-        conversationContext: context,
-      }),
-    ).resolves.toMatchObject({
-      questionCreated: true,
-      reason: 'QUESTION_PREPARED',
-      field: CoachProfileAcquisitionField.TRAINING_EXPERIENCE,
-    });
-    expect(test.runtime.evaluate).toHaveBeenCalledWith(
-      'common-user-id',
-      sentAt,
-      PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,
-      expect.objectContaining(context),
-    );
-    expect(test.eligibility.evaluate).not.toHaveBeenCalled();
-
-    const productiveCycle = activeCycle({
-      userId: 'common-user-id',
-      field: CoachProfileAcquisitionField.TRAINING_EXPERIENCE,
-      sourceMessageId: 'workout-request-id',
-      origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:workout-request-id',
-    });
-    test.prisma.outboundMessage.findUnique.mockResolvedValue({
-      id: 'question-outbound-id',
-      userId: 'common-user-id',
-      sourceMessageId: 'workout-request-id',
-      responseType: ResponseType.PROFILE_ACQUISITION,
-    });
-    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
-    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
-      productiveCycle,
-    );
-
-    await expect(
-      test.service.authorizeQuestionSend('question-outbound-id'),
-    ).resolves.toBe(true);
-    expect(test.eligibility.evaluate).not.toHaveBeenCalled();
-
-    test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
-    test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
-      productiveCycle,
-    );
-    test.prisma.message.findFirst.mockResolvedValue({
-      id: 'answer-message-id',
-      content: 'sou iniciante',
-      timestamp: answerAt,
-      conversationId: 'conversation-id',
-    });
-    test.prisma.outboundMessage.findMany.mockResolvedValue([
-      {
-        id: 'question-outbound-id',
-        sourceMessageId: 'workout-request-id',
-        externalMessageId: 'workout-question',
+      await expect(
+        test.service.requestWorkoutClarification({
+          userId: 'common-user-id',
+          sourceMessageId: 'workout-request-id',
+          referenceDate: sentAt,
+          conversationContext: context,
+        }),
+      ).resolves.toMatchObject({
+        questionCreated: true,
+        reason: 'QUESTION_PREPARED',
+        field: CoachProfileAcquisitionField.TRAINING_EXPERIENCE,
+      });
+      expect(test.runtime.evaluate).toHaveBeenCalledWith(
+        'common-user-id',
         sentAt,
-      },
-    ]);
+        PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,
+        expect.objectContaining(context),
+      );
+      expect(test.eligibility.evaluate).not.toHaveBeenCalled();
 
-    await expect(
-      test.service.captureActiveResponse({
+      const productiveCycle = activeCycle({
         userId: 'common-user-id',
-        messageId: 'answer-message-id',
-      }),
-    ).resolves.toMatchObject({
-      handled: true,
-      persisted: true,
-      continuationMessageId: 'answer-message-id',
-      originalRequestMessageId: 'workout-request-id',
-    });
-    expect(test.eligibility.evaluate).not.toHaveBeenCalled();
-  });
+        field: CoachProfileAcquisitionField.TRAINING_EXPERIENCE,
+        sourceMessageId: 'workout-request-id',
+        origin: 'WORKOUT_V2_PRODUCTIVE_GENERATION:workout-request-id',
+      });
+      test.prisma.outboundMessage.findUnique.mockResolvedValue({
+        id: 'question-outbound-id',
+        userId: 'common-user-id',
+        sourceMessageId: 'workout-request-id',
+        responseType: ResponseType.PROFILE_ACQUISITION,
+      });
+      test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+      test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+        productiveCycle,
+      );
+
+      await expect(
+        test.service.authorizeQuestionSend('question-outbound-id'),
+      ).resolves.toBe(true);
+      expect(test.eligibility.evaluate).not.toHaveBeenCalled();
+
+      test.prisma.coachProfileAcquisitionCycle.findFirst.mockReset();
+      test.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+        productiveCycle,
+      );
+      test.prisma.message.findFirst.mockResolvedValue({
+        id: 'answer-message-id',
+        content: 'sou iniciante',
+        timestamp: answerAt,
+        conversationId: 'conversation-id',
+      });
+      test.prisma.outboundMessage.findMany.mockResolvedValue([
+        {
+          id: 'question-outbound-id',
+          sourceMessageId: 'workout-request-id',
+          externalMessageId: 'workout-question',
+          sentAt,
+        },
+      ]);
+
+      await expect(
+        test.service.captureActiveResponse({
+          userId: 'common-user-id',
+          messageId: 'answer-message-id',
+        }),
+      ).resolves.toMatchObject({
+        handled: true,
+        persisted: true,
+        continuationMessageId: 'answer-message-id',
+        originalRequestMessageId: 'workout-request-id',
+      });
+      expect(test.eligibility.evaluate).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['DIET', 'BOTH'] as const)(
+    'continues the original commercial %s request after acquiring a field',
+    async (intent) => {
+      const s = subject('PRODUCTIVE');
+      const origin =
+        intent === 'DIET'
+          ? 'NUTRITION_V2_PRODUCTIVE_GENERATION'
+          : 'COMBINED_V2_PRODUCTIVE_GENERATION';
+      s.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+        activeCycle({
+          userId: 'common-user-id',
+          origin: `${origin}:original-request-id`,
+        }),
+      );
+      s.prisma.message.findFirst.mockResolvedValue({
+        id: 'answer-id',
+        content: 'nenhuma',
+        timestamp: answerAt,
+        conversationId: 'conversation-id',
+      });
+      await expect(
+        s.service.captureActiveResponse({
+          userId: 'common-user-id',
+          messageId: 'answer-id',
+        }),
+      ).resolves.toMatchObject({
+        handled: true,
+        persisted: true,
+        continuationMessageId: 'answer-id',
+        originalRequestMessageId: 'original-request-id',
+        originalIntent: intent,
+      });
+      expect(s.mutationService.execute).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    'o que é hipertrofia?',
+    'qual meu treino de hoje?',
+    'quanto consumi hoje?',
+  ])(
+    'does not start acquisition for a read or general answer: %s',
+    async () => {
+      const s = subject('PRODUCTIVE');
+      await expect(
+        s.service.afterCoachResponseSent({
+          userId: 'common-user-id',
+          sourceMessageId: 'source-message-id',
+          intent: 'UNKNOWN',
+          sentAt,
+        }),
+      ).resolves.toMatchObject({ questionCreated: false });
+      expect(s.runtime.evaluate).not.toHaveBeenCalled();
+      expect(s.cycles.prepare).not.toHaveBeenCalled();
+    },
+  );
 
   it('prepares productive Nutrition acquisition for a non-ADMIN user', async () => {
-    const test = subject('INTERNAL');
+    const test = subject('PRODUCTIVE');
     test.prisma.message.findFirst.mockResolvedValue({
       id: 'nutrition-request-id',
       conversationId: 'conversation-id',
@@ -1063,7 +1229,7 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
   });
 
   it('isolates simultaneous productive clarification requests for two non-ADMIN users', async () => {
-    const test = subject('INTERNAL');
+    const test = subject('PRODUCTIVE');
     test.prisma.message.findFirst.mockImplementation(
       ({
         where,
@@ -1122,6 +1288,70 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
       }),
     );
     expect(test.eligibility.evaluate).not.toHaveBeenCalled();
+  });
+
+  it.each(['INTERNAL', 'OFF'] as const)(
+    'blocks USER productive requests in %s before preparing a question',
+    async (mode) => {
+      const s = subject(mode);
+      s.eligibility.evaluate.mockResolvedValue({
+        internal: false,
+        eligible: false,
+        reason: 'USER_NOT_INTERNAL',
+      });
+      await expect(
+        s.service.requestWorkoutClarification({
+          userId: 'common-user-id',
+          sourceMessageId: 'source-message-id',
+          referenceDate: sentAt,
+        }),
+      ).resolves.toMatchObject({ questionCreated: false });
+      expect(s.cycles.prepare).not.toHaveBeenCalled();
+      expect(s.eventBus.publish).not.toHaveBeenCalled();
+    },
+  );
+
+  it('revalidates revoked commercial access at send, sent and response phases', async () => {
+    const s = subject('PRODUCTIVE');
+    s.prisma.subscription.findFirst.mockResolvedValue(null);
+    s.prisma.outboundMessage.findUnique.mockResolvedValue({
+      id: 'question-id',
+      userId: 'common-user-id',
+      conversationId: 'conversation-id',
+      sourceMessageId: 'source-message-id',
+      responseType: ResponseType.PROFILE_ACQUISITION,
+      status: OutboundMessageStatus.SENT,
+      sentAt,
+    });
+    await expect(s.service.authorizeQuestionSend('question-id')).resolves.toBe(
+      false,
+    );
+    await expect(
+      s.service.afterOutboundSent('question-id'),
+    ).resolves.toMatchObject({ reason: 'USER_NOT_ELIGIBLE' });
+    await expect(
+      s.service.captureActiveResponse({
+        userId: 'common-user-id',
+        messageId: 'answer-id',
+      }),
+    ).resolves.toMatchObject({ handled: false, persisted: false });
+    expect(s.cycles.markAsked).not.toHaveBeenCalled();
+    expect(s.mutationService.execute).not.toHaveBeenCalled();
+  });
+
+  it('blocks commercial acquisition when canonical access is denied', async () => {
+    const s = subject('PRODUCTIVE');
+    s.prisma.subscription.findFirst.mockResolvedValue(null);
+    await expect(
+      s.service.requestProductiveClarification({
+        userId: 'common-user-id',
+        sourceMessageId: 'source-message-id',
+        referenceDate: sentAt,
+        intent: 'DIET',
+      }),
+    ).resolves.toMatchObject({ questionCreated: false });
+    expect(s.cycles.prepare).not.toHaveBeenCalled();
+    expect(s.eventBus.publish).not.toHaveBeenCalled();
   });
 
   it('keeps an external user completely outside the rollout', async () => {
@@ -1635,7 +1865,7 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
   });
 
   it('does not authorize a profile outbound using another productive cycle', async () => {
-    const test = subject('OFF');
+    const test = subject('PRODUCTIVE');
     test.prisma.outboundMessage.findUnique.mockResolvedValue({
       id: 'foreign-cycle-outbound-id',
       userId: 'common-user-id',
@@ -1661,7 +1891,7 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
   it.each(['PROCESSING', 'REPROMPT'] as const)(
     'authorizes a productive %s reprompt using the inbound response source',
     async (resultCodePrefix) => {
-      const test = subject('OFF');
+      const test = subject('PRODUCTIVE');
       const originalRequestMessageId = 'original-request-message-id';
       const invalidAnswerMessageId = 'invalid-answer-message-id';
       test.prisma.outboundMessage.findUnique.mockResolvedValue({
@@ -1699,7 +1929,7 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
   );
 
   it('authorizes a productive confirmation using its answer source', async () => {
-    const test = subject('OFF');
+    const test = subject('PRODUCTIVE');
     const originalRequestMessageId = 'original-request-message-id';
     const answerMessageId = 'answer-message-id';
     test.prisma.outboundMessage.findUnique.mockResolvedValue({
@@ -1732,7 +1962,7 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
   it.each(['REPROMPT', 'PROCESSING'] as const)(
     'fails closed for a productive %s reprompt with a different token',
     async (resultCodePrefix) => {
-      const test = subject('OFF');
+      const test = subject('PRODUCTIVE');
       const originalRequestMessageId = 'original-request-message-id';
       const invalidAnswerMessageId = 'invalid-answer-message-id';
       test.prisma.outboundMessage.findUnique.mockResolvedValue({
@@ -1776,7 +2006,7 @@ describe('ProfileAcquisitionInternalRolloutService', () => {
       sourceConversationId: string,
       sourceUserId: string,
     ) => {
-      const test = subject('OFF');
+      const test = subject('PRODUCTIVE');
       const originalRequestMessageId = 'original-request-message-id';
       const invalidAnswerMessageId = 'invalid-answer-message-id';
       test.prisma.outboundMessage.findUnique.mockResolvedValue({

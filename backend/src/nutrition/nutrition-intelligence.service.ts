@@ -72,6 +72,7 @@ export class NutritionIntelligenceService {
         select: {
           id: true,
           createdAt: true,
+          userId: true,
           analysis: {
             select: {
               mealCategory: true,
@@ -102,6 +103,7 @@ export class NutritionIntelligenceService {
         select: {
           id: true,
           type: true,
+          userId: true,
           title: true,
           summary: true,
           occurrences: true,
@@ -115,6 +117,7 @@ export class NutritionIntelligenceService {
         },
         select: {
           windowDays: true,
+          userId: true,
           averageQualityScore: true,
           direction: true,
           consistencyScore: true,
@@ -125,6 +128,13 @@ export class NutritionIntelligenceService {
         take: 12,
       }),
     ]);
+    if (
+      baseContext.userId !== userId ||
+      [...recentMeals, ...activeInsights, ...trendRecords].some(
+        (record) => record.userId !== userId,
+      )
+    )
+      throw new Error('Nutrition context ownership mismatch');
     const trends = TREND_WINDOWS.map((windowDays) =>
       trendRecords.find((trend) => trend.windowDays === windowDays),
     ).filter((trend) => trend !== undefined);
@@ -172,6 +182,7 @@ export class NutritionIntelligenceService {
         id: mealAnalysisId,
       },
       include: {
+        meal: { select: { userId: true } },
         items: {
           orderBy: {
             id: 'asc',
@@ -179,6 +190,12 @@ export class NutritionIntelligenceService {
         },
       },
     });
+    if (
+      analysis.id !== mealAnalysisId ||
+      analysis.meal.userId !== userId ||
+      context.userId !== userId
+    )
+      throw new Error('Nutrition analysis ownership mismatch');
     const quality = this.qualityService.calculate({
       calories: analysis.totalCalories?.toNumber() ?? 0,
       protein: analysis.totalProtein?.toNumber() ?? 0,

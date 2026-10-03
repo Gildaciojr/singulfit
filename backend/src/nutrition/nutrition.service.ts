@@ -35,6 +35,7 @@ export class NutritionService {
   async createMealFromMedia(
     mediaFileId: string,
     source: MealSource = MealSource.WHATSAPP,
+    expected?: Readonly<{ userId: string; messageId: string }>,
   ) {
     const existingMeal = await this.prisma.meal.findUnique({
       where: {
@@ -44,6 +45,13 @@ export class NutritionService {
     });
 
     if (existingMeal) {
+      if (
+        expected &&
+        (existingMeal.userId !== expected.userId ||
+          existingMeal.messageId !== expected.messageId ||
+          existingMeal.mediaFileId !== mediaFileId)
+      )
+        throw new BadRequestException('Meal ownership mismatch');
       return existingMeal;
     }
 
@@ -56,6 +64,13 @@ export class NutritionService {
     if (!mediaFile) {
       throw new NotFoundException('Mídia da refeição não encontrada');
     }
+    if (
+      mediaFile.id !== mediaFileId ||
+      (expected &&
+        (mediaFile.userId !== expected.userId ||
+          mediaFile.messageId !== expected.messageId))
+    )
+      throw new BadRequestException('Media ownership mismatch');
 
     if (mediaFile.mediaType !== MediaType.IMAGE) {
       throw new BadRequestException(
@@ -90,6 +105,13 @@ export class NutritionService {
         });
 
         if (concurrentMeal) {
+          if (
+            expected &&
+            (concurrentMeal.userId !== expected.userId ||
+              concurrentMeal.messageId !== expected.messageId ||
+              concurrentMeal.mediaFileId !== mediaFileId)
+          )
+            throw new BadRequestException('Meal ownership mismatch');
           return concurrentMeal;
         }
       }

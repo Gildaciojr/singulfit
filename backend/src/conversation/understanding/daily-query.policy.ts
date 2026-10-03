@@ -55,6 +55,16 @@ export function dailyQuery(value: string): DailyQuery | null {
 export function isWeeklyFollowUp(value: string): boolean {
   return /^e (?:essa|esta|nesta) semana$/u.test(foldDailyText(value));
 }
+export function metricFollowUp(
+  value: string,
+): Exclude<DailyMetric, 'ALL'> | null {
+  const text = foldDailyText(value);
+  if (/^e (?:a )?proteina$/u.test(text)) return 'PROTEIN';
+  if (/^e (?:os )?carboidratos?$/u.test(text)) return 'CARBS';
+  if (/^e (?:as )?gorduras?$/u.test(text)) return 'FAT';
+  if (/^e (?:as )?calorias?$/u.test(text)) return 'CALORIES';
+  return null;
+}
 export function isIsolatedReminderReply(value: string): boolean {
   return /^(?:sim|nao|ok|feito|ja fiz|fiz|ja treinei|treinei|ja comi|comi|terminei|conclui|nao fiz|nao consegui(?: hoje)?|nao deu|pulei|nao treinei|nao comi|vou fazer (?:agora|depois|mais tarde)|depois eu faco|faco mais tarde|comi outra coisa)$/u.test(
     foldDailyText(value),

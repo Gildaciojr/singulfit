@@ -720,6 +720,11 @@ describe('CoachPlanningExecutionService', () => {
       'user-id',
       'Vou treinar só 3 vezes esta semana',
       declared,
+      expect.objectContaining({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+      }),
     );
     expect(workoutBuilder.build).toHaveBeenCalledWith(
       expect.objectContaining({

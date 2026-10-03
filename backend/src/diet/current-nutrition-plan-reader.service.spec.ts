@@ -166,7 +166,11 @@ describe('CurrentNutritionPlanReaderService', () => {
   }) {
     const prisma = {
       nutritionPlanOwnership: {
-        findUnique: jest.fn().mockResolvedValue(input?.ownership ?? null),
+        findUnique: jest
+          .fn()
+          .mockResolvedValue(
+            input?.ownership ? { userId: 'user-id', ...input.ownership } : null,
+          ),
       },
       dietPlan: {
         findMany: jest
@@ -191,6 +195,20 @@ describe('CurrentNutritionPlanReaderService', () => {
       ),
     };
   }
+
+  it.each(['LEGACY', 'V2'] as const)(
+    'rejects a foreign %s fallback returned by a repository',
+    async (implementation) => {
+      const s = createSubject(
+        implementation === 'LEGACY'
+          ? { activeLegacy: [legacyPlan({ userId: 'foreign' })] }
+          : { activeV2: [v2Plan({ userId: 'foreign' })] },
+      );
+      await expect(s.service.getCurrent('user-id')).rejects.toThrow(
+        ConflictException,
+      );
+    },
+  );
 
   it('returns the Legacy variant when it is the only active implementation', async () => {
     const subject = createSubject({ activeLegacy: [legacyPlan()] });

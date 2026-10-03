@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { ProfileAcquisitionField } from '../../context/coach-adaptive-profile-collector.contract';
 import { NUTRITION_ARTIFACT_TYPE } from '../../diet/v2/nutrition-planning-artifact.contract';
 import {
   WORKOUT_ARTIFACT_TYPE,
@@ -85,8 +86,44 @@ export class ConversationEntityRecognizerService {
     this.addComponents(text, entities);
     this.addConfirmation(text, entities);
     this.addTemporalReference(text, entities);
+    this.addProfileRead(message, entities);
 
     return Object.freeze({ entities: this.unique(entities) });
+  }
+
+  private addProfileRead(
+    message: NormalizedConversationMessage,
+    entities: ConversationEntity[],
+  ): void {
+    const text = message.folded;
+    if (!message.question && !/\b(lembra|lembre|eu disse)\b/u.test(text))
+      return;
+    const topics: readonly [RegExp, ProfileAcquisitionField][] = [
+      [/\bqual (?:e )?(?:o )?meu objetivo\b/u, 'PRIMARY_GOAL'],
+      [
+        /\b(?:onde .*treino|lembra .*treino em|eu disse .*treino)\b/u,
+        'TRAINING_ENVIRONMENT',
+      ],
+      [/\bquais equipamentos\b/u, 'TRAINING_EQUIPMENT'],
+      [
+        /\bquantas vezes .*semana .*disse|quantas vezes .*disse .*treinar\b/u,
+        'TRAINING_FREQUENCY',
+      ],
+      [
+        /\b(?:sou alergic[oa]|tenho alergia|lembra .*alergic|disse .*alergia)\b/u,
+        'ALLERGIES',
+      ],
+      [/\b(?:tenho intolerancia|disse .*intolerancia)\b/u, 'FOOD_INTOLERANCES'],
+      [
+        /\b(?:disse .*nao gosto|lembra .*nao gosto)\b/u,
+        'DECLARED_FOOD_REJECTIONS',
+      ],
+      [/\bqual distancia .*quero correr\b/u, 'TARGET_DISTANCE'],
+      [/\bqual .*distancia .*disse .*corro\b/u, 'CURRENT_RUNNING_DISTANCE'],
+    ];
+    for (const [pattern, field] of topics)
+      if (pattern.test(text))
+        entities.push(Object.freeze({ kind: 'PROFILE_FIELD', field }));
   }
 
   private addArtifacts(text: string, entities: ConversationEntity[]): void {

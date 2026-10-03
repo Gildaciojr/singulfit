@@ -52,8 +52,13 @@ export class NutritionVisionService {
     private readonly intelligenceService: NutritionIntelligenceService,
   ) {}
 
-  async analyzeMeal(mealId: string) {
+  async analyzeMeal(mealId: string, expectedUserId?: string) {
     const meal = await this.nutritionService.getMeal(mealId);
+    if (
+      meal.id !== mealId ||
+      (expectedUserId !== undefined && meal.userId !== expectedUserId)
+    )
+      throw new ConflictException('Meal ownership mismatch');
 
     if (!meal.analysis) {
       throw new NotFoundException('Análise da refeição não encontrada');
@@ -65,6 +70,15 @@ export class NutritionVisionService {
       );
     }
 
+    await this.assertOwnership(
+      this.prisma,
+      meal.id,
+      meal.analysis.id,
+      meal.userId,
+      meal.conversationId,
+      meal.messageId,
+      meal.mediaFileId,
+    );
     if (meal.analysis.status === MealAnalysisStatus.COMPLETED) {
       return meal;
     }
@@ -72,6 +86,17 @@ export class NutritionVisionService {
     if (meal.analysis.status !== MealAnalysisStatus.PENDING) {
       throw new ConflictException('Análise já processada ou em andamento');
     }
+
+    const context = await this.intelligenceService.buildUserNutritionContext(
+      meal.userId,
+    );
+    if (context.userId !== meal.userId)
+      throw new ConflictException('Vision context ownership mismatch');
+    const image = await this.mediaService.getImageDataUrl(meal.mediaFileId, {
+      userId: meal.userId,
+      conversationId: meal.conversationId,
+      messageId: meal.messageId,
+    });
 
     const job = await this.aiService.createJob({
       userId: meal.userId,
@@ -81,33 +106,50 @@ export class NutritionVisionService {
       promptName: NUTRITION_VISION_PROMPT_NAME,
     });
     const startedAt = new Date();
+    if (
+      job.userId !== meal.userId ||
+      job.conversationId !== meal.conversationId ||
+      job.messageId !== meal.messageId
+    ) {
+      const error = new ConflictException('Vision job ownership mismatch');
+      if (job.userId === meal.userId)
+        await this.aiService.failJob(job.id, error, undefined, meal.userId);
+      throw error;
+    }
 
-    await this.prisma.$transaction(async (transaction) => {
-      const analysisClaim = await transaction.mealAnalysis.updateMany({
-        where: {
-          id: meal.analysis?.id,
-          status: MealAnalysisStatus.PENDING,
-        },
-        data: {
-          status: MealAnalysisStatus.PROCESSING,
-          aiJobId: job.id,
-          processingStartedAt: startedAt,
-        },
+    try {
+      await this.prisma.$transaction(async (transaction) => {
+        const analysisClaim = await transaction.mealAnalysis.updateMany({
+          where: {
+            id: meal.analysis?.id,
+            status: MealAnalysisStatus.PENDING,
+            meal: { userId: meal.userId },
+          },
+          data: {
+            status: MealAnalysisStatus.PROCESSING,
+            aiJobId: job.id,
+            processingStartedAt: startedAt,
+          },
+        });
+
+        if (analysisClaim.count !== 1) {
+          throw new ConflictException('Análise já processada ou em andamento');
+        }
       });
-
-      if (analysisClaim.count !== 1) {
-        throw new ConflictException('Análise já processada ou em andamento');
-      }
-    });
+    } catch (error: unknown) {
+      await this.aiService.failJob(job.id, error, undefined, meal.userId);
+      throw error;
+    }
 
     let response: OpenAIResponseResult | undefined;
 
     try {
-      const context = await this.intelligenceService.buildUserNutritionContext(
-        meal.userId,
-      );
-      const image = await this.mediaService.getImageDataUrl(meal.mediaFileId);
       response = await this.aiService.runVisionJob(job.id, {
+        expectedContext: {
+          userId: meal.userId,
+          conversationId: meal.conversationId,
+          messageId: meal.messageId,
+        },
         input: this.buildAnalysisInput(context),
         imageUrl: image.dataUrl,
         jsonSchema: {
@@ -140,6 +182,71 @@ export class NutritionVisionService {
     }
   }
 
+  private async assertOwnership(
+    client: PrismaService,
+    mealId: string,
+    analysisId: string,
+    userId: string,
+    conversationId: string,
+    messageId: string,
+    mediaId: string,
+  ): Promise<void> {
+    const [message, media, analysis] = await Promise.all([
+      client.message.findUnique({
+        where: { id: messageId },
+        select: {
+          id: true,
+          conversationId: true,
+          conversation: { select: { id: true, userId: true } },
+        },
+      }),
+      client.mediaFile.findUnique({
+        where: { id: mediaId },
+        select: {
+          id: true,
+          userId: true,
+          conversationId: true,
+          messageId: true,
+        },
+      }),
+      client.mealAnalysis.findUnique({
+        where: { id: analysisId },
+        select: {
+          id: true,
+          mealId: true,
+          meal: {
+            select: {
+              userId: true,
+              conversationId: true,
+              messageId: true,
+              mediaFileId: true,
+            },
+          },
+        },
+      }),
+    ]);
+    if (
+      !message ||
+      message.id !== messageId ||
+      message.conversationId !== conversationId ||
+      message.conversation.id !== conversationId ||
+      message.conversation.userId !== userId ||
+      !media ||
+      media.id !== mediaId ||
+      media.userId !== userId ||
+      media.conversationId !== conversationId ||
+      media.messageId !== messageId ||
+      !analysis ||
+      analysis.id !== analysisId ||
+      analysis.mealId !== mealId ||
+      analysis.meal.userId !== userId ||
+      analysis.meal.conversationId !== conversationId ||
+      analysis.meal.messageId !== messageId ||
+      analysis.meal.mediaFileId !== mediaId
+    )
+      throw new ConflictException('Vision source ownership mismatch');
+  }
+
   private async completeAnalysis(
     mealId: string,
     mealAnalysisId: string,
@@ -150,6 +257,17 @@ export class NutritionVisionService {
     context: NutritionUserContext,
   ) {
     return this.prisma.$transaction(async (transaction) => {
+      const owned = await transaction.mealAnalysis.findUnique({
+        where: { id: mealAnalysisId },
+        select: { id: true, mealId: true, meal: { select: { userId: true } } },
+      });
+      if (
+        !owned ||
+        owned.id !== mealAnalysisId ||
+        owned.mealId !== mealId ||
+        owned.meal.userId !== userId
+      )
+        throw new ConflictException('MealAnalysis ownership mismatch');
       if (parsed.result.foods.length > 0) {
         await transaction.mealItem.createMany({
           data: parsed.result.foods.map((food) => ({
@@ -271,10 +389,16 @@ export class NutritionVisionService {
     const safeError = this.getSafeError(error);
 
     await this.prisma.$transaction(async (transaction) => {
+      const owned = await transaction.mealAnalysis.findUnique({
+        where: { id: mealAnalysisId },
+        select: { meal: { select: { userId: true } } },
+      });
+      if (!owned || owned.meal.userId !== userId) return;
       await transaction.mealAnalysis.updateMany({
         where: {
           id: mealAnalysisId,
           status: MealAnalysisStatus.PROCESSING,
+          meal: { userId },
         },
         data: {
           status: MealAnalysisStatus.FAILED,
@@ -300,7 +424,7 @@ export class NutritionVisionService {
         },
       });
     });
-    await this.aiService.failJob(aiJobId, error, response);
+    await this.aiService.failJob(aiJobId, error, response, userId);
   }
 
   private parseResponse(outputText: string): ParsedNutritionAnalysis {

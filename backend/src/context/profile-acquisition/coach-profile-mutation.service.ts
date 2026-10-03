@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { ProfileAcquisitionAuthorizationService } from './profile-acquisition-authorization.service';
 import {
   CoachProfileAcquisitionField,
   CoachProfileConfirmationState,
@@ -177,14 +178,25 @@ export class CoachProfileMutationService {
     private readonly prisma: PrismaService,
     private readonly registry: CoachProfileFieldRegistryService,
     private readonly operationalConfig: ProfileAcquisitionOperationalConfigService,
+    @Optional()
+    private readonly authorization?: ProfileAcquisitionAuthorizationService,
   ) {}
+
+  private async acquisitionEnabled(userId: string): Promise<boolean> {
+    const mode = this.operationalConfig.get().mode;
+    return (
+      (mode === PROFILE_ACQUISITION_MODE.INTERNAL &&
+        (!this.authorization ||
+          (await this.authorization.isAllowed(userId)))) ||
+      (mode === PROFILE_ACQUISITION_MODE.PRODUCTIVE &&
+        !!(await this.authorization?.isAllowed(userId)))
+    );
+  }
 
   async execute(
     command: CoachProfileMutationCommand,
   ): Promise<ProfileMutationResult> {
-    if (
-      this.operationalConfig.get().mode !== PROFILE_ACQUISITION_MODE.INTERNAL
-    ) {
+    if (!(await this.acquisitionEnabled(command.userId))) {
       return this.result(
         'REJECTED',
         command.field,
@@ -233,8 +245,16 @@ export class CoachProfileMutationService {
     try {
       return await this.prisma.$transaction(async (transaction) => {
         let serialized: SerializedValue = initialSerialized;
+        const foodPreference =
+          command.field ===
+            CoachProfileAcquisitionField.DECLARED_FOOD_PREFERENCES ||
+          command.field ===
+            CoachProfileAcquisitionField.DECLARED_FOOD_REJECTIONS;
         const lockKey =
-          'profile-acquisition:' + command.userId + ':' + command.field;
+          'profile-acquisition:' +
+          command.userId +
+          ':' +
+          (foodPreference ? 'food-preferences' : command.field);
         await transaction.$queryRaw`
           WITH advisory_lock AS (
             SELECT pg_advisory_xact_lock(hashtext(${lockKey}))
@@ -246,6 +266,20 @@ export class CoachProfileMutationService {
           where: { operationKey: command.operationKey },
         });
         if (duplicate) {
+          if (
+            foodPreference &&
+            ((duplicate.userId !== undefined &&
+              duplicate.userId !== command.userId) ||
+              (duplicate.field !== undefined &&
+                duplicate.field !== command.field))
+          )
+            return this.result(
+              'REJECTED',
+              command.field,
+              null,
+              null,
+              'OWNERSHIP_MISMATCH',
+            );
           return this.result(
             'DUPLICATE',
             command.field,
@@ -253,6 +287,61 @@ export class CoachProfileMutationService {
             duplicate.valueFingerprint,
             'DUPLICATE_OPERATION',
           );
+        }
+        if (
+          foodPreference &&
+          command.action === 'SET' &&
+          Array.isArray(command.value)
+        ) {
+          const oppositeField =
+            command.field ===
+            CoachProfileAcquisitionField.DECLARED_FOOD_REJECTIONS
+              ? CoachProfileAcquisitionField.DECLARED_FOOD_PREFERENCES
+              : CoachProfileAcquisitionField.DECLARED_FOOD_REJECTIONS;
+          const opposite = await transaction.coachProfileFieldValue.findFirst({
+            where: {
+              userId: command.userId,
+              field: oppositeField,
+              isActive: true,
+            },
+            orderBy: [{ referenceDate: 'desc' }, { id: 'desc' }],
+          });
+          const fold = (value: string) =>
+            value
+              .normalize('NFD')
+              .replace(/\p{Diacritic}/gu, '')
+              .trim()
+              .toLowerCase();
+          if (
+            opposite &&
+            opposite.userId !== undefined &&
+            opposite.userId !== command.userId
+          )
+            return this.result(
+              'REJECTED',
+              command.field,
+              null,
+              null,
+              'OWNERSHIP_MISMATCH',
+            );
+          if (
+            opposite?.field === oppositeField &&
+            Array.isArray(opposite.textListValue) &&
+            opposite.textListValue.some(
+              (item) =>
+                typeof item === 'string' &&
+                command.action === 'SET' &&
+                Array.isArray(command.value) &&
+                command.value.some((value) => fold(value) === fold(item)),
+            )
+          )
+            return this.result(
+              'CONFLICT',
+              command.field,
+              null,
+              null,
+              'FOOD_PREFERENCE_REJECTION_CONFLICT',
+            );
         }
         const current = await transaction.coachProfileFieldValue.findFirst({
           where: {
@@ -262,6 +351,20 @@ export class CoachProfileMutationService {
           },
           orderBy: [{ referenceDate: 'desc' }, { id: 'desc' }],
         });
+        if (
+          foodPreference &&
+          current &&
+          ((current.userId !== undefined &&
+            current.userId !== command.userId) ||
+            (current.field !== undefined && current.field !== command.field))
+        )
+          return this.result(
+            'REJECTED',
+            command.field,
+            null,
+            null,
+            'OWNERSHIP_MISMATCH',
+          );
         const explicitConflictPolicy =
           definition.confirmationPolicy === 'EXPLICIT_ON_CONFLICT' ||
           definition.updatePolicy === 'EXPLICIT_ON_CONFLICT';
@@ -394,14 +497,16 @@ export class CoachProfileMutationService {
           );
           return this.result(
             current.status === CoachProfileValueStatus.ANSWERED_UNCONFIRMED &&
-              current.confirmationState === CoachProfileConfirmationState.PENDING
+              current.confirmationState ===
+                CoachProfileConfirmationState.PENDING
               ? 'REQUIRES_CONFIRMATION'
               : 'UNCHANGED',
             command.field,
             current.id,
             current.valueFingerprint,
             current.status === CoachProfileValueStatus.ANSWERED_UNCONFIRMED &&
-              current.confirmationState === CoachProfileConfirmationState.PENDING
+              current.confirmationState ===
+                CoachProfileConfirmationState.PENDING
               ? 'CONFIRMATION_REQUIRED'
               : 'VALUE_UNCHANGED',
           );
@@ -478,9 +583,7 @@ export class CoachProfileMutationService {
   async resolvePendingConfirmation(
     input: ProfilePendingConfirmationCommand,
   ): Promise<ProfileMutationResult> {
-    if (
-      this.operationalConfig.get().mode !== PROFILE_ACQUISITION_MODE.INTERNAL
-    ) {
+    if (!(await this.acquisitionEnabled(input.userId))) {
       return this.result(
         'REJECTED',
         input.field,

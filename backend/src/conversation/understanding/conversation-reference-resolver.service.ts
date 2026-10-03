@@ -140,8 +140,18 @@ export class ConversationReferenceResolverService {
       'dieta',
       'plano alimentar',
       'alimentacao',
+      'refeicao',
+      'almoco',
+      'jantar',
+      'cafe da manha',
+      'frango',
+      'arroz',
     ]);
-    const workout = this.includesAny(text, ['treino', 'plano de treino']);
+    const workout = this.includesAny(text, [
+      'treino',
+      'plano de treino',
+      'exercicio',
+    ]);
     if (nutrition && workout) return 'BOTH';
     if (nutrition) return 'NUTRITION';
     if (workout) return 'WORKOUT';
@@ -191,7 +201,7 @@ export class ConversationReferenceResolverService {
     return target;
   }
 
-  private ordinal(text: string): number | null {
+  ordinal(text: string): number | null {
     const values: Readonly<Record<string, number>> = Object.freeze({
       '1': 1,
       '1o': 1,

@@ -93,9 +93,39 @@ export class WorkoutPlanV2PersistenceValidator {
       );
 
     const document = this.toJsonRecord(plan);
+    const projection = this.project(plan, input.calendarWeekdays);
+    if (input.preservedCalendar) {
+      const calendar = new Map(
+        input.preservedCalendar.map((entry) => [
+          entry.sessionSequence,
+          entry.weekday,
+        ]),
+      );
+      if (
+        calendar.size !== projection.days.length ||
+        projection.days.some((day) => !calendar.has(day.dayNumber))
+      )
+        throw new BadRequestException(
+          'Calendário original incompatível com a substituição',
+        );
+      return Object.freeze({
+        document,
+        projection: Object.freeze({
+          ...projection,
+          days: Object.freeze(
+            projection.days.map((day) =>
+              Object.freeze({
+                ...day,
+                weekday: calendar.get(day.dayNumber) ?? null,
+              }),
+            ),
+          ),
+        }),
+      });
+    }
     return Object.freeze({
       document,
-      projection: this.project(plan, input.calendarWeekdays),
+      projection,
     });
   }
 

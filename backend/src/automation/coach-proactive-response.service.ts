@@ -64,11 +64,16 @@ export class CoachProactiveResponseService {
         timestamp: true,
         replyToExternalMessageId: true,
         conversation: {
-          select: { user: { select: { name: true } } },
+          select: { userId: true, user: { select: { name: true } } },
         },
       },
     });
-    if (!message) return this.notHandled();
+    if (
+      !message ||
+      message.id !== input.messageId ||
+      message.conversation.userId !== input.userId
+    )
+      return this.notHandled();
     const independentCommand = this.isIndependentCommand(message.content);
 
     const quoted = Boolean(message.replyToExternalMessageId);
@@ -105,6 +110,8 @@ export class CoachProactiveResponseService {
       },
       select: {
         id: true,
+        userId: true,
+        conversationId: true,
         scheduledFor: true,
         sentAt: true,
         responseExpiresAt: true,
@@ -115,6 +122,12 @@ export class CoachProactiveResponseService {
       },
       orderBy: [{ scheduledFor: 'desc' }, { id: 'desc' }],
     });
+    if (
+      intervention &&
+      (intervention.userId !== input.userId ||
+        intervention.conversationId !== message.conversationId)
+    )
+      return this.notHandled();
     const intent = intervention
       ? this.proactiveIntent(intervention.context)
       : null;

@@ -21,6 +21,33 @@ import { NutritionConversationShadowPipelineService } from './nutrition-conversa
 import { NutritionConversationEpisodicMemoryIntegrationService } from './nutrition-conversation-episodic-memory-integration.service';
 
 describe('ResponseBuilderService', () => {
+  it('rejects foreign analysis before formatting, provider selection or public outbound', async () => {
+    const s = createSubject();
+    s.analysis.meal.userId = 'user-b';
+    await expect(
+      s.service.buildNutritionResponse('analysis-id', 'user-id'),
+    ).rejects.toThrow('ownership mismatch');
+    expect(s.formatter.format).not.toHaveBeenCalled();
+    expect(s.eventBus.publish).not.toHaveBeenCalled();
+    expect(s.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects foreign context before formatting or public outbound', async () => {
+    const s = createSubject();
+    s.intelligenceService.buildUserNutritionContext.mockResolvedValue({
+      userId: 'user-b',
+      goal: null,
+      memories: [],
+      activeInsights: [],
+      trends: [],
+      recentMeals: [],
+    });
+    await expect(
+      s.service.buildNutritionResponse('analysis-id'),
+    ).rejects.toThrow('ownership mismatch');
+    expect(s.formatter.format).not.toHaveBeenCalled();
+    expect(s.eventBus.publish).not.toHaveBeenCalled();
+  });
   function createSubject() {
     const outbound = {
       id: 'outbound-id',

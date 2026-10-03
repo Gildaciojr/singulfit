@@ -17,6 +17,11 @@ export interface WorkoutExecutionContextV2 {
 }
 
 export interface PersistWorkoutPlanV2Input {
+  readonly expectedActivePlanId?: string;
+  readonly preservedCalendar?: readonly {
+    readonly sessionSequence: number;
+    readonly weekday: WorkoutWeekday | null;
+  }[];
   readonly generation: WorkoutPlanningGenerationResult;
   readonly ownership: WorkoutPlanV2Ownership;
   readonly executionContext?: WorkoutExecutionContextV2;

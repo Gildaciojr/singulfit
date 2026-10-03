@@ -41,7 +41,10 @@ export class ResponseBuilderService {
     private readonly episodicMemoryIntegration: NutritionConversationEpisodicMemoryIntegrationService,
   ) {}
 
-  async buildNutritionResponse(mealAnalysisId: string) {
+  async buildNutritionResponse(
+    mealAnalysisId: string,
+    expectedUserId?: string,
+  ) {
     const analysis = await this.prisma.mealAnalysis.findUnique({
       where: { id: mealAnalysisId },
       include: {
@@ -51,6 +54,9 @@ export class ResponseBuilderService {
         aiJob: {
           select: {
             id: true,
+            userId: true,
+            conversationId: true,
+            messageId: true,
             promptVersionId: true,
             usage: { select: { estimatedCost: true } },
           },
@@ -60,6 +66,11 @@ export class ResponseBuilderService {
     if (!analysis) {
       throw new NotFoundException('Análise nutricional não encontrada');
     }
+    if (
+      analysis.id !== mealAnalysisId ||
+      (expectedUserId !== undefined && analysis.meal.userId !== expectedUserId)
+    )
+      throw new ConflictException('Nutrition response ownership mismatch');
     if (analysis.status !== MealAnalysisStatus.COMPLETED) {
       throw new ConflictException(
         'Análise nutricional ainda não foi concluída',
@@ -76,11 +87,42 @@ export class ResponseBuilderService {
     }
     const conversationId = analysis.meal.conversationId;
     const sourceMessageId = analysis.meal.messageId;
+    if (expectedUserId !== undefined) {
+      const source = await this.prisma.message.findUnique({
+        where: { id: sourceMessageId },
+        select: {
+          id: true,
+          conversationId: true,
+          conversation: { select: { userId: true } },
+        },
+      });
+      if (
+        !source ||
+        source.id !== sourceMessageId ||
+        source.conversationId !== conversationId ||
+        source.conversation.userId !== expectedUserId
+      )
+        throw new ConflictException(
+          'Nutrition response source ownership mismatch',
+        );
+    }
+    if (
+      expectedUserId !== undefined &&
+      analysis.aiJob &&
+      (analysis.aiJob.userId !== expectedUserId ||
+        analysis.aiJob.conversationId !== conversationId ||
+        analysis.aiJob.messageId !== sourceMessageId)
+    )
+      throw new ConflictException('Nutrition response job ownership mismatch');
 
     const [context, longitudinal] = await Promise.all([
       this.intelligenceService.buildUserNutritionContext(analysis.meal.userId),
       this.longitudinal.getResponseContext(analysis.meal.userId),
     ]);
+    if (context.userId !== analysis.meal.userId)
+      throw new ConflictException(
+        'Nutrition response context ownership mismatch',
+      );
     const behavior = await this.behavioralIntelligence.refreshSignals(
       analysis.meal.userId,
     );

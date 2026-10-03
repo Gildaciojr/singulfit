@@ -469,4 +469,13 @@ describe('Structured profile acquisition registry and recognition', () => {
       questionExpirationHours: 48,
     });
   });
+  it.each(['OFF', 'SHADOW', 'INTERNAL', 'PRODUCTIVE'])(
+    'resolves explicit %s configuration',
+    (mode) => {
+      const config = new ProfileAcquisitionOperationalConfigService({
+        get: () => ` ${mode.toLowerCase()} `,
+      } as unknown as ConfigService);
+      expect(config.get().mode).toBe(mode);
+    },
+  );
 });

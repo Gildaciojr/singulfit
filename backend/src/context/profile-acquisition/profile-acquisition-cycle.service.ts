@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { ProfileAcquisitionAuthorizationService } from './profile-acquisition-authorization.service';
 import { createHash } from 'crypto';
 import {
   CoachProfileAcquisitionCycleStatus,
@@ -25,16 +26,27 @@ export class ProfileAcquisitionCycleService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly operationalConfig: ProfileAcquisitionOperationalConfigService,
+    @Optional()
+    private readonly authorization?: ProfileAcquisitionAuthorizationService,
   ) {}
+
+  private async acquisitionEnabled(userId: string): Promise<boolean> {
+    const mode = this.operationalConfig.get().mode;
+    return (
+      (mode === PROFILE_ACQUISITION_MODE.INTERNAL &&
+        (!this.authorization ||
+          (await this.authorization.isAllowed(userId)))) ||
+      (mode === PROFILE_ACQUISITION_MODE.PRODUCTIVE &&
+        !!(await this.authorization?.isAllowed(userId)))
+    );
+  }
 
   async expireActiveIfNeeded(input: {
     readonly userId: string;
     readonly referenceDate: string;
     readonly resultCode: string;
   }): Promise<void> {
-    if (
-      this.operationalConfig.get().mode !== PROFILE_ACQUISITION_MODE.INTERNAL
-    ) {
+    if (!(await this.acquisitionEnabled(input.userId))) {
       return;
     }
     const referenceDate = new Date(input.referenceDate);
@@ -117,9 +129,7 @@ export class ProfileAcquisitionCycleService {
           expectedActiveCycleUpdatedAt: Date;
         }>,
   ): Promise<ProfileAcquisitionCycleResult> {
-    if (
-      this.operationalConfig.get().mode !== PROFILE_ACQUISITION_MODE.INTERNAL
-    ) {
+    if (!(await this.acquisitionEnabled(command.userId))) {
       return this.result('REJECTED', null, null, 'ACQUISITION_DISABLED');
     }
     const referenceDate = new Date(command.referenceDate);
@@ -167,10 +177,11 @@ export class ProfileAcquisitionCycleService {
           expectedActiveCycleUpdatedAt: Date;
         }>,
   ): Promise<ProfileAcquisitionCycleResult> {
-    const duplicate =
-      await transaction.coachProfileAcquisitionCycle.findUnique({
+    const duplicate = await transaction.coachProfileAcquisitionCycle.findUnique(
+      {
         where: { operationKey: command.operationKey },
-      });
+      },
+    );
     if (duplicate) {
       return this.result(
         'DUPLICATE',
@@ -304,9 +315,7 @@ export class ProfileAcquisitionCycleService {
   async markAsked(
     command: ProfileAcquisitionCycleAskedCommand,
   ): Promise<ProfileAcquisitionCycleAskedResult> {
-    if (
-      this.operationalConfig.get().mode !== PROFILE_ACQUISITION_MODE.INTERNAL
-    ) {
+    if (!(await this.acquisitionEnabled(command.userId))) {
       return this.askedResult('REJECTED', command.cycleId, null);
     }
     const askedAt = new Date(command.askedAt);
@@ -384,9 +393,7 @@ export class ProfileAcquisitionCycleService {
   async claimResponse(
     command: ProfileAcquisitionResponseClaimCommand,
   ): Promise<ProfileAcquisitionResponseClaimResult> {
-    if (
-      this.operationalConfig.get().mode !== PROFILE_ACQUISITION_MODE.INTERNAL
-    ) {
+    if (!(await this.acquisitionEnabled(command.userId))) {
       return this.claimResult('REJECTED', command.cycleId, null);
     }
     const receivedAt = new Date(command.receivedAt);
@@ -445,9 +452,7 @@ export class ProfileAcquisitionCycleService {
   async releaseResponseClaim(
     command: ProfileAcquisitionResponseClaimReleaseCommand,
   ): Promise<void> {
-    if (
-      this.operationalConfig.get().mode !== PROFILE_ACQUISITION_MODE.INTERNAL
-    ) {
+    if (!(await this.acquisitionEnabled(command.userId))) {
       return;
     }
     await this.prisma.$transaction(async (transaction) => {
@@ -467,9 +472,7 @@ export class ProfileAcquisitionCycleService {
   async complete(
     command: ProfileAcquisitionCycleCompletionCommand,
   ): Promise<ProfileAcquisitionCycleCompletionResult> {
-    if (
-      this.operationalConfig.get().mode !== PROFILE_ACQUISITION_MODE.INTERNAL
-    ) {
+    if (!(await this.acquisitionEnabled(command.userId))) {
       return Object.freeze({
         status: 'REJECTED',
         cycleId: command.cycleId,

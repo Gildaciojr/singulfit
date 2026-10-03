@@ -3,6 +3,7 @@ import type { ConversationUnderstandingInput } from '../contracts/conversation-u
 import { CONVERSATION_OPERATION } from '../contracts/conversation-intent.contract';
 import type {
   ConversationOperationResolution,
+  ConversationEntityRecognition,
   NormalizedConversationMessage,
 } from '../contracts/conversation-understanding-pipeline.contract';
 import type { ConversationOperation } from '../contracts/conversation-intent.contract';
@@ -14,6 +15,7 @@ export class ConversationOperationResolverService {
   resolve(
     input: Pick<ConversationUnderstandingInput, 'continuity'>,
     message: NormalizedConversationMessage,
+    recognized?: ConversationEntityRecognition,
   ): ConversationOperationResolution {
     const text = message.folded;
     const candidates: ConversationOperation[] = [];
@@ -35,6 +37,17 @@ export class ConversationOperationResolverService {
     const add = (operation: ConversationOperation): void => {
       if (!candidates.includes(operation)) candidates.push(operation);
     };
+    if (
+      !message.question &&
+      /^(?:nao tenho|me de outra opcao|substitua essa refeicao)\b/u.test(
+        text,
+      ) &&
+      (recognized?.entities.some(
+        (entity) => entity.kind === 'FOOD' || entity.kind === 'MEAL',
+      ) ||
+        input.continuity.targetPlan === 'DIET')
+    )
+      add(CONVERSATION_OPERATION.SUBSTITUTE_ITEM);
 
     if (/\b(status|andamento|situacao)\b/u.test(text)) {
       add(CONVERSATION_OPERATION.PRESENT_PLAN_STATUS);

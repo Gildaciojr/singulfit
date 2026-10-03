@@ -9,6 +9,7 @@ import {
   dailyQuery,
   foldDailyText,
   isWeeklyFollowUp,
+  metricFollowUp,
 } from '../understanding/daily-query.policy';
 
 const DAY_LABELS = [
@@ -34,6 +35,7 @@ export class ConversationDailyQueryService {
     return (
       dailyQuery(text) !== null ||
       isWeeklyFollowUp(text) ||
+      metricFollowUp(text) !== null ||
       this.mealRequest(text)
     );
   }
@@ -47,7 +49,8 @@ export class ConversationDailyQueryService {
   }): Promise<string | null> {
     const text = foldDailyText(input.text);
     let query = dailyQuery(text);
-    if (isWeeklyFollowUp(text)) {
+    const metric = metricFollowUp(text);
+    if (isWeeklyFollowUp(text) || metric) {
       const previous = await this.prisma.message.findFirst({
         where: {
           conversationId: input.conversationId,
@@ -57,13 +60,30 @@ export class ConversationDailyQueryService {
           type: MessageType.TEXT,
           timestamp: { lt: input.referenceDate },
         },
-        select: { content: true },
+        select: {
+          content: true,
+          timestamp: true,
+          conversation: { select: { id: true, userId: true } },
+        },
         orderBy: [{ timestamp: 'desc' }, { id: 'desc' }],
       });
-      const antecedent = previous ? dailyQuery(previous.content) : null;
+      const antecedent =
+        previous &&
+        previous.conversation.userId === input.userId &&
+        previous.conversation.id === input.conversationId &&
+        previous.timestamp < input.referenceDate
+          ? dailyQuery(previous.content)
+          : null;
       if (!antecedent)
-        return 'Você quer consultar esta semana sobre qual informação: alimentação registrada ou outra coisa?';
-      query = { ...antecedent, period: 'THIS_WEEK' };
+        return metric
+          ? 'Você quer consultar essa quantidade consumida hoje ou nesta semana?'
+          : 'Você quer consultar esta semana sobre qual informação: alimentação registrada ou outra coisa?';
+      if (metric && antecedent.kind !== 'CONSUMPTION')
+        return 'Você quer consultar essa quantidade na alimentação registrada hoje ou nesta semana?';
+      query = {
+        ...antecedent,
+        ...(metric ? { metric } : { period: 'THIS_WEEK' as const }),
+      };
     }
     if (query?.kind === 'EXPENDITURE') {
       return `Consigo acompanhar a alimentação que você registrou, mas ainda não tenho uma fonte confiável dos seus gastos calóricos reais ${query.period === 'TODAY' ? 'de hoje' : 'desta semana'}.`;
@@ -72,8 +92,14 @@ export class ConversationDailyQueryService {
     try {
       const preferences = await this.prisma.userPreferences.findUnique({
         where: { userId: input.userId },
-        select: { timezone: true },
+        select: { timezone: true, userId: true },
       });
+      if (
+        preferences &&
+        preferences.userId !== undefined &&
+        preferences.userId !== input.userId
+      )
+        throw new Error('Preferences ownership mismatch');
       const timezone = this.clock.timezone(preferences?.timezone);
       if (query) {
         const summary = await this.consumption.summarize({
@@ -128,6 +154,8 @@ export class ConversationDailyQueryService {
   ): Promise<string> {
     const current = await this.nutrition.getCurrent(userId);
     if (!current) return 'Você ainda não possui um plano alimentar ativo.';
+    if (current.userId !== userId)
+      return 'Não consegui consultar seu plano com segurança agora.';
     if (current.implementation === 'LEGACY') {
       const matches = current.meals.filter((meal) =>
         text.includes(foldDailyText(meal.name)),

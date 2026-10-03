@@ -1,6 +1,7 @@
 import { AIJobType, Prisma } from '@prisma/client';
 import type { PendingAIJobCompletion } from '../../ai/pending-ai-job-completion.contract';
 import type { CoachProfileSnapshot } from '../../context/coach-profile-snapshot.contract';
+import type { NutritionMutationTarget } from './nutrition-targeted-mutation.policy';
 import type { ConversationGoalDecision } from '../../context/conversation-goal-planner.contract';
 import type {
   NutritionArtifactResolution,
@@ -46,6 +47,7 @@ export interface GenerateNutritionPlanV2Input {
   readonly explicitArtifactType?: NutritionArtifactType;
   readonly nutritionEvidence?: readonly NutritionEvidenceSummary[];
   readonly previousPlan?: NutritionPlanV2;
+  readonly mutationTarget?: NutritionMutationTarget;
   readonly reviewedPlan?: {
     readonly id: string;
     readonly plan: NutritionPlanV2;

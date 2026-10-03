@@ -18,7 +18,7 @@ export class ConversationSafetyDetectorService {
 
     if (/\bdor no peito\b/u.test(text)) {
       this.add(signals, entities, 'PAIN', 'HIGH', 'PAIN', 'peito');
-    } else if (/\bdor(es)?\b/u.test(text)) {
+    } else if (/\b(?:dor(?:es)?|doi|doendo)\b/u.test(text)) {
       this.add(
         signals,
         entities,

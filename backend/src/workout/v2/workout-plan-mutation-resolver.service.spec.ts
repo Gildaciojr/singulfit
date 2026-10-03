@@ -2,6 +2,7 @@ import type { CurrentWorkoutPlanReaderService } from './current-workout-plan-rea
 import type { WorkoutPlanV2 } from './workout-plan-v2.contract';
 import { WorkoutPlanMutationResolverService } from './workout-plan-mutation-resolver.service';
 import type { WorkoutRecognizedContext } from './workout-planning-context.contract';
+import type { ConversationPlanReferenceService } from '../../conversation/understanding/conversation-plan-reference.service';
 
 function plan(): WorkoutPlanV2 {
   return {
@@ -58,12 +59,115 @@ function plan(): WorkoutPlanV2 {
 }
 
 describe('WorkoutPlanMutationResolverService', () => {
+  it.each([
+    [
+      'Pernas: Agachamento livre; Leg press',
+      'Troque o primeiro exercício',
+      'squat',
+    ],
+    ['Pernas: Agachamento livre; Leg press', 'Troque o segundo', 'leg-press'],
+    [
+      'Peito: Supino máquina',
+      'Não tenho máquina para esse exercício',
+      'chest-press',
+    ],
+    [
+      'Peito: Supino máquina',
+      'Troque esse exercício agachamento livre',
+      'squat',
+    ],
+  ])(
+    'resolves %s / %s in the presented session, giving named targets priority',
+    async (recent, request, key) => {
+      const read = jest.fn().mockResolvedValue({
+        status: 'AVAILABLE',
+        plan: {
+          userId: 'user-id',
+          aggregateId: 'active-plan',
+          calendar: [],
+          document: plan(),
+        },
+      });
+      const references = {
+        recentAssistant: jest.fn().mockResolvedValue(recent),
+      };
+      const resolver = new WorkoutPlanMutationResolverService(
+        { read } as unknown as CurrentWorkoutPlanReaderService,
+        references as unknown as ConversationPlanReferenceService,
+      );
+      await expect(
+        resolver.resolve(
+          'user-id',
+          request,
+          {},
+          {
+            userId: 'user-id',
+            conversationId: 'conversation',
+            messageId: 'message',
+            referenceDate: new Date(),
+          },
+        ),
+      ).resolves.toMatchObject({
+        status: 'READY',
+        recognizedContext: {
+          mutation: { sourceActivityKey: key, sourcePlanId: 'active-plan' },
+          ...(request.includes('máquina')
+            ? { equipment: { value: ['BODYWEIGHT'] } }
+            : {}),
+        },
+      });
+    },
+  );
+  it.each([
+    null,
+    'Pernas: Agachamento livre; Peito: Supino máquina',
+    'Uma explicação sobre proteína',
+  ])(
+    'clarifies an ordinal when no single session was presented: %s',
+    async (recent) => {
+      const resolver = new WorkoutPlanMutationResolverService(
+        {
+          read: jest.fn().mockResolvedValue({
+            status: 'AVAILABLE',
+            plan: { userId: 'user-id', document: plan() },
+          }),
+        } as unknown as CurrentWorkoutPlanReaderService,
+        {
+          recentAssistant: jest.fn().mockResolvedValue(recent),
+        } as unknown as ConversationPlanReferenceService,
+      );
+      await expect(
+        resolver.resolve(
+          'user-id',
+          'Troque o primeiro exercício',
+          {},
+          {
+            userId: 'user-id',
+            conversationId: 'conversation',
+            messageId: 'message',
+            referenceDate: new Date(),
+          },
+        ),
+      ).resolves.toMatchObject({ status: 'CLARIFICATION' });
+    },
+  );
+  it('rejects a foreign active plan even when a reader mock supplies it', async () => {
+    const resolver = new WorkoutPlanMutationResolverService({
+      read: jest.fn().mockResolvedValue({
+        status: 'AVAILABLE',
+        plan: { userId: 'other', document: plan() },
+      }),
+    } as unknown as CurrentWorkoutPlanReaderService);
+    await expect(
+      resolver.resolve('user-id', 'Troque agachamento livre', {}),
+    ).resolves.toMatchObject({ status: 'NO_CURRENT_PLAN' });
+  });
   function setup(current: WorkoutPlanV2 | null = plan()) {
     const read = jest.fn().mockResolvedValue(
       current
         ? {
             status: 'AVAILABLE',
-            plan: { document: current },
+            plan: { userId: 'user-id', document: current },
           }
         : { status: 'NO_PLAN', plan: null },
     );
@@ -199,6 +303,46 @@ describe('WorkoutPlanMutationResolverService', () => {
         },
       },
     });
+  });
+  it.each(['Substitua supino', 'Troque o supino por outro'])(
+    'resolves a unique exact exercise name prefix: %s',
+    async (request) => {
+      await expect(
+        setup().resolver.resolve('user-id', request, {}),
+      ).resolves.toMatchObject({
+        status: 'READY',
+        recognizedContext: { mutation: { sourceActivityKey: 'chest-press' } },
+      });
+    },
+  );
+  it('clarifies an exercise name prefix that matches two activities', async () => {
+    const current = plan();
+    const duplicate = {
+      ...current,
+      sessions: [
+        ...current.sessions,
+        {
+          ...current.sessions[1],
+          sessionKey: 'another',
+          sequence: 3,
+          blocks: [
+            {
+              ...current.sessions[1].blocks[0],
+              activities: [
+                {
+                  ...current.sessions[1].blocks[0].activities[0],
+                  activityKey: 'bar-press',
+                  name: 'Supino com barra',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    await expect(
+      setup(duplicate).resolver.resolve('user-id', 'Troque supino', {}),
+    ).resolves.toMatchObject({ status: 'CLARIFICATION' });
   });
 
   it('carries safety signals for painful substitutions so the engine can block before provider', async () => {

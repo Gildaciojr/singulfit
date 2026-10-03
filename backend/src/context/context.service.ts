@@ -41,6 +41,13 @@ export class ContextService {
       this.snapshotService.getStatistics(userId),
     ]);
 
+    if (
+      [nutritionProfile, preferences, latestSnapshot, ...memories].some(
+        (record) => record && record.userId !== userId,
+      )
+    )
+      throw new NotFoundException('Contexto pertence a outro usuário');
+
     return {
       userId,
       nutritionProfile,
@@ -164,7 +171,7 @@ export class ContextService {
       },
     });
 
-    if (!user) {
+    if (!user || user.id !== userId) {
       throw new NotFoundException('Usuário não encontrado');
     }
   }

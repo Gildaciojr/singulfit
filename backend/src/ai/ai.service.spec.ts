@@ -10,6 +10,56 @@ import { PromptService } from './prompt.service';
 import { EventBusService } from '../event-bus/event-bus.service';
 
 describe('AIService', () => {
+  it.each(['before', 'after'] as const)(
+    'rejects a foreign Vision job %s claim before gateway',
+    async (phase) => {
+      const owned = {
+        id: 'job-id',
+        userId: 'user-a',
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+        type: AIJobType.IMAGE,
+        promptVersion: { prompt: 'Vision prompt' },
+      };
+      const foreign = { ...owned, userId: 'user-b' };
+      const prisma = {
+        aIJob: {
+          findUnique: jest
+            .fn()
+            .mockResolvedValue(phase === 'before' ? foreign : owned),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          findUniqueOrThrow: jest.fn().mockResolvedValue(foreign),
+        },
+      };
+      const gateway = { createVisionResponse: jest.fn() };
+      const service = createService({ prisma, gateway });
+      await expect(
+        service.runVisionJob('job-id', {
+          input: 'user-a context',
+          imageUrl: 'data:image/jpeg;base64,AA==',
+          expectedContext: {
+            userId: 'user-a',
+            conversationId: 'conversation-id',
+            messageId: 'message-id',
+          },
+        }),
+      ).rejects.toThrow('ownership mismatch');
+      expect(gateway.createVisionResponse).not.toHaveBeenCalled();
+      if (phase === 'before')
+        expect(prisma.aIJob.updateMany).not.toHaveBeenCalled();
+      else
+        expect(prisma.aIJob.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              userId: 'user-a',
+              conversationId: 'conversation-id',
+              messageId: 'message-id',
+              type: AIJobType.IMAGE,
+            }),
+          }),
+        );
+    },
+  );
   function createService(options: {
     prisma: Record<string, unknown>;
     promptService?: Record<string, unknown>;
@@ -36,6 +86,84 @@ describe('AIService', () => {
       } as unknown as EventBusService,
     );
   }
+
+  it.each([AIJobStatus.PENDING, AIJobStatus.PROCESSING])(
+    'reverses an owned rejected IMAGE reservation once from %s',
+    async (status) => {
+      const job = {
+        id: 'job-id',
+        userId: 'user-a',
+        type: AIJobType.IMAGE,
+        status: status as AIJobStatus,
+      };
+      const tx = {
+        aIJob: {
+          findUnique: jest.fn().mockResolvedValue(job),
+          update: jest.fn().mockImplementation(() => {
+            job.status = AIJobStatus.FAILED;
+            return Promise.resolve(job);
+          }),
+        },
+      };
+      const usageService = {
+        reverseInTransaction: jest.fn(),
+        confirmInTransaction: jest.fn(),
+      };
+      const service = createService({
+        prisma: {
+          $transaction: async (
+            operation: (client: typeof tx) => Promise<void>,
+          ) => operation(tx),
+        },
+        usageService,
+      });
+      await service.failJob(
+        'job-id',
+        new Error('ownership mismatch'),
+        undefined,
+        'user-a',
+      );
+      await service.failJob('job-id', new Error('retry'), undefined, 'user-a');
+      expect(usageService.reverseInTransaction).toHaveBeenCalledTimes(1);
+      expect(usageService.reverseInTransaction).toHaveBeenCalledWith(
+        tx,
+        'job-id',
+      );
+      expect(usageService.confirmInTransaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not mutate or reverse a foreign IMAGE job returned during rejection', async () => {
+    const tx = {
+      aIJob: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({
+            id: 'job-id',
+            userId: 'user-b',
+            type: AIJobType.IMAGE,
+            status: AIJobStatus.PROCESSING,
+          }),
+        update: jest.fn(),
+      },
+    };
+    const usageService = { reverseInTransaction: jest.fn() };
+    const service = createService({
+      prisma: {
+        $transaction: async (operation: (client: typeof tx) => Promise<void>) =>
+          operation(tx),
+      },
+      usageService,
+    });
+    await service.failJob(
+      'job-id',
+      new Error('ownership mismatch'),
+      undefined,
+      'user-a',
+    );
+    expect(tx.aIJob.update).not.toHaveBeenCalled();
+    expect(usageService.reverseInTransaction).not.toHaveBeenCalled();
+  });
 
   it('creates one standalone job after taking the operation lock', async () => {
     const createdJob = {

@@ -21,7 +21,22 @@ describe('ConversationTurnContextBuilderService', () => {
     } | null,
   ) {
     const prisma = {
-      conversation: { findFirst: jest.fn().mockResolvedValue(conversation) },
+      conversation: {
+        findFirst: jest.fn().mockResolvedValue(
+          conversation
+            ? {
+                id: 'conversation-id',
+                userId: 'user-id',
+                ...conversation,
+                messages: conversation.messages.map((message) => ({
+                  conversationId: 'conversation-id',
+                  conversation: { userId: 'user-id' },
+                  ...message,
+                })),
+              }
+            : null,
+        ),
+      },
       scheduledMessage: { findMany: jest.fn().mockResolvedValue([]) },
       coachProfileAcquisitionCycle: {
         findFirst: jest.fn().mockResolvedValue(null),
@@ -56,6 +71,51 @@ describe('ConversationTurnContextBuilderService', () => {
     receivedAt: '2026-08-01T12:00:00.000Z',
     legacyIntent: 'DIET' as const,
   };
+
+  it.each(['id', 'userId'])(
+    'rejects a foreign root conversation %s',
+    async (field) => {
+      const s = createSubject({ messages: [] });
+      s.prisma.conversation.findFirst.mockResolvedValue({
+        id: 'conversation-id',
+        userId: 'user-id',
+        messages: [],
+        [field]: 'foreign',
+      });
+      await expect(s.service.build(input)).rejects.toThrow(
+        'Conversa não encontrada',
+      );
+    },
+  );
+
+  it('drops foreign child messages and scheduled automation context', async () => {
+    const s = createSubject({ messages: [] });
+    s.prisma.conversation.findFirst.mockResolvedValue({
+      id: 'conversation-id',
+      userId: 'user-id',
+      messages: [
+        {
+          direction: MessageDirection.INBOUND,
+          content: 'FOREIGN_MESSAGE_B',
+          timestamp: new Date('2026-08-01T11:59:00Z'),
+          conversationId: 'conversation-id',
+          conversation: { userId: 'user-b' },
+        },
+      ],
+    });
+    s.prisma.scheduledMessage.findMany.mockResolvedValue([
+      {
+        id: 'foreign',
+        userId: 'user-b',
+        conversationId: 'conversation-id',
+        content: 'FOREIGN_AUTOMATION_B',
+        context: { private: 'SECRET_B' },
+        scheduledFor: new Date('2026-08-01T11:59:00Z'),
+      },
+    ]);
+    const result = await s.service.build(input);
+    expect(JSON.stringify(result)).not.toMatch(/FOREIGN_|SECRET_B/);
+  });
 
   it('never incorporates future messages or automations when processing a delayed inbound', async () => {
     const s = createSubject({
@@ -144,7 +204,14 @@ describe('ConversationTurnContextBuilderService', () => {
     expect(
       subject.prisma.conversation.findFirst.mock.calls[0][0].select.messages
         .select,
-    ).toEqual({ direction: true, content: true, timestamp: true });
+    ).toEqual(
+      expect.objectContaining({
+        direction: true,
+        content: true,
+        timestamp: true,
+        conversationId: true,
+      }),
+    );
   });
 
   it.each([
@@ -214,6 +281,8 @@ describe('ConversationTurnContextBuilderService', () => {
     subject.prisma.scheduledMessage.findMany.mockResolvedValueOnce([
       {
         id: 'scheduled-hydration-id',
+        userId: 'user-id',
+        conversationId: 'conversation-id',
         content: 'Já conseguiu tomar água hoje?',
         context: {
           source: 'AUTOMATION',
@@ -224,6 +293,7 @@ describe('ConversationTurnContextBuilderService', () => {
         scheduledFor: new Date('2026-08-01T11:59:00.000Z'),
         automationRule: null,
         coachMessage: {
+          userId: 'user-id',
           context: {
             source: 'AUTOMATION',
             ruleCode: 'HYDRATION_REMINDER',
@@ -359,6 +429,8 @@ describe('ConversationTurnContextBuilderService', () => {
       const subject = createSubject({ messages: [] });
       subject.prisma.scheduledMessage.findMany.mockResolvedValueOnce([
         {
+          userId: input.userId,
+          conversationId: input.conversationId,
           content: proactive,
           scheduledFor: new Date('2026-08-01T11:59:00.000Z'),
         },
@@ -382,6 +454,8 @@ describe('ConversationTurnContextBuilderService', () => {
     });
     subject.prisma.scheduledMessage.findMany.mockResolvedValue([
       {
+        userId: input.userId,
+        conversationId: input.conversationId,
         content: 'Como foi o treino de hoje?',
         scheduledFor: new Date('2026-08-01T11:59:00Z'),
       },
@@ -405,6 +479,8 @@ describe('ConversationTurnContextBuilderService', () => {
     const subject = createSubject({ messages: [] });
     subject.prisma.scheduledMessage.findMany.mockResolvedValueOnce([
       {
+        userId: input.userId,
+        conversationId: input.conversationId,
         content: 'Oi Gildácio, como está sua hidratação hoje?',
         scheduledFor: new Date('2026-08-01T11:00:00.000Z'),
       },
@@ -433,6 +509,8 @@ describe('ConversationTurnContextBuilderService', () => {
       messages: [
         {
           direction: MessageDirection.OUTBOUND,
+          userId: input.userId,
+          conversationId: input.conversationId,
           content: text,
           timestamp: new Date('2026-08-01T11:59:00.000Z'),
         },
@@ -440,6 +518,8 @@ describe('ConversationTurnContextBuilderService', () => {
     });
     subject.prisma.scheduledMessage.findMany.mockResolvedValueOnce([
       {
+        userId: input.userId,
+        conversationId: input.conversationId,
         content: text,
         scheduledFor: new Date('2026-08-01T11:59:00.000Z'),
       },

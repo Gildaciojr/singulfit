@@ -56,6 +56,7 @@ describe('NutritionIntelligenceService', () => {
         findMany: jest.fn().mockResolvedValue([
           {
             id: 'meal-id',
+            userId: 'user-id',
             createdAt: new Date('2026-06-13T12:00:00.000Z'),
             analysis: {
               mealCategory: MealCategory.LUNCH,
@@ -141,6 +142,7 @@ describe('NutritionIntelligenceService', () => {
       mealAnalysis: {
         findUniqueOrThrow: jest.fn().mockResolvedValue({
           id: 'analysis-id',
+          meal: { userId: 'user-id' },
           totalCalories: new Prisma.Decimal('650'),
           totalProtein: new Prisma.Decimal('8'),
           totalCarbs: new Prisma.Decimal('95'),

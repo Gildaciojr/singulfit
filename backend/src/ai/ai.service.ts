@@ -46,6 +46,10 @@ interface RunTextJobInput {
 
 interface RunVisionJobInput extends RunTextJobInput {
   imageUrl: string;
+  expectedContext?: Pick<
+    CreateAIJobInput,
+    'userId' | 'conversationId' | 'messageId'
+  >;
 }
 
 @Injectable()
@@ -367,7 +371,31 @@ export class AIService {
     aiJobId: string,
     request: RunVisionJobInput,
   ): Promise<OpenAIResponseResult> {
-    const job = await this.claimJob(aiJobId);
+    const expected = request.expectedContext;
+    if (expected) {
+      const source = await this.prisma.aIJob.findUnique({
+        where: { id: aiJobId },
+      });
+      if (
+        !source ||
+        source.id !== aiJobId ||
+        source.userId !== expected.userId ||
+        source.conversationId !== expected.conversationId ||
+        source.messageId !== expected.messageId ||
+        source.type !== AIJobType.IMAGE
+      )
+        throw new ConflictException('Vision AIJob ownership mismatch');
+    }
+    const job = await this.claimJob(aiJobId, expected);
+    if (
+      expected &&
+      (job.id !== aiJobId ||
+        job.userId !== expected.userId ||
+        job.conversationId !== expected.conversationId ||
+        job.messageId !== expected.messageId ||
+        job.type !== AIJobType.IMAGE)
+    )
+      throw new ConflictException('Vision AIJob ownership mismatch');
 
     return this.openAIGateway.createVisionResponse({
       instructions: job.promptVersion.prompt,
@@ -443,6 +471,7 @@ export class AIService {
     aiJobId: string,
     error: unknown,
     response?: OpenAIResponseResult,
+    expectedUserId?: string,
   ): Promise<void> {
     const safeError = this.getSafeError(error);
 
@@ -453,7 +482,18 @@ export class AIService {
         },
       });
 
-      if (!job || job.status !== AIJobStatus.PROCESSING) {
+      if (
+        !job ||
+        job.id !== aiJobId ||
+        (expectedUserId !== undefined &&
+          (job.userId !== expectedUserId || job.type !== AIJobType.IMAGE)) ||
+        (job.status !== AIJobStatus.PROCESSING &&
+          !(
+            expectedUserId !== undefined &&
+            job.type === AIJobType.IMAGE &&
+            job.status === AIJobStatus.PENDING
+          ))
+      ) {
         return;
       }
 
@@ -472,6 +512,13 @@ export class AIService {
       await transaction.aIJob.update({
         where: {
           id: job.id,
+          ...(expectedUserId !== undefined
+            ? {
+                userId: expectedUserId,
+                type: AIJobType.IMAGE,
+                status: job.status,
+              }
+            : {}),
         },
         data: {
           status: AIJobStatus.FAILED,
@@ -602,12 +649,19 @@ export class AIService {
     return 'Falha não identificada no processamento de IA';
   }
 
-  private async claimJob(aiJobId: string) {
+  private async claimJob(
+    aiJobId: string,
+    expected?: Pick<
+      CreateAIJobInput,
+      'userId' | 'conversationId' | 'messageId'
+    >,
+  ) {
     const now = new Date();
     const leaseExpiresAt = new Date(now.getTime() + this.getLeaseMs());
     const claimed = await this.prisma.aIJob.updateMany({
       where: {
         id: aiJobId,
+        ...(expected ? { ...expected, type: AIJobType.IMAGE } : {}),
         OR: [
           {
             status: AIJobStatus.PENDING,

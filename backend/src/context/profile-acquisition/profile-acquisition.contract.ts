@@ -11,10 +11,20 @@ export const PROFILE_ACQUISITION_MODE = {
   OFF: 'OFF',
   SHADOW: 'SHADOW',
   INTERNAL: 'INTERNAL',
+  PRODUCTIVE: 'PRODUCTIVE',
 } as const;
 
 export type ProfileAcquisitionMode =
   (typeof PROFILE_ACQUISITION_MODE)[keyof typeof PROFILE_ACQUISITION_MODE];
+
+export function isWritingAcquisitionMode(
+  mode: ProfileAcquisitionMode,
+): boolean {
+  return (
+    mode === PROFILE_ACQUISITION_MODE.INTERNAL ||
+    mode === PROFILE_ACQUISITION_MODE.PRODUCTIVE
+  );
+}
 
 export type TrainingModality =
   | 'GYM_STRENGTH'

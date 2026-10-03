@@ -38,6 +38,8 @@ export class CurrentNutritionPlanReaderService {
       where: { userId },
     });
     if (ownership) {
+      if (ownership.userId !== userId)
+        throw this.ownershipConflict(userId, 'V2');
       if (ownership.implementation === NutritionPlanImplementation.LEGACY) {
         const plan = await this.prisma.dietPlan.findFirst({
           where: {
@@ -48,7 +50,13 @@ export class CurrentNutritionPlanReaderService {
           },
           include: DIET_PLAN_INCLUDE,
         });
-        if (!plan) throw this.ownershipConflict(userId, 'LEGACY');
+        if (
+          !plan ||
+          plan.id !== ownership.planId ||
+          plan.userId !== userId ||
+          plan.profileId !== ownership.profileId
+        )
+          throw this.ownershipConflict(userId, 'LEGACY');
         this.logCurrent('LEGACY');
         return this.legacy(plan);
       }
@@ -60,7 +68,13 @@ export class CurrentNutritionPlanReaderService {
           status: NutritionPlanStatus.ACTIVE,
         },
       });
-      if (!plan) throw this.ownershipConflict(userId, 'V2');
+      if (
+        !plan ||
+        plan.id !== ownership.planId ||
+        plan.userId !== userId ||
+        plan.profileId !== ownership.profileId
+      )
+        throw this.ownershipConflict(userId, 'V2');
       try {
         const current = this.v2(plan);
         this.logCurrent('V2');
@@ -84,6 +98,8 @@ export class CurrentNutritionPlanReaderService {
       }),
     ]);
 
+    if ([...legacy, ...v2].some((plan) => plan.userId !== userId))
+      throw this.ownershipConflict(userId, 'V2');
     if (legacy.length > 1 || v2.length > 1 || (legacy[0] && v2[0])) {
       throw this.conflict(userId, legacy.length, v2.length);
     }
@@ -109,13 +125,17 @@ export class CurrentNutritionPlanReaderService {
           where: { id: reference.id, userId },
           include: DIET_PLAN_INCLUDE,
         });
-        return plan ? this.legacy(plan) : null;
+        return plan && plan.id === reference.id && plan.userId === userId
+          ? this.legacy(plan)
+          : null;
       }
       case 'V2': {
         const plan = await this.prisma.nutritionPlanV2.findFirst({
           where: { id: reference.id, userId },
         });
-        return plan ? this.v2(plan) : null;
+        return plan && plan.id === reference.id && plan.userId === userId
+          ? this.v2(plan)
+          : null;
       }
     }
   }

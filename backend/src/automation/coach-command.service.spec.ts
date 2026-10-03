@@ -53,6 +53,7 @@ import { WorkoutGeneratorService } from '../workout/workout-generator.service';
 import { AUTOMATION_RULE_CODES } from './automation.constants';
 import { CoachCommandService } from './coach-command.service';
 import { ConversationDailyQueryService } from '../conversation/runtime/conversation-daily-query.service';
+import { ConversationProfileConsentService } from '../conversation/runtime/conversation-profile-consent.service';
 import { CoachPlanningExecutionDispatcherService } from './coach-planning-execution-dispatcher.service';
 import type { CoachPlanningBothApplicationExecutorService } from './coach-planning-both-application-executor.service';
 import { CoachPlanningExecutionService } from './coach-planning-execution.service';
@@ -181,6 +182,7 @@ describe('CoachCommandService', () => {
     currentWorkoutPlanId?: string;
     dailyEnabled?: boolean;
     dailyContent?: string | null;
+    profileConsentContent?: string;
   }) {
     const at = new Date('2026-06-10T12:00:00.000Z');
     const rule = {
@@ -517,6 +519,10 @@ describe('CoachCommandService', () => {
               },
       ),
     };
+    const profileConsent = {
+      accepts: jest.fn().mockReturnValue(true),
+      process: jest.fn().mockResolvedValue(options?.profileConsentContent),
+    };
     const service = new CoachCommandService(
       prisma as unknown as PrismaService,
       planningExecution,
@@ -543,6 +549,9 @@ describe('CoachCommandService', () => {
             answer: async () => options.dailyContent ?? null,
           } as unknown as ConversationDailyQueryService)
         : undefined,
+      options?.profileConsentContent
+        ? (profileConsent as unknown as ConversationProfileConsentService)
+        : undefined,
     );
 
     return {
@@ -561,6 +570,7 @@ describe('CoachCommandService', () => {
       planningConversationResponse,
       profileAcquisitionRollout,
       currentWorkoutPlanReader,
+      profileConsent,
     };
   }
 
@@ -2114,6 +2124,48 @@ describe('CoachCommandService', () => {
       }),
     );
     expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.conversationGoalShadow.execute).not.toHaveBeenCalled();
+  });
+
+  it('routes explicit profile consent before runtime and planning', async () => {
+    const subject = createSubject({
+      content: 'quero que você lembre disso',
+      profileConsentContent: 'Registrei no seu perfil.',
+      runtimeContent: 'Outra resposta',
+    });
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+    expect(subject.profileConsent.process).toHaveBeenCalledTimes(1);
+    expect(subject.profileConsent.process).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-id', messageId: 'message-id' }),
+    );
+    expect(subject.conversationRuntime.decide).not.toHaveBeenCalled();
+    expect(subject.conversationGoalShadow.execute).not.toHaveBeenCalled();
+    expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.transaction.scheduledMessage.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          content: 'Registrei no seu perfil.',
+        }),
+      }),
+    );
+  });
+
+  it('does not repeat profile consent after a canonical response already exists', async () => {
+    const subject = createSubject({
+      content: 'quero que você lembre disso',
+      profileConsentContent: 'Registrei no seu perfil.',
+      existingContent: 'Registro confirmado',
+    });
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+    expect(subject.profileConsent.process).not.toHaveBeenCalled();
+    expect(subject.prisma.coachMessage.create).not.toHaveBeenCalled();
     expect(subject.conversationGoalShadow.execute).not.toHaveBeenCalled();
   });
 

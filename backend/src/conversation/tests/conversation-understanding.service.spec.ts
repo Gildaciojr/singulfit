@@ -385,6 +385,8 @@ describe('ConversationUnderstandingService', () => {
 
   it.each([
     ['Estou com dor no peito', 'PAIN', 'HIGH'],
+    ['Esse exercício dói meu joelho', 'PAIN', 'MEDIUM'],
+    ['Esse exercício está doendo meu joelho', 'PAIN', 'MEDIUM'],
     ['Desmaiei durante o treino', 'INCAPACITY', 'HIGH'],
     ['Acho que tive uma fratura', 'INJURY', 'HIGH'],
     ['Estou com lesão no joelho', 'INJURY', 'MEDIUM'],

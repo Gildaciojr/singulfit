@@ -25,9 +25,14 @@ import { ConversationNutritionDeterministicAnswerService } from './conversation-
 import { WorkoutModule } from '../../workout/workout.module';
 import { ConversationDailyQueryService } from './conversation-daily-query.service';
 import { NutritionConsumptionSummaryService } from '../../nutrition/nutrition-consumption-summary.service';
+import { PersonalizedCoachContextService } from './personalized-coach-context.service';
+import { ConversationNutritionMutationService } from './conversation-nutrition-mutation.service';
+import { NutritionExecutionModule } from '../../diet/v2/execution/nutrition-execution.module';
+import { ConversationProfileConsentService } from './conversation-profile-consent.service';
 
 @Module({
   imports: [
+    NutritionExecutionModule,
     PrismaModule,
     ObservabilityModule,
     ContextModule,
@@ -37,6 +42,9 @@ import { NutritionConsumptionSummaryService } from '../../nutrition/nutrition-co
     WorkoutModule,
   ],
   providers: [
+    ConversationProfileConsentService,
+    ConversationNutritionMutationService,
+    PersonalizedCoachContextService,
     ConversationDailyQueryService,
     NutritionConsumptionSummaryService,
     ConversationRuntimeOperationalConfigService,
@@ -58,6 +66,8 @@ import { NutritionConsumptionSummaryService } from '../../nutrition/nutrition-co
     ConversationNutritionDeterministicAnswerService,
   ],
   exports: [
+    ConversationProfileConsentService,
+    ConversationNutritionMutationService,
     ConversationDailyQueryService,
     ConversationRuntimeOperationalConfigService,
     ConversationRuntimeService,

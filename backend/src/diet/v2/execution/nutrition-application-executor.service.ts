@@ -46,6 +46,8 @@ export class NutritionApplicationExecutorService {
     }
     if (generation.output.kind === 'PLAN') {
       const persisted = await this.planPersistence.persist({
+        expectedActivePlanId:
+          input.generationInput.mutationTarget?.sourcePlanId,
         generation: generation as PersistNutritionPlanV2Input['generation'],
         ownership: input.ownership,
         executionContext: {

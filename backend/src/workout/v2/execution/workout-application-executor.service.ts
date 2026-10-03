@@ -83,6 +83,10 @@ export class WorkoutApplicationExecutorService {
       input.generationInput,
     );
     const persisted = await this.persistence.persist({
+      expectedActivePlanId:
+        input.generationInput.recognizedContext?.mutation?.sourcePlanId,
+      preservedCalendar:
+        input.generationInput.recognizedContext?.mutation?.sourceCalendar,
       generation,
       ownership: input.ownership,
       executionContext: input.executionContext,

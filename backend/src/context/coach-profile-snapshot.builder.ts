@@ -50,6 +50,7 @@ const COACH_PROFILE_SNAPSHOT_USER_SELECT = {
   onboardingCompleted: true,
   fitnessProfile: {
     select: {
+      userId: true,
       gender: true,
       birthDate: true,
       heightCm: true,
@@ -69,6 +70,7 @@ const COACH_PROFILE_SNAPSHOT_USER_SELECT = {
   },
   nutritionProfile: {
     select: {
+      userId: true,
       sex: true,
       birthDate: true,
       heightCm: true,
@@ -83,6 +85,7 @@ const COACH_PROFILE_SNAPSHOT_USER_SELECT = {
   },
   preferences: {
     select: {
+      userId: true,
       preferredWakeUpTime: true,
       preferredSleepTime: true,
       preferredTrainingTime: true,
@@ -93,6 +96,7 @@ const COACH_PROFILE_SNAPSHOT_USER_SELECT = {
   },
   coachProfile: {
     select: {
+      userId: true,
       communicationStyle: true,
       coachingStyle: true,
       tone: true,
@@ -104,6 +108,7 @@ const COACH_PROFILE_SNAPSHOT_USER_SELECT = {
   },
   behavioralProfile: {
     select: {
+      userId: true,
       communicationStyle: true,
       motivationStyle: true,
       adherenceStyle: true,
@@ -112,27 +117,28 @@ const COACH_PROFILE_SNAPSHOT_USER_SELECT = {
     },
   },
   behavioralSnapshots: {
-    select: { stage: true },
+    select: { userId: true, stage: true },
     orderBy: [{ generatedAt: 'desc' as const }, { id: 'desc' as const }],
     take: 1,
   },
   fitnessCheckIns: {
-    select: { adherenceScore: true },
+    select: { userId: true, adherenceScore: true },
     orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }],
     take: 1,
   },
   progressSnapshots: {
-    select: { weightKg: true },
+    select: { userId: true, weightKg: true },
     orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }],
     take: 1,
   },
   longitudinalProfiles: {
-    select: { adherenceScore: true },
+    select: { userId: true, adherenceScore: true },
     orderBy: [{ generatedAt: 'desc' as const }, { id: 'desc' as const }],
     take: 1,
   },
   foodPreferenceSnapshots: {
     select: {
+      userId: true,
       foodName: true,
       kind: true,
       confidence: true,
@@ -148,6 +154,7 @@ const COACH_PROFILE_SNAPSHOT_USER_SELECT = {
   },
   nutritionEvolution: {
     select: {
+      userId: true,
       overallDirection: true,
       mealsAnalyzed: true,
       qualityScore: true,
@@ -156,18 +163,19 @@ const COACH_PROFILE_SNAPSHOT_USER_SELECT = {
     take: 1,
   },
   goalProgression: {
-    select: { goal: true, state: true, score: true },
+    select: { userId: true, goal: true, state: true, score: true },
     orderBy: [{ generatedAt: 'desc' as const }, { id: 'desc' as const }],
     take: 1,
   },
   coachAdaptations: {
-    select: { mode: true, reason: true },
+    select: { userId: true, mode: true, reason: true },
     orderBy: [{ generatedAt: 'desc' as const }, { id: 'desc' as const }],
     take: 1,
   },
   dietPlans: {
     where: { status: DietPlanStatus.ACTIVE },
     select: {
+      userId: true,
       id: true,
       title: true,
       objective: true,
@@ -180,6 +188,7 @@ const COACH_PROFILE_SNAPSHOT_USER_SELECT = {
   workoutPlans: {
     where: { status: WorkoutStatus.ACTIVE },
     select: {
+      userId: true,
       id: true,
       title: true,
       objective: true,
@@ -190,7 +199,7 @@ const COACH_PROFILE_SNAPSHOT_USER_SELECT = {
     take: 1,
   },
   conversationMemories: {
-    select: { summary: true },
+    select: { userId: true, summary: true },
     orderBy: [
       { relevanceScore: 'desc' as const },
       { generatedAt: 'desc' as const },
@@ -263,16 +272,46 @@ export class CoachProfileSnapshotBuilder {
             sourceKey: ACTIVATION_ONBOARDING_PROFILE_SOURCE_KEY,
           },
         },
-        select: { content: true },
+        select: { content: true, userId: true },
       }),
       this.currentNutritionPlanReader.getCurrent(userId),
     ]);
 
-    if (!user) {
+    if (!user || user.id !== userId) {
       throw new NotFoundException(
         'Usuário do CoachProfileSnapshot não encontrado',
       );
     }
+
+    const relatedOwners = [
+      user.fitnessProfile,
+      user.nutritionProfile,
+      user.preferences,
+      user.coachProfile,
+      user.behavioralProfile,
+      ...user.behavioralSnapshots,
+      ...user.fitnessCheckIns,
+      ...user.progressSnapshots,
+      ...user.longitudinalProfiles,
+      ...user.foodPreferenceSnapshots,
+      ...user.nutritionEvolution,
+      ...user.goalProgression,
+      ...user.coachAdaptations,
+      ...user.dietPlans,
+      ...user.workoutPlans,
+      ...user.conversationMemories,
+      activationMemory,
+    ];
+    if (
+      relatedOwners.some(
+        (record) =>
+          record && record.userId !== undefined && record.userId !== userId,
+      ) ||
+      (currentNutritionPlan && currentNutritionPlan.userId !== userId)
+    )
+      throw new NotFoundException(
+        'Dados do CoachProfileSnapshot pertencem a outro usuário',
+      );
 
     return this.assemble(
       user,
@@ -293,7 +332,10 @@ export class CoachProfileSnapshotBuilder {
     const nutrition = user.nutritionProfile;
     const activation = this.record(activationContent);
     const acquired = this.acquisitionProjection.project(
-      user.coachProfileFieldValues,
+      user.coachProfileFieldValues.filter(
+        (value) =>
+          value.userId === user.id && value.referenceDate <= referenceDate,
+      ),
     );
 
     const sex = this.resolveDuplicate(

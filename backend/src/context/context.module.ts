@@ -21,6 +21,7 @@ import { ProfileAcquisitionCycleService } from './profile-acquisition/profile-ac
 import { ProfileAnswerRecognizerService } from './profile-acquisition/profile-answer-recognizer.service';
 import { ProfileAcquisitionOperationalConfigService } from './profile-acquisition/profile-acquisition-operational-config.service';
 import { ProfileAcquisitionInternalEligibilityService } from './profile-acquisition/profile-acquisition-internal-eligibility.service';
+import { ProfileAcquisitionAuthorizationService } from './profile-acquisition/profile-acquisition-authorization.service';
 import { ProfileAcquisitionInternalRolloutService } from './profile-acquisition/profile-acquisition-internal-rollout.service';
 import { ProfileAcquisitionRuntimeService } from './profile-acquisition/profile-acquisition-runtime.service';
 import {
@@ -58,6 +59,7 @@ import { DietModule } from '../diet/diet.module';
     CoachProfileAcquisitionProjectionService,
     ProfileAcquisitionOperationalConfigService,
     ProfileAcquisitionInternalEligibilityService,
+    ProfileAcquisitionAuthorizationService,
     ProfileAcquisitionRuntimeService,
     ProfileAcquisitionInternalRolloutService,
   ],
@@ -78,6 +80,8 @@ import { DietModule } from '../diet/diet.module';
     ProfileAcquisitionCycleService,
     ProfileAcquisitionOperationalConfigService,
     ProfileAcquisitionInternalRolloutService,
+    ProfileAcquisitionInternalEligibilityService,
+    ProfileAcquisitionAuthorizationService,
   ],
 })
 export class ContextModule {}

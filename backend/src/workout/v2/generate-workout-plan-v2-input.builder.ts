@@ -234,6 +234,40 @@ export class GenerateWorkoutPlanV2InputBuilder {
     snapshot: CoachProfileSnapshot,
     declared: WorkoutRecognizedContext,
   ): WorkoutRecognizedContext {
+    // Plan defaults are a fallback, not a new explicit declaration of profile facts.
+    if (current?.mutation?.inheritedProfileFields) {
+      const profileFields: Readonly<
+        Partial<
+          Record<
+            keyof WorkoutRecognizedContext,
+            keyof CoachProfileSnapshot['training']
+          >
+        >
+      > = {
+        modality: 'preferredModality',
+        objective: 'primaryGoal',
+        experience: 'experienceLevel',
+        weeklyFrequency: 'weeklyFrequency',
+        sessionDurationMinutes: 'sessionDurationMinutes',
+        environment: 'environment',
+        equipment: 'availableEquipment',
+      };
+      const omitted = new Set(
+        current.mutation.inheritedProfileFields.filter((field) => {
+          const profileField = profileFields[field];
+          return (
+            profileField && snapshot.training[profileField]?.status === 'KNOWN'
+          );
+        }),
+      );
+      current = Object.freeze(
+        Object.fromEntries(
+          Object.entries(current).filter(
+            ([field]) => !omitted.has(field as keyof WorkoutRecognizedContext),
+          ),
+        ),
+      );
+    }
     const storedEquipment = snapshot.training.availableEquipment;
     const storedEnvironment = snapshot.training.environment;
     const declaredEnvironment =

@@ -1,7 +1,8 @@
 import { createHash } from 'crypto';
 import { productiveWorkoutProfileFacts } from './productive-profile-facts';
 import { CoachProfileAcquisitionField } from '@prisma/client';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { ProfileAcquisitionAuthorizationService } from './profile-acquisition-authorization.service';
 import {
   CoachProfileAcquisitionCycle,
   CoachProfileAcquisitionCycleStatus,
@@ -36,6 +37,7 @@ import { ProfileAcquisitionOperationalConfigService } from './profile-acquisitio
 import { ProfileAcquisitionRuntimeService } from './profile-acquisition-runtime.service';
 import {
   PROFILE_ACQUISITION_MODE,
+  isWritingAcquisitionMode,
   type ProfileAcquisitionMode,
   type ProfileQuestionSpecification,
   type RecognizedProfileAnswer,
@@ -86,7 +88,18 @@ export class ProfileAcquisitionInternalRolloutService {
     private readonly mutationFactory: CoachProfileMutationCommandFactoryService,
     private readonly mutationService: CoachProfileMutationService,
     private readonly cycleService: ProfileAcquisitionCycleService,
+    @Optional()
+    private readonly authorization?: ProfileAcquisitionAuthorizationService,
   ) {}
+
+  private async evaluateAccess(userId: string) {
+    if (this.config.get().mode === PROFILE_ACQUISITION_MODE.PRODUCTIVE)
+      return {
+        internal: false,
+        eligible: !!(await this.authorization?.isAllowed(userId)),
+      };
+    return this.eligibility.evaluate(userId);
+  }
 
   async requestWorkoutClarification(input: {
     readonly userId: string;
@@ -178,7 +191,7 @@ export class ProfileAcquisitionInternalRolloutService {
     if (
       dispatched.cycleId !== null &&
       dispatched.reason !== 'ROLLOUT_FAILURE' &&
-      this.config.get().mode === PROFILE_ACQUISITION_MODE.INTERNAL &&
+      isWritingAcquisitionMode(this.config.get().mode) &&
       (inlineFacts?.environment || inlineFacts?.weeklyFrequency) &&
       (await this.acquisitionAuthorizedForSource(
         {
@@ -334,6 +347,16 @@ export class ProfileAcquisitionInternalRolloutService {
         );
       }
       if (
+        operational.mode === PROFILE_ACQUISITION_MODE.PRODUCTIVE &&
+        !(await this.authorization?.isAllowed(outbound.userId))
+      )
+        return this.rolloutResult(
+          true,
+          false,
+          'USER_NOT_ELIGIBLE',
+          operational.mode,
+        );
+      if (
         (outbound.status !== OutboundMessageStatus.SENT &&
           outbound.status !== OutboundMessageStatus.DELIVERED) ||
         !outbound.sentAt
@@ -348,18 +371,15 @@ export class ProfileAcquisitionInternalRolloutService {
       const sentAt = outbound.sentAt;
       const sentOutbound = Object.freeze({ ...outbound, sentAt });
       const productiveCycle = await this.findCycleForOutbound(outbound, true);
-      const productiveAuthorized =
-        productiveCycle &&
-        (await this.cycleBelongsToConversation(
-          productiveCycle,
-          outbound.conversationId,
-        ));
-      if (!productiveAuthorized) {
-        if (operational.mode !== PROFILE_ACQUISITION_MODE.INTERNAL) {
+      {
+        if (!isWritingAcquisitionMode(operational.mode)) {
           return this.rolloutResult(false, false, 'MODE_OFF', operational.mode);
         }
-        const access = await this.eligibility.evaluate(outbound.userId);
-        if (!access.internal) {
+        const access = await this.evaluateAccess(outbound.userId);
+        if (
+          operational.mode === PROFILE_ACQUISITION_MODE.INTERNAL &&
+          !access.internal
+        ) {
           return this.rolloutResult(
             true,
             false,
@@ -409,7 +429,7 @@ export class ProfileAcquisitionInternalRolloutService {
     readonly sentAt: Date;
   }): Promise<ProfileAcquisitionRolloutResult> {
     const operational = this.config.get();
-    if (operational.mode !== PROFILE_ACQUISITION_MODE.INTERNAL) {
+    if (!isWritingAcquisitionMode(operational.mode)) {
       return this.rolloutResult(false, false, 'MODE_OFF', operational.mode);
     }
     try {
@@ -422,8 +442,11 @@ export class ProfileAcquisitionInternalRolloutService {
           operational.mode,
         );
       }
-      const access = await this.eligibility.evaluate(input.userId);
-      if (!access.internal) {
+      const access = await this.evaluateAccess(input.userId);
+      if (
+        operational.mode === PROFILE_ACQUISITION_MODE.INTERNAL &&
+        !access.internal
+      ) {
         return this.rolloutResult(
           true,
           false,
@@ -484,6 +507,11 @@ export class ProfileAcquisitionInternalRolloutService {
     readonly messageId: string;
   }): Promise<ProfileAcquisitionCaptureResult> {
     const operational = this.config.get();
+    if (
+      operational.mode === PROFILE_ACQUISITION_MODE.PRODUCTIVE &&
+      !(await this.authorization?.isAllowed(input.userId))
+    )
+      return this.captureResult(false, false, false, 'USER_NOT_ELIGIBLE');
     const productiveCycle =
       await this.prisma.coachProfileAcquisitionCycle.findFirst({
         where: {
@@ -493,17 +521,17 @@ export class ProfileAcquisitionInternalRolloutService {
         },
         orderBy: [{ referenceDate: 'desc' }, { id: 'desc' }],
       });
-    if (
-      !productiveCycle &&
-      operational.mode !== PROFILE_ACQUISITION_MODE.INTERNAL
-    ) {
+    if (!isWritingAcquisitionMode(operational.mode)) {
       return this.captureResult(false, false, false, 'MODE_OFF');
     }
 
     try {
-      if (!productiveCycle) {
-        const access = await this.eligibility.evaluate(input.userId);
-        if (!access.internal) {
+      {
+        const access = await this.evaluateAccess(input.userId);
+        if (
+          operational.mode === PROFILE_ACQUISITION_MODE.INTERNAL &&
+          !access.internal
+        ) {
           return this.captureResult(false, false, false, 'USER_NOT_INTERNAL');
         }
         if (!access.eligible) {
@@ -618,16 +646,11 @@ export class ProfileAcquisitionInternalRolloutService {
     },
     mode: ProfileAcquisitionMode,
   ): Promise<boolean> {
-    const productiveCycle = await this.findCycleForOutbound(source, true);
-    if (
-      productiveCycle &&
-      productiveCycle.userId === source.userId &&
-      (await this.cycleBelongsToConversation(
-        productiveCycle,
-        source.conversationId,
-      ))
-    )
-      return true;
+    if (mode === PROFILE_ACQUISITION_MODE.PRODUCTIVE) {
+      if (!(await this.authorization?.isAllowed(source.userId))) return false;
+      const cycle = await this.findCycleForOutbound(source, false);
+      return cycle?.userId === source.userId;
+    }
     if (mode !== PROFILE_ACQUISITION_MODE.INTERNAL) return false;
     const access = await this.eligibility.evaluate(source.userId);
     return access.internal && access.eligible;
@@ -665,6 +688,18 @@ export class ProfileAcquisitionInternalRolloutService {
     ),
     preselectedQuestion?: PreparedProfileQuestion,
   ): Promise<ProfileAcquisitionRolloutResult> {
+    if (!isWritingAcquisitionMode(mode))
+      return this.rolloutResult(false, false, 'MODE_OFF', mode);
+    if (
+      mode === PROFILE_ACQUISITION_MODE.INTERNAL &&
+      !(await this.eligibility.evaluate(outbound.userId)).eligible
+    )
+      return this.rolloutResult(true, false, 'USER_NOT_ELIGIBLE', mode);
+    if (
+      mode === PROFILE_ACQUISITION_MODE.PRODUCTIVE &&
+      !(await this.authorization?.isAllowed(outbound.userId))
+    )
+      return this.rolloutResult(true, false, 'USER_NOT_ELIGIBLE', mode);
     await this.cycleService.expireActiveIfNeeded({
       userId: outbound.userId,
       referenceDate: outbound.sentAt.toISOString(),
@@ -1430,7 +1465,7 @@ export class ProfileAcquisitionInternalRolloutService {
         entityId: cycleId ?? userId,
         metadata: {
           ...metadata,
-          mode: PROFILE_ACQUISITION_MODE.INTERNAL,
+          mode: this.config.get().mode,
         },
       },
     });
@@ -1799,7 +1834,7 @@ export class ProfileAcquisitionInternalRolloutService {
       },
       orderBy: [{ referenceDate: 'desc' }, { id: 'desc' }],
     });
-    if (!cycle) return null;
+    if (!cycle || cycle.userId !== outbound.userId) return null;
     if (
       !(await this.cycleBelongsToConversation(cycle, outbound.conversationId))
     )

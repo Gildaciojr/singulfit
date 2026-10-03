@@ -252,7 +252,14 @@ export class MediaService {
     };
   }
 
-  async getImageDataUrl(mediaFileId: string) {
+  async getImageDataUrl(
+    mediaFileId: string,
+    expected?: Readonly<{
+      userId: string;
+      conversationId: string;
+      messageId: string;
+    }>,
+  ) {
     const mediaFile = await this.prisma.mediaFile.findUnique({
       where: {
         id: mediaFileId,
@@ -262,6 +269,14 @@ export class MediaService {
     if (!mediaFile) {
       throw new NotFoundException('Mídia não encontrada');
     }
+    if (
+      mediaFile.id !== mediaFileId ||
+      (expected &&
+        (mediaFile.userId !== expected.userId ||
+          mediaFile.conversationId !== expected.conversationId ||
+          mediaFile.messageId !== expected.messageId))
+    )
+      throw new BadRequestException('Image ownership mismatch');
 
     if (mediaFile.mediaType !== MediaType.IMAGE) {
       throw new BadRequestException('A mídia informada não é uma imagem');

@@ -11,6 +11,7 @@ import { WORKOUT_PLAN_GENERATION } from '../../entitlements/entitlement.constant
 import { WorkoutArtifactResolverService } from './workout-artifact-resolver.service';
 import { freezeWorkoutPlanV2 } from './workout-plan-v2.freeze';
 import { WorkoutPlanV2Parser } from './workout-plan-v2.parser';
+import { applyWorkoutTargetedMutation } from './workout-targeted-mutation.policy';
 import { WorkoutPlanV2Validator } from './workout-plan-v2.validator';
 import type {
   GeneratedWorkoutPlanV2Candidate,
@@ -145,6 +146,7 @@ export class WorkoutPlanningEngineV2Service {
           generatedAt: input.referenceDate.toISOString(),
           reused: true,
         },
+        input,
       );
       return Object.freeze({
         status: 'ALREADY_COMPLETED' as const,
@@ -182,6 +184,7 @@ export class WorkoutPlanningEngineV2Service {
           generatedAt: input.referenceDate.toISOString(),
           reused: false,
         },
+        input,
       );
       const storedResult: WorkoutPlanningStoredAIJobResult = Object.freeze({
         candidateOutput: response.outputText,
@@ -212,9 +215,20 @@ export class WorkoutPlanningEngineV2Service {
     candidate: GeneratedWorkoutPlanV2Candidate,
     prepared: PreparedWorkoutPlanningV2,
     generationMetadata: WorkoutPlanV2['generationMetadata'],
+    input: GenerateWorkoutPlanV2Input,
   ): WorkoutPlanV2 {
     if (!prepared.context || !prepared.strategy || !prepared.readiness)
       throw new BadGatewayException('Contexto de treino V2 ausente');
+    if (
+      input.previousPlan &&
+      input.recognizedContext?.mutation?.kind === 'EXERCISE_SUBSTITUTION' &&
+      input.recognizedContext.mutation.sourceActivityKey
+    )
+      candidate = applyWorkoutTargetedMutation(
+        candidate,
+        input.previousPlan,
+        input.recognizedContext.mutation.sourceActivityKey,
+      );
     const validation = this.validator.validate(
       candidate,
       prepared.context,

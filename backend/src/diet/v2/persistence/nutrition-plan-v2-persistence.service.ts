@@ -80,6 +80,27 @@ export class NutritionPlanV2PersistenceService {
         );
       }
 
+      if (input.expectedActivePlanId) {
+        const current = await transaction.nutritionPlanOwnership.findUnique({
+          where: { userId: input.ownership.userId },
+          select: {
+            userId: true,
+            profileId: true,
+            planId: true,
+            implementation: true,
+          },
+        });
+        if (
+          !current ||
+          current.userId !== input.ownership.userId ||
+          current.profileId !== input.ownership.profileId ||
+          current.implementation !== NutritionPlanImplementation.V2 ||
+          current.planId !== input.expectedActivePlanId
+        )
+          throw new ConflictException(
+            'O plano alimentar mudou durante a troca. Consulte o plano atual antes de tentar novamente.',
+          );
+      }
       await this.repository.archiveActive(transaction, input.ownership.userId);
       await this.repository.archiveActiveLegacy(
         transaction,

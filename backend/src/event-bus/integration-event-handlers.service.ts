@@ -188,10 +188,18 @@ export class IntegrationEventHandlersService implements OnModuleInit {
 
     const meal = await this.nutritionService.createMealFromMedia(
       this.requiredString(event.payload, 'mediaFileId'),
+      undefined,
+      { userId, messageId },
     );
+    if (
+      meal.userId !== userId ||
+      meal.messageId !== messageId ||
+      meal.mediaFileId !== this.requiredString(event.payload, 'mediaFileId')
+    )
+      throw new Error('Media event ownership mismatch');
 
     try {
-      await this.nutritionVisionService.analyzeMeal(meal.id);
+      await this.nutritionVisionService.analyzeMeal(meal.id, userId);
     } catch (error: unknown) {
       if (!(error instanceof UsageLimitExceededException)) {
         throw error;
@@ -207,6 +215,7 @@ export class IntegrationEventHandlersService implements OnModuleInit {
   private async processNutritionCompletion(event: OutboxEvent): Promise<void> {
     await this.responseBuilderService.buildNutritionResponse(
       this.requiredString(event.payload, 'mealAnalysisId'),
+      this.requiredString(event.payload, 'userId'),
     );
   }
 

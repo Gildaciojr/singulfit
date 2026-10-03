@@ -29,6 +29,8 @@ export class ProfileAcquisitionOperationalConfigService {
         return PROFILE_ACQUISITION_MODE.SHADOW;
       case PROFILE_ACQUISITION_MODE.INTERNAL:
         return PROFILE_ACQUISITION_MODE.INTERNAL;
+      case PROFILE_ACQUISITION_MODE.PRODUCTIVE:
+        return PROFILE_ACQUISITION_MODE.PRODUCTIVE;
       default:
         return PROFILE_ACQUISITION_MODE.OFF;
     }

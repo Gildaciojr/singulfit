@@ -71,6 +71,8 @@ export class ConversationTurnContextBuilderService {
         this.prisma.conversation.findFirst({
           where: { id: input.conversationId, userId: input.userId },
           select: {
+            id: true,
+            userId: true,
             messages: {
               where: {
                 id: { not: input.messageId },
@@ -78,6 +80,8 @@ export class ConversationTurnContextBuilderService {
                 timestamp: { lte: referenceDate },
               },
               select: {
+                conversationId: true,
+                conversation: { select: { userId: true } },
                 direction: true,
                 content: true,
                 timestamp: true,
@@ -103,13 +107,15 @@ export class ConversationTurnContextBuilderService {
           },
           select: {
             id: true,
+            userId: true,
+            conversationId: true,
             content: true,
             context: true,
             externalMessageId: true,
             scheduledFor: true,
             sentAt: true,
             automationRule: { select: { code: true } },
-            coachMessage: { select: { context: true } },
+            coachMessage: { select: { userId: true, context: true } },
           },
           orderBy: [{ scheduledFor: 'desc' }, { id: 'desc' }],
           take: 8,
@@ -120,16 +126,36 @@ export class ConversationTurnContextBuilderService {
             active: true,
             expiresAt: { gt: referenceDate },
           },
-          select: { field: true, status: true, logicalTurn: true },
+          select: {
+            userId: true,
+            field: true,
+            status: true,
+            logicalTurn: true,
+          },
           orderBy: [{ referenceDate: 'desc' }, { createdAt: 'desc' }],
         }),
         this.snapshotBuilder.build(input.userId, referenceDate),
       ]);
-    if (!conversation) throw new NotFoundException('Conversa não encontrada');
+    if (
+      !conversation ||
+      conversation.id !== input.conversationId ||
+      conversation.userId !== input.userId
+    )
+      throw new NotFoundException('Conversa não encontrada');
+    if (
+      snapshot.identity.userId.status !== 'KNOWN' ||
+      snapshot.identity.userId.value !== input.userId
+    )
+      throw new NotFoundException('Profile snapshot ownership mismatch');
 
     const merged = [
       ...conversation.messages
-        .filter((message) => message.timestamp <= referenceDate)
+        .filter(
+          (message) =>
+            message.timestamp <= referenceDate &&
+            message.conversationId === input.conversationId &&
+            message.conversation.userId === input.userId,
+        )
         .map((message) => ({
           direction: message.direction,
           content: message.content,
@@ -145,6 +171,10 @@ export class ConversationTurnContextBuilderService {
       ...scheduledMessages
         .filter(
           (message) =>
+            message.userId === input.userId &&
+            message.conversationId === input.conversationId &&
+            (!message.coachMessage ||
+              message.coachMessage.userId === input.userId) &&
             (message.sentAt ?? message.scheduledFor) <= referenceDate,
         )
         .map((message) => ({
@@ -194,7 +224,10 @@ export class ConversationTurnContextBuilderService {
         structuredContext: message.structuredContext,
       }),
     );
-    const activeCycle = input.proactiveReply ? null : foundActiveCycle;
+    const activeCycle =
+      input.proactiveReply || foundActiveCycle?.userId !== input.userId
+        ? null
+        : foundActiveCycle;
     const currentLogicalTurn = Math.max(
       history.length + 1,
       (activeCycle?.logicalTurn ?? 0) + 1,

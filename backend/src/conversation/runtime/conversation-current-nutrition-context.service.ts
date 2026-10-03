@@ -18,6 +18,8 @@ export class ConversationCurrentNutritionContextService {
     try {
       const current = await this.reader.getCurrent(userId);
       if (!current) return Object.freeze({ status: 'ABSENT', plan: null });
+      if (current.userId !== userId)
+        return Object.freeze({ status: 'UNAVAILABLE', plan: null });
       return Object.freeze({
         status: 'AVAILABLE',
         plan: this.presenter.toPublic(current),

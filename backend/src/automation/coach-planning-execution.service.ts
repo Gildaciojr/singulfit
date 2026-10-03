@@ -23,6 +23,7 @@ import {
   CONVERSATION_RECOGNIZED_INTENT,
 } from '../context/conversation-goal-planner.contract';
 import { ConversationGoalPlannerService } from '../context/conversation-goal-planner.service';
+import { ConversationNutritionMutationService } from '../conversation/runtime/conversation-nutrition-mutation.service';
 import {
   GenerateNutritionPlanV2InputBuilder,
   type GenerateNutritionPlanV2InputSource,
@@ -144,6 +145,8 @@ export class CoachPlanningExecutionService {
     private readonly workoutPlanningInputBuilder?: GenerateWorkoutPlanV2InputBuilder,
     @Optional()
     private readonly workoutMutationResolver?: WorkoutPlanMutationResolverService,
+    @Optional()
+    private readonly nutritionMutation?: ConversationNutritionMutationService,
   ) {}
 
   async execute(
@@ -159,6 +162,55 @@ export class CoachPlanningExecutionService {
     intent: CoachCommandIntent,
     runtime?: CoachPlanningRuntimeContext,
   ): Promise<CoachPlanningExecutionResult> {
+    if (
+      (runtime?.planningDecision?.goal === 'UPDATE_DIET_PLAN' ||
+        runtime?.planningDecision?.recognizedIntent ===
+          'DIET_PLAN_UPDATE_REQUEST') &&
+      this.nutritionMutation
+    ) {
+      const result = await this.nutritionMutation.execute({
+        userId,
+        messageId: runtime.messageId,
+        conversationId: runtime.conversationId,
+        referenceDate: new Date(runtime.referenceDate ?? new Date()),
+        decision: runtime.planningDecision,
+      });
+      const dispatch: CoachPlanningDispatchResult = Object.freeze({
+        content: result.content,
+        executor: 'DIET_V2',
+        generationCompleted: result.completed,
+        fallbackApplied: false,
+      });
+      const state = this.unavailableReasoning(
+        'CANONICAL_INPUT_UNAVAILABLE',
+      ).state;
+      return Object.freeze<CoachPlanningExecutionResult>({
+        content: result.content,
+        responseRequired: true,
+        selectedSource: 'NUTRITION_V2',
+        decision: runtime.planningDecision,
+        nutritionReasoning: null,
+        workoutReasoning: null,
+        longitudinalDecision: null,
+        humanContext: null,
+        reasoning: { nutrition: state, workout: state, longitudinal: state },
+        dispatch,
+        metadata: {
+          correlationId: runtime.correlationId ?? null,
+          operationKey: runtime.messageId,
+          executor: dispatch.executor,
+          fallbackApplied: false,
+          generationCompleted: result.completed,
+          routeSelection: {
+            nutrition: 'V2',
+            workout: null,
+            reason: 'NUTRITION_V2_OFFICIAL_ROUTE',
+            nutritionPilotStatus: null,
+            suppressNutritionShadow: true,
+          },
+        },
+      });
+    }
     if (isNutritionCurrentPlanRead(runtime?.currentMessage)) {
       return this.executeCanonicalNutritionRead(userId, intent, runtime);
     }
@@ -749,6 +801,14 @@ export class CoachPlanningExecutionService {
             userId,
             runtime?.currentMessage,
             baseWorkoutContext ?? Object.freeze({}),
+            runtime
+              ? {
+                  userId,
+                  conversationId: runtime.conversationId,
+                  messageId: runtime.messageId,
+                  referenceDate: new Date(runtime.referenceDate ?? new Date()),
+                }
+              : undefined,
           )
         : Object.freeze({
             status: 'CLARIFICATION' as const,

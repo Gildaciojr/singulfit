@@ -28,6 +28,7 @@ import { isWorkoutCurrentPlanRead } from '../workout/v2/workout-current-plan-rea
 import { CurrentWorkoutPlanReaderService } from '../workout/v2/current-workout-plan-reader.service';
 import { CONVERSATION_GOAL } from '../context/conversation-goal-planner.contract';
 import { ConversationDailyQueryService } from '../conversation/runtime/conversation-daily-query.service';
+import { ConversationProfileConsentService } from '../conversation/runtime/conversation-profile-consent.service';
 import {
   isIsolatedReminderReply,
   UNCORRELATED_REPLY,
@@ -74,6 +75,8 @@ export class CoachCommandService {
     private readonly currentWorkoutPlanReader?: CurrentWorkoutPlanReaderService,
     @Optional()
     private readonly dailyQueries?: ConversationDailyQueryService,
+    @Optional()
+    private readonly profileConsent?: ConversationProfileConsentService,
   ) {}
 
   async processReadOnlyText(input: ProcessCoachCommandInput): Promise<boolean> {
@@ -130,6 +133,7 @@ export class CoachCommandService {
       },
     });
     if (!message) return false;
+    if (this.profileConsent?.accepts(message.content)) return true;
     if (
       await this.resolveWorkoutSessionContinuation({
         userId: input.userId,
@@ -278,7 +282,8 @@ export class CoachCommandService {
       if (
         !(
           this.dailyQueries?.accepts(commandText) ||
-          isIsolatedReminderReply(commandText)
+          isIsolatedReminderReply(commandText) ||
+          this.profileConsent?.accepts(commandText)
         )
       )
         await this.activatePendingPrompt(
@@ -305,12 +310,24 @@ export class CoachCommandService {
           referenceDate: message.timestamp,
         })
       : null;
+    const profileContent =
+      pending.status !== 'ACTIONABLE' &&
+      pending.status !== 'COMPLETED' &&
+      this.profileConsent?.accepts(commandText)
+        ? await this.profileConsent.process({
+            userId: input.userId,
+            conversationId: message.conversation.id,
+            messageId: message.id,
+            referenceDate: message.timestamp,
+          })
+        : null;
     const isolatedReply =
       Boolean(this.dailyQueries) &&
       pending.status !== 'ACTIONABLE' &&
       pending.status !== 'COMPLETED' &&
       isIsolatedReminderReply(commandText);
     const bypassRuntime =
+      profileContent !== null ||
       dailyContent !== null ||
       isolatedReply ||
       pending.status === 'ACTIONABLE' ||
@@ -348,9 +365,9 @@ export class CoachCommandService {
       intent = runtimeDecision.profileAcquisition.executionRoute.targetPlan;
     }
     const planningResult =
-      dailyContent !== null || isolatedReply
+      profileContent !== null || dailyContent !== null || isolatedReply
         ? {
-            content: dailyContent ?? UNCORRELATED_REPLY,
+            content: profileContent ?? dailyContent ?? UNCORRELATED_REPLY,
             responseRequired: true,
           }
         : pending.status === 'COMPLETED'
@@ -479,7 +496,7 @@ export class CoachCommandService {
       intent,
       selectionContext,
     });
-    if (dailyContent === null && !isolatedReply) {
+    if (profileContent === null && dailyContent === null && !isolatedReply) {
       await this.activatePendingPrompt(
         input.userId,
         message,

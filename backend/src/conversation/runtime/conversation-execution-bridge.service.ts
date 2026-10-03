@@ -145,6 +145,7 @@ export class ConversationExecutionBridgeService {
     try {
       result = await this.qa!.execute({
         ...executionContext,
+        entities: decision.understanding.entities,
         route: decision.executionRoute,
         humanContext,
         previousAnswer: previousFollowUp?.previousAnswer ?? null,

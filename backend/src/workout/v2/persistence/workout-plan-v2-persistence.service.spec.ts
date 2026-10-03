@@ -266,6 +266,44 @@ function setup(options?: {
 }
 
 describe('WorkoutPlanV2PersistenceService', () => {
+  it.each(['MONDAY', null] as const)(
+    'keeps the source calendar weekday %s during an exercise substitution',
+    (weekday) => {
+      const validated = new WorkoutPlanV2PersistenceValidator().validateInput({
+        ...input(),
+        calendarWeekdays: ['FRIDAY'],
+        preservedCalendar: [{ sessionSequence: 1, weekday }],
+      });
+      expect(validated.projection.days[0].weekday).toBe(weekday);
+    },
+  );
+  it.each([
+    { id: 'newer-plan', userId: 'user-id', profileId: 'profile-id' },
+    { id: 'source-plan', userId: 'other', profileId: 'profile-id' },
+    null,
+  ])(
+    'rejects stale or foreign mutation sources under the user lock: %s',
+    async (current) => {
+      const test = setup();
+      const findFirst = jest.fn().mockResolvedValue(current);
+      test.repository.inTransaction.mockImplementation(async (operation) =>
+        operation({
+          workoutPlan: { findFirst },
+        } as unknown as Prisma.TransactionClient),
+      );
+      await expect(
+        test.service.persist({
+          ...input(),
+          expectedActivePlanId: 'source-plan',
+        }),
+      ).rejects.toThrow();
+      expect(test.repository.acquireUserLock).toHaveBeenCalled();
+      expect(findFirst).toHaveBeenCalled();
+      expect(test.repository.archiveActive).not.toHaveBeenCalled();
+      expect(test.repository.create).not.toHaveBeenCalled();
+      expect(test.ai.completeJobInTransaction).not.toHaveBeenCalled();
+    },
+  );
   it('persists once and completes the AIJob after accepted persistence in one transaction', async () => {
     const test = setup();
     await expect(test.service.persist(input())).resolves.toMatchObject({

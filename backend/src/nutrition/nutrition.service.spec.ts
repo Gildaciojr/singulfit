@@ -37,6 +37,34 @@ describe('NutritionService', () => {
     };
   }
 
+  it.each(['meal', 'media'] as const)(
+    'rejects foreign %s from the inbound image pipeline',
+    async (source) => {
+      const s = createSubject();
+      if (source === 'meal')
+        s.prisma.meal.findUnique.mockResolvedValue({
+          ...s.createdMeal,
+          userId: 'foreign',
+          messageId: 'message-id',
+        });
+      else
+        s.prisma.mediaFile.findUnique.mockResolvedValue({
+          id: 'media-id',
+          userId: 'foreign',
+          conversationId: 'conversation-id',
+          messageId: 'message-id',
+          mediaType: MediaType.IMAGE,
+        });
+      await expect(
+        s.service.createMealFromMedia('media-id', undefined, {
+          userId: 'user-id',
+          messageId: 'message-id',
+        }),
+      ).rejects.toThrow(/ownership mismatch/);
+      expect(s.prisma.meal.create).not.toHaveBeenCalled();
+    },
+  );
+
   it('creates a WhatsApp meal and its pending analysis from stored media', async () => {
     const subject = createSubject();
 

@@ -114,6 +114,12 @@ export interface WorkoutRecognizedContext {
   readonly movementConstraints?: readonly WorkoutMovementConstraint[];
   readonly safetySignals?: readonly WorkoutSafetyFlag[];
   readonly mutation?: Readonly<{
+    readonly sourcePlanId?: string;
+    readonly inheritedProfileFields?: readonly (keyof WorkoutRecognizedContext)[];
+    readonly sourceCalendar?: readonly {
+      readonly sessionSequence: number;
+      readonly weekday: import('@prisma/client').WorkoutWeekday | null;
+    }[];
     kind: 'PLAN_ADAPTATION' | 'EXERCISE_SUBSTITUTION';
     sourceActivityKey: string | null;
     sourceActivityName: string | null;

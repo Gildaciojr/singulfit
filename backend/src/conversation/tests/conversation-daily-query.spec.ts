@@ -38,6 +38,7 @@ describe('ConversationDailyQueryService', () => {
       }),
     };
     const current = {
+      userId: 'user',
       implementation: 'V2',
       document: {
         artifactType: 'WEEKLY_PLAN',
@@ -200,6 +201,8 @@ describe('ConversationDailyQueryService', () => {
     const s = subject();
     s.prisma.message.findFirst.mockResolvedValue({
       content: 'quanto de proteína consumi hoje?',
+      timestamp: new Date(s.input.referenceDate.getTime() - 1000),
+      conversation: { id: 'conversation', userId: 'user' },
     });
     expect(
       await s.service.answer({ ...s.input, text: 'e essa semana?' }),
@@ -224,6 +227,8 @@ describe('ConversationDailyQueryService', () => {
     ).toContain('qual informação');
     s.prisma.message.findFirst.mockResolvedValue({
       content: 'qual meu treino de hoje?',
+      timestamp: new Date(s.input.referenceDate.getTime() - 1000),
+      conversation: { id: 'conversation', userId: 'user' },
     });
     expect(
       await s.service.answer({ ...s.input, text: 'e essa semana?' }),
@@ -244,4 +249,62 @@ describe('ConversationDailyQueryService', () => {
       expect(s.consumption.summarize).not.toHaveBeenCalled();
     },
   );
+  it.each([
+    ['quanto consumi hoje?', 'TODAY'],
+    ['quanto consumi essa semana?', 'THIS_WEEK'],
+  ] as const)(
+    'keeps the antecedent period of %s for e proteína',
+    async (content, period) => {
+      const s = subject();
+      s.prisma.message.findFirst.mockResolvedValue({
+        content,
+        timestamp: new Date(s.input.referenceDate.getTime() - 1000),
+        conversation: { id: 'conversation', userId: 'user' },
+      });
+      expect(
+        await s.service.answer({ ...s.input, text: 'e proteína?' }),
+      ).toContain('proteína: 35 g');
+      expect(s.consumption.summarize).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user', period }),
+      );
+    },
+  );
+  it.each(['ABSENT', 'FOREIGN', 'FUTURE', 'UNRELATED'])(
+    'clarifies a metric follow-up with %s antecedent',
+    async (variant) => {
+      const s = subject();
+      s.prisma.message.findFirst.mockResolvedValue(
+        variant === 'ABSENT'
+          ? null
+          : {
+              content:
+                variant === 'UNRELATED'
+                  ? 'qual meu treino?'
+                  : 'quanto consumi hoje?',
+              timestamp: new Date(
+                s.input.referenceDate.getTime() +
+                  (variant === 'FUTURE' ? 1 : -1000),
+              ),
+              conversation: {
+                id: 'conversation',
+                userId: variant === 'FOREIGN' ? 'other' : 'user',
+              },
+            },
+      );
+      expect(
+        await s.service.answer({ ...s.input, text: 'e proteína?' }),
+      ).toContain('hoje ou nesta semana');
+      expect(s.consumption.summarize).not.toHaveBeenCalled();
+    },
+  );
+  it('rejects a foreign current meal document returned by a mock', async () => {
+    const s = subject();
+    s.nutrition.getCurrent.mockResolvedValue({ ...s.current, userId: 'other' });
+    const answer = await s.service.answer({
+      ...s.input,
+      text: 'qual meu almoço de hoje?',
+    });
+    expect(answer).toContain('segurança');
+    expect(answer).not.toContain('Frango');
+  });
 });

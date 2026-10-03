@@ -244,6 +244,31 @@ describe('CoachProfileSnapshotBuilder', () => {
       COACH_PROFILE_COMPLETION_STATE.PARTIAL,
     );
   });
+  it('rejects a foreign root user or nested profile returned by a mock', async () => {
+    const foreignRoot = await subject({ ...userRecord(), id: 'other' });
+    await expect(
+      foreignRoot.builder.build('user-id', referenceDate),
+    ).rejects.toThrow('não encontrado');
+    const test = await subject();
+    const user = userRecord();
+    test.prisma.user.findUnique.mockResolvedValue({
+      ...user,
+      fitnessProfile: { ...user.fitnessProfile, userId: 'other' },
+    });
+    await expect(test.builder.build('user-id', referenceDate)).rejects.toThrow(
+      'outro usuário',
+    );
+  });
+  it('rejects foreign activation memory returned by a mock', async () => {
+    const test = await subject();
+    test.prisma.conversationMemory.findUnique.mockResolvedValue({
+      userId: 'other',
+      content: { restrictions: ['foreign allergy'] },
+    });
+    await expect(test.builder.build('user-id', referenceDate)).rejects.toThrow(
+      'outro usuário',
+    );
+  });
 
   it('filters legacy isolated observations and structural values before exposing preferences', async () => {
     const user = userRecord();

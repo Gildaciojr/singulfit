@@ -41,6 +41,7 @@ import { NutritionPlanningReadinessService } from './nutrition-planning-readines
 import { NutritionPlanningSafetyService } from './nutrition-planning-safety.service';
 import { NutritionPlanningStrategyService } from './nutrition-planning-strategy.service';
 import { NUTRITION_PLANNING_V2_PROMPT } from './nutrition-planning-v2.prompt.definition';
+import { applyNutritionTargetedMutation } from './nutrition-targeted-mutation.policy';
 
 @Injectable()
 export class NutritionGenerationRunnerV2Service {
@@ -85,7 +86,27 @@ export class NutritionGenerationRunnerV2Service {
       previousPlan: input.reviewedPlan?.plan ?? input.previousPlan,
       requestedChangeReason: input.requestedChangeReason,
     });
-    const strategy = this.strategyService.build(context);
+    const generatedStrategy = this.strategyService.build(context);
+    const strategy =
+      input.mutationTarget && input.previousPlan
+        ? Object.freeze({
+            ...input.previousPlan.strategy,
+            artifactType: context.artifactType,
+            dayCount: input.previousPlan.days.length,
+            appliedConstraintCodes: Object.freeze([
+              ...new Set([
+                ...input.previousPlan.strategy.appliedConstraintCodes,
+                ...generatedStrategy.appliedConstraintCodes,
+              ]),
+            ]),
+            excludedFoods: Object.freeze([
+              ...new Set([
+                ...input.previousPlan.strategy.excludedFoods,
+                ...generatedStrategy.excludedFoods,
+              ]),
+            ]),
+          })
+        : generatedStrategy;
     const safety = this.safetyService.evaluateBeforeGeneration(
       input.snapshot,
       readiness,
@@ -109,6 +130,18 @@ export class NutritionGenerationRunnerV2Service {
       schemaVersion: 2 as const,
       context: prepared.context,
       strategy: prepared.strategy,
+      ...(input.mutationTarget
+        ? {
+            targetedMutation: {
+              ...input.mutationTarget,
+              sourceDay: input.previousPlan?.days.find(
+                (day) => day.dayNumber === input.mutationTarget?.dayNumber,
+              ),
+              instructions:
+                'Propose only the requested replacement. Keep dayNumber, mealKey and itemKey of the target. All other content is preserved by the application. Respect every constraint and rejection.',
+            },
+          }
+        : {}),
       ...(artifactType === 'PLAN_REVIEW'
         ? { reviewedPlan: input.reviewedPlan }
         : {}),
@@ -299,7 +332,17 @@ export class NutritionGenerationRunnerV2Service {
     const validationStarted = performance.now();
     let plan;
     try {
-      plan = this.finalize(candidate, prepared, generation);
+      plan = this.finalize(
+        input.mutationTarget && input.previousPlan
+          ? applyNutritionTargetedMutation(
+              candidate,
+              input.previousPlan,
+              input.mutationTarget,
+            )
+          : candidate,
+        prepared,
+        generation,
+      );
     } catch (error: unknown) {
       if (mode === NutritionGenerationExecutionMode.SHADOW)
         throw new NutritionGenerationRunError('VALIDATION', error);
