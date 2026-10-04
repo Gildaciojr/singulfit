@@ -19,6 +19,7 @@ import { RecommendationService } from '../recommendations/recommendation.service
 import { LongitudinalService } from '../longitudinal/longitudinal.service';
 import { NutritionConversationShadowPipelineService } from './nutrition-conversation-shadow-pipeline.service';
 import { NutritionConversationEpisodicMemoryIntegrationService } from './nutrition-conversation-episodic-memory-integration.service';
+import type { ConversationContinuationService } from '../conversation/runtime/conversation-continuation.service';
 
 describe('ResponseBuilderService', () => {
   it('rejects foreign analysis before formatting, provider selection or public outbound', async () => {
@@ -48,7 +49,7 @@ describe('ResponseBuilderService', () => {
     expect(s.formatter.format).not.toHaveBeenCalled();
     expect(s.eventBus.publish).not.toHaveBeenCalled();
   });
-  function createSubject() {
+  function createSubject(continuations?: ConversationContinuationService) {
     const outbound = {
       id: 'outbound-id',
       userId: 'user-id',
@@ -131,6 +132,7 @@ describe('ResponseBuilderService', () => {
         ]),
       },
       outboundMessage: {
+        findFirst: jest.fn().mockResolvedValue(null),
         findMany: jest.fn(),
       },
       conversation: {
@@ -335,6 +337,7 @@ describe('ResponseBuilderService', () => {
       longitudinal as unknown as LongitudinalService,
       nutritionConversationShadowPipeline as unknown as NutritionConversationShadowPipelineService,
       episodicMemoryIntegration as unknown as NutritionConversationEpisodicMemoryIntegrationService,
+      continuations,
     );
 
     return {
@@ -355,6 +358,49 @@ describe('ResponseBuilderService', () => {
       analysis,
     };
   }
+
+  it('uses the existing vision analysis for a meal continuation without selecting a legacy candidate', async () => {
+    const continuation = {
+      enabled: () => true,
+      publicText: (content: string) => content,
+      mediaReply: jest.fn().mockResolvedValue({
+        pending: { scheduledMessageId: 'receipt' },
+        content:
+          'Uma refeição diferente não apaga seu progresso. Retome seu plano nas próximas refeições.',
+      }),
+      completeMedia: jest.fn(),
+    };
+    const s = createSubject(
+      continuation as unknown as ConversationContinuationService,
+    );
+    await s.service.buildNutritionResponse('analysis-id');
+    expect(continuation.mediaReply).toHaveBeenCalledWith(
+      'user-id',
+      'message-id',
+      '',
+    );
+    expect(continuation.completeMedia).toHaveBeenCalledWith(
+      s.transaction,
+      'user-id',
+      'conversation-id',
+      'message-id',
+      expect.objectContaining({ content: expect.any(String) }),
+    );
+    expect(
+      s.nutritionConversationShadowPipeline.selectOfficial,
+    ).not.toHaveBeenCalled();
+    expect(
+      s.nutritionConversationShadowPipeline.execute,
+    ).not.toHaveBeenCalled();
+    expect(s.transaction.outboundMessage.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          content:
+            'Uma refeição diferente não apaga seu progresso. Retome seu plano nas próximas refeições.',
+        }),
+      }),
+    );
+  });
 
   it('creates the outbound response and event atomically', async () => {
     const subject = createSubject();

@@ -11,6 +11,7 @@ import {
   OutboundMessageStatus,
 } from '@prisma/client';
 import { EventBusService } from '../event-bus/event-bus.service';
+import { ConversationPublicAnswerBoundaryService } from '../conversation/runtime/conversation-public-answer-boundary.service';
 import { INTERNAL_EVENT } from '../event-bus/event-bus.constants';
 import { PrismaService } from '../prisma/prisma.service';
 import { AUTOMATION_RULE_CODES } from './automation.constants';
@@ -347,12 +348,17 @@ export class CoachProactiveResponseService {
         },
       });
 
-      const content = this.response(
-        input.intent,
-        input.outcome,
-        input.hydrationEvidence,
-        input.preferredName,
-      );
+      const boundary = new ConversationPublicAnswerBoundaryService();
+      const content =
+        boundary.projectText(
+          this.response(
+            input.intent,
+            input.outcome,
+            input.hydrationEvidence,
+            input.preferredName,
+          ),
+        ) ??
+        boundary.projectText('Pode me contar um pouco mais sobre como foi?')!;
       const coachMessage = await transaction.coachMessage.upsert({
         where: {
           idempotencyKey: `proactive-response:${input.interventionId}:${input.message.id}`,
@@ -523,10 +529,12 @@ export class CoachProactiveResponseService {
       );
     }
     if (
-      /\b(fiz tudo|completei|conclui|terminei|foi otimo|bati a meta|estou bem|to bem|bom dia)\b/u.test(
-        text,
-      )
-    ) {
+      (intent === COACH_PROACTIVE_INTENTS.GOOD_MORNING ||
+        intent === COACH_PROACTIVE_INTENTS.DAILY_CHECK_IN) &&
+      /\b(foi otimo|estou bem|to bem|bom dia)\b/u.test(text)
+    )
+      return this.classification(CoachProactiveWorkoutOutcome.COMPLETED);
+    if (/\b(fiz tudo|completei|conclui|terminei|bati a meta)\b/u.test(text)) {
       return this.classification(CoachProactiveWorkoutOutcome.COMPLETED);
     }
     if (

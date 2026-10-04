@@ -48,7 +48,7 @@ function document(aiJobId = 'job-id') {
     objective: 'STRENGTH',
     lifecycleReason: 'CREATION',
     replacesPlanReference: null,
-    title: 'Plano V2 atual',
+    title: 'Plano atual',
     referenceDate: '2026-08-17',
     strategy: {},
     sessions: [
@@ -101,7 +101,7 @@ function record(options?: {
     user: {
       preferences: { timezone: options?.timezone ?? 'America/Sao_Paulo' },
     },
-    title: 'Plano V2 atual',
+    title: 'Plano atual',
     days: weekdays.map((weekday, index) => ({
       dayNumber: index + 1,
       weekday: options?.calendar === false ? null : weekdays[index],
@@ -164,6 +164,100 @@ function legacyRecord(options?: {
 }
 
 describe('CurrentWorkoutPlanReaderService', () => {
+  it('never queries legacy when canonical is absent, while the historical read remains available', async () => {
+    const s = setup(legacyRecord());
+    s.findFirst.mockResolvedValueOnce(null);
+    expect(await s.service.read('user-id', true)).toEqual({
+      status: 'NO_PLAN',
+      plan: null,
+    });
+    expect(s.findFirst).toHaveBeenCalledTimes(1);
+    expect((await s.service.read('user-id')).status).toBe('LEGACY_RELATIONAL');
+  });
+  it.each([
+    'AIJob',
+    'promptVersionId',
+    '123e4567-e89b-12d3-a456-426614174000',
+    '```\nsegredo\n```',
+    '| segredo |\n| --- |',
+    'metadata',
+  ])(
+    'blocks contaminated canonical title and session label: %s',
+    async (unsafe) => {
+      const title = setup(
+        record({ document: { ...document(), title: unsafe } }),
+      );
+      const titleReply = await title.service.presentCanonicalDay(
+        'user-id',
+        'meu treino',
+        new Date('2026-10-04T15:00:00Z'),
+      );
+      expect(titleReply.content).not.toContain(unsafe);
+      expect(titleReply.content).toContain('segurança');
+      const label = setup(
+        record({
+          document: {
+            ...document(),
+            title: 'Meu plano',
+            sessions: [
+              session(1, unsafe, 'Agachamento'),
+              session(2, 'Peito', 'Supino'),
+              session(3, 'Costas', 'Remada'),
+            ],
+          },
+        }),
+      );
+      const labelReply = await label.service.presentCanonicalDay(
+        'user-id',
+        'meu treino',
+        new Date('2026-10-04T15:00:00Z'),
+      );
+      expect(labelReply.content).not.toContain(unsafe);
+      expect(labelReply.content).toContain('segurança');
+      const unsafeDocument = document();
+      unsafeDocument.sessions[0].blocks[0].activities[0].instruction = unsafe;
+      const instruction = setup(record({ document: unsafeDocument }));
+      const instructionReply = await instruction.service.presentCanonicalDay(
+        'user-id',
+        'meu treino',
+        new Date('2026-10-04T15:00:00Z'),
+      );
+      expect(instructionReply.content).not.toContain(unsafe);
+      expect(instructionReply.content).toContain('segurança');
+    },
+  );
+  it.each([
+    ['2026-10-04T15:00:00Z', '2026-10-04', '2026-10-05', '2026-10-07'],
+    ['2026-10-31T15:00:00Z', '2026-10-31', '2026-11-01', '2026-11-02'],
+    ['2026-12-31T15:00:00Z', '2026-12-31', '2027-01-01', '2027-01-04'],
+    ['2027-01-01T01:00:00Z', '2026-12-31', '2027-01-01', '2027-01-04'],
+  ])(
+    'uses civil timezone dates across %s: today, tomorrow, then next session',
+    async (timestamp, today, tomorrow, after) => {
+      const s = setup(
+        record({ document: { ...document(), title: 'Meu plano' } }),
+      );
+      const now = new Date(timestamp);
+      expect(
+        (await s.service.presentCanonicalDay('user-id', 'hoje', now))
+          .resolvedLocalDate,
+      ).toBe(today);
+      expect(
+        (await s.service.presentCanonicalDay('user-id', 'amanhã', now))
+          .resolvedLocalDate,
+      ).toBe(tomorrow);
+      expect(
+        (
+          await s.service.presentCanonicalDay(
+            'user-id',
+            'qual meu próximo treino',
+            now,
+            tomorrow,
+          )
+        ).resolvedLocalDate,
+      ).toBe(after);
+    },
+  );
   function setup(value: ReturnType<typeof record> | null = record()) {
     const findFirst = jest.fn().mockResolvedValue(value);
     const mutations = {
@@ -248,6 +342,41 @@ describe('CurrentWorkoutPlanReaderService', () => {
     for (const mutation of Object.values(s.mutations))
       expect(mutation).not.toHaveBeenCalled();
   });
+  it('prefers owned ACTIVE V2 for canonical runtime and returns only today or tomorrow rest', async () => {
+    const s = setup(record());
+    const monday = new Date('2026-08-17T15:00:00Z');
+    const today = await s.service.present('user-id', 'hoje', monday, true);
+    expect(today).toContain('Agachamento');
+    expect(today).not.toContain('Supino');
+    expect(today).not.toContain('Remada');
+    expect(s.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          userId: 'user-id',
+          status: 'ACTIVE',
+          aiJob: { promptVersion: { name: WORKOUT_PLANNING_V2_PROMPT.name } },
+        },
+      }),
+    );
+    expect(s.findFirst).toHaveBeenCalledTimes(1);
+    expect(
+      await s.service.present('user-id', 'amanhã', monday, true),
+    ).toContain('descanso');
+    for (const mutation of Object.values(s.mutations))
+      expect(mutation).not.toHaveBeenCalled();
+  });
+  it('does not fall back to a historical workout when the ACTIVE canonical plan is invalid', async () => {
+    const s = setup(record({ document: { invalid: true } }));
+    expect(
+      await s.service.present(
+        'user-id',
+        'hoje',
+        new Date('2026-08-17T15:00:00Z'),
+        true,
+      ),
+    ).toContain('Não vou usar um plano antigo');
+    expect(s.findFirst).toHaveBeenCalledTimes(1);
+  });
 
   it('reads the latest valid V2 history, including archives, under user/profile ownership', async () => {
     const { service, findMany } = setup();
@@ -255,7 +384,7 @@ describe('CurrentWorkoutPlanReaderService', () => {
       service.readPrevious('user-id', new Date('2026-08-18')),
     ).resolves.toMatchObject({
       userId: 'user-id',
-      document: { title: 'Plano V2 atual' },
+      document: { title: 'Plano atual' },
     });
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -347,7 +476,7 @@ describe('CurrentWorkoutPlanReaderService', () => {
       'Qual meu treino?',
       new Date('2026-08-17T12:00:00.000Z'),
     );
-    expect(content).toContain('Plano V2 atual');
+    expect(content).toContain('Plano atual');
     expect(content).toContain('Sessão 1 — segunda-feira');
     Object.values(mutations).forEach((mutation) => {
       expect(mutation).not.toHaveBeenCalled();

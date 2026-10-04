@@ -53,6 +53,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WorkoutGeneratorService } from '../workout/workout-generator.service';
 import { AUTOMATION_RULE_CODES } from './automation.constants';
 import { CoachCommandService } from './coach-command.service';
+import type { ConversationContinuationService } from '../conversation/runtime/conversation-continuation.service';
+import { continuation } from '../conversation/runtime/conversation-continuation.contract';
 import { ConversationDailyQueryService } from '../conversation/runtime/conversation-daily-query.service';
 import { ConversationProfileConsentService } from '../conversation/runtime/conversation-profile-consent.service';
 import { CoachPlanningExecutionDispatcherService } from './coach-planning-execution-dispatcher.service';
@@ -184,6 +186,7 @@ describe('CoachCommandService', () => {
     dailyEnabled?: boolean;
     dailyContent?: string | null;
     profileConsentContent?: string;
+    continuations?: ConversationContinuationService;
   }) {
     const at = new Date('2026-06-10T12:00:00.000Z');
     const rule = {
@@ -205,6 +208,18 @@ describe('CoachCommandService', () => {
       automationRule: rule,
     };
     const transaction = {
+      automationRule: { findUnique: jest.fn().mockResolvedValue(rule) },
+      userAutomationPreference: { upsert: jest.fn() },
+      $queryRaw: jest.fn(),
+      coachMessage: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        create: jest
+          .fn()
+          .mockImplementation((input: { data: Record<string, unknown> }) => ({
+            id: 'canonical-coach',
+            ...input.data,
+          })),
+      },
       scheduledMessage: {
         findMany: jest.fn().mockResolvedValue([]),
         upsert: jest.fn().mockResolvedValue(scheduledMessage),
@@ -555,6 +570,7 @@ describe('CoachCommandService', () => {
       options?.profileConsentContent
         ? (profileConsent as unknown as ConversationProfileConsentService)
         : undefined,
+      options?.continuations,
     );
 
     return {
@@ -576,6 +592,81 @@ describe('CoachCommandService', () => {
       profileConsent,
     };
   }
+
+  it('persists typed canonical continuation and reuses ordered delivery without planning or regeneration', async () => {
+    const at = new Date('2026-06-10T12:00:00Z');
+    const next = continuation('WORKOUT_DAY_QUERY', at);
+    const continuations = {
+      publicText: (content: string) => content,
+      enabled: jest.fn().mockReturnValue(true),
+      source: jest.fn().mockResolvedValue({
+        id: 'message-id',
+        content: 'Qual meu treino de hoje?',
+        conversationId: 'conversation-id',
+        timestamp: at,
+        replyToExternalMessageId: null,
+      }),
+      resolve: jest.fn().mockResolvedValue({
+        content: 'Treino de hoje: agachamento.',
+        domain: 'WORKOUT',
+        next,
+        pending: null,
+        outcome: 'UNKNOWN',
+        evidence: { day: 'TODAY' },
+      }),
+      claim: jest.fn().mockResolvedValue(true),
+    };
+    const s = createSubject({
+      content: 'Qual meu treino de hoje?',
+      continuations:
+        continuations as unknown as ConversationContinuationService,
+    });
+    s.transaction.scheduledMessage.upsert.mockImplementation(
+      (input: { create: { context: Prisma.InputJsonObject } }) => ({
+        id: 'scheduled-id',
+        scheduledFor: at,
+        context: input.create.context,
+      }),
+    );
+    expect(
+      await s.service.processCanonicalContinuation({
+        userId: 'user-id',
+        messageId: 'message-id',
+      }),
+    ).toBe(true);
+    expect(s.transaction.scheduledMessage.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          context: expect.objectContaining({
+            continuation: next,
+            deliveryMode: 'ORDERED_COACH_RESPONSE_BATCH',
+          }),
+        }),
+      }),
+    );
+    expect(s.eventBus.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          scheduledMessageIds: expect.any(Array),
+        }),
+      }),
+      s.transaction,
+    );
+    expect(s.dietGenerator.generate).not.toHaveBeenCalled();
+    expect(s.workoutGenerator.generate).not.toHaveBeenCalled();
+    expect(s.prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(continuations.claim.mock.calls[0][0]).toBe(s.transaction);
+    const stored = s.transaction.coachMessage.create.mock.results[0].value;
+    s.prisma.coachMessage.findUnique.mockResolvedValue(stored);
+    await s.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+    expect(continuations.resolve).toHaveBeenCalledTimes(1);
+    expect(continuations.claim).toHaveBeenCalledTimes(1);
+    expect(s.transaction.coachMessage.create).toHaveBeenCalledTimes(1);
+    expect(s.currentWorkoutPlanReader.read).not.toHaveBeenCalled();
+  });
 
   it.each([
     'sim',
@@ -1845,6 +1936,24 @@ describe('CoachCommandService', () => {
     ).resolves.toBe(true);
     expect(subject.currentWorkoutPlanReader.read).toHaveBeenCalledWith(
       'user-id',
+      false,
+    );
+  });
+  it('uses only the canonical reader for an eligible numeric workout follow-up', async () => {
+    const subject = createSubject({
+      content: '1',
+      workoutSelection: true,
+      continuations: {
+        enabled: () => true,
+      } as unknown as ConversationContinuationService,
+    });
+    await subject.service.shouldHandleBeforeProfileAcquisition({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+    expect(subject.currentWorkoutPlanReader.read).toHaveBeenCalledWith(
+      'user-id',
+      true,
     );
   });
 

@@ -30,6 +30,8 @@ import { CurrentWorkoutPlanReaderService } from '../workout/v2/current-workout-p
 import { CONVERSATION_GOAL } from '../context/conversation-goal-planner.contract';
 import { ConversationDailyQueryService } from '../conversation/runtime/conversation-daily-query.service';
 import { ConversationProfileConsentService } from '../conversation/runtime/conversation-profile-consent.service';
+import { ConversationContinuationService } from '../conversation/runtime/conversation-continuation.service';
+import { continuationJson } from '../conversation/runtime/conversation-continuation.contract';
 import {
   isIsolatedReminderReply,
   UNCORRELATED_REPLY,
@@ -78,7 +80,153 @@ export class CoachCommandService {
     private readonly dailyQueries?: ConversationDailyQueryService,
     @Optional()
     private readonly profileConsent?: ConversationProfileConsentService,
+    @Optional()
+    private readonly continuations?: ConversationContinuationService,
   ) {}
+
+  async processCanonicalContinuation(
+    input: ProcessCoachCommandInput,
+  ): Promise<boolean> {
+    if (!this.continuations?.enabled(input.userId)) return false;
+    const message = await this.continuations.source(
+      input.userId,
+      input.messageId,
+      'TEXT',
+    );
+    if (!message) return false;
+    const idempotencyKey = this.idempotencyKey(input.userId, input.messageId);
+    const existing = await this.prisma.coachMessage.findUnique({
+      where: { idempotencyKey },
+    });
+    // An already handled historical turn is not a new canonical response.
+    if (
+      existing &&
+      (!this.isRecord(existing.context) ||
+        existing.context.canonicalContinuation !== true)
+    )
+      return true;
+    let reply = existing
+      ? null
+      : await this.continuations.resolve(input.userId, input.messageId);
+    if (reply?.evidence.delegateRuntime) {
+      const decision = await this.decideOfficialExecution({
+        userId: input.userId,
+        conversationId: message.conversationId,
+        messageId: message.id,
+        text: message.content,
+        receivedAt: message.timestamp.toISOString(),
+        replyToExternalMessageId: message.replyToExternalMessageId,
+        legacyIntent: 'UNKNOWN',
+      });
+      reply = {
+        ...reply,
+        content:
+          decision.source === 'CONVERSATION_RUNTIME' ||
+          decision.source === 'SAFE_RESPONSE'
+            ? decision.content
+            : 'Não consegui continuar essa resposta com segurança. Pode me dizer a que você está se referindo?',
+      };
+    }
+    if (!existing && !reply) return false;
+    if (!this.continuations.enabled(input.userId)) return true;
+    if (reply)
+      reply = {
+        ...reply,
+        content: this.continuations.publicText(
+          reply.content,
+          reply.domain === 'WORKOUT',
+        ),
+      };
+    const intent: CoachCommandIntent =
+      reply?.domain === 'WORKOUT'
+        ? 'WORKOUT'
+        : reply?.domain === 'NUTRITION'
+          ? 'DIET'
+          : 'UNKNOWN';
+    const selectionContext: Prisma.InputJsonObject = reply
+      ? {
+          continuation: continuationJson(reply.next),
+          continuationEvidence: reply.evidence,
+        }
+      : this.isRecord(existing?.context)
+        ? (existing.context as Prisma.InputJsonObject)
+        : {};
+    const queue = (
+      row: { id: string; content: string; context: Prisma.JsonValue },
+      transaction?: Prisma.TransactionClient,
+    ) => {
+      const stored = this.isRecord(row.context) ? row.context : {};
+      const storedIntent = stored.canonicalIntent;
+      return this.scheduleResponse(
+        {
+          userId: input.userId,
+          conversationId: message.conversationId,
+          messageId: message.id,
+          coachMessageId: row.id,
+          content: row.content,
+          scheduledFor: this.scheduledFor(message.timestamp, message.id),
+          intent:
+            storedIntent === 'WORKOUT' || storedIntent === 'DIET'
+              ? storedIntent
+              : 'UNKNOWN',
+          selectionContext: stored as Prisma.InputJsonObject,
+        },
+        transaction,
+      );
+    };
+    const coach =
+      existing ??
+      (await this.prisma.$transaction(async (transaction) => {
+        await transaction.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${idempotencyKey}))`;
+        if (!this.continuations?.enabled(input.userId)) return null;
+        const replay = await transaction.coachMessage.findUnique({
+          where: { idempotencyKey },
+        });
+        if (replay) return replay;
+        if (!reply || !this.continuations) return null;
+        const claimed = await this.continuations.claim(
+          transaction,
+          input.userId,
+          message.conversationId,
+          message.id,
+          reply,
+          message.timestamp,
+        );
+        if (!this.continuations.enabled(input.userId))
+          throw new Error('Continuation runtime disabled before coach commit');
+        const persisted = await transaction.coachMessage.create({
+          data: {
+            userId: input.userId,
+            type: CoachMessageType.FOLLOW_UP,
+            idempotencyKey,
+            content: claimed
+              ? reply.content
+              : this.continuations.publicText(
+                  'Já recebi uma resposta à pergunta anterior. Pode me dizer a que você está se referindo agora?',
+                ),
+            context: claimed
+              ? {
+                  ...selectionContext,
+                  canonicalIntent: intent,
+                  canonicalContinuation: true,
+                }
+              : { canonicalIntent: 'UNKNOWN', canonicalContinuation: true },
+            generatedAt: new Date(),
+            scheduledFor: message.timestamp,
+          },
+        });
+        // Consumption, coach, next durable scheduled response and outbox are atomic.
+        // Recovery still exposes the next question only after its actual SENT state.
+        await queue(persisted, transaction);
+        if (!this.continuations.enabled(input.userId))
+          throw new Error('Continuation runtime disabled before coach commit');
+        return persisted;
+      }));
+    if (!coach) return true; // A concurrent turn owns this pending question.
+    if (!this.continuations.enabled(input.userId)) return true;
+    if (existing) await queue(coach);
+    return true;
+  }
 
   async processReadOnlyText(input: ProcessCoachCommandInput): Promise<boolean> {
     if (!this.dailyQueries) return false;
@@ -202,6 +350,13 @@ export class CoachCommandService {
         reason: 'TEXT_MESSAGE_NOT_FOUND',
       };
     }
+    if (
+      !input.planningContinuation &&
+      this.continuations?.enabled(input.userId) &&
+      isWorkoutCurrentPlanRead(message.content) &&
+      (await this.processCanonicalContinuation(input))
+    )
+      return { handled: true, duplicated: false, intent: 'WORKOUT' };
     const planningOriginal = input.planningContinuation
       ? await this.prisma.message.findFirst({
           where: {
@@ -270,6 +425,12 @@ export class CoachCommandService {
       where: { idempotencyKey },
     });
     if (existing) {
+      if (
+        this.isRecord(existing.context) &&
+        existing.context.canonicalContinuation === true &&
+        !this.continuations?.enabled(input.userId)
+      )
+        return { handled: true, duplicated: true, intent };
       await this.scheduleResponse({
         userId: input.userId,
         conversationId: message.conversation.id,
@@ -817,17 +978,29 @@ export class CoachCommandService {
     return 'UNKNOWN';
   }
 
-  private async scheduleResponse(input: {
-    userId: string;
-    conversationId: string;
-    messageId: string;
-    coachMessageId: string;
-    content: string;
-    scheduledFor: Date;
-    intent: CoachCommandIntent;
-    selectionContext: Prisma.InputJsonObject;
-  }): Promise<void> {
-    const rule = await this.prisma.automationRule.findUnique({
+  private async scheduleResponse(
+    input: {
+      userId: string;
+      conversationId: string;
+      messageId: string;
+      coachMessageId: string;
+      content: string;
+      scheduledFor: Date;
+      intent: CoachCommandIntent;
+      selectionContext: Prisma.InputJsonObject;
+    },
+    client?: Prisma.TransactionClient,
+  ): Promise<void> {
+    const db = client ?? this.prisma;
+    const canonical = input.selectionContext.canonicalContinuation === true;
+    if (canonical && !this.continuations?.enabled(input.userId)) return;
+    if (canonical && !client) {
+      await this.prisma.$transaction((transaction) =>
+        this.scheduleResponse(input, transaction),
+      );
+      return;
+    }
+    const rule = await db.automationRule.findUnique({
       where: {
         code: AUTOMATION_RULE_CODES.DAILY_COACH,
       },
@@ -837,7 +1010,7 @@ export class CoachCommandService {
       throw new Error('Regra de automação indisponível');
     }
 
-    await this.prisma.userAutomationPreference.upsert({
+    await db.userAutomationPreference.upsert({
       where: {
         userId: input.userId,
       },
@@ -852,7 +1025,8 @@ export class CoachCommandService {
       3_400,
       input.intent === 'WORKOUT' || input.intent === 'BOTH',
     );
-    await this.prisma.$transaction(async (transaction) => {
+    const persist = async (transaction: Prisma.TransactionClient) => {
+      if (canonical && !this.continuations?.enabled(input.userId)) return;
       const scheduledMessages: {
         id: string;
         scheduledFor: Date;
@@ -874,6 +1048,8 @@ export class CoachCommandService {
           input,
           rule.id,
         );
+        if (canonical && !this.continuations?.enabled(input.userId))
+          throw new Error('Continuation runtime disabled before replay commit');
         return;
       }
       for (const [partIndex, content] of parts.entries()) {
@@ -926,7 +1102,13 @@ export class CoachCommandService {
         input,
         rule.id,
       );
-    });
+      if (canonical && !this.continuations?.enabled(input.userId))
+        throw new Error(
+          'Continuation runtime disabled before scheduling commit',
+        );
+    };
+    if (client) await persist(client);
+    else await this.prisma.$transaction(persist);
   }
 
   private async publishScheduledResponse(
@@ -980,7 +1162,10 @@ export class CoachCommandService {
     ) {
       return {};
     }
-    const current = await this.currentWorkoutPlanReader.read(userId);
+    const current = await this.currentWorkoutPlanReader.read(
+      userId,
+      this.continuations?.enabled(userId) ?? false,
+    );
     if (
       current.status !== 'AVAILABLE' &&
       current.status !== 'LEGACY_RELATIONAL'
@@ -1067,7 +1252,10 @@ export class CoachCommandService {
     ) {
       return null;
     }
-    const current = await this.currentWorkoutPlanReader.read(input.userId);
+    const current = await this.currentWorkoutPlanReader.read(
+      input.userId,
+      this.continuations?.enabled(input.userId) ?? false,
+    );
     if (
       (current.status !== 'AVAILABLE' &&
         current.status !== 'LEGACY_RELATIONAL') ||

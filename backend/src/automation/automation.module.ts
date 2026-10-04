@@ -98,6 +98,7 @@ import { DietController } from '../diet/diet.controller';
     CoachProactiveResponseService,
   ],
   exports: [
+    ConversationRuntimeModule,
     AutomationService,
     CoachCommandService,
     CoachService,

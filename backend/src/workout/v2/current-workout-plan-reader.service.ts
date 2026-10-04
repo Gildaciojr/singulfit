@@ -16,6 +16,8 @@ import { WorkoutPlanV2StoredDocumentParser } from './workout-plan-v2-stored-docu
 import { WORKOUT_PROMPT_BY_GOAL } from '../workout.constants';
 import { WORKOUT_PLANNING_V2_PROMPT } from './workout-planning-v2.prompt.definition';
 import { WorkoutPlanV2Formatter } from './workout-plan-v2.formatter';
+import { ConversationPublicAnswerBoundaryService } from '../../conversation/runtime/conversation-public-answer-boundary.service';
+import { CoachProactiveSchedulePolicy } from '../../automation/coach-proactive-schedule.policy';
 
 const LEGACY_WORKOUT_PROMPT_NAMES = new Set<string>(
   Object.values(WORKOUT_PROMPT_BY_GOAL),
@@ -42,8 +44,131 @@ export class CurrentWorkoutPlanReaderService {
     userId: string,
     message: string,
     referenceDate: Date,
+    preferCanonical = false,
   ): Promise<string> {
-    const result = await this.read(userId);
+    const result = await this.read(userId, preferCanonical);
+    if (
+      preferCanonical &&
+      result.status === 'AVAILABLE' &&
+      !this.canonicalFieldsSafe(result.plan)
+    )
+      return this.publicText(
+        'Não consegui apresentar esse treino com segurança. Pode tentar novamente?',
+      );
+    const content = this.presentResult(result, message, referenceDate);
+    return preferCanonical ? this.publicText(content) : content;
+  }
+
+  async presentCanonicalDay(
+    userId: string,
+    message: string,
+    referenceDate: Date,
+    afterLocalDate?: string,
+  ): Promise<{ content: string; resolvedLocalDate?: string }> {
+    const result = await this.read(userId, true);
+    if (result.status !== 'AVAILABLE')
+      return {
+        content: this.publicText(
+          this.presentResult(result, message, referenceDate),
+        ),
+      };
+    if (!this.canonicalFieldsSafe(result.plan))
+      return {
+        content: this.publicText(
+          'Não consegui apresentar esse treino com segurança. Pode tentar novamente?',
+        ),
+      };
+    const clock = new CoachProactiveSchedulePolicy();
+    const local = clock.parts(referenceDate, result.plan.timezone);
+    // UTC is used only as a civil-calendar calculator, never as the user's instant.
+    const civil = new Date(
+      Date.UTC(local.year, local.month - 1, local.day, 12),
+    );
+    const next = /\bproximo treino\b/u.test(this.normalize(message));
+    if (next && afterLocalDate) {
+      const previous = new Date(`${afterLocalDate}T12:00:00Z`);
+      if (
+        !Number.isFinite(previous.getTime()) ||
+        previous.toISOString().slice(0, 10) !== afterLocalDate
+      )
+        return {
+          content: this.publicText(
+            'Não consegui identificar o dia que você quer continuar. Qual dia deseja consultar?',
+          ),
+        };
+      civil.setTime(previous.getTime());
+    }
+    let resolved: Date | null = null;
+    if (next) {
+      for (let offset = 1; offset <= 7; offset++) {
+        const weekday = WEEKDAYS[(civil.getUTCDay() + offset) % 7];
+        const selected = this.byWeekday(result.plan, weekday);
+        if (selected.kind === 'SESSION') {
+          resolved = new Date(civil);
+          resolved.setUTCDate(civil.getUTCDate() + offset);
+          break;
+        }
+        if (selected.kind !== 'REST_DAY') break;
+      }
+    } else {
+      const weekday = this.temporalWeekday(
+        this.normalize(message),
+        referenceDate,
+        result.plan.timezone,
+      );
+      if (weekday) {
+        resolved = new Date(civil);
+        resolved.setUTCDate(
+          civil.getUTCDate() +
+            ((WEEKDAYS.indexOf(weekday) - civil.getUTCDay() + 7) % 7),
+        );
+      }
+    }
+    const content =
+      next && resolved
+        ? `Seu próximo treino está programado para ${this.weekdayLabel(WEEKDAYS[resolved.getUTCDay()])}.\n${this.presentResult(result, this.weekdayLabel(WEEKDAYS[resolved.getUTCDay()]), referenceDate)}`
+        : this.presentResult(result, message, referenceDate);
+    return {
+      content: this.publicText(content),
+      ...(resolved
+        ? { resolvedLocalDate: resolved.toISOString().slice(0, 10) }
+        : {}),
+    };
+  }
+  private publicText(value: string): string {
+    const boundary = new ConversationPublicAnswerBoundaryService();
+    return (
+      boundary.projectStructuredText(value) ??
+      boundary.projectText(
+        'Não consegui apresentar esse treino com segurança. Pode tentar novamente?',
+      )!
+    );
+  }
+  private canonicalFieldsSafe(plan: CurrentWorkoutPlanV2): boolean {
+    const boundary = new ConversationPublicAnswerBoundaryService();
+    const fields = [
+      plan.document.title,
+      ...plan.document.sessions.flatMap((session) => [
+        session.label,
+        ...session.blocks.flatMap((block) => [
+          block.title,
+          ...block.activities.flatMap((activity) => [
+            activity.name,
+            activity.instruction,
+            ...activity.alerts,
+          ]),
+        ]),
+      ]),
+    ];
+    return fields.every(
+      (field) => boundary.projectStructuredText(field) !== null,
+    );
+  }
+  private presentResult(
+    result: CurrentWorkoutPlanReadResult,
+    message: string,
+    referenceDate: Date,
+  ): string {
     if (result.status === 'NO_PLAN') {
       return 'Você ainda não tem um plano de treino ativo. Se quiser, posso montar um com base na sua rotina.';
     }
@@ -157,9 +282,12 @@ export class CurrentWorkoutPlanReaderService {
     return null;
   }
 
-  async read(userId: string): Promise<CurrentWorkoutPlanReadResult> {
+  async read(
+    userId: string,
+    preferCanonical = false,
+  ): Promise<CurrentWorkoutPlanReadResult> {
     if (!userId.trim()) return Object.freeze({ status: 'NO_PLAN', plan: null });
-    const record = await this.prisma.workoutPlan.findFirst({
+    const query = {
       where: { userId, status: 'ACTIVE' },
       orderBy: [{ generatedAt: 'desc' }, { id: 'desc' }],
       include: {
@@ -172,7 +300,16 @@ export class CurrentWorkoutPlanReaderService {
           select: { preferences: { select: { timezone: true } } },
         },
       },
-    });
+    } satisfies Prisma.WorkoutPlanFindFirstArgs;
+    const where: Prisma.WorkoutPlanWhereInput = {
+      ...query.where,
+      ...(preferCanonical
+        ? {
+            aiJob: { promptVersion: { name: WORKOUT_PLANNING_V2_PROMPT.name } },
+          }
+        : {}),
+    };
+    const record = await this.prisma.workoutPlan.findFirst({ ...query, where });
     if (!record) return Object.freeze({ status: 'NO_PLAN', plan: null });
     const aiJob = record.aiJob;
     if (

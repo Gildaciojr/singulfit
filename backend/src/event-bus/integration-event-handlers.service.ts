@@ -23,6 +23,7 @@ import { EventHandlerRegistry } from './event-handler.registry';
 import { ProfileAcquisitionInternalRolloutService } from '../context/profile-acquisition/profile-acquisition-internal-rollout.service';
 import { SubscriptionLifecycleService } from '../subscriptions/subscription-lifecycle.service';
 import { CoachProactiveResponseService } from '../automation/coach-proactive-response.service';
+import { ConversationContinuationService } from '../conversation/runtime/conversation-continuation.service';
 
 @Injectable()
 export class IntegrationEventHandlersService implements OnModuleInit {
@@ -42,6 +43,8 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     private readonly subscriptionLifecycle: SubscriptionLifecycleService,
     @Optional()
     private readonly proactiveResponse?: CoachProactiveResponseService,
+    @Optional()
+    private readonly continuations?: ConversationContinuationService,
   ) {}
 
   onModuleInit(): void {
@@ -104,12 +107,18 @@ export class IntegrationEventHandlersService implements OnModuleInit {
       return;
     }
     if (
+      typeof this.coachCommandService.processCanonicalContinuation ===
+        'function' &&
+      (await this.coachCommandService.processCanonicalContinuation(input))
+    )
+      return;
+    if (
       typeof this.coachCommandService.processReadOnlyText === 'function' &&
       (await this.coachCommandService.processReadOnlyText(input))
     )
       return;
 
-    if (this.proactiveResponse) {
+    if (this.proactiveResponse && !this.continuations?.enabled(input.userId)) {
       const proactive = await this.proactiveResponse.capture(input);
       if (proactive.handled) return;
       if (proactive.continueInRuntime) {
@@ -199,11 +208,13 @@ export class IntegrationEventHandlersService implements OnModuleInit {
       throw new Error('Media event ownership mismatch');
 
     try {
+      await this.continuations?.bindMedia(userId, messageId);
       await this.nutritionVisionService.analyzeMeal(meal.id, userId);
     } catch (error: unknown) {
       if (!(error instanceof UsageLimitExceededException)) {
         throw error;
       }
+      await this.continuations?.releaseMedia(userId, messageId);
 
       await this.responseBuilderService.buildUsageLimitResponse(
         meal.id,

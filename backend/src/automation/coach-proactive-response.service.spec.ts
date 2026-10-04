@@ -7,6 +7,23 @@ import type { PrismaService } from '../prisma/prisma.service';
 import { CoachProactiveResponseService } from './coach-proactive-response.service';
 
 describe('CoachProactiveResponseService', () => {
+  it.each(['bom dia', 'oi', 'beleza', 'tudo certo', 'foi ótimo', 'estou bem'])(
+    'does not conclude a workout from evidence-free reply %s',
+    async (content) => {
+      const s = createSubject({
+        replyId: null,
+        intent: 'WORKOUT_CHECK',
+        content,
+      });
+      await expect(
+        s.service.capture({
+          userId: 'user-id',
+          messageId: 'inbound-message-id',
+        }),
+      ).resolves.toMatchObject({ handled: false, outcome: null });
+      expect(s.transaction.scheduledMessage.update).not.toHaveBeenCalled();
+    },
+  );
   it.each(['inbound', 'intervention'] as const)(
     'rejects foreign %s before reminder mutation or outcome',
     async (source) => {
@@ -314,7 +331,7 @@ describe('CoachProactiveResponseService', () => {
     async (content) => {
       const s = createSubject({ content, consumed: true, outcome: 'DEFERRED' });
       s.transaction.scheduledMessage.update.mockImplementation(
-        async (args: {
+        (args: {
           data: {
             responseMessageId: string;
             responseOutcome: CoachProactiveWorkoutOutcome;
@@ -322,7 +339,7 @@ describe('CoachProactiveResponseService', () => {
           };
         }) => {
           Object.assign(s.intervention, args.data);
-          return {};
+          return Promise.resolve({});
         },
       );
       const first = await s.service.capture({
@@ -386,11 +403,12 @@ describe('CoachProactiveResponseService', () => {
   it('serializes competing terminal replies to a deferred intervention', async () => {
     const s = createSubject({ consumed: true, outcome: 'DEFERRED' });
     s.prisma.message.findFirst.mockImplementation(
-      async (args: { where: { id: string } }) => ({
-        ...s.message,
-        id: args.where.id,
-        content: args.where.id === 'first' ? 'já fiz' : 'não consegui',
-      }),
+      (args: { where: { id: string } }) =>
+        Promise.resolve({
+          ...s.message,
+          id: args.where.id,
+          content: args.where.id === 'first' ? 'já fiz' : 'não consegui',
+        }),
     );
     let queue: Promise<unknown> = Promise.resolve();
     s.prisma.$transaction.mockImplementation(
@@ -401,7 +419,7 @@ describe('CoachProactiveResponseService', () => {
       },
     );
     s.transaction.scheduledMessage.update.mockImplementation(
-      async (args: {
+      (args: {
         data: {
           responseMessageId: string;
           responseOutcome: CoachProactiveWorkoutOutcome;
@@ -409,7 +427,7 @@ describe('CoachProactiveResponseService', () => {
         };
       }) => {
         Object.assign(s.intervention, args.data);
-        return {};
+        return Promise.resolve({});
       },
     );
     const results = await Promise.all(
@@ -547,7 +565,6 @@ describe('CoachProactiveResponseService', () => {
     ['DINNER_CHECK', 'já', 'registrar corretamente'],
     ['DINNER_CHECK', 'sim, jantei', 'jantar feito'],
     ['DINNER_CHECK', 'não jantei ainda', 'não fez o jantar'],
-    ['WORKOUT_CHECK', 'foi ótimo', 'Treino concluído'],
     ['WORKOUT_CHECK', 'não consegui treinar hoje', 'Sem culpa'],
     ['DAILY_CHECK_IN', 'estou bem', 'Que bom'],
     ['DAILY_CHECK_IN', 'estou cansado', 'respeitar seu ritmo'],

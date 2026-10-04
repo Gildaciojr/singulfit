@@ -7,7 +7,7 @@ import {
   ScheduledMessageStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { COACH_CONVERSATIONAL_QA_V2_PROMPT } from './coach-conversational-qa.prompt.definition';
+import { ACTIVE_CONVERSATION_QA_PROMPT } from './conversation-qa-capability';
 import { ConversationPublicAnswerBoundaryService } from './conversation-public-answer-boundary.service';
 import { normalizeConversationQACandidate } from './conversation-qa-candidate-normalizer';
 
@@ -70,6 +70,11 @@ export class ConversationQAFollowUpContextService {
       orderBy: [{ timestamp: 'desc' }, { createdAt: 'desc' }],
     });
     if (!previous) return null;
+    if (
+      current.timestamp.getTime() - previous.timestamp.getTime() >=
+      24 * 60 * 60 * 1_000
+    )
+      return null;
 
     const job = await this.prisma.aIJob.findFirst({
       where: {
@@ -80,8 +85,8 @@ export class ConversationQAFollowUpContextService {
         status: AIJobStatus.COMPLETED,
         completedAt: { lt: current.timestamp },
         promptVersion: {
-          name: COACH_CONVERSATIONAL_QA_V2_PROMPT.name,
-          version: COACH_CONVERSATIONAL_QA_V2_PROMPT.version,
+          name: ACTIVE_CONVERSATION_QA_PROMPT.name,
+          isActive: true,
         },
       },
       select: { result: true },
@@ -113,6 +118,8 @@ export class ConversationQAFollowUpContextService {
       where: {
         userId: input.userId,
         status: ScheduledMessageStatus.SENT,
+        conversationId: input.conversationId,
+        context: { path: ['sourceMessageId'], equals: previous.id },
         content: coachMessage.content,
         scheduledFor: {
           gte: previous.timestamp,

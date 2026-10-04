@@ -1,7 +1,9 @@
+import { ConversationContinuationService } from '../conversation/runtime/conversation-continuation.service';
 import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import {
   AIResponseEvaluationType,
@@ -39,6 +41,8 @@ export class ResponseBuilderService {
     private readonly longitudinal: LongitudinalService,
     private readonly nutritionConversationShadowPipeline: NutritionConversationShadowPipelineService,
     private readonly episodicMemoryIntegration: NutritionConversationEpisodicMemoryIntegrationService,
+    @Optional()
+    private readonly continuations?: ConversationContinuationService,
   ) {}
 
   async buildNutritionResponse(
@@ -114,6 +118,18 @@ export class ResponseBuilderService {
         analysis.aiJob.messageId !== sourceMessageId)
     )
       throw new ConflictException('Nutrition response job ownership mismatch');
+    const sent = this.continuations?.enabled(analysis.meal.userId)
+      ? await this.prisma.outboundMessage.findFirst({
+          where: {
+            mealAnalysisId,
+            userId: analysis.meal.userId,
+            conversationId,
+            sourceMessageId,
+            status: { in: ['SENT', 'DELIVERED'] },
+          },
+        })
+      : null;
+    if (sent) return sent;
 
     const [context, longitudinal] = await Promise.all([
       this.intelligenceService.buildUserNutritionContext(analysis.meal.userId),
@@ -191,20 +207,62 @@ export class ResponseBuilderService {
       reasoning: { longitudinalContext: conversationInput.longitudinal },
       legacyText: legacyDecision.finalContent,
     };
-    const selection =
-      await this.nutritionConversationShadowPipeline.selectOfficial(
-        selectionInput,
-      );
-    const decision =
-      selection.content === legacyDecision.finalContent
+    const mealContinuation = await this.continuations?.mediaReply(
+      analysis.meal.userId,
+      sourceMessageId,
+      analysis.items
+        .map(
+          (item) =>
+            `${item.foodName}: ${item.estimatedGrams?.toString() ?? 'quantidade não determinada'} g estimados`,
+        )
+        .join(', '),
+    );
+    const selection = mealContinuation
+      ? { content: mealContinuation.content, candidateExecutionAttempted: true }
+      : await this.nutritionConversationShadowPipeline.selectOfficial(
+          selectionInput,
+        );
+    const evaluatedDecision = mealContinuation
+      ? this.responseEvaluation.evaluate(
+          mealContinuation.content,
+          AIResponseEvaluationType.NUTRITION_RESPONSE,
+          evaluationContext,
+        )
+      : selection.content === legacyDecision.finalContent
         ? legacyDecision
         : this.responseEvaluation.evaluate(
             selection.content,
             AIResponseEvaluationType.NUTRITION_RESPONSE,
             evaluationContext,
           );
+    const decision =
+      mealContinuation && this.continuations
+        ? {
+            ...evaluatedDecision,
+            finalContent: this.continuations.publicText(
+              evaluatedDecision.finalContent,
+            ),
+          }
+        : evaluatedDecision;
 
     const outbound = await this.prisma.$transaction(async (transaction) => {
+      if (mealContinuation && this.continuations) {
+        if (!this.continuations.enabled(analysis.meal.userId))
+          throw new ConflictException(
+            'Continuation runtime disabled before media commit',
+          );
+        const completed = mealContinuation.pending
+          ? await this.continuations.completeMedia(
+              transaction,
+              analysis.meal.userId,
+              conversationId,
+              sourceMessageId,
+              mealContinuation,
+            )
+          : true;
+        if (completed === false)
+          throw new ConflictException('Continuation media commit unavailable');
+      }
       const outbound = await transaction.outboundMessage.upsert({
         where: {
           mealAnalysisId,
@@ -238,6 +296,13 @@ export class ResponseBuilderService {
       });
 
       await this.publishOutbound(transaction, outbound);
+      if (
+        mealContinuation &&
+        !this.continuations?.enabled(analysis.meal.userId)
+      )
+        throw new ConflictException(
+          'Continuation runtime disabled before response commit',
+        );
       return outbound;
     });
 

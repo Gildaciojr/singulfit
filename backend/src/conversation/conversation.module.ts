@@ -44,6 +44,7 @@ import { ConversationUnderstandingValidator } from './validators/conversation-un
     ConversationUnderstandingValidator,
   ],
   exports: [
+    ConversationSafetyDetectorService,
     CoachProfileSnapshotConversationAdapter,
     ConversationGoalDecisionAdapter,
     ProfileAcquisitionDecisionConversationAdapter,

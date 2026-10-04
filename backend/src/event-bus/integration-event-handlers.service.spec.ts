@@ -20,8 +20,56 @@ import { EventHandlerRegistry } from './event-handler.registry';
 import { IntegrationEventHandlersService } from './integration-event-handlers.service';
 import { SubscriptionLifecycleService } from '../subscriptions/subscription-lifecycle.service';
 import { CoachProactiveResponseService } from '../automation/coach-proactive-response.service';
+import type { ConversationContinuationService } from '../conversation/runtime/conversation-continuation.service';
 
 describe('IntegrationEventHandlersService', () => {
+  it.each([true, false])(
+    'uses canonical continuation before proactive legacy only when eligible=%s',
+    async (eligible) => {
+      const registry = new EventHandlerRegistry();
+      const coach = {
+        processCanonicalContinuation: jest.fn().mockResolvedValue(eligible),
+        processReadOnlyText: jest.fn().mockResolvedValue(false),
+      };
+      const proactive = {
+        capture: jest.fn().mockResolvedValue({ handled: true }),
+      };
+      const continuations = { enabled: () => eligible };
+      const service = new IntegrationEventHandlersService(
+        registry,
+        {} as PagBankWebhookService,
+        {} as EvolutionWebhookService,
+        {} as NutritionService,
+        {} as NutritionVisionService,
+        {} as ResponseBuilderService,
+        {} as EvolutionSendService,
+        coach as unknown as CoachCommandService,
+        {} as AutomationService,
+        {} as ActivationJourneyService,
+        {} as ActivationOnboardingService,
+        acquisitionRollout() as unknown as ProfileAcquisitionInternalRolloutService,
+        subscriptionLifecycle() as unknown as SubscriptionLifecycleService,
+        proactive as unknown as CoachProactiveResponseService,
+        continuations as unknown as ConversationContinuationService,
+      );
+      service.onModuleInit();
+      const handler = registry.get(
+        INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED,
+      );
+      if (!handler) throw new Error('Missing inbound handler');
+      await handler(
+        outboxEvent(INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED, {
+          userId: 'user',
+          messageId: 'message',
+        }),
+      );
+      expect(coach.processCanonicalContinuation).toHaveBeenCalledWith({
+        userId: 'user',
+        messageId: 'message',
+      });
+      expect(proactive.capture).toHaveBeenCalledTimes(eligible ? 0 : 1);
+    },
+  );
   it.each([
     ['PHYSICAL_LIMITATIONS', 'não', false],
     ['TRAINING_ENVIRONMENT', 'Academia', false],

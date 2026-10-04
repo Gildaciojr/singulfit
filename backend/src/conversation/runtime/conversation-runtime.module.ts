@@ -29,6 +29,9 @@ import { PersonalizedCoachContextService } from './personalized-coach-context.se
 import { ConversationNutritionMutationService } from './conversation-nutrition-mutation.service';
 import { NutritionExecutionModule } from '../../diet/v2/execution/nutrition-execution.module';
 import { ConversationProfileConsentService } from './conversation-profile-consent.service';
+import { ConversationContinuationService } from './conversation-continuation.service';
+import { ConversationContinuationSemanticsService } from './conversation-continuation-semantics.service';
+import { ConversationContinuationStore } from './conversation-continuation.store';
 
 @Module({
   imports: [
@@ -42,6 +45,9 @@ import { ConversationProfileConsentService } from './conversation-profile-consen
     WorkoutModule,
   ],
   providers: [
+    ConversationContinuationService,
+    ConversationContinuationStore,
+    ConversationContinuationSemanticsService,
     ConversationProfileConsentService,
     ConversationNutritionMutationService,
     PersonalizedCoachContextService,
@@ -66,6 +72,7 @@ import { ConversationProfileConsentService } from './conversation-profile-consen
     ConversationNutritionDeterministicAnswerService,
   ],
   exports: [
+    ConversationContinuationService,
     ConversationProfileConsentService,
     ConversationNutritionMutationService,
     ConversationDailyQueryService,

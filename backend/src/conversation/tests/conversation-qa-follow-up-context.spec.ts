@@ -7,6 +7,7 @@ import {
 } from '@prisma/client';
 import { ConversationQAFollowUpContextService } from '../runtime/conversation-qa-follow-up-context.service';
 import { ConversationPublicAnswerBoundaryService } from '../runtime/conversation-public-answer-boundary.service';
+import { ACTIVE_CONVERSATION_QA_PROMPT } from '../runtime/conversation-qa-capability';
 
 describe('ConversationQAFollowUpContextService', () => {
   const previousTimestamp = new Date('2026-08-13T12:00:00.000Z');
@@ -138,7 +139,10 @@ describe('ConversationQAFollowUpContextService', () => {
         type: AIJobType.TEXT,
         status: AIJobStatus.COMPLETED,
         completedAt: { lt: currentTimestamp },
-        promptVersion: { name: 'coach_conversational_qa_v1', version: 2 },
+        promptVersion: {
+          name: ACTIVE_CONVERSATION_QA_PROMPT.name,
+          isActive: true,
+        },
       },
       select: { result: true },
       orderBy: [{ completedAt: 'desc' }, { createdAt: 'desc' }],
@@ -154,6 +158,8 @@ describe('ConversationQAFollowUpContextService', () => {
         userId: 'user-id',
         status: ScheduledMessageStatus.SENT,
         content: officialContent,
+        conversationId: 'conversation-id',
+        context: { path: ['sourceMessageId'], equals: 'previous-message-id' },
         scheduledFor: { gte: previousTimestamp, lt: currentTimestamp },
       },
       select: { id: true },

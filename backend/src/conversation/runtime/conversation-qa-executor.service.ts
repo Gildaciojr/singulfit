@@ -7,7 +7,7 @@ import type { CoachConversationHumanContext } from '../../context/coach-conversa
 import { PrismaService } from '../../prisma/prisma.service';
 import type { PublicNutritionResponse } from '../../diet/v2/presentation/public-nutrition-response.contract';
 import type { ConversationExecutionRoute } from '../contracts/conversation-execution-route.contract';
-import { COACH_CONVERSATIONAL_QA_V4_PROMPT } from './coach-conversational-qa.prompt.definition';
+import { ACTIVE_CONVERSATION_QA_PROMPT as COACH_CONVERSATIONAL_QA_V4_PROMPT } from './conversation-qa-capability';
 import { ConversationCurrentNutritionContextService } from './conversation-current-nutrition-context.service';
 import { ConversationPublicAnswerBoundaryService } from './conversation-public-answer-boundary.service';
 import { normalizeConversationQACandidate } from './conversation-qa-candidate-normalizer';
