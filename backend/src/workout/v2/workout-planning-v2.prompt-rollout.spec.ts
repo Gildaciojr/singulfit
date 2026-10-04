@@ -6,14 +6,28 @@ import {
   WORKOUT_PLANNING_V2_PROMPT_V3,
   WORKOUT_PLANNING_V2_PROMPT_V4,
   WORKOUT_PLANNING_V2_PROMPT_V5,
+  WORKOUT_PLANNING_V2_PROMPT_V6,
 } from './workout-planning-v2.prompt.definition';
 
 describe('workout planning prompt rollout', () => {
-  it('freezes the current v6 instructions without a new prompt version', () => {
-    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(6);
+  it('freezes the final commercial v7 instructions hash', () => {
     expect(
       createHash('sha256')
         .update(WORKOUT_PLANNING_V2_PROMPT.instructions)
+        .digest('hex'),
+    ).toBe('62efa6ef1de1aa7486d2a54ae26930c1e816bb40b55a1894fecefd120d43414c');
+    expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(
+      'Cada activity.instruction deve ser curta, específica ao exercício',
+    );
+    expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(
+      'cues de segurança podem repetir quando realmente necessários',
+    );
+  });
+  it('freezes historical v6 instructions while selecting v7', () => {
+    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(7);
+    expect(
+      createHash('sha256')
+        .update(WORKOUT_PLANNING_V2_PROMPT_V6.instructions)
         .digest('hex'),
     ).toBe('2d94eff78b1dff71226957c3a07e4f4ae24a2c6565fe390e16795cb4ecb57436');
   });
@@ -54,8 +68,8 @@ describe('workout planning prompt rollout', () => {
     expect(migration).toContain("'WORKOUT_PLANNING_V2',\n  'TEXT',");
   });
 
-  it('selects version 6 without mutating the historical definitions', () => {
-    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(6);
+  it('selects version 7 without mutating the historical definitions', () => {
+    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(7);
     expect(WORKOUT_PLANNING_V2_PROMPT_V4.version).toBe(4);
     expect(
       createHash('sha256')
@@ -95,14 +109,14 @@ describe('workout planning prompt rollout', () => {
   it('extends v5 with generic executable duration and exact TIMED arithmetic', () => {
     expect(WORKOUT_PLANNING_V2_PROMPT_V5.version).toBe(5);
     expect(
-      WORKOUT_PLANNING_V2_PROMPT.instructions.startsWith(
+      WORKOUT_PLANNING_V2_PROMPT_V6.instructions.startsWith(
         WORKOUT_PLANNING_V2_PROMPT_V5.instructions,
       ),
     ).toBe(true);
-    expect(WORKOUT_PLANNING_V2_PROMPT.schema).toBe(
+    expect(WORKOUT_PLANNING_V2_PROMPT_V6.schema).toBe(
       WORKOUT_PLANNING_V2_PROMPT_V5.schema,
     );
-    const extension = WORKOUT_PLANNING_V2_PROMPT.instructions.slice(
+    const extension = WORKOUT_PLANNING_V2_PROMPT_V6.instructions.slice(
       WORKOUT_PLANNING_V2_PROMPT_V5.instructions.length,
     );
     expect(extension).toContain(
@@ -121,6 +135,27 @@ describe('workout planning prompt rollout', () => {
     expect(extension).toContain('descanso ENTRE séries');
     expect(extension).toContain('não adicione descanso depois da última série');
     expect(extension).not.toMatch(/\b60\b/u);
+  });
+
+  it('extends immutable v6 with complete multi-round prescriptions and generic quality', () => {
+    expect(WORKOUT_PLANNING_V2_PROMPT_V6.version).toBe(6);
+    expect(
+      WORKOUT_PLANNING_V2_PROMPT.instructions.startsWith(
+        WORKOUT_PLANNING_V2_PROMPT_V6.instructions,
+      ),
+    ).toBe(true);
+    expect(WORKOUT_PLANNING_V2_PROMPT.schema).toBe(
+      WORKOUT_PLANNING_V2_PROMPT_V6.schema,
+    );
+    const extension = WORKOUT_PLANNING_V2_PROMPT.instructions.slice(
+      WORKOUT_PLANNING_V2_PROMPT_V6.instructions.length,
+    );
+    expect(extension).toContain('rounds > 1');
+    expect(extension).toContain('recoverySeconds = 0');
+    expect(extension).toContain('durationSeconds=210');
+    expect(extension).toContain('strategy.sessionDurationMinutes');
+    expect(extension).toContain('volume semanal');
+    expect(extension).not.toMatch(/\b60\s*(?:min|minutos)\b/iu);
   });
 
   it('deactivates only the prior active definition and preserves history', () => {

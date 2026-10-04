@@ -52,6 +52,39 @@ describe('OutboxDispatcherService', () => {
     expect(outboxService.markFailed).not.toHaveBeenCalled();
   });
 
+  it('keeps independent response events concurrent while their handlers await delivery', async () => {
+    const registry = new EventHandlerRegistry();
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started: string[] = [];
+    registry.register('AUTOMATION_TRIGGERED', async (event) => {
+      started.push(event.id);
+      await gate;
+    });
+    const events = [
+      { ...event(), id: 'left-response', eventType: 'AUTOMATION_TRIGGERED' },
+      { ...event(), id: 'right-response', eventType: 'AUTOMATION_TRIGGERED' },
+    ];
+    const outbox = {
+      claimBatch: jest.fn().mockResolvedValue(events),
+      markProcessed: jest.fn().mockResolvedValue(true),
+      markFailed: jest.fn(),
+      markIgnored: jest.fn(),
+    };
+    const pending = new OutboxDispatcherService(
+      outbox as unknown as OutboxService,
+      registry,
+    ).drain();
+    await Promise.resolve();
+    expect(started).toEqual(['left-response', 'right-response']);
+    expect(outbox.markProcessed).not.toHaveBeenCalled();
+    release?.();
+    await expect(pending).resolves.toBe(2);
+    expect(outbox.markProcessed).toHaveBeenCalledTimes(2);
+  });
+
   it('persists handler failure for retry', async () => {
     const claimed = event();
     const failure = new Error('handler failed');

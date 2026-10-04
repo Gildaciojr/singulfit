@@ -187,14 +187,12 @@ describe('IntegrationEventHandlersService', () => {
   it('rejects a foreign meal from image handling before Vision or public response', async () => {
     const registry = new EventHandlerRegistry();
     const nutrition = {
-      createMealFromMedia: jest
-        .fn()
-        .mockResolvedValue({
-          id: 'meal-id',
-          userId: 'user-b',
-          messageId: 'message-id',
-          mediaFileId: 'media-id',
-        }),
+      createMealFromMedia: jest.fn().mockResolvedValue({
+        id: 'meal-id',
+        userId: 'user-b',
+        messageId: 'message-id',
+        mediaFileId: 'media-id',
+      }),
     };
     const vision = { analyzeMeal: jest.fn() };
     const responses = { buildNutritionResponse: jest.fn() };
@@ -818,6 +816,207 @@ describe('IntegrationEventHandlersService', () => {
       intent: 'WORKOUT',
       sentAt,
     });
+  });
+
+  function automationBatch(sendScheduledMessage: jest.Mock) {
+    const registry = new EventHandlerRegistry();
+    const acquisition = acquisitionRollout();
+    const handlers = new IntegrationEventHandlersService(
+      registry,
+      {} as PagBankWebhookService,
+      {} as EvolutionWebhookService,
+      {} as NutritionService,
+      {} as NutritionVisionService,
+      {} as ResponseBuilderService,
+      {} as EvolutionSendService,
+      {} as CoachCommandService,
+      { sendScheduledMessage } as unknown as AutomationService,
+      {} as ActivationJourneyService,
+      {} as ActivationOnboardingService,
+      acquisition as unknown as ProfileAcquisitionInternalRolloutService,
+      subscriptionLifecycle() as unknown as SubscriptionLifecycleService,
+    );
+    handlers.onModuleInit();
+    const handler = registry.get(INTERNAL_EVENT.AUTOMATION_TRIGGERED);
+    if (!handler) throw new Error('Automation handler missing');
+    const event = (ids: readonly string[], intent = 'WORKOUT') =>
+      outboxEvent(INTERNAL_EVENT.AUTOMATION_TRIGGERED, {
+        scheduledMessageIds: [...ids],
+        source: 'WHATSAPP_COACH_COMMAND',
+        sourceMessageId: 'source-id',
+        userId: 'user-id',
+        intent,
+      });
+    return { handler, event, acquisition };
+  }
+  it.each([
+    ['WORKOUT', 1],
+    ['WORKOUT', 2],
+    ['WORKOUT', 3],
+    ['DIET', 3],
+    ['BOTH', 3],
+  ] as const)(
+    'awaits each part of a %s %s-part batch and runs acquisition once after completion',
+    async (intent, count) => {
+      const ids = Array.from({ length: count }, (_, index) => `part-${index}`);
+      const observed: string[] = [];
+      const releases: (() => void)[] = [];
+      const send = jest.fn(
+        (id: string) =>
+          new Promise((resolve) => {
+            observed.push(id);
+            releases.push(() =>
+              resolve({
+                id,
+                status: 'SENT',
+                sentAt: new Date(),
+                scheduledFor: new Date(),
+              }),
+            );
+          }),
+      );
+      const subject = automationBatch(send);
+      const pending = subject.handler(subject.event(ids, intent));
+      for (let index = 0; index < count; index++) {
+        expect(observed).toEqual(ids.slice(0, index + 1));
+        expect(
+          subject.acquisition.afterCoachResponseSent,
+        ).not.toHaveBeenCalled();
+        releases[index]();
+        await Promise.resolve();
+      }
+      await pending;
+      expect(observed).toEqual(ids);
+      expect(subject.acquisition.afterCoachResponseSent).toHaveBeenCalledTimes(
+        1,
+      );
+    },
+  );
+  it('fences first-part failure and resumes a partial retry without bypassing unsent parts', async () => {
+    const send = jest.fn().mockRejectedValueOnce(new Error('part0 failed'));
+    const subject = automationBatch(send);
+    const event = subject.event(['part-0', 'part-1', 'part-2']);
+    await expect(subject.handler(event)).rejects.toThrow('part0 failed');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(subject.acquisition.afterCoachResponseSent).not.toHaveBeenCalled();
+    send
+      .mockReset()
+      .mockResolvedValueOnce({ status: 'SENT' })
+      .mockRejectedValueOnce(new Error('part1 failed'));
+    await expect(subject.handler(event)).rejects.toThrow('part1 failed');
+    expect(send.mock.calls.map((call: readonly string[]) => call[0])).toEqual([
+      'part-0',
+      'part-1',
+    ]);
+    expect(subject.acquisition.afterCoachResponseSent).not.toHaveBeenCalled();
+    send.mockReset().mockResolvedValue({ status: 'SENT' });
+    await subject.handler(event);
+    expect(send.mock.calls.map((call: readonly string[]) => call[0])).toEqual([
+      'part-0',
+      'part-1',
+      'part-2',
+    ]);
+    expect(subject.acquisition.afterCoachResponseSent).toHaveBeenCalledTimes(1);
+  });
+  it.each(['SENDING', 'PENDING', 'FAILED'])(
+    'does not overtake an unconfirmed predecessor returned as %s',
+    async (status) => {
+      const send = jest.fn().mockResolvedValue({ status });
+      const subject = automationBatch(send);
+      await expect(
+        subject.handler(subject.event(['part-0', 'part-1'])),
+      ).rejects.toThrow('aguardando confirmação');
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(subject.acquisition.afterCoachResponseSent).not.toHaveBeenCalled();
+    },
+  );
+  it.each(['DIET', 'WORKOUT', 'BOTH'])(
+    'runs acquisition only after the last part of a historical %s single-ID response',
+    async (intent) => {
+      const send = jest.fn((id: string) =>
+        Promise.resolve({
+          status: 'SENT',
+          context: { partIndex: Number(id.at(-1)), partCount: 3 },
+        }),
+      );
+      const subject = automationBatch(send);
+      for (let index = 0; index < 3; index++) {
+        await subject.handler(
+          outboxEvent(INTERNAL_EVENT.AUTOMATION_TRIGGERED, {
+            scheduledMessageId: `legacy-${index}`,
+            source: 'WHATSAPP_COACH_COMMAND',
+            sourceMessageId: 'source-id',
+            userId: 'user-id',
+            intent,
+          }),
+        );
+        expect(
+          subject.acquisition.afterCoachResponseSent,
+        ).toHaveBeenCalledTimes(index === 2 ? 1 : 0);
+      }
+    },
+  );
+
+  it('keeps a blocked historical multipart event retryable instead of losing its final side effect', async () => {
+    const send = jest.fn().mockResolvedValue({
+      status: 'PENDING',
+      context: {
+        source: 'WHATSAPP_COACH_COMMAND',
+        partIndex: 2,
+        partCount: 3,
+      },
+    });
+    const subject = automationBatch(send);
+    await expect(
+      subject.handler(
+        outboxEvent(INTERNAL_EVENT.AUTOMATION_TRIGGERED, {
+          scheduledMessageId: 'legacy-last',
+          source: 'WHATSAPP_COACH_COMMAND',
+          sourceMessageId: 'source-id',
+          userId: 'user-id',
+          intent: 'DIET',
+        }),
+      ),
+    ).rejects.toThrow('aguardando confirmação');
+    expect(subject.acquisition.afterCoachResponseSent).not.toHaveBeenCalled();
+  });
+
+  it('does not start DIET acquisition after only the first historical chunk', async () => {
+    const send = jest.fn().mockResolvedValue({
+      status: 'SENT',
+      context: { partIndex: 0, partCount: 3 },
+    });
+    const subject = automationBatch(send);
+    await subject.handler(
+      outboxEvent(INTERNAL_EVENT.AUTOMATION_TRIGGERED, {
+        scheduledMessageId: 'diet-0',
+        source: 'WHATSAPP_COACH_COMMAND',
+        sourceMessageId: 'source-id',
+        userId: 'user-id',
+        intent: 'DIET',
+      }),
+    );
+    expect(subject.acquisition.afterCoachResponseSent).not.toHaveBeenCalled();
+  });
+
+  it('allows two independent response batches to start concurrently', async () => {
+    const started: string[] = [];
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const send = jest.fn(async (id: string) => {
+      started.push(id);
+      await gate;
+      return { status: 'SENT' };
+    });
+    const subject = automationBatch(send);
+    const left = subject.handler(subject.event(['left-0', 'left-1']));
+    const right = subject.handler(subject.event(['right-0', 'right-1']));
+    expect(started).toEqual(['left-0', 'right-0']);
+    release?.();
+    await Promise.all([left, right]);
+    expect(started).toEqual(['left-0', 'right-0', 'left-1', 'right-1']);
   });
 
   it('schedules premium kickoff only for onboarding context refresh completion', async () => {

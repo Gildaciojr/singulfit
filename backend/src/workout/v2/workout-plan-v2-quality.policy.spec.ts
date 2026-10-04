@@ -5,6 +5,12 @@ import {
 } from './workout-plan-v2-quality.policy';
 import { WorkoutPlanV2Validator } from './workout-plan-v2.validator';
 import { WorkoutPlanningStrategyService } from './workout-planning-strategy.service';
+import { estimateWorkoutSession } from './workout-duration-estimator';
+import type {
+  WorkoutActivityV2,
+  WorkoutSessionV2,
+} from './workout-plan-v2.contract';
+import { commercialWorkoutPlan } from './workout-commercial-quality.fixtures';
 import {
   qualityCandidate,
   qualityContext,
@@ -81,7 +87,7 @@ describe('Workout quality before persistence', () => {
         workoutStructuralActivityIssue({ ...activity, ...optional }),
       ).toMatchObject({
         code: 'TIMED_DURATION_UNCERTAIN',
-        severity: 'WARNING',
+        severity: 'ERROR',
       });
   });
   it.each([300, 420])(
@@ -115,6 +121,142 @@ describe('Workout quality before persistence', () => {
     },
   );
 
+  it.each([
+    [3, null, null, 30, 'ERROR'],
+    [3, 30, null, 210, 'ERROR'],
+    [3, null, 60, 210, 'ERROR'],
+    [1, null, null, 30, 'WARNING'],
+    [1, 30, null, 30, null],
+    [3, 30, 60, 210, null],
+    [3, 30, 0, 90, null],
+  ] as const)(
+    'requires a complete multi-round clock: %s/%s/%s',
+    (rounds, workSeconds, recoverySeconds, durationSeconds, severity) => {
+      const activity = {
+        ...strength('plank'),
+        kind: 'TIMED' as const,
+        name: 'Prancha frontal',
+        rounds,
+        workSeconds,
+        recoverySeconds,
+        durationSeconds,
+      };
+      const issue = workoutStructuralActivityIssue(activity);
+      if (severity)
+        expect(issue).toEqual({
+          code: 'TIMED_DURATION_UNCERTAIN',
+          severity,
+          path: 'plank',
+        });
+      else expect(issue).toBeNull();
+      const ctx = qualityContext(['MONDAY']);
+      const result = new WorkoutPlanV2Validator().validate(
+        qualityCandidate([qualitySession('plank-session', [activity])]),
+        ctx,
+        new WorkoutPlanningStrategyService().build(ctx),
+      );
+      if (severity === 'ERROR') expect(result.status).toBe('INVALID');
+      else
+        expect(
+          result.issues.some(
+            (item) =>
+              item.code === 'TIMED_DURATION_UNCERTAIN' &&
+              item.severity === 'ERROR',
+          ),
+        ).toBe(false);
+    },
+  );
+
+  it('rejects the observed three-movement session despite long declared blocks', () => {
+    const ctx = qualityContext(['MONDAY']);
+    const base = qualitySession('observed');
+    const session = {
+      ...base,
+      blocks: base.blocks.map((block) =>
+        block.type === 'STRENGTH'
+          ? {
+              ...block,
+              activities: Array.from({ length: 3 }, (_, index) => ({
+                ...strength(`main-${index}`),
+                sets: 3,
+                restSeconds: 60,
+              })),
+            }
+          : block.type === 'COOLDOWN'
+            ? {
+                ...block,
+                activities: block.activities.map((activity) =>
+                  activity.kind === 'ENDURANCE'
+                    ? { ...activity, durationMinutes: 10 }
+                    : activity,
+                ),
+              }
+            : block,
+      ),
+    };
+    const result = new WorkoutPlanV2Validator().validate(
+      qualityCandidate([session]),
+      ctx,
+      new WorkoutPlanningStrategyService().build(ctx),
+    );
+    expect(result.status).toBe('INVALID');
+    expect(result.issues).toContainEqual({
+      code: 'SESSION_CONTENT_TOO_SHORT',
+      severity: 'ERROR',
+      path: 'observed',
+    });
+  });
+
+  it.each([30, 45, 60])(
+    'rejects materially short high-confidence content relative to %s minutes',
+    (target) => {
+      const ctx = qualityContext(['MONDAY']);
+      const strategy = {
+        ...new WorkoutPlanningStrategyService().build(ctx),
+        sessionDurationMinutes: { status: 'CONFIRMED' as const, value: target },
+      };
+      const short = {
+        ...qualitySession('short', [
+          { ...strength(), sets: 3, restSeconds: 60 },
+        ]),
+        estimatedDurationMinutes: target,
+      };
+      const validator = new WorkoutPlanV2Validator();
+      expect(
+        validator.validate(qualityCandidate([short]), ctx, strategy).issues,
+      ).toContainEqual({
+        code: 'SESSION_CONTENT_TOO_SHORT',
+        severity: 'ERROR',
+        path: 'short',
+      });
+      const full = qualitySession('plausible');
+      const plausible = {
+        ...full,
+        estimatedDurationMinutes: target,
+        blocks: full.blocks.map((block) => ({
+          ...block,
+          estimatedDurationMinutes:
+            (block.estimatedDurationMinutes * target) / 60,
+          activities: block.activities.map((activity) =>
+            activity.kind === 'ENDURANCE'
+              ? {
+                  ...activity,
+                  durationMinutes: (activity.durationMinutes * target) / 60,
+                }
+              : activity.kind === 'STRENGTH'
+                ? {
+                    ...activity,
+                    sets: target === 30 ? 2 : target === 45 ? 3 : 4,
+                  }
+                : activity,
+          ),
+        })),
+      };
+      expect(
+        validator.validate(qualityCandidate([plausible]), ctx, strategy).status,
+      ).not.toBe('INVALID');
+    },
+  );
   it('warns on loaded overlap across five consecutive days and adapts beginner tolerance', () => {
     const context = qualityContext();
     const sessions =
@@ -144,6 +286,175 @@ describe('Workout quality before persistence', () => {
       }),
     ).toHaveLength(1);
   });
+
+  it.each([60, 45])(
+    'checks duration boundaries relative to target %s using actual estimator bounds',
+    (target) => {
+      const context = qualityContext(['MONDAY']);
+      const strategy = {
+        ...new WorkoutPlanningStrategyService().build(context),
+        sessionDurationMinutes: { status: 'CONFIRMED' as const, value: target },
+      };
+      const cases = [
+        ['HIGH', 0.79, 'WARNING'],
+        ['HIGH', 0.8, null],
+        ['HIGH', 0.75, 'WARNING'],
+        ['HIGH', 0.74, 'ERROR'],
+        ['HIGH', 0.55, 'ERROR'],
+        ['LOW', 0.79, 'WARNING'],
+        ['LOW', 0.55, 'WARNING'],
+        ['LOW', 0.54, 'ERROR'],
+        ['LOW', 0.9, null],
+      ] as const;
+      for (const [confidence, ratio, severity] of cases) {
+        const uncertain: WorkoutActivityV2 = {
+          ...strength('mobility'),
+          kind: 'MOBILITY',
+          name: 'Mobilidade livre',
+          movementPattern: 'MOBILITY',
+          durationSeconds: null,
+          holdSeconds: null,
+          repetitions: null,
+        };
+        const activity: WorkoutActivityV2 = {
+          ...strength('walk'),
+          kind: 'ENDURANCE',
+          name: 'Caminhada',
+          mode: 'WALK',
+          movementPattern: 'LOCOMOTION',
+          durationMinutes: target * ratio - (confidence === 'LOW' ? 11.5 : 5),
+          distanceKm: null,
+        };
+        const session: WorkoutSessionV2 = {
+          ...qualitySession('boundary'),
+          estimatedDurationMinutes: target,
+          blocks: qualitySession().blocks.map((block, index) => ({
+            ...block,
+            estimatedDurationMinutes: index === 1 ? target - 2 : 1,
+            activities:
+              index === 1
+                ? confidence === 'LOW'
+                  ? [activity, uncertain]
+                  : [activity]
+                : [
+                    {
+                      ...activity,
+                      activityKey: `support-${index}`,
+                      durationMinutes: 1,
+                    },
+                  ],
+          })),
+        };
+        const estimate = estimateWorkoutSession(session);
+        expect(estimate.confidence).toBe(confidence);
+        expect(estimate.maximumMinutes / target).toBeCloseTo(ratio, 8);
+        const result = new WorkoutPlanV2Validator().validate(
+          qualityCandidate([session]),
+          context,
+          strategy,
+        );
+        const issue = result.issues.find(
+          (item) => item.code === 'SESSION_CONTENT_TOO_SHORT',
+        );
+        if (severity) expect(issue?.severity).toBe(severity);
+        else expect(issue).toBeUndefined();
+        if (confidence === 'LOW' && severity !== 'ERROR')
+          expect(
+            result.issues.filter((item) => item.severity === 'ERROR'),
+          ).toEqual([]);
+        if (severity === 'ERROR') expect(result.status).toBe('INVALID');
+      }
+    },
+  );
+
+  it('validates the realistic five-day fixture including equipment, duration and recovery', () => {
+    const plan = commercialWorkoutPlan();
+    const result = new WorkoutPlanV2Validator().validate(
+      qualityCandidate(plan.sessions),
+      qualityContext(),
+      plan.strategy,
+    );
+    expect(result.issues.filter((issue) => issue.severity === 'ERROR')).toEqual(
+      [],
+    );
+    expect(
+      workoutWeeklyRecoveryIssues(
+        qualityCandidate(plan.sessions),
+        qualityContext(),
+      ),
+    ).toEqual([]);
+    const activities = plan.sessions.flatMap((session) =>
+      session.blocks.flatMap((block) => block.activities),
+    );
+    expect(
+      plan.sessions[2].blocks.find((block) => block.type === 'ENDURANCE')
+        ?.activities,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'Bicicleta ergométrica leve',
+          kind: 'ENDURANCE',
+        }),
+      ]),
+    );
+    expect(
+      plan.sessions.every((session) =>
+        session.blocks
+          .filter((block) => block.type === 'STRENGTH')
+          .every((block) =>
+            block.activities.every(
+              (activity) =>
+                activity.kind === 'STRENGTH' || activity.kind === 'TIMED',
+            ),
+          ),
+      ),
+    ).toBe(true);
+    const instructions = activities
+      .filter(
+        (activity) => activity.kind === 'STRENGTH' || activity.kind === 'TIMED',
+      )
+      .map((activity) => activity.instruction);
+    expect(new Set(instructions).size).toBe(instructions.length);
+    const prescriptions = activities
+      .filter((activity) => activity.kind === 'STRENGTH')
+      .map(
+        (activity) =>
+          `${activity.sets}/${activity.repetitions}/${activity.restSeconds}`,
+      );
+    expect(new Set(prescriptions).size).toBeGreaterThanOrEqual(5);
+    expect(
+      activities.every((activity) =>
+        activity.equipment.every((equipment) =>
+          plan.strategy.authorizedEquipment.includes(equipment),
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      activities.find((activity) => activity.name === 'Supino reto com barra'),
+    ).toMatchObject({
+      movementPattern: 'PUSH',
+      equipment: ['BARBELL', 'BENCH'],
+    });
+    expect(
+      activities.find((activity) => activity.name === 'Remada baixa na polia'),
+    ).toMatchObject({ movementPattern: 'PULL', equipment: ['CABLE'] });
+    expect(
+      activities.find(
+        (activity) => activity.name === 'Farmer walk com halteres',
+      ),
+    ).toMatchObject({
+      kind: 'TIMED',
+      movementPattern: 'CARRY',
+      durationSeconds: 340,
+    });
+    expect(
+      plan.sessions[2].blocks
+        .flatMap((block) => block.activities)
+        .filter((activity) => 'intensity' in activity)
+        .every((activity) => activity.intensity === 'LIGHT'),
+    ).toBe(true);
+  });
+
   it('reduces unavoidable consecutive overlap for weight loss without changing spaced-day distribution', () => {
     const strategy = new WorkoutPlanningStrategyService();
     const consecutive = strategy.build(
@@ -221,7 +532,10 @@ describe('Workout quality before persistence', () => {
   it('warns on uncertain time and block declarations instead of falsely rejecting', () => {
     const result = validate(
       qualitySession('uncertain', [
-        { ...strength(), repetitions: 'até esforço confortável' },
+        ...Array.from({ length: 4 }, (_, index) => ({
+          ...strength(`uncertain-${index}`),
+          repetitions: 'até esforço confortável',
+        })),
       ]),
     );
     expect(result.issues).toContainEqual({
@@ -230,9 +544,8 @@ describe('Workout quality before persistence', () => {
       path: 'uncertain',
     });
     expect(
-      result.issues.find((issue) => issue.code === 'SESSION_CONTENT_TOO_SHORT')
-        ?.severity,
-    ).toBe('WARNING');
+      result.issues.some((issue) => issue.code === 'SESSION_CONTENT_TOO_SHORT'),
+    ).toBe(false);
     expect(
       validate({
         ...qualitySession(),

@@ -240,9 +240,57 @@ export class IntegrationEventHandlersService implements OnModuleInit {
   }
 
   private async processAutomation(event: OutboxEvent): Promise<void> {
-    const sent = await this.automationService.sendScheduledMessage(
-      this.requiredString(event.payload, 'scheduledMessageId'),
-    );
+    const payload = event.payload;
+    const hasBatch =
+      typeof payload === 'object' &&
+      payload !== null &&
+      !Array.isArray(payload) &&
+      'scheduledMessageIds' in payload;
+    const ids = hasBatch
+      ? payload.scheduledMessageIds
+      : [this.requiredString(payload, 'scheduledMessageId')];
+    if (
+      !Array.isArray(ids) ||
+      ids.length === 0 ||
+      ids.some((id) => typeof id !== 'string' || !id.trim()) ||
+      new Set(ids).size !== ids.length
+    )
+      throw new Error('Batch de automação inválido');
+    let sent:
+      | Awaited<ReturnType<AutomationService['sendScheduledMessage']>>
+      | undefined;
+    for (const id of ids) {
+      if (typeof id !== 'string') throw new Error('ID de automação inválido');
+      sent = await this.automationService.sendScheduledMessage(id);
+      const context = sent.context;
+      const legacyMultipart =
+        typeof context === 'object' &&
+        context !== null &&
+        !Array.isArray(context) &&
+        context.source === 'WHATSAPP_COACH_COMMAND' &&
+        typeof context.partCount === 'number' &&
+        context.partCount > 1;
+      if (
+        (hasBatch || legacyMultipart) &&
+        sent.status !== ScheduledMessageStatus.SENT
+      ) {
+        if (sent.status === ScheduledMessageStatus.CANCELED) return;
+        throw new Error(
+          'Resposta multi-part aguardando confirmação da parte anterior',
+        );
+      }
+    }
+    if (!sent) throw new Error('Resposta de automação ausente');
+    if (
+      !hasBatch &&
+      typeof sent.context === 'object' &&
+      sent.context !== null &&
+      !Array.isArray(sent.context) &&
+      typeof sent.context.partIndex === 'number' &&
+      typeof sent.context.partCount === 'number' &&
+      sent.context.partIndex + 1 < sent.context.partCount
+    )
+      return;
     const source = this.optionalString(event.payload, 'source');
     const intent = this.coachIntent(
       this.optionalString(event.payload, 'intent'),

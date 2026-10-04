@@ -250,6 +250,7 @@ describe('Nutrition V2 internal pilot integration', () => {
     );
     const transaction = {
       scheduledMessage: {
+        findMany: jest.fn().mockResolvedValue([]),
         upsert: jest.fn().mockResolvedValue({ id: 'scheduled-message-id' }),
       },
     };

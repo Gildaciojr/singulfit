@@ -4,6 +4,44 @@ import type { ConversationAnswerCandidate } from '../runtime/conversation-qa.con
 describe('ConversationPublicAnswerBoundaryService', () => {
   const boundary = new ConversationPublicAnswerBoundaryService();
 
+  it('retains the Q&A bullet limit while accepting structured prescriptions', () => {
+    const text =
+      '*Supino reto*\n• 4 séries × 8–10 repetições\n• Descanso: 1 min 30 s\n• Equipamento: barra + banco\n• Intensidade: moderada\n\n💡 Controle a descida.';
+    expect(boundary.projectText(text)).toBeNull();
+    expect(boundary.projectStructuredText(text)).toBe(text);
+    expect(boundary.projectText('• Um\n• Dois\n• Três')).toBe(
+      '• Um\n• Dois\n• Três',
+    );
+  });
+
+  it.each([
+    '```\nSEGREDO_LIVRE\n```',
+    'AIJob\nSEGREDO_ADJACENTE',
+    '| Coluna | Valor |\n| --- | --- |\n| SEGREDO_TABELA | arbitrário |',
+    '12f2331b-efa4-4207-867a-9593a1350a2e\nSEGREDO_UUID',
+    'promptVersionId\nSEGREDO_PROMPT',
+    '**ênfase não fechada\nSEGREDO_MARKDOWN',
+  ])('rejects the entire contaminated structured text: %s', (value) => {
+    expect(boundary.projectStructuredText(value)).toBeNull();
+    expect(boundary.projectText(value)).toBeNull();
+  });
+
+  it('shares normalization and keeps bounded structured output', () => {
+    const text =
+      '## Treino\r\n**Supino**\r\n\r\n\r\n[Orientação](https://example.com)  segura';
+    expect(boundary.projectStructuredText(text)).toBe(
+      boundary.projectText(text),
+    );
+    expect(boundary.projectStructuredText(null)).toBeNull();
+    expect(boundary.projectStructuredText(' ')).toBeNull();
+    expect(boundary.projectText('a'.repeat(4001))).toBeNull();
+    expect(boundary.projectStructuredText('a'.repeat(4001))).toHaveLength(4001);
+    expect(boundary.projectStructuredText('a'.repeat(32000))).toHaveLength(
+      32000,
+    );
+    expect(boundary.projectStructuredText('a'.repeat(32001))).toBeNull();
+  });
+
   it.each([
     'null',
     'undefined',

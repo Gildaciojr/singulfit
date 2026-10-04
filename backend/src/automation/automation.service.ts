@@ -604,6 +604,57 @@ export class AutomationService {
           };
         }
 
+        const context = current.context;
+        if (
+          typeof context === 'object' &&
+          context !== null &&
+          !Array.isArray(context) &&
+          (context.deliveryMode === 'ORDERED_COACH_RESPONSE_BATCH' ||
+            (context.source === 'WHATSAPP_COACH_COMMAND' &&
+              typeof context.partCount === 'number' &&
+              context.partCount > 1))
+        ) {
+          if (
+            typeof context.partIndex !== 'number' ||
+            !Number.isInteger(context.partIndex) ||
+            context.partIndex < 0 ||
+            typeof context.partCount !== 'number' ||
+            !Number.isInteger(context.partCount) ||
+            context.partCount < 1 ||
+            context.partIndex >= context.partCount ||
+            typeof context.sourceMessageId !== 'string' ||
+            !context.sourceMessageId.trim()
+          )
+            throw new BadRequestException(
+              'Contexto de entrega do coach inválido',
+            );
+          if (context.partIndex > 0) {
+            const predecessors = await transaction.scheduledMessage.findMany({
+              where: {
+                userId: current.userId,
+                automationRuleId: current.automationRuleId,
+                AND: [
+                  {
+                    context: {
+                      path: ['sourceMessageId'],
+                      equals: context.sourceMessageId,
+                    },
+                  },
+                  { context: { path: ['partIndex'], lt: context.partIndex } },
+                ],
+              },
+              select: { status: true, context: true },
+            });
+            if (
+              predecessors.length !== context.partIndex ||
+              predecessors.some(
+                (part) => part.status !== ScheduledMessageStatus.SENT,
+              )
+            )
+              return { shouldSend: false as const, message: current };
+          }
+        }
+
         if (current.scheduledFor > at) {
           throw new BadRequestException(
             'Mensagem ainda não atingiu o horário agendado',

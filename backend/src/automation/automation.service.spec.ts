@@ -35,7 +35,9 @@ describe('AutomationService', () => {
       (call) => call[0].data.status === 'SENT',
     );
     expect(sent).toBeDefined();
-    const data = sent?.[0].data;
+    const data = sent?.[0].data as
+      | { responseExpiresAt: Date; sentAt: Date }
+      | undefined;
     expect(data?.responseExpiresAt.getTime() - data?.sentAt.getTime()).toBe(
       24 * 60 * 60 * 1_000,
     );
@@ -319,6 +321,126 @@ describe('AutomationService', () => {
       scheduledMessage,
     };
   }
+
+  function orderedDelivery(intent = 'WORKOUT', legacy = false) {
+    const subject = createSubject();
+    const messages = Array.from({ length: 3 }, (_, partIndex) => ({
+      ...subject.scheduledMessage,
+      id: `part-${partIndex}`,
+      status: ScheduledMessageStatus.PENDING as ScheduledMessageStatus,
+      content: `Part ${partIndex}`,
+      context: {
+        source: 'WHATSAPP_COACH_COMMAND',
+        sourceMessageId: 'source-id',
+        intent,
+        ...(legacy ? {} : { deliveryMode: 'ORDERED_COACH_RESPONSE_BATCH' }),
+        partIndex,
+        partCount: 3,
+      },
+      user: {
+        isActive: true,
+        phone: '5511999999999',
+        phoneE164: '5511999999999',
+        preferences: {},
+      },
+    }));
+    const get = (id: string) => {
+      const message = messages.find((item) => item.id === id);
+      if (!message) throw new Error('message missing');
+      return message;
+    };
+    subject.transaction.scheduledMessage.findUnique.mockImplementation(
+      (input: { where: { id: string } }) =>
+        Promise.resolve(get(input.where.id)),
+    );
+    subject.transaction.scheduledMessage.findMany.mockImplementation(
+      (input: { where: { AND: readonly { context: { lt?: number } }[] } }) => {
+        const index =
+          input.where.AND.find((item) => item.context.lt !== undefined)?.context
+            .lt ?? 0;
+        return Promise.resolve(
+          messages.filter((item) => item.context.partIndex < index),
+        );
+      },
+    );
+    subject.transaction.scheduledMessage.update.mockImplementation(
+      (input: {
+        where: { id: string };
+        data: { status: ScheduledMessageStatus };
+      }) => {
+        const message = get(input.where.id);
+        message.status = input.data.status;
+        return Promise.resolve(message);
+      },
+    );
+    subject.prisma.scheduledMessage.updateMany.mockImplementation(
+      (input: {
+        where: { id: string; status: ScheduledMessageStatus };
+        data: { status: ScheduledMessageStatus };
+      }) => {
+        const message = get(input.where.id);
+        if (message.status !== input.where.status)
+          return Promise.resolve({ count: 0 });
+        message.status = input.data.status;
+        return Promise.resolve({ count: 1 });
+      },
+    );
+    subject.prisma.scheduledMessage.findUniqueOrThrow.mockImplementation(
+      (input: { where: { id: string } }) =>
+        Promise.resolve(get(input.where.id)),
+    );
+    return { ...subject, messages };
+  }
+  it.each(['DIET', 'WORKOUT', 'BOTH', 'UNKNOWN'])(
+    'never sends a %s successor before all predecessors are SENT, including the legacy due scanner path',
+    async (intent) => {
+      const subject = orderedDelivery(intent, true);
+      const at = new Date('2026-06-10T12:05:00Z');
+      const blocked = await subject.service.sendScheduledMessage('part-1', at);
+      expect(blocked.status).toBe(ScheduledMessageStatus.PENDING);
+      expect(subject.evolutionGateway.sendText).not.toHaveBeenCalled();
+      subject.messages[0].status = ScheduledMessageStatus.FAILED;
+      await subject.service.sendScheduledMessage('part-1', at);
+      expect(subject.evolutionGateway.sendText).not.toHaveBeenCalled();
+      subject.messages[0].status = ScheduledMessageStatus.SENT;
+      await subject.service.sendScheduledMessage('part-2', at);
+      expect(subject.evolutionGateway.sendText).not.toHaveBeenCalled();
+      await subject.service.sendScheduledMessage('part-1', at);
+      expect(subject.evolutionGateway.sendText).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each(['DIET', 'WORKOUT', 'BOTH', 'UNKNOWN'])(
+    'retries only the failed %s part and skips previously SENT parts on duplicate delivery',
+    async (intent) => {
+      const subject = orderedDelivery(intent);
+      const at = new Date('2026-06-10T12:05:00Z');
+      subject.evolutionGateway.sendText
+        .mockResolvedValueOnce({ externalMessageId: 'part-0-external' })
+        .mockRejectedValueOnce(new Error('part-1-failed'))
+        .mockResolvedValue({ externalMessageId: 'sent' });
+      await subject.service.sendScheduledMessage('part-0', at);
+      await expect(
+        subject.service.sendScheduledMessage('part-1', at),
+      ).rejects.toThrow('part-1-failed');
+      expect(subject.messages.map((item) => item.status)).toEqual([
+        'SENT',
+        'FAILED',
+        'PENDING',
+      ]);
+      for (const id of ['part-0', 'part-1', 'part-2'])
+        await subject.service.sendScheduledMessage(id, at);
+      const sentContents = subject.evolutionGateway.sendText.mock.calls.map(
+        (call: readonly { text: string }[]) => call[0].text,
+      );
+      expect(sentContents).toEqual(['Part 0', 'Part 1', 'Part 1', 'Part 2']);
+      for (const id of ['part-0', 'part-1', 'part-2'])
+        await subject.service.sendScheduledMessage(id, at);
+      expect(subject.evolutionGateway.sendText).toHaveBeenCalledTimes(4);
+      expect(subject.messages.every((item) => item.status === 'SENT')).toBe(
+        true,
+      );
+    },
+  );
 
   it('creates default preferences on first read', async () => {
     const subject = createSubject();

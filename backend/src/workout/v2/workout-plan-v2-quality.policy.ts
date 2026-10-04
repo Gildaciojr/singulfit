@@ -49,7 +49,7 @@ export function workoutStructuralActivityIssue(
     )
       return {
         code: 'TIMED_DURATION_UNCERTAIN',
-        severity: 'WARNING',
+        severity: activity.rounds > 1 ? 'ERROR' : 'WARNING',
         path: activity.activityKey,
       };
   }

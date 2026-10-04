@@ -1,3 +1,4 @@
+import { chunkWorkoutWhatsApp } from '../workout/v2/workout-whatsapp.chunker';
 import { Test } from '@nestjs/testing';
 import {
   historicalWorkoutPlan,
@@ -205,6 +206,7 @@ describe('CoachCommandService', () => {
     };
     const transaction = {
       scheduledMessage: {
+        findMany: jest.fn().mockResolvedValue([]),
         upsert: jest.fn().mockResolvedValue(scheduledMessage),
       },
     };
@@ -2312,19 +2314,19 @@ describe('CoachCommandService', () => {
     expect(firstSequence.map((part) => part.conversationId)).toEqual(
       expectedParts.map(() => 'conversation-id'),
     );
-    expect(firstEvents).toHaveLength(expectedParts.length);
-    expect(firstEvents.map((event) => event.eventType)).toEqual(
-      expectedParts.map(() => 'AUTOMATION_TRIGGERED'),
-    );
-    expect(firstEvents.map((event) => event.aggregateId)).toEqual(
-      firstSequence.map((part) => part.id),
-    );
-    expect(firstEvents.map((event) => event.payload.sourceMessageId)).toEqual(
-      expectedParts.map(() => 'message-id'),
-    );
-    expect(firstEvents.map((event) => event.availableAt.getTime())).toEqual(
-      firstSequence.map((part) => part.scheduledFor.getTime()),
-    );
+    expect(firstEvents).toHaveLength(1);
+    expect(firstEvents.map((event) => event.eventType)).toEqual([
+      'AUTOMATION_TRIGGERED',
+    ]);
+    expect(firstEvents.map((event) => event.aggregateId)).toEqual([
+      firstSequence[0].id,
+    ]);
+    expect(firstEvents.map((event) => event.payload.sourceMessageId)).toEqual([
+      'message-id',
+    ]);
+    expect(firstEvents.map((event) => event.availableAt.getTime())).toEqual([
+      firstSequence[0].scheduledFor.getTime(),
+    ]);
     expect(firstSequence.map((part) => part.scheduledFor.getTime())).toEqual(
       firstSequence.map(
         (_, index) => firstSequence[0].scheduledFor.getTime() + index,
@@ -2357,10 +2359,8 @@ describe('CoachCommandService', () => {
     expect(subject.transaction.scheduledMessage.upsert).toHaveBeenCalledTimes(
       expectedParts.length * 2,
     );
-    expect(subject.eventBus.publish).toHaveBeenCalledTimes(
-      expectedParts.length * 2,
-    );
-    expect(effects.outboxEvents.size).toBe(expectedParts.length);
+    expect(subject.eventBus.publish).toHaveBeenCalledTimes(2);
+    expect(effects.outboxEvents.size).toBe(1);
   });
 
   it('converges concurrent executions to one logical multipart sequence', async () => {
@@ -2397,10 +2397,8 @@ describe('CoachCommandService', () => {
     expect(
       [...effects.scheduledMessages.values()].map(({ content }) => content),
     ).toEqual(expectedParts);
-    expect(effects.outboxEvents.size).toBe(expectedParts.length);
-    expect(subject.eventBus.publish).toHaveBeenCalledTimes(
-      expectedParts.length * 2,
-    );
+    expect(effects.outboxEvents.size).toBe(1);
+    expect(subject.eventBus.publish).toHaveBeenCalledTimes(2);
   });
 
   it('preserves a long BOTH response with semantic Workout boundaries and one header', async () => {
@@ -2429,12 +2427,18 @@ describe('CoachCommandService', () => {
     const parts = sequence.map((part) => part.content);
     expect(parts.length).toBeGreaterThan(1);
     expect(parts.every((part) => part.length <= 3400)).toBe(true);
-    expect(parts.join('\n\n')).toBe(content);
+    expect(
+      parts
+        .map((part) =>
+          part.replace(/^➡️ \*Continuação do seu treino — \d+\/\d+\*\n\n/u, ''),
+        )
+        .join('\n\n'),
+    ).toBe(content);
     for (const session of sessions)
       expect(parts.some((part) => part.includes(session))).toBe(true);
-    expect(parts.slice(1).every((part) => part.startsWith('*Sessão'))).toBe(
-      true,
-    );
+    expect(
+      parts.slice(1).every((part) => part.startsWith('➡️ *Continuação')),
+    ).toBe(true);
     expect(parts.join('').split('*Sua semana de treino*')).toHaveLength(2);
     expect(sequence.map((part) => part.context.partIndex)).toEqual(
       parts.map((_, index) => index),
@@ -2448,6 +2452,133 @@ describe('CoachCommandService', () => {
     });
     expect(effects.scheduledMessages.size).toBe(parts.length);
   });
+
+  it('replays an existing legacy Workout sequence without rechunking or changing its event identity', async () => {
+    const subject = createSubject({
+      content: 'quero um treino',
+      existingContent: 'Resposta histórica',
+    });
+    const legacy = [0, 1].map((partIndex) => ({
+      id: `legacy-${partIndex}`,
+      scheduledFor: new Date(`2026-06-10T12:00:00.00${partIndex}Z`),
+      context: {
+        source: 'WHATSAPP_COACH_COMMAND',
+        sourceMessageId: 'message-id',
+        intent: 'WORKOUT',
+        partIndex,
+        partCount: 2,
+      },
+    }));
+    subject.transaction.scheduledMessage.findMany.mockResolvedValue(legacy);
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+    expect(subject.transaction.scheduledMessage.upsert).not.toHaveBeenCalled();
+    expect(subject.eventBus.publish).toHaveBeenCalledTimes(2);
+    expect(
+      subject.eventBus.publish.mock.calls.map(
+        (call: readonly { payload: { scheduledMessageId: string } }[]) =>
+          call[0].payload.scheduledMessageId,
+      ),
+    ).toEqual(['legacy-0', 'legacy-1']);
+    expect(
+      subject.eventBus.publish.mock.calls.every(
+        (call) => !('scheduledMessageIds' in call[0].payload),
+      ),
+    ).toBe(true);
+  });
+
+  it('schedules a Workout response as one ordered batch and reuses the same event on replay', async () => {
+    const content = [
+      'Preparei seu treino.',
+      ...Array.from(
+        { length: 5 },
+        (_, index) =>
+          `📅 *Sessão ${index + 1} — Treino*\n\n*1. Movimento*\n• Repetições: 10\n\n💡 ${'Controle o movimento. '.repeat(65).trim()}`,
+      ),
+    ].join('\n\n');
+    const subject = createSubject({
+      content: 'quero um treino',
+      runtimeContent: content,
+    });
+    const effects = installPersistentEffectHarness(subject);
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+    const messages = [...effects.scheduledMessages.values()];
+    expect(messages.map((message) => message.content)).toEqual(
+      chunkWorkoutWhatsApp(content),
+    );
+    expect(
+      messages.every(
+        (message) =>
+          message.context.deliveryMode === 'ORDERED_COACH_RESPONSE_BATCH',
+      ),
+    ).toBe(true);
+    expect(effects.outboxEvents.size).toBe(1);
+    expect(effects.publishedEvents[0].payload.scheduledMessageIds).toEqual(
+      messages.map((message) => message.id),
+    );
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+    expect(effects.outboxEvents.size).toBe(1);
+    expect(effects.scheduledMessages.size).toBe(messages.length);
+  });
+
+  it.each(['DIET', 'WORKOUT', 'BOTH', 'UNKNOWN'] as const)(
+    'schedules any %s multipart coach response as one logical batch',
+    async (intent) => {
+      const subject = createSubject();
+      const effects = installPersistentEffectHarness(subject);
+      const schedule = subject.service as unknown as {
+        scheduleResponse(input: {
+          userId: string;
+          conversationId: string;
+          messageId: string;
+          coachMessageId: string;
+          content: string;
+          scheduledFor: Date;
+          intent: typeof intent;
+          selectionContext: Record<string, never>;
+        }): Promise<void>;
+      };
+      const content = Array.from(
+        { length: 3 },
+        (_, index) => `Parte ${index}. ${'Conteúdo do coach. '.repeat(110)}`,
+      ).join('\n\n');
+      await schedule.scheduleResponse({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'source-id',
+        coachMessageId: 'coach-id',
+        content,
+        scheduledFor: new Date('2026-06-10T12:00:00Z'),
+        intent,
+        selectionContext: {},
+      });
+      const messages = [...effects.scheduledMessages.values()];
+      expect(messages.length).toBeGreaterThan(1);
+      expect(effects.publishedEvents).toHaveLength(1);
+      expect(effects.publishedEvents[0].payload.scheduledMessageIds).toEqual(
+        messages.map((message) => message.id),
+      );
+      expect(messages.map((message) => message.context.partIndex)).toEqual(
+        messages.map((_, index) => index),
+      );
+      expect(
+        messages.every(
+          (message) =>
+            message.context.deliveryMode === 'ORDERED_COACH_RESPONSE_BATCH' &&
+            message.context.sourceMessageId === 'source-id' &&
+            message.context.partCount === messages.length,
+        ),
+      ).toBe(true);
+    },
+  );
 
   it('splits long outbound content deterministically without losing text', () => {
     const service = createSubject().service as unknown as {
@@ -2483,14 +2614,25 @@ describe('CoachCommandService', () => {
     expect(parts.every((part) => part.length <= 3400)).toBe(true);
     for (const session of sessions)
       expect(parts.some((part) => part.includes(session))).toBe(true);
-    expect(parts.join('\n\n')).toBe(content);
+    expect(
+      parts
+        .map((part) =>
+          part.replace(/^➡️ \*Continuação do seu treino — \d+\/\d+\*\n\n/u, ''),
+        )
+        .join('\n\n'),
+    ).toBe(content);
     expect(service.messageParts(content, 3400, true)).toEqual(parts);
     const long =
       `*Sessão 1 — Corpo inteiro*\n${'Orientação técnica. '.repeat(400)}`.trim();
     const longParts = service.messageParts(long, 3400, true);
     expect(longParts.every((part) => part.length <= 3400)).toBe(true);
-    expect(longParts.join(' ').replace(/\s+/gu, ' ')).toBe(
-      long.replace(/\s+/gu, ' '),
-    );
+    expect(
+      longParts
+        .map((part) =>
+          part.replace(/^➡️ \*Continuação do seu treino — \d+\/\d+\*\n\n/u, ''),
+        )
+        .join(' ')
+        .replace(/\s+/gu, ' '),
+    ).toBe(long.replace(/\s+/gu, ' '));
   });
 });

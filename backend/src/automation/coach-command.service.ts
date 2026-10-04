@@ -1,3 +1,4 @@
+import { chunkWorkoutWhatsApp } from '../workout/v2/workout-whatsapp.chunker';
 import { Injectable, Optional } from '@nestjs/common';
 import { explicitPlanningIntent } from '../conversation/understanding/explicit-planning-intent';
 import type { ConversationGoalDecision } from '../context/conversation-goal-planner.contract';
@@ -852,6 +853,29 @@ export class CoachCommandService {
       input.intent === 'WORKOUT' || input.intent === 'BOTH',
     );
     await this.prisma.$transaction(async (transaction) => {
+      const scheduledMessages: {
+        id: string;
+        scheduledFor: Date;
+        context: Prisma.JsonValue;
+      }[] = [];
+      const existing = await transaction.scheduledMessage.findMany({
+        where: {
+          userId: input.userId,
+          automationRuleId: rule.id,
+          context: { path: ['sourceMessageId'], equals: input.messageId },
+        },
+        orderBy: [{ scheduledFor: 'asc' }, { id: 'asc' }],
+        select: { id: true, scheduledFor: true, context: true },
+      });
+      if (existing.length > 0) {
+        await this.publishScheduledResponse(
+          transaction,
+          existing,
+          input,
+          rule.id,
+        );
+        return;
+      }
       for (const [partIndex, content] of parts.entries()) {
         const scheduledFor = new Date(input.scheduledFor.getTime() + partIndex);
         const scheduledMessage = await transaction.scheduledMessage.upsert({
@@ -879,6 +903,7 @@ export class CoachCommandService {
               partIndex,
               partCount: parts.length,
               ...input.selectionContext,
+              deliveryMode: 'ORDERED_COACH_RESPONSE_BATCH',
             },
             responseExpiresAt:
               input.selectionContext.action === WORKOUT_SESSION_SELECTION_ACTION
@@ -893,26 +918,55 @@ export class CoachCommandService {
           },
         });
 
-        await this.eventBus.publish(
-          {
-            eventType: INTERNAL_EVENT.AUTOMATION_TRIGGERED,
-            aggregateType: 'SCHEDULED_MESSAGE',
-            aggregateId: scheduledMessage.id,
-            payload: {
-              scheduledMessageId: scheduledMessage.id,
-              userId: input.userId,
-              automationRuleId: rule.id,
-              ruleCode: AUTOMATION_RULE_CODES.DAILY_COACH,
-              source: 'WHATSAPP_COACH_COMMAND',
-              sourceMessageId: input.messageId,
-              intent: input.intent,
-            },
-            availableAt: scheduledFor,
-          },
-          transaction,
-        );
+        scheduledMessages.push(scheduledMessage);
       }
+      await this.publishScheduledResponse(
+        transaction,
+        scheduledMessages,
+        input,
+        rule.id,
+      );
     });
+  }
+
+  private async publishScheduledResponse(
+    transaction: Prisma.TransactionClient,
+    messages: readonly {
+      id: string;
+      scheduledFor: Date;
+      context: Prisma.JsonValue;
+    }[],
+    input: { userId: string; messageId: string; intent: CoachCommandIntent },
+    ruleId: string,
+  ): Promise<void> {
+    const ordered = messages.every(
+      (message) =>
+        this.isRecord(message.context) &&
+        message.context.deliveryMode === 'ORDERED_COACH_RESPONSE_BATCH',
+    );
+    const groups = ordered ? [messages] : messages.map((message) => [message]);
+    for (const group of groups) {
+      await this.eventBus.publish(
+        {
+          eventType: INTERNAL_EVENT.AUTOMATION_TRIGGERED,
+          aggregateType: 'SCHEDULED_MESSAGE',
+          aggregateId: group[0].id,
+          payload: {
+            ...(ordered
+              ? { scheduledMessageIds: group.map((message) => message.id) }
+              : { scheduledMessageId: group[0].id }),
+            userId: input.userId,
+            automationRuleId: ruleId,
+            ruleCode: AUTOMATION_RULE_CODES.DAILY_COACH,
+            source: 'WHATSAPP_COACH_COMMAND',
+            sourceMessageId: input.messageId,
+            intent: input.intent,
+          },
+          availableAt: group[0].scheduledFor,
+        },
+        transaction,
+      );
+    }
   }
 
   private async workoutSelectionContext(
@@ -1074,6 +1128,7 @@ export class CoachCommandService {
     maximumLength = 3_400,
     workout = false,
   ): readonly string[] {
+    if (workout) return chunkWorkoutWhatsApp(content, maximumLength);
     const remaining = content.trim();
     if (remaining.length <= maximumLength) return Object.freeze([remaining]);
     const parts: string[] = [];

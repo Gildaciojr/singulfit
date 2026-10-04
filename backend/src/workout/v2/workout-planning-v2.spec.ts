@@ -487,7 +487,7 @@ describe('Workout Planning Engine V2', () => {
       workoutSchemaForAuthorizedEquipment([]).schema,
     ))
       expect(variant.maxItems).toBe(0);
-    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(6);
+    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(7);
     expect(WORKOUT_PLANNING_V2_PROMPT_V3.version).toBe(3);
   });
   it('reproduces five 60-minute FULL_GYM sessions with bodyweight warm-up without unavailable-equipment failures', () => {
@@ -1290,12 +1290,13 @@ describe('Workout Planning Engine V2', () => {
     const keyForVersion = (version: number) =>
       `workout-planning-v2:${createHash('sha256').update(`user-id:${version}:${providerRequest.input}`).digest('hex')}`;
     expect(generation.operationKey).toBe(
-      `workout-planning-v2:${createHash('sha256').update(`user-id:6:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${providerRequest.input}`).digest('hex')}`,
+      `workout-planning-v2:${createHash('sha256').update(`user-id:7:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${providerRequest.input}`).digest('hex')}`,
     );
     expect(WORKOUT_PLANNING_V2_EXECUTION_REVISION).toBe(
       'timed-clock-canonical-v1',
     );
     expect(generation.operationKey).not.toBe(keyForVersion(6));
+    expect(generation.operationKey).not.toBe(keyForVersion(7));
     expect(generation.operationKey).not.toBe(keyForVersion(3));
     expect(generation.operationKey).not.toBe(keyForVersion(5));
     expect(ai.completeJobInTransaction).not.toHaveBeenCalled();
@@ -1919,7 +1920,7 @@ describe('Workout Planning Engine V2', () => {
   it('publishes prompt V2 with explicit personalization and stereotype guards', () => {
     expect(WORKOUT_PLANNING_V2_PROMPT).toMatchObject({
       name: 'workout_planning_v2',
-      version: 6,
+      version: 7,
       capability: 'WORKOUT_PLANNING_V2',
     });
     expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(

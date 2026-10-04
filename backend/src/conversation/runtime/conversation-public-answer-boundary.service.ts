@@ -19,6 +19,19 @@ export class ConversationPublicAnswerBoundaryService {
   }
 
   projectText(value: string | null): string | null {
+    return this.projectPublicText(value, 3, 4_000);
+  }
+
+  /** Structured plans share all safety guards, with their own size/bullet budget. */
+  projectStructuredText(value: string | null): string | null {
+    return this.projectPublicText(value, null, 32_000);
+  }
+
+  private projectPublicText(
+    value: string | null,
+    maximumBullets: number | null,
+    maximumLength: number,
+  ): string | null {
     if (!value) return null;
     const originalLines = value.replace(/\r\n/gu, '\n').split('\n');
     if (
@@ -36,12 +49,16 @@ export class ConversationPublicAnswerBoundaryService {
       .split('\n')
       .map((line) => line.replace(/^\s*#{1,6}\s*/u, '').trim())
       .filter((line) => !line || !MARKDOWN_TABLE.test(line));
-    if (lines.filter((line) => BULLET.test(line)).length > 3) return null;
+    if (
+      maximumBullets !== null &&
+      lines.filter((line) => BULLET.test(line)).length > maximumBullets
+    )
+      return null;
     const projected = lines
       .join('\n')
       .replace(/[ \t]{2,}/gu, ' ')
       .replace(/\n{3,}/gu, '\n\n')
       .trim();
-    return projected && projected.length <= 4_000 ? projected : null;
+    return projected && projected.length <= maximumLength ? projected : null;
   }
 }

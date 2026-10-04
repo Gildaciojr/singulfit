@@ -60,7 +60,15 @@ export class WorkoutPlanV2Validator {
           this.add(
             issues,
             tooShort ? 'SESSION_CONTENT_TOO_SHORT' : 'SESSION_CONTENT_TOO_LONG',
-            material && estimate.confidence === 'HIGH' ? 'ERROR' : 'WARNING',
+            // The estimator already gives a generous upper bound. A moderate
+            // 75–80% of the target stays a warning; below 75% with known execution,
+            // or below 55% even with uncertainty, content is insufficient.
+            material ||
+              (tooShort &&
+                estimate.confidence === 'HIGH' &&
+                estimate.maximumMinutes < target * 0.75)
+              ? 'ERROR'
+              : 'WARNING',
             session.sessionKey,
           );
         }
