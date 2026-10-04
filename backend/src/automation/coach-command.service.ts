@@ -177,7 +177,14 @@ export class CoachCommandService {
     const coach =
       existing ??
       (await this.prisma.$transaction(async (transaction) => {
-        await transaction.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${idempotencyKey}))`;
+        await transaction.$queryRaw<Array<{ acquired: number }>>`
+      WITH acquired AS MATERIALIZED (
+        SELECT pg_advisory_xact_lock(hashtext(${idempotencyKey}))
+      )
+      SELECT 1::int AS "acquired"
+      FROM acquired
+    `;
+
         if (!this.continuations?.enabled(input.userId)) return null;
         const replay = await transaction.coachMessage.findUnique({
           where: { idempotencyKey },

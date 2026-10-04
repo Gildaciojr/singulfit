@@ -70,7 +70,14 @@ export class ConversationContinuationStore {
     };
     const token = randomUUID();
     const gate = await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${idempotencyKey}))`;
+      await tx.$queryRaw<Array<{ acquired: number }>>`
+    WITH acquired AS MATERIALIZED (
+      SELECT pg_advisory_xact_lock(hashtext(${idempotencyKey}))
+    )
+    SELECT 1::int AS "acquired"
+    FROM acquired
+  `;
+
       if (!this.enabled(userId)) return null;
       const existing = await tx.outboxEvent.findUnique({
         where: { eventType_aggregateType_aggregateId: identity },
