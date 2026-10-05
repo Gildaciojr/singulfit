@@ -9,6 +9,7 @@ import type {
 import type { ConversationOperation } from '../contracts/conversation-intent.contract';
 import { isNutritionCurrentPlanRead } from '../../diet/nutrition-current-plan-read.policy';
 import { isFullPlanReplacementRequest } from './full-plan-replacement.policy';
+import { isNutritionAdvice } from './nutrition-request.policy';
 
 @Injectable()
 export class ConversationOperationResolverService {
@@ -18,6 +19,13 @@ export class ConversationOperationResolverService {
     recognized?: ConversationEntityRecognition,
   ): ConversationOperationResolution {
     const text = message.folded;
+    if (isNutritionAdvice(text)) {
+      return Object.freeze({
+        operation: CONVERSATION_OPERATION.PROVIDE_GUIDANCE,
+        candidates: Object.freeze([CONVERSATION_OPERATION.PROVIDE_GUIDANCE]),
+        explicit: true,
+      });
+    }
     const candidates: ConversationOperation[] = [];
     const fullReplacement = isFullPlanReplacementRequest(text);
     const explicitWorkoutRequest =

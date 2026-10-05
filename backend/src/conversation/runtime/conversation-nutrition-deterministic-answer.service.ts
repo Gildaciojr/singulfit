@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { isNutritionAdvice } from '../understanding/nutrition-request.policy';
 import type { ConversationExecutionRoute } from '../contracts/conversation-execution-route.contract';
 import { NutritionWhatsAppPresenter } from '../../diet/v2/presentation/nutrition-whatsapp.presenter';
 import type { PublicNutritionResponse } from '../../diet/v2/presentation/public-nutrition-response.contract';
@@ -24,6 +25,7 @@ export class ConversationNutritionDeterministicAnswerService {
     readonly current: ConversationCurrentNutritionContext;
   }): DeterministicNutritionAnswer | null {
     const request = this.normalize(input.request);
+    if (isNutritionAdvice(request)) return null;
     // Consumption and expenditure belong to the daily query service, never targets.
     if (dailyQuery(request) || isWeeklyFollowUp(request)) return null;
     if (!this.nutritionRequest(input.route, request)) return null;

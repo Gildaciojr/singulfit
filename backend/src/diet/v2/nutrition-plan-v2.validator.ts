@@ -9,7 +9,7 @@ import type {
 } from './nutrition-plan-v2.contract';
 import type { NutritionPlanningStrategy } from './nutrition-planning-strategy.contract';
 
-const CONSTRAINT_TERMS: Readonly<Record<string, readonly string[]>> =
+export const CONSTRAINT_TERMS: Readonly<Record<string, readonly string[]>> =
   Object.freeze({
     LACTOSE: Object.freeze([
       'leite',

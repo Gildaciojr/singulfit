@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { isNutritionAdvice } from './nutrition-request.policy';
 import type { ConversationUnderstandingInput } from '../contracts/conversation-understanding.contract';
 import type { ConversationReference } from '../contracts/conversation-entity.contract';
 import type {
@@ -136,17 +137,19 @@ export class ConversationReferenceResolverService {
   }
 
   private explicitDomain(text: string): ReferenceDomain | null {
-    const nutrition = this.includesAny(text, [
-      'dieta',
-      'plano alimentar',
-      'alimentacao',
-      'refeicao',
-      'almoco',
-      'jantar',
-      'cafe da manha',
-      'frango',
-      'arroz',
-    ]);
+    const nutrition =
+      isNutritionAdvice(text) ||
+      this.includesAny(text, [
+        'dieta',
+        'plano alimentar',
+        'alimentacao',
+        'refeicao',
+        'almoco',
+        'jantar',
+        'cafe da manha',
+        'frango',
+        'arroz',
+      ]);
     const workout = this.includesAny(text, [
       'treino',
       'plano de treino',

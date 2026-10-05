@@ -362,7 +362,7 @@ export class NutritionPlanningContextBuilder {
         : 'REQUIRES_CONFIRMATION';
   }
 
-  private constraintCode(value: string): NutritionConstraintCode {
+  constraintCode(value: string): NutritionConstraintCode {
     const normalized = value
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')

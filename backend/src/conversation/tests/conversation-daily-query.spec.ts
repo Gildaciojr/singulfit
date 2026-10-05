@@ -77,6 +77,23 @@ describe('ConversationDailyQueryService', () => {
     };
     return { service, prisma, consumption, nutrition, current, input };
   }
+
+  it('selects the named afternoon snack even when a morning snack also exists', async () => {
+    const s = subject();
+    s.current.document.days[0].meals.push(
+      meal('MORNING_SNACK', 'Lanche da manhã', '10:00'),
+      meal('AFTERNOON_SNACK', 'Lanche da tarde', '16:00'),
+    );
+    const content = await s.service.answer({
+      userId: 'user',
+      conversationId: 'conversation',
+      messageId: 'message',
+      text: 'Qual meu lanche da tarde?',
+      referenceDate: new Date('2026-06-07T18:00:00Z'),
+    });
+    expect(content).toContain('Lanche da tarde');
+    expect(content).not.toContain('Lanche da manhã');
+  });
   it.each([
     'Qual minha próxima refeição?',
     'Não mandei sobre treino. Perguntei QUAL A MINHA PRÓXIMA REFEIÇÃO DE HOJE',

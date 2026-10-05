@@ -1,0 +1,98 @@
+import { normalizeFoodTerm } from '../../context/food-preference-policy';
+
+export type NutritionRequestIntent =
+  | 'PLAN_LOOKUP'
+  | 'NUTRITION_ADVICE'
+  | 'MEAL_SUBSTITUTION'
+  | 'CONSTRAINED_RECOMMENDATION';
+
+export interface NutritionRequest {
+  readonly intent: NutritionRequestIntent;
+  readonly meal: string | null;
+  readonly constraints: readonly string[];
+}
+
+/** Meal advice is read-only unless the user explicitly asks to persist a change. */
+export function nutritionRequest(value: string): NutritionRequest | null {
+  const text = normalizeFoodTerm(value);
+  const meal =
+    text.match(
+      /\b(?:lanche da tarde|lanche da manha|cafe da manha|almoco|jantar|lanche|ceia|refeicao)\b/u,
+    )?.[0] ?? null;
+  const foodContext =
+    meal !== null ||
+    /\b(?:comer|comida|alimento|alimentacao|dieta|cardapio|frango|arroz|banana|proteico|lactose|gluten|vegan\w*|vegetarian\w*)\b/u.test(
+      text,
+    ) ||
+    /\b(?:algo|opcao)\b.*\b(?:leve|rapido|barato|proteico)\b/u.test(text);
+  if (!foodContext) return null;
+  // Keep explicit persistent mutations, full plans and their existing handoff.
+  if (
+    /\b(?:daqui para frente|permanentemente|definitivamente|atualiz\w*|persist\w*)\b/u.test(
+      text,
+    ) ||
+    (/\b(?:no meu plano|na minha dieta)\b/u.test(text) &&
+      /\b(?:tro(?:c|qu)\w*|substitu\w*|mud\w*|alter\w*|adapte|inclua|crie|gere|monte)\b/u.test(
+        text,
+      )) ||
+    (/\b(?:crie|gere|monte|refaca|quero|preciso)\b.*\b(?:plano alimentar|dieta|cardapio)\b/u.test(
+      text,
+    ) &&
+      !/\b(?:dica|ideia|sugest\w*|opcao|alternativa)\b/u.test(text)) ||
+    /^(?:troque|substitua|adapte|ajuste|altere|mude)\b/u.test(text) ||
+    /^(?:quero|preciso|monte|crie|gere)\s+(?:(?:um|uma|o|a|meu|minha|novo|nova)\s+)*(?:plano de treino|treino|ficha)\b/u.test(
+      text,
+    )
+  )
+    return null;
+
+  const constraints = [
+    [/\b(?:rapid\w*|pratic\w*|sem tempo)\b/u, 'QUICK'],
+    [/\b(?:barat\w*|economic\w*|baixo custo)\b/u, 'LOW_COST'],
+    [/\b(?:proteic\w*|rico em proteina|mais proteina)\b/u, 'HIGH_PROTEIN'],
+    [/\b(?:leve|leves)\b/u, 'LIGHT'],
+    [/\bsem lactose\b/u, 'LACTOSE'],
+    [/\bsem gluten\b/u, 'GLUTEN'],
+    [/\b(?:sem leite|alergia (?:a|ao) leite)\b/u, 'MILK'],
+    [/\b(?:sem ovos?|alergia (?:a|ao) ovos?)\b/u, 'EGG'],
+    [/\b(?:sem amendoim|alergia (?:a|ao) amendoim)\b/u, 'PEANUT'],
+    [/\bvegan\w*\b/u, 'VEGAN'],
+    [/\bvegetarian\w*\b/u, 'VEGETARIAN'],
+    [/\b(?:levar|transportar|trabalho)\b/u, 'PORTABLE'],
+  ] as const;
+  const requested = Object.freeze(
+    constraints
+      .filter(([pattern]) => pattern.test(text))
+      .map(([, code]) => code),
+  );
+  const substitution =
+    /\b(?:no lugar|em vez|alternativa|outra opcao|nao tenho|tro(?:c|qu)\w*|substitu\w*)\b/u.test(
+      text,
+    );
+  const advice =
+    /\b(?:dica|ideia|sugest\w*|sug(?:er|ir)\w*|recomend\w*|indi(?:c|qu)\w*|opcao|bom .*comer|comer .*bom|algo diferente)\b/u.test(
+      text,
+    ) ||
+    (/\b(?:mont\w*|cri\w*)\b/u.test(text) && meal !== null) ||
+    (/\b(?:quero|preciso|gostaria)\b/u.test(text) &&
+      (meal !== null || requested.length > 0));
+  const intent: NutritionRequestIntent | null = substitution
+    ? 'MEAL_SUBSTITUTION'
+    : advice && requested.length > 0
+      ? 'CONSTRAINED_RECOMMENDATION'
+      : advice
+        ? 'NUTRITION_ADVICE'
+        : /\b(?:qual|quais|quanto|quantidade|porcao|o que esta|mostre|consulta|perguntei|posso comer)\b/u.test(
+              text,
+            )
+          ? 'PLAN_LOOKUP'
+          : null;
+  return intent
+    ? Object.freeze({ intent, meal, constraints: requested })
+    : null;
+}
+
+export function isNutritionAdvice(value: string): boolean {
+  const request = nutritionRequest(value);
+  return request !== null && request.intent !== 'PLAN_LOOKUP';
+}

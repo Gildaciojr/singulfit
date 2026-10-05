@@ -1,4 +1,5 @@
 import type { ConsumptionPeriod } from '../../nutrition/nutrition-consumption-summary.service';
+import { isNutritionAdvice } from './nutrition-request.policy';
 
 export function foldDailyText(value: string): string {
   return value
@@ -11,6 +12,7 @@ export function foldDailyText(value: string): string {
 }
 export type DailyMetric = 'CALORIES' | 'PROTEIN' | 'CARBS' | 'FAT' | 'ALL';
 export function isDailyMealRequest(value: string): boolean {
+  if (isNutritionAdvice(value)) return false;
   const text = foldDailyText(value);
   if (
     /\b(troque|trocar|substitua|substituir|monte|crie|gere|adapte|quero outra|nao tenho)\b/u.test(

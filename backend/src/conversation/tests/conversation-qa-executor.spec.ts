@@ -103,7 +103,7 @@ describe('ConversationQAExecutorService', () => {
 
   function createSubject(
     output: object,
-    status = AIJobStatus.PENDING,
+    status: AIJobStatus = AIJobStatus.PENDING,
     deterministicNutrition = false,
     personalized?: PersonalizedCoachContextService,
   ) {
@@ -317,6 +317,491 @@ describe('ConversationQAExecutorService', () => {
     });
     expect(subject.ai.createJob).not.toHaveBeenCalled();
     expect(subject.ai.runTextJob).not.toHaveBeenCalled();
+  });
+
+  describe('contextual meal advice', () => {
+    const snackPlan: PublicNutritionResponse = Object.freeze({
+      ...publicPlan,
+      days: Object.freeze([
+        {
+          meals: Object.freeze([
+            {
+              name: 'Lanche da tarde',
+              time: '16:00',
+              items: Object.freeze([
+                { name: 'Macarrão cozido', quantity: '2 pratos pequenos' },
+                { name: 'Peito de frango grelhado', quantity: '100 g' },
+                { name: 'Feijão cozido', quantity: '1 concha pequena' },
+              ]),
+            },
+          ]),
+        },
+      ]),
+    });
+    const option = (answer: string) => ({
+      disposition: 'ANSWER',
+      domain: 'NUTRITION',
+      answer,
+      followUpQuestion: null,
+      grounding: 'MIXED',
+      confidence: 'HIGH',
+    });
+    const input = (message: string) => ({
+      userId: 'user-id',
+      conversationId: 'conversation-id',
+      messageId: 'message-id',
+      route: route('NUTRITION_GUIDANCE'),
+      humanContext: human(message),
+      referenceDate: new Date('2026-10-05T18:00:00Z'),
+    });
+
+    it('keeps an explicit snack lookup faithful to the canonical meal', async () => {
+      const subject = createSubject({}, AIJobStatus.PENDING, true);
+      subject.currentNutrition.read.mockResolvedValue({
+        status: 'AVAILABLE',
+        plan: snackPlan,
+      });
+      const result = await subject.service.execute(
+        input('Qual meu lanche da tarde?'),
+      );
+      expect(result).toMatchObject({
+        status: 'COMPLETED',
+        observability: { answerSource: 'DETERMINISTIC_FALLBACK' },
+      });
+      if (result.status !== 'COMPLETED')
+        throw new Error('Expected plan lookup');
+      for (const item of snackPlan.days[0].meals[0].items)
+        expect(result.content).toContain(item.name);
+      expect(subject.ai.runTextJob).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['Me dê uma dica para lanche da tarde', 'NUTRITION_ADVICE', []],
+      [
+        'O que posso comer no lugar do meu lanche da tarde?',
+        'MEAL_SUBSTITUTION',
+        [],
+      ],
+      [
+        'Quero um lanche rápido e proteico',
+        'CONSTRAINED_RECOMMENDATION',
+        ['QUICK', 'HIGH_PROTEIN'],
+      ],
+      ['Me sugira algo sem lactose', 'CONSTRAINED_RECOMMENDATION', ['LACTOSE']],
+    ] as const)(
+      'sends %s to the existing QA with meal context and no plan mutation',
+      async (message, intent, constraints) => {
+        const before = JSON.stringify(snackPlan);
+        const subject = createSubject(
+          option('Uma opção prática é pão integral com ovos e uma fruta.'),
+          AIJobStatus.PENDING,
+          true,
+        );
+        subject.currentNutrition.read.mockResolvedValue({
+          status: 'AVAILABLE',
+          plan: snackPlan,
+        });
+        const result = await subject.service.execute(input(message));
+        expect(result).toMatchObject({
+          status: 'COMPLETED',
+          observability: { answerSource: 'AI' },
+        });
+        const payload: unknown = JSON.parse(
+          subject.ai.runTextJob.mock.calls[0][1].input as string,
+        );
+        expect(payload).toMatchObject({
+          nutritionGuidance: {
+            intent,
+            immediateConstraints: constraints,
+            safetyConstraints: constraints.filter((code) => code === 'LACTOSE'),
+            originalMeals: [
+              {
+                name: 'Lanche da tarde',
+                items: snackPlan.days[0].meals[0].items,
+              },
+            ],
+            policy: {
+              readOnly: true,
+              currentPlanRole: 'CONTEXT_NOT_ANSWER',
+              preserveApproximateNutritionalFunction:
+                intent === 'MEAL_SUBSTITUTION',
+            },
+          },
+        });
+        expect(subject.ai.completeJobInTransaction).toHaveBeenCalledTimes(1);
+        // The executor receives no plan repository or generator; its only write is AI completion.
+        expect(Object.keys(subject.prisma)).toEqual(['$transaction']);
+        expect(JSON.stringify(snackPlan)).toBe(before);
+      },
+    );
+
+    it.each([
+      AIJobStatus.PENDING,
+      AIJobStatus.COMPLETED,
+      AIJobStatus.PROCESSING,
+    ])(
+      'rejects mechanical canonical meal copies on fresh, stored and joined answers: %s',
+      async (status) => {
+        const subject = createSubject(
+          option('Macarrão cozido com frango grelhado e feijão cozido.'),
+          status,
+          true,
+        );
+        subject.currentNutrition.read.mockResolvedValue({
+          status: 'AVAILABLE',
+          plan: snackPlan,
+        });
+        await expect(
+          subject.service.execute(input('Me dê uma dica para lanche da tarde')),
+        ).resolves.toMatchObject({
+          status: 'FAILED',
+          reason: 'NUTRITION_ADVICE_REPEATS_CURRENT_MEAL',
+        });
+        expect(subject.ai.completeJobInTransaction).not.toHaveBeenCalled();
+      },
+    );
+
+    it('allows a canonical ingredient in a different combination', async () => {
+      const subject = createSubject(
+        option('Você pode preparar um sanduíche de frango com tomate.'),
+        AIJobStatus.PENDING,
+        true,
+      );
+      subject.currentNutrition.read.mockResolvedValue({
+        status: 'AVAILABLE',
+        plan: snackPlan,
+      });
+      await expect(
+        subject.service.execute(input('Me dê uma dica para lanche da tarde')),
+      ).resolves.toMatchObject({ status: 'COMPLETED' });
+    });
+
+    it.each([
+      AIJobStatus.PENDING,
+      AIJobStatus.COMPLETED,
+      AIJobStatus.PROCESSING,
+    ])(
+      'blocks explicit lactose-incompatible advice before exposing any answer: %s',
+      async (status) => {
+        const subject = createSubject(
+          option('Experimente iogurte natural com fruta.'),
+          status,
+          true,
+        );
+        await expect(
+          subject.service.execute(input('Me sugira algo sem lactose')),
+        ).resolves.toMatchObject({
+          status: 'FAILED',
+          reason: 'NUTRITION_ADVICE_UNSAFE_FOOD',
+        });
+        expect(subject.ai.completeJobInTransaction).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['amendoim', 'Experimente uma fruta com pasta de amendoim.'],
+      ['leite', 'Experimente iogurte sem lactose.'],
+      ['kiwi', 'Experimente kiwi com aveia.'],
+    ])(
+      'honors the existing personalized allergy projection: %s',
+      async (allergy, answer) => {
+        const context = {
+          safety: {
+            allergies: { status: 'KNOWN', value: [{ description: allergy }] },
+          },
+          nutrition: {},
+        };
+        const personalized = {
+          build: jest.fn().mockResolvedValue(context),
+          answer: jest.fn().mockReturnValue(null),
+          validatesAnswer: jest.fn().mockReturnValue(true),
+        };
+        const subject = createSubject(
+          option(answer),
+          AIJobStatus.PENDING,
+          true,
+          personalized as unknown as PersonalizedCoachContextService,
+        );
+        await expect(
+          subject.service.execute(input('Me dê uma dica para lanche da tarde')),
+        ).resolves.toMatchObject({
+          status: 'FAILED',
+          reason: 'NUTRITION_ADVICE_UNSAFE_FOOD',
+        });
+        const payload: unknown = JSON.parse(
+          subject.ai.runTextJob.mock.calls[0][1].input as string,
+        );
+        expect(payload).toMatchObject({
+          nutritionGuidance: { safetyConstraints: [allergy] },
+          trustedContext: context,
+        });
+        expect(subject.ai.completeJobInTransaction).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['vegano', 'Uma opção é frango com tomate.'],
+      ['VEGAN', 'Uma opção é ovos com tomate.'],
+      ['vegetariano', 'Uma opção é peixe com tomate.'],
+      ['sem glúten', 'Uma opção é pão integral com ovos.'],
+    ])(
+      'blocks advice incompatible with an existing dietary restriction: %s',
+      async (restriction, answer) => {
+        const personalized = {
+          build: jest.fn().mockResolvedValue({
+            safety: {
+              foodRestrictions: {
+                status: 'KNOWN',
+                value: [{ description: restriction }],
+              },
+            },
+          }),
+          answer: jest.fn().mockReturnValue(null),
+          validatesAnswer: jest.fn().mockReturnValue(true),
+        };
+        const subject = createSubject(
+          option(answer),
+          AIJobStatus.PENDING,
+          true,
+          personalized as unknown as PersonalizedCoachContextService,
+        );
+        await expect(
+          subject.service.execute(input('Me dê uma dica para lanche da tarde')),
+        ).resolves.toMatchObject({
+          status: 'FAILED',
+          reason: 'NUTRITION_ADVICE_UNSAFE_FOOD',
+        });
+        expect(subject.ai.completeJobInTransaction).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['ovo', 'Uma nova opção é fruta com aveia.', 'COMPLETED'],
+      ['ovo', 'Uma opção é ovos mexidos.', 'FAILED'],
+      [
+        'pasta de amendoim',
+        'Uma opção é PASTA DE AMENDOIM com fruta.',
+        'FAILED',
+      ],
+      ['maçã', 'Uma opção é MACAS com aveia.', 'FAILED'],
+      ['ovo', 'Uma opção é um novelo de conversa sobre frutas.', 'COMPLETED'],
+    ] as const)(
+      'matches rejected food %s using normalized whole terms: %s',
+      async (food, answer, status) => {
+        const personalized = {
+          build: jest.fn().mockResolvedValue({
+            nutrition: {
+              declaredFoodRejections: { status: 'KNOWN', value: [food] },
+            },
+          }),
+          answer: jest.fn().mockReturnValue(null),
+          validatesAnswer: jest.fn().mockReturnValue(true),
+        };
+        const subject = createSubject(
+          option(answer),
+          AIJobStatus.PENDING,
+          true,
+          personalized as unknown as PersonalizedCoachContextService,
+        );
+        await expect(
+          subject.service.execute(input('Me dê uma dica para lanche da tarde')),
+        ).resolves.toMatchObject({ status });
+      },
+    );
+
+    it.each([
+      [
+        'uva',
+        'Uma nova opção para um dia de chuva é fruta com aveia.',
+        'COMPLETED',
+      ],
+      ['uva', 'Uma opção é uvas com aveia.', 'FAILED'],
+      ['fruta do conde', 'Uma opção é FRUTA DO CONDE.', 'FAILED'],
+      ['fruta do conde', 'Uma opção é fruta com aveia.', 'COMPLETED'],
+    ] as const)(
+      'matches custom restriction %s using normalized whole terms: %s',
+      async (food, answer, status) => {
+        const personalized = {
+          build: jest.fn().mockResolvedValue({
+            safety: {
+              allergies: { status: 'KNOWN', value: [{ description: food }] },
+            },
+          }),
+          answer: jest.fn().mockReturnValue(null),
+          validatesAnswer: jest.fn().mockReturnValue(true),
+        };
+        const subject = createSubject(
+          option(answer),
+          AIJobStatus.PENDING,
+          true,
+          personalized as unknown as PersonalizedCoachContextService,
+        );
+        await expect(
+          subject.service.execute(input('Me dê uma dica para lanche da tarde')),
+        ).resolves.toMatchObject({ status });
+      },
+    );
+
+    it('accepts compatible advice with goal, preferences and allergy context intact', async () => {
+      const context = {
+        goals: { nutrition: { status: 'KNOWN', value: 'WEIGHT_LOSS' } },
+        safety: {
+          allergies: { status: 'KNOWN', value: [{ description: 'amendoim' }] },
+        },
+        nutrition: {
+          declaredFoodRejections: { status: 'KNOWN', value: ['frango'] },
+          cookingAvailability: { status: 'KNOWN', value: 'LIMITED' },
+        },
+        preferences: {
+          foodPreferences: {
+            status: 'KNOWN',
+            value: [{ kind: 'ACCEPTED', foodName: 'aveia' }],
+          },
+        },
+      };
+      const personalized = {
+        build: jest.fn().mockResolvedValue(context),
+        answer: jest.fn().mockReturnValue(null),
+        validatesAnswer: jest.fn().mockReturnValue(true),
+      };
+      const subject = createSubject(
+        option('Uma opção rápida é fruta com aveia e bebida vegetal.'),
+        AIJobStatus.PENDING,
+        true,
+        personalized as unknown as PersonalizedCoachContextService,
+      );
+      await expect(
+        subject.service.execute(input('Me dê uma dica para lanche da tarde')),
+      ).resolves.toMatchObject({ status: 'COMPLETED' });
+      const payload: unknown = JSON.parse(
+        subject.ai.runTextJob.mock.calls[0][1].input as string,
+      );
+      expect(payload).toMatchObject({
+        trustedContext: context,
+        nutritionGuidance: {
+          excludedFoods: ['frango'],
+          safetyConstraints: ['amendoim'],
+        },
+      });
+    });
+
+    it('asks one useful question for conflicting allergies before model execution', async () => {
+      const personalized = {
+        build: jest.fn().mockResolvedValue({
+          safety: {
+            allergies: {
+              status: 'REQUIRES_CONFIRMATION',
+              value: [{ description: 'amendoim' }],
+            },
+          },
+          profileFields: [
+            { field: 'ALLERGIES', status: 'CONFLICTED', value: null },
+          ],
+        }),
+        answer: jest.fn().mockReturnValue(null),
+        validatesAnswer: jest.fn().mockReturnValue(true),
+      };
+      const subject = createSubject(
+        {},
+        AIJobStatus.PENDING,
+        true,
+        personalized as unknown as PersonalizedCoachContextService,
+      );
+      const result = await subject.service.execute(
+        input('Me dê uma dica para lanche da tarde'),
+      );
+      expect(result).toMatchObject({
+        status: 'COMPLETED',
+        observability: { disposition: 'CLARIFY' },
+      });
+      if (result.status !== 'COMPLETED')
+        throw new Error('Expected clarification');
+      expect(result.content.match(/\?/gu)).toHaveLength(1);
+      expect(subject.ai.createJob).not.toHaveBeenCalled();
+    });
+
+    it('asks about an unknown original meal before proposing an equivalent substitution', async () => {
+      const subject = createSubject({}, AIJobStatus.PENDING, true);
+      subject.currentNutrition.read.mockResolvedValue({
+        status: 'ABSENT',
+        plan: null,
+      });
+      await expect(
+        subject.service.execute(
+          input('O que posso comer no lugar do meu lanche da tarde?'),
+        ),
+      ).resolves.toMatchObject({
+        status: 'COMPLETED',
+        observability: { disposition: 'CLARIFY' },
+      });
+      expect(subject.ai.createJob).not.toHaveBeenCalled();
+    });
+
+    it('does not let a clarification conceal an incompatible suggestion', async () => {
+      const subject = createSubject(
+        {
+          ...option('Experimente iogurte natural.'),
+          disposition: 'CLARIFY',
+          followUpQuestion: 'Você tem fruta em casa?',
+        },
+        AIJobStatus.PENDING,
+        true,
+      );
+      await expect(
+        subject.service.execute(input('Me sugira algo sem lactose')),
+      ).resolves.toMatchObject({
+        status: 'FAILED',
+        reason: 'NUTRITION_ADVICE_UNSAFE_FOOD',
+      });
+    });
+
+    it('allows explicitly lactose-free dairy when no milk allergy is present', async () => {
+      const subject = createSubject(
+        option('Uma opção é iogurte sem lactose com fruta.'),
+        AIJobStatus.PENDING,
+        true,
+      );
+      await expect(
+        subject.service.execute(input('Me sugira algo sem lactose')),
+      ).resolves.toMatchObject({ status: 'COMPLETED' });
+    });
+
+    it('uses recent suggestions to support variety on consecutive requests', async () => {
+      const first = 'Uma opção é um sanduíche de ovos com tomate.';
+      const second = 'Outra ideia é uma fruta com aveia e bebida vegetal.';
+      const subject = createSubject(option(first), AIJobStatus.PENDING, true);
+      subject.currentNutrition.read.mockResolvedValue({
+        status: 'AVAILABLE',
+        plan: snackPlan,
+      });
+      await expect(
+        subject.service.execute(input('Me dê uma dica para lanche da tarde')),
+      ).resolves.toMatchObject({ status: 'COMPLETED' });
+      subject.ai.runTextJob.mockResolvedValue({
+        responseId: 'second',
+        model: 'model',
+        outputText: JSON.stringify(option(second)),
+        promptTokens: 20,
+        completionTokens: 10,
+        totalTokens: 30,
+      });
+      await expect(
+        subject.service.execute({
+          ...input('Me sugira algo diferente para comer agora'),
+          messageId: 'second-message',
+          humanContext: human('Me sugira algo diferente para comer agora', [
+            { direction: 'COACH', text: first },
+          ]),
+        }),
+      ).resolves.toMatchObject({ status: 'COMPLETED' });
+      const payload: unknown = JSON.parse(
+        subject.ai.runTextJob.mock.calls[1][1].input as string,
+      );
+      expect(payload).toMatchObject({
+        nutritionGuidance: { recentSuggestions: [first] },
+      });
+      expect(subject.ai.runTextJob).toHaveBeenCalledTimes(2);
+    });
   });
 
   const cases = [

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { isNutritionAdvice } from './nutrition-request.policy';
 import type { ConversationUnderstandingInput } from '../contracts/conversation-understanding.contract';
 import type { ConversationReference } from '../contracts/conversation-entity.contract';
 import {
@@ -22,7 +23,9 @@ export class ConversationDomainResolverService {
   ): ConversationDomainResolution {
     const candidates = new Set<ConversationDomain>();
     const text = message.folded;
+    const nutritionAdvice = isNutritionAdvice(text);
     if (
+      nutritionAdvice ||
       /\b(dieta|alimentacao|alimentar|refeicao|comida|alimento|cardapio|whey|creatina|frango|arroz|banana)\b/u.test(
         text,
       )
@@ -63,7 +66,8 @@ export class ConversationDomainResolverService {
     );
     if (
       mealScopedNutrition &&
-      /\b(comer|jantar|almocar|refeicao|suger|mont)\w*\b/u.test(text) &&
+      (nutritionAdvice ||
+        /\b(comer|jantar|almocar|refeicao|suger|mont)\w*\b/u.test(text)) &&
       !/\b(plano de treino|monte (?:um )?treino|crie (?:um )?treino)\b/u.test(
         text,
       )

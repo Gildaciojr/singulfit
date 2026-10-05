@@ -78,10 +78,6 @@ describe('ConversationNutritionDeterministicAnswerService', () => {
       'qual minha meta de proteína?',
       'Sua meta diária no plano é 130 g de proteína.',
     ],
-    [
-      'não tenho frango, posso trocar?',
-      'No seu plano, *Frango grelhado* pode ser trocado por *Peixe*. Siga a porção indicada na refeição.',
-    ],
   ] as const)('answers %s only from the canonical plan', (request, content) => {
     expect(
       service.answer({
@@ -112,6 +108,33 @@ describe('ConversationNutritionDeterministicAnswerService', () => {
       content: 'Você ainda não possui um plano alimentar ativo.',
     });
   });
+
+  it.each([
+    'Me dê uma dica para lanche da tarde',
+    'Me dê uma dica para almoço',
+    'O que posso comer no lugar do meu almoço?',
+    'não tenho frango, posso trocar?',
+    'Quero um almoço rápido e proteico',
+    'Me sugira algo sem lactose',
+  ])(
+    'does not copy a plan meal or restrict advice to registered substitutions: %s',
+    (request) => {
+      expect(
+        service.answer({
+          request,
+          route,
+          current: { status: 'AVAILABLE', plan },
+        }),
+      ).toBeNull();
+      expect(
+        service.answer({
+          request,
+          route,
+          current: { status: 'ABSENT', plan: null },
+        }),
+      ).toBeNull();
+    },
+  );
 
   it('does not turn a persistent adaptation request into a read-only answer', () => {
     expect(

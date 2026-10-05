@@ -251,7 +251,11 @@ export class ConversationDailyQueryService {
           ? ['BREAKFAST']
           : /\bceia\b/u.test(text)
             ? ['EVENING_SNACK']
-            : ['MORNING_SNACK', 'AFTERNOON_SNACK'];
+            : /\blanche da tarde\b/u.test(text)
+              ? ['AFTERNOON_SNACK']
+              : /\blanche da manha\b/u.test(text)
+                ? ['MORNING_SNACK']
+                : ['MORNING_SNACK', 'AFTERNOON_SNACK'];
     const matches = day.meals.filter((meal) => periods.includes(meal.period));
     return matches.length === 1
       ? this.formatMeal(matches[0])

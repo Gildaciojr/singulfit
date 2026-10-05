@@ -12,6 +12,12 @@ import { ConversationCurrentNutritionContextService } from './conversation-curre
 import { ConversationPublicAnswerBoundaryService } from './conversation-public-answer-boundary.service';
 import { normalizeConversationQACandidate } from './conversation-qa-candidate-normalizer';
 import { ConversationNutritionDeterministicAnswerService } from './conversation-nutrition-deterministic-answer.service';
+import {
+  nutritionAdviceContext,
+  nutritionAdvicePayload,
+  nutritionAdviceViolation,
+  type NutritionAdviceContext,
+} from './nutrition-advice.policy';
 import { PersonalizedCoachContextService } from './personalized-coach-context.service';
 import type { ConversationEntity } from '../contracts/conversation-entity.contract';
 import type {
@@ -128,6 +134,32 @@ export class ConversationQAExecutorService {
         0,
       );
     const currentNutrition = await this.currentNutrition.read(input.userId);
+    const nutritionAdvice = nutritionAdviceContext(
+      input.humanContext,
+      personalized,
+      currentNutrition.plan,
+      input.previousAnswer ?? null,
+      input.referenceDate ?? new Date(),
+    );
+    if (
+      nutritionAdvice?.unresolvedSafety ||
+      nutritionAdvice?.unresolvedOriginalMeal
+    ) {
+      return this.candidateResult(
+        {
+          disposition: 'CLARIFY',
+          domain: 'NUTRITION',
+          answer: null,
+          followUpQuestion: nutritionAdvice.unresolvedSafety
+            ? 'Há informações diferentes sobre suas restrições alimentares. Qual alimento você precisa evitar?'
+            : 'O que costuma ter nessa refeição que você quer substituir?',
+          grounding: 'PROFILE',
+          confidence: 'LOW',
+        },
+        'DETERMINISTIC_FALLBACK',
+        0,
+      );
+    }
     const deterministic = this.deterministicNutrition?.answer({
       request: input.humanContext.currentMessage,
       route: input.route,
@@ -161,6 +193,9 @@ export class ConversationQAExecutorService {
       return this.failed('AI_JOB_OWNERSHIP_MISMATCH');
     if (job.status === AIJobStatus.COMPLETED) {
       const stored = this.parseCandidate(job.result);
+      const violation =
+        stored && nutritionAdviceViolation(nutritionAdvice, stored);
+      if (violation) return this.failed(violation);
       if (
         stored &&
         this.personalized &&
@@ -175,7 +210,13 @@ export class ConversationQAExecutorService {
         : this.failed('STORED_ANSWER_INVALID');
     }
     if (job.status === AIJobStatus.PROCESSING) {
-      return this.join(job.id, deadlineAtMs, personalized, input.userId);
+      return this.join(
+        job.id,
+        deadlineAtMs,
+        personalized,
+        input.userId,
+        nutritionAdvice,
+      );
     }
     if (job.status !== AIJobStatus.PENDING) {
       return this.failed(`AI_JOB_${job.status}`);
@@ -202,6 +243,7 @@ export class ConversationQAExecutorService {
             input.previousAnswer ?? null,
             input.previousFollowUpQuestion ?? null,
             personalized,
+            nutritionAdvice,
           ),
         ),
         jsonSchema: COACH_CONVERSATIONAL_QA_V4_PROMPT.schema,
@@ -209,7 +251,13 @@ export class ConversationQAExecutorService {
       });
     } catch (error: unknown) {
       if (error instanceof ConflictException) {
-        return this.join(job.id, deadlineAtMs, personalized, input.userId);
+        return this.join(
+          job.id,
+          deadlineAtMs,
+          personalized,
+          input.userId,
+          nutritionAdvice,
+        );
       }
       await this.ai.failJob(job.id, error);
       return this.failed(
@@ -223,6 +271,11 @@ export class ConversationQAExecutorService {
     if (!candidate) {
       await this.ai.failJob(job.id, new Error('INVALID_QA_RESPONSE'), response);
       return this.failed('INVALID_AI_RESPONSE', providerDurationMs, response);
+    }
+    const violation = nutritionAdviceViolation(nutritionAdvice, candidate);
+    if (violation) {
+      await this.ai.failJob(job.id, new Error(violation), response);
+      return this.failed(violation, providerDurationMs, response, candidate);
     }
     if (
       this.personalized &&
@@ -273,6 +326,7 @@ export class ConversationQAExecutorService {
     deadlineAtMs: number,
     personalized: ConversationAIValue = null,
     userId?: string,
+    nutritionAdvice: NutritionAdviceContext | null = null,
   ): Promise<ConversationQAExecutionResult> {
     const joinDeadlineAtMs = deadlineAtMs - OFFICIAL_SELECTION_MARGIN_MS;
     while (Date.now() < joinDeadlineAtMs) {
@@ -281,6 +335,9 @@ export class ConversationQAExecutorService {
         return this.failed('AI_JOB_OWNERSHIP_MISMATCH');
       if (job.status === AIJobStatus.COMPLETED) {
         const stored = this.parseCandidate(job.result);
+        const violation =
+          stored && nutritionAdviceViolation(nutritionAdvice, stored);
+        if (violation) return this.failed(violation);
         if (
           stored &&
           this.personalized &&
@@ -351,12 +408,16 @@ export class ConversationQAExecutorService {
     previousAnswer: string | null = null,
     previousFollowUpQuestion: string | null = null,
     personalized: ConversationAIValue = null,
+    nutritionAdvice: NutritionAdviceContext | null = null,
   ): ConversationAIValue {
     return Object.freeze({
       request: context.currentMessage,
       route: route.kind,
       previousAnswer,
       previousFollowUpQuestion,
+      ...(nutritionAdvice
+        ? { nutritionGuidance: nutritionAdvicePayload(nutritionAdvice) }
+        : {}),
       trustedContext:
         personalized ??
         Object.freeze({
@@ -369,6 +430,10 @@ export class ConversationQAExecutorService {
             context.nutrition.preferredFoods?.value ?? Object.freeze([]),
           rejectedFoods:
             context.nutrition.rejectedFoods?.value ?? Object.freeze([]),
+          dietaryPattern: context.nutrition.dietaryPattern?.value ?? null,
+          cookingAvailability:
+            context.routine.cookingAvailability?.value ?? null,
+          mealsAwayFromHome: context.routine.mealsAwayFromHome?.value ?? null,
           restrictions: context.restrictions?.value ?? Object.freeze([]),
           progress: context.progress?.value ?? null,
           memories: Object.freeze(
