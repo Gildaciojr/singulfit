@@ -1,13 +1,63 @@
-import { nutritionRequest } from '../understanding/nutrition-request.policy';
+import {
+  nutritionRequest,
+  selfContainedNutritionRequest,
+} from '../understanding/nutrition-request.policy';
 import { isDailyMealRequest } from '../understanding/daily-query.policy';
 import { explicitContinuationDomain } from '../understanding/explicit-continuation-domain.policy';
 
 describe('nutrition meal request semantics', () => {
   it.each([
+    'Me dê uma dica para lanche da tarde',
+    'Me dá uma dica de lanche da tarde',
+    'Quero uma dica para o lanche da tarde',
+    'Quero que você me dê uma dica para um lanche da tarde',
+    'Me sugira um lanche da tarde',
+    'O que você sugere para o lanche da tarde?',
+    'Alguma ideia pro lanche da tarde?',
+    'Tem alguma opção para meu lanche da tarde?',
+    'Queria algo diferente para o lanche da tarde',
+    'O que posso comer à tarde?',
+    'Me dá uma opção rápida e proteica para a tarde',
+    'Quero algo barato para comer à tarde',
+    'Preciso de algo sem lactose para o lanche',
+    'Me da uma opcao rapida e proteica para a tarde',
+    'Me sugira uma opcao pratica para comer de manha',
+    'Quero opcoes rapidas e proteicas para comer a noite',
+  ])('recognizes autonomous read-only nutrition request: %s', (text) => {
+    expect(selfContainedNutritionRequest(text)).not.toBeNull();
+    expect(explicitContinuationDomain(text)).toBe('NUTRITION');
+  });
+
+  it.each([
+    'Outra opção',
+    'Me dá outra opção sem lactose',
+    'Me dá outra',
+    'E esse?',
+    'Isso',
+    'Troca esse',
+    'O segundo',
+    'E aquele?',
+    'Pode substituir isso?',
+    'Me dê uma dica para esse lanche',
+    'Quero trocar esse jantar',
+    'Troque permanentemente meu lanche por uma fruta',
+    'Qual meu lanche da tarde?',
+    'Minha reunião é à tarde',
+  ])('does not bypass reference, mutation or other intent: %s', (text) => {
+    expect(selfContainedNutritionRequest(text)).toBeNull();
+  });
+
+  it.each([
     ['Qual meu lanche da tarde?', 'PLAN_LOOKUP', []],
     ['O que está no meu jantar?', 'PLAN_LOOKUP', []],
     ['Qual minha próxima refeição?', 'PLAN_LOOKUP', []],
     ['Me dê uma dica para lanche da tarde', 'NUTRITION_ADVICE', []],
+    ['O que posso comer à tarde?', 'NUTRITION_ADVICE', []],
+    [
+      'Me dá uma opção rápida e proteica para a tarde',
+      'CONSTRAINED_RECOMMENDATION',
+      ['QUICK', 'HIGH_PROTEIN'],
+    ],
     [
       'Quero um lanche rápido antes do treino',
       'CONSTRAINED_RECOMMENDATION',

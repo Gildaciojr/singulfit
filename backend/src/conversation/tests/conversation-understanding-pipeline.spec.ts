@@ -110,6 +110,31 @@ describe('Conversation Understanding deterministic pipeline components', () => {
     );
   });
 
+  it.each([
+    'Quero que você me dê uma dica para um lanche da tarde',
+    'Me sugira um lanche da tarde',
+    'um treino',
+    'uma opção',
+  ])('does not interpret indefinite article as ordinal: %s', (text) => {
+    const message = normalize(text);
+    const result = references.resolve(
+      understandingInput(text),
+      message,
+      tokenizer.tokenize(message),
+    );
+    expect(
+      result.references.some(
+        (reference) =>
+          reference.kind === 'PLAN' && reference.target === 'ORDINAL',
+      ),
+    ).toBe(false);
+  });
+
+  it.each(['o primeiro', 'a primeira', '1', '1º', '1o'])(
+    'preserves real ordinal: %s',
+    (text) => expect(references.ordinal(normalize(text).folded)).toBe(1),
+  );
+
   it('resolves ordinal and previous plan references explicitly', () => {
     const second = normalize('o segundo plano de treino');
     const previous = normalize('minha dieta anterior');

@@ -171,6 +171,86 @@ describe('Canonical conversation continuation', () => {
       },
     };
   }
+  it.each([
+    [null, null],
+    [null, 'UNRESOLVED'],
+    ['MEAL_CONTENT_REQUEST', null],
+    ['MEAL_CONTENT_REQUEST', 'UNRESOLVED'],
+    ['WORKOUT_DAY_QUERY', null],
+    ['WORKOUT_DAY_QUERY', 'UNRESOLVED'],
+  ] as const)(
+    'delegates autonomous advice before interpreter with pending=%s and result=%s',
+    async (kind, action) => {
+      const s = subject(kind);
+      s.prisma.message.findFirst.mockResolvedValue({
+        ...(await s.prisma.message.findFirst()),
+        content: 'Me dê uma dica para lanche da tarde',
+      });
+      s.semantics.interpret.mockResolvedValue(
+        action ? { ...base, action } : null,
+      );
+      expect(await s.service.resolve('user', 'message')).toBeNull();
+      expect(s.semantics.interpret).not.toHaveBeenCalled();
+      expect(s.prisma.scheduledMessage.updateMany).not.toHaveBeenCalled();
+      expect(s.nutrition.read).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['Outra opção', 'E esse?', 'Troca esse'])(
+    'clarifies an unresolved dependent reply without writes: %s',
+    async (text) => {
+      const s = subject(null);
+      s.prisma.message.findFirst.mockResolvedValue({
+        ...(await s.prisma.message.findFirst()),
+        content: text,
+      });
+      expect((await s.service.resolve('user', 'message'))?.content).toContain(
+        'Pode me dizer a que mensagem',
+      );
+      expect(s.semantics.interpret).toHaveBeenCalled();
+      expect(s.prisma.scheduledMessage.updateMany).not.toHaveBeenCalled();
+      expect(s.nutrition.read).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps a dependent alternative with valid Q&A referent in the runtime', async () => {
+    const s = subject(null);
+    s.prisma.message.findFirst.mockResolvedValue({
+      ...(await s.prisma.message.findFirst()),
+      content: 'Outra opção',
+    });
+    s.qa.findPending.mockResolvedValue({
+      previousAnswer: 'Uma opção é fruta com aveia.',
+      previousFollowUpQuestion: 'Quer uma alternativa salgada?',
+    });
+    expect(await s.service.resolve('user', 'message')).toMatchObject({
+      evidence: { delegateRuntime: true },
+    });
+    expect(s.semantics.interpret).toHaveBeenCalled();
+  });
+
+  it('does not bypass explicit persistent meal mutation', async () => {
+    const s = subject(null, { action: 'INDEPENDENT' });
+    s.prisma.message.findFirst.mockResolvedValue({
+      ...(await s.prisma.message.findFirst()),
+      content: 'Troque permanentemente meu lanche por uma fruta',
+    });
+    expect(await s.service.resolve('user', 'message')).toBeNull();
+    expect(s.semantics.interpret).toHaveBeenCalled();
+  });
+
+  it('keeps safety before autonomous nutrition advice', async () => {
+    const s = subject(null);
+    s.prisma.message.findFirst.mockResolvedValue({
+      ...(await s.prisma.message.findFirst()),
+      content: 'Me dê uma dica para lanche da tarde, estou com dor no peito',
+    });
+    expect(await s.service.resolve('user', 'message')).toMatchObject({
+      evidence: { safetyAction: 'URGENT_GUIDANCE' },
+    });
+    expect(s.semantics.interpret).not.toHaveBeenCalled();
+  });
+
   it.each(['bom dia', 'oi', 'beleza', 'tudo certo'])(
     'does not promote greeting %s to a workout fact',
     async (text) => {

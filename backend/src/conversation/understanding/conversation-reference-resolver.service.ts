@@ -210,7 +210,6 @@ export class ConversationReferenceResolverService {
       '1o': 1,
       primeiro: 1,
       primeira: 1,
-      um: 1,
       '2': 2,
       '2o': 2,
       segundo: 2,
@@ -234,7 +233,7 @@ export class ConversationReferenceResolverService {
       sete: 7,
     });
     const match =
-      /\b(1o|2o|[1-7]|primeir[oa]|segundo|terceir[oa]|quarto|quinto|sexto|setim[oa]|um|dois|tres|quatro|cinco|seis|sete)\b/u.exec(
+      /\b(1o|2o|[1-7]|primeir[oa]|segundo|terceir[oa]|quarto|quinto|sexto|setim[oa]|dois|tres|quatro|cinco|seis|sete)\b/u.exec(
         text,
       );
     return match ? values[match[1]] : null;

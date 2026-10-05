@@ -1,6 +1,11 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { AIJobStatus } from '@prisma/client';
 import { ConversationModule } from '../conversation.module';
+import { ConversationContinuationService } from '../runtime/conversation-continuation.service';
+import type { ContinuationReply } from '../runtime/conversation-continuation.contract';
+import { continuation } from '../runtime/conversation-continuation.contract';
+import { ConversationSafetyDetectorService } from '../understanding/conversation-safety-detector.service';
+import { ConversationMessageNormalizerService } from '../understanding/conversation-message-normalizer.service';
 import { ConversationUnderstandingService } from '../understanding/conversation-understanding.service';
 import { ConversationRoutingDecisionService } from '../routing/conversation-routing-decision.service';
 import { ConversationDailyQueryService } from '../runtime/conversation-daily-query.service';
@@ -56,20 +61,91 @@ describe('Nutrition advice integration (real semantic pipeline, external I/O dou
     safetyGuidance: [],
   };
 
-  it.each([
-    ['Qual meu lanche da tarde?', 'PLAN_LOOKUP'],
-    ['Me dê uma dica para lanche da tarde', 'NUTRITION_ADVICE'],
-    ['O que posso comer no lugar do meu lanche da tarde?', 'MEAL_SUBSTITUTION'],
+  it.each(
     [
-      'Quero um lanche da tarde rápido e proteico',
-      'CONSTRAINED_RECOMMENDATION',
-    ],
-    ['Me sugira algo diferente para comer agora', 'NUTRITION_ADVICE'],
-    ['Me sugira algo sem lactose', 'CONSTRAINED_RECOMMENDATION'],
-  ])(
-    'routes %s after a workout context without mutating Nutrition V2',
-    async (text, intent) => {
+      ['Qual meu lanche da tarde?', 'PLAN_LOOKUP'],
+      ['Me dê uma dica para lanche da tarde', 'NUTRITION_ADVICE'],
+      ['Me dá uma dica de lanche da tarde', 'NUTRITION_ADVICE'],
+      ['Quero uma dica para o lanche da tarde', 'NUTRITION_ADVICE'],
+      [
+        'Quero que você me dê uma dica para um lanche da tarde',
+        'NUTRITION_ADVICE',
+      ],
+      ['Me sugira um lanche da tarde', 'NUTRITION_ADVICE'],
+      ['O que você sugere para o lanche da tarde?', 'NUTRITION_ADVICE'],
+      ['Alguma ideia pro lanche da tarde?', 'NUTRITION_ADVICE'],
+      ['Tem alguma opção para meu lanche da tarde?', 'NUTRITION_ADVICE'],
+      ['Queria algo diferente para o lanche da tarde', 'NUTRITION_ADVICE'],
+      ['O que posso comer à tarde?', 'NUTRITION_ADVICE'],
+      [
+        'Me dá uma opção rápida e proteica para a tarde',
+        'CONSTRAINED_RECOMMENDATION',
+      ],
+      [
+        'Me da uma opcao rapida e proteica para a tarde',
+        'CONSTRAINED_RECOMMENDATION',
+      ],
+      [
+        'O que posso comer no lugar do meu lanche da tarde?',
+        'MEAL_SUBSTITUTION',
+      ],
+      [
+        'Quero um lanche da tarde rápido e proteico',
+        'CONSTRAINED_RECOMMENDATION',
+      ],
+      ['Me sugira algo diferente para comer agora', 'NUTRITION_ADVICE'],
+      ['Me sugira algo sem lactose', 'CONSTRAINED_RECOMMENDATION'],
+    ].flatMap(([text, intent]) =>
+      [null, 'MEAL_CONTENT_REQUEST', 'WORKOUT_DAY_QUERY'].map(
+        (pendingKind) => [text, intent, pendingKind] as const,
+      ),
+    ),
+  )(
+    'routes %s (%s) through the continuation gate with pending=%s',
+    async (text, intent, pendingKind) => {
       const referenceDate = new Date('2026-10-05T18:00:00Z');
+      const semantics = { interpret: jest.fn().mockResolvedValue(null) };
+      const gate = new ConversationContinuationService(
+        {} as never,
+        semantics as never,
+        {} as never,
+        {} as never,
+        new ConversationPublicAnswerBoundaryService(),
+        new ConversationSafetyDetectorService(),
+        new ConversationMessageNormalizerService(),
+        {} as never,
+        {
+          enabled: () => true,
+          source: () =>
+            Promise.resolve({
+              content: text,
+              timestamp: referenceDate,
+              conversationId: 'conversation-id',
+              replyToExternalMessageId: null,
+            }),
+          pending: () =>
+            Promise.resolve(
+              pendingKind
+                ? {
+                    continuation: continuation(
+                      pendingKind === 'WORKOUT_DAY_QUERY'
+                        ? 'WORKOUT_DAY_QUERY'
+                        : 'MEAL_CONTENT_REQUEST',
+                      referenceDate,
+                    ),
+                  }
+                : null,
+            ),
+          resolveOnce: (
+            _user: string,
+            _message: string,
+            _type: string,
+            execute: () => Promise<ContinuationReply | null>,
+          ) => execute(),
+        } as never,
+      );
+      expect(await gate.resolve('user-id', 'message-id')).toBeNull();
+      expect(semantics.interpret).not.toHaveBeenCalled();
       const current = {
         userId: 'user-id',
         implementation: 'V2',
@@ -178,6 +254,13 @@ describe('Nutrition advice integration (real semantic pipeline, external I/O dou
         operation: 'PROVIDE_GUIDANCE',
         intent: 'NUTRITION_QUESTION',
       });
+      if (text.includes('um lanche'))
+        expect(
+          understanding.references.some(
+            (reference) =>
+              reference.kind === 'PLAN' && reference.target === 'ORDINAL',
+          ),
+        ).toBe(false);
       const snapshot = routingSnapshot({
         dietAvailable: true,
         workoutAvailable: true,
@@ -218,6 +301,13 @@ describe('Nutrition advice integration (real semantic pipeline, external I/O dou
             policy: { readOnly: true, currentPlanRole: 'CONTEXT_NOT_ANSWER' },
           },
         });
+        if (/op[cç][aã]o r[aá]pida e proteica/u.test(text))
+          expect(payload).toMatchObject({
+            nutritionGuidance: {
+              immediateConstraints: ['QUICK', 'HIGH_PROTEIN'],
+              safetyConstraints: [],
+            },
+          });
         expect(reader.getCurrent).not.toHaveBeenCalled();
       }
       for (const writer of Object.values(writers))

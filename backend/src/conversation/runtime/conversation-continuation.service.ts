@@ -1,5 +1,6 @@
 import { ConversationContinuationStore } from './conversation-continuation.store';
 import { explicitContinuationDomain } from '../understanding/explicit-continuation-domain.policy';
+import { selfContainedNutritionRequest } from '../understanding/nutrition-request.policy';
 import {
   dailyQuery,
   isDailyMealRequest,
@@ -174,10 +175,11 @@ export class ConversationContinuationService {
         outcome: 'UNKNOWN',
         evidence: { safetyAction: safety.action },
       };
-    const explicitDomain = explicitContinuationDomain(message.content);
     // Explicit daily reads belong to their canonical reader, not reminder replies.
     if (isDailyMealRequest(message.content) || dailyQuery(message.content))
       return null;
+    if (selfContainedNutritionRequest(message.content)) return null;
+    const explicitDomain = explicitContinuationDomain(message.content);
     let pending = await this.pending(userId, message);
     if (
       pending &&

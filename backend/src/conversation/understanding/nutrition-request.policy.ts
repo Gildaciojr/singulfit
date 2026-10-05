@@ -21,10 +21,12 @@ export function nutritionRequest(value: string): NutritionRequest | null {
     )?.[0] ?? null;
   const foodContext =
     meal !== null ||
-    /\b(?:comer|comida|alimento|alimentacao|dieta|cardapio|frango|arroz|banana|proteico|lactose|gluten|vegan\w*|vegetarian\w*)\b/u.test(
+    /\b(?:comer|comida|alimento|alimentacao|dieta|cardapio|frango|arroz|banana|proteic[oa]s?|lactose|gluten|vegan\w*|vegetarian\w*)\b/u.test(
       text,
     ) ||
-    /\b(?:algo|opcao)\b.*\b(?:leve|rapido|barato|proteico)\b/u.test(text);
+    /\b(?:algo|opcao)\b.*\b(?:leves?|rapid[oa]s?|pratic[oa]s?|barat[oa]s?|proteic[oa]s?)\b/u.test(
+      text,
+    );
   if (!foodContext) return null;
   // Keep explicit persistent mutations, full plans and their existing handoff.
   if (
@@ -75,7 +77,10 @@ export function nutritionRequest(value: string): NutritionRequest | null {
     ) ||
     (/\b(?:mont\w*|cri\w*)\b/u.test(text) && meal !== null) ||
     (/\b(?:quero|preciso|gostaria)\b/u.test(text) &&
-      (meal !== null || requested.length > 0));
+      (meal !== null || requested.length > 0)) ||
+    (/\b(?:comer|alimentar)\b/u.test(text) &&
+      /\b(?:manha|tarde|noite)\b/u.test(text) &&
+      /\b(?:posso|devo|seria|suger\w*)\b/u.test(text));
   const intent: NutritionRequestIntent | null = substitution
     ? 'MEAL_SUBSTITUTION'
     : advice && requested.length > 0
@@ -95,4 +100,27 @@ export function nutritionRequest(value: string): NutritionRequest | null {
 export function isNutritionAdvice(value: string): boolean {
   const request = nutritionRequest(value);
   return request !== null && request.intent !== 'PLAN_LOOKUP';
+}
+
+/** A read-only request owns its target; deictic/elliptic replies still need context. */
+export function selfContainedNutritionRequest(
+  value: string,
+): NutritionRequest | null {
+  const request = nutritionRequest(value);
+  if (!request || request.intent === 'PLAN_LOOKUP') return null;
+  const text = normalizeFoodTerm(value);
+  if (
+    /\b(?:ess[ea]s?|est[ea]s?|aquel[ea]s?|isso|isto|aquilo|anterior|ultimo|ultima|primeir[oa]|segund[oa]|terceir[oa])\b/u.test(
+      text,
+    )
+  )
+    return null;
+  const explicitFoodTarget =
+    request.meal !== null ||
+    /\b(?:comer|comida|alimentacao|alimento|dieta|cardapio|frango|arroz|banana)\b/u.test(
+      text,
+    );
+  if (/\b(?:outr[oa]s?|mesm[oa]s?)\b/u.test(text) && !explicitFoodTarget)
+    return null;
+  return explicitFoodTarget || request.constraints.length > 0 ? request : null;
 }
