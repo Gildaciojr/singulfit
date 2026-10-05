@@ -8,6 +8,7 @@ import { NutritionConsumptionSummaryService } from '../../nutrition/nutrition-co
 import {
   dailyQuery,
   foldDailyText,
+  isDailyMealRequest,
   isWeeklyFollowUp,
   metricFollowUp,
 } from '../understanding/daily-query.policy';
@@ -36,7 +37,7 @@ export class ConversationDailyQueryService {
       dailyQuery(text) !== null ||
       isWeeklyFollowUp(text) ||
       metricFollowUp(text) !== null ||
-      this.mealRequest(text)
+      isDailyMealRequest(text)
     );
   }
 
@@ -88,7 +89,7 @@ export class ConversationDailyQueryService {
     if (query?.kind === 'EXPENDITURE') {
       return `Consigo acompanhar a alimentação que você registrou, mas ainda não tenho uma fonte confiável dos seus gastos calóricos reais ${query.period === 'TODAY' ? 'de hoje' : 'desta semana'}.`;
     }
-    if (!query && !this.mealRequest(text)) return null;
+    if (!query && !isDailyMealRequest(text)) return null;
     try {
       const preferences = await this.prisma.userPreferences.findUnique({
         where: { userId: input.userId },
@@ -130,22 +131,6 @@ export class ConversationDailyQueryService {
     } catch {
       return 'Não consegui consultar essas informações com segurança agora. Tente novamente em instantes.';
     }
-  }
-
-  private mealRequest(value: string): boolean {
-    const text = foldDailyText(value);
-    if (
-      /\b(troque|trocar|substitua|substituir|monte|crie|gere|adapte|quero outra|nao tenho)\b/u.test(
-        text,
-      )
-    )
-      return false;
-    return (
-      /\b(?:qual|quais|o que|mostre)\b/u.test(text) &&
-      /\b(?:almoco|jantar|cafe da manha|lanche|ceia|proxima refeicao|refeicao vem depois|como agora|comer agora)\b/u.test(
-        text,
-      )
-    );
   }
 
   private async meal(

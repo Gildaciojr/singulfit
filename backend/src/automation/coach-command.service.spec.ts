@@ -1,4 +1,6 @@
 import { chunkWorkoutWhatsApp } from '../workout/v2/workout-whatsapp.chunker';
+import { explicitContinuationDomain } from '../conversation/understanding/explicit-continuation-domain.policy';
+import { isWorkoutCurrentPlanRead } from '../workout/v2/workout-current-plan-read.policy';
 import { Test } from '@nestjs/testing';
 import {
   historicalWorkoutPlan,
@@ -53,7 +55,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WorkoutGeneratorService } from '../workout/workout-generator.service';
 import { AUTOMATION_RULE_CODES } from './automation.constants';
 import { CoachCommandService } from './coach-command.service';
-import type { ConversationContinuationService } from '../conversation/runtime/conversation-continuation.service';
+import { ConversationContinuationService } from '../conversation/runtime/conversation-continuation.service';
+import { ConversationContinuationStore } from '../conversation/runtime/conversation-continuation.store';
+import type { ConversationContinuationSemanticsService } from '../conversation/runtime/conversation-continuation-semantics.service';
+import { ConversationSafetyDetectorService } from '../conversation/understanding/conversation-safety-detector.service';
+import { ConversationMessageNormalizerService } from '../conversation/understanding/conversation-message-normalizer.service';
+import type { ConversationQAFollowUpContextService } from '../conversation/runtime/conversation-qa-follow-up-context.service';
+import type { CurrentNutritionPlanReaderService } from '../diet/current-nutrition-plan-reader.service';
+import type { NutritionConsumptionSummaryService } from '../nutrition/nutrition-consumption-summary.service';
 import { continuation } from '../conversation/runtime/conversation-continuation.contract';
 import { ConversationDailyQueryService } from '../conversation/runtime/conversation-daily-query.service';
 import { ConversationProfileConsentService } from '../conversation/runtime/conversation-profile-consent.service';
@@ -184,6 +193,7 @@ describe('CoachCommandService', () => {
       | 'INVALID_V2_PLAN';
     currentWorkoutPlanId?: string;
     dailyEnabled?: boolean;
+    dailyQueries?: ConversationDailyQueryService;
     dailyContent?: string | null;
     profileConsentContent?: string;
     continuations?: ConversationContinuationService;
@@ -561,12 +571,13 @@ describe('CoachCommandService', () => {
         ? (profileAcquisitionRollout as unknown as ProfileAcquisitionInternalRolloutService)
         : undefined,
       currentWorkoutPlanReader as unknown as CurrentWorkoutPlanReaderService,
-      options?.dailyEnabled
-        ? ({
-            accepts: () => options.dailyContent !== undefined,
-            answer: () => Promise.resolve(options.dailyContent ?? null),
-          } as unknown as ConversationDailyQueryService)
-        : undefined,
+      options?.dailyQueries ??
+        (options?.dailyEnabled
+          ? ({
+              accepts: () => options.dailyContent !== undefined,
+              answer: () => Promise.resolve(options.dailyContent ?? null),
+            } as unknown as ConversationDailyQueryService)
+          : undefined),
       options?.profileConsentContent
         ? (profileConsent as unknown as ConversationProfileConsentService)
         : undefined,
@@ -592,6 +603,185 @@ describe('CoachCommandService', () => {
       profileConsent,
     };
   }
+
+  it.each([
+    'Qual minha próxima refeição?',
+    'Não mandei sobre treino. Perguntei QUAL A MINHA PRÓXIMA REFEIÇÃO DE HOJE',
+    'não perguntei de treino, perguntei minha próxima refeição',
+    'O que posso comer no jantar?',
+  ])(
+    'routes %s through nutrition without claiming the pending workout',
+    async (content) => {
+      const at = new Date('2026-06-10T12:00:00Z');
+      const source = {
+        id: 'message-id',
+        content,
+        timestamp: at,
+        conversationId: 'conversation-id',
+        replyToExternalMessageId: null,
+        conversation: {
+          userId: 'user-id',
+          user: { preferences: { timezone: 'America/Sao_Paulo' } },
+        },
+      };
+      const config = {
+        get: () => ({ valid: true, killSwitch: false }),
+        isOfficiallyEligible: () => true,
+      };
+      const store = new ConversationContinuationStore(
+        {} as PrismaService,
+        config as unknown as ConversationRuntimeOperationalConfigService,
+      );
+      jest.spyOn(store, 'source').mockResolvedValue(source);
+      jest
+        .spyOn(store, 'resolveOnce')
+        .mockImplementation((_user, _id, _type, execute) => execute());
+      jest.spyOn(store, 'pending').mockResolvedValue({
+        scheduledMessageId: 'old-workout',
+        question: 'Treino de terça-feira',
+        continuation: continuation(
+          'WORKOUT_DAY_QUERY',
+          at,
+          'UNKNOWN',
+          'USER_QUERY',
+          '2026-06-09',
+        ),
+      });
+      const semantics = {
+        interpret: jest.fn().mockResolvedValue({
+          action: 'WORKOUT_QUERY',
+          day: 'NEXT',
+          reference: 'PENDING',
+        }),
+      };
+      const workout = { presentCanonicalDay: jest.fn() };
+      const resolver = new ConversationContinuationService(
+        {} as PrismaService,
+        semantics as unknown as ConversationContinuationSemanticsService,
+        workout as unknown as CurrentWorkoutPlanReaderService,
+        {} as ConversationCurrentNutritionContextService,
+        new ConversationPublicAnswerBoundaryService(),
+        new ConversationSafetyDetectorService(),
+        new ConversationMessageNormalizerService(),
+        {} as ConversationQAFollowUpContextService,
+        store,
+      );
+      const claim = jest.spyOn(store, 'claim');
+      const dailyPrisma = {
+        userPreferences: {
+          findUnique: jest
+            .fn()
+            .mockResolvedValue({ timezone: 'America/Sao_Paulo' }),
+        },
+        message: { findFirst: jest.fn().mockResolvedValue(null) },
+        scheduledMessage: { findMany: jest.fn().mockResolvedValue([]) },
+      };
+      const nutrition = {
+        getCurrent: jest.fn().mockResolvedValue({
+          userId: 'user-id',
+          implementation: 'V2',
+          document: {
+            artifactType: 'WEEKLY_PLAN',
+            days: [
+              {
+                label: 'Quarta-feira',
+                dayNumber: 4,
+                meals: [
+                  {
+                    period: 'LUNCH',
+                    name: 'Almoço quarta',
+                    suggestedTime: '12:00',
+                    items: [{ quantity: '120 g', foodName: 'Peixe' }],
+                  },
+                  {
+                    period: 'DINNER',
+                    name: 'Jantar quarta',
+                    suggestedTime: '19:00',
+                    items: [{ quantity: '120 g', foodName: 'Peixe' }],
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      };
+      const daily = new ConversationDailyQueryService(
+        dailyPrisma as unknown as PrismaService,
+        {} as NutritionConsumptionSummaryService,
+        nutrition as unknown as CurrentNutritionPlanReaderService,
+      );
+      const s = createSubject({
+        content,
+        continuations: resolver,
+        dailyQueries: daily,
+        runtimeContent: 'Não executar',
+      });
+      const input = { userId: 'user-id', messageId: 'message-id' };
+      expect(await s.service.processCanonicalContinuation(input)).toBe(false);
+      expect(claim).not.toHaveBeenCalled();
+      expect(await s.service.processReadOnlyText(input)).toBe(true);
+      expect(claim).not.toHaveBeenCalled();
+      expect(semantics.interpret).not.toHaveBeenCalled();
+      expect(workout.presentCanonicalDay).not.toHaveBeenCalled();
+      expect(s.currentWorkoutPlanReader.read).not.toHaveBeenCalled();
+      expect(nutrition.getCurrent).toHaveBeenCalledWith('user-id');
+      expect(s.prisma.coachMessage.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            content: expect.stringContaining('Peixe'),
+          }),
+        }),
+      );
+      expect(s.conversationRuntime.decide).not.toHaveBeenCalled();
+      expect(s.workoutGenerator.generate).not.toHaveBeenCalled();
+      expect(s.dietGenerator.generate).not.toHaveBeenCalled();
+      expect(s.transaction.coachMessage.create).not.toHaveBeenCalled();
+      expect(s.prisma.coachMessage.create).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('routes a combined current-plan read through general routing without a workout-only shortcut', async () => {
+    const content = 'Qual meu treino de amanhã e qual minha dieta atual?';
+    expect(explicitContinuationDomain(content)).toBe('COMBINED');
+    expect(isWorkoutCurrentPlanRead(content)).toBe(true);
+    const continuations = {
+      enabled: jest.fn().mockReturnValue(true),
+    };
+    const response = 'Treino de amanhã e dieta atual: resposta combinada.';
+    const subject = createSubject({
+      content,
+      runtimeContent: response,
+      continuations:
+        continuations as unknown as ConversationContinuationService,
+    });
+    const canonical = jest
+      .spyOn(subject.service, 'processCanonicalContinuation')
+      .mockResolvedValue(true);
+    const planning = jest.spyOn(subject.planningExecution, 'executeStructured');
+
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+
+    expect(canonical).not.toHaveBeenCalled();
+    expect(subject.currentWorkoutPlanReader.read).not.toHaveBeenCalled();
+    expect(subject.conversationRuntime.decide).toHaveBeenCalledWith(
+      expect.objectContaining({ text: content }),
+    );
+    expect(planning).not.toHaveBeenCalled();
+    expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+    expect(subject.prisma.coachMessage.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          content: response,
+          context: expect.not.objectContaining({
+            action: 'WORKOUT_SESSION_SELECTION',
+          }),
+        }),
+      }),
+    );
+  });
 
   it('persists typed canonical continuation and reuses ordered delivery without planning or regeneration', async () => {
     const at = new Date('2026-06-10T12:00:00Z');

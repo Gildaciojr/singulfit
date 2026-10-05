@@ -183,6 +183,124 @@ describe('Canonical conversation continuation', () => {
       expect(s.prisma.scheduledMessage.updateMany).not.toHaveBeenCalled();
     },
   );
+  it.each([
+    'Qual minha próxima refeição?',
+    'Não mandei sobre treino. Perguntei QUAL A MINHA PRÓXIMA REFEIÇÃO DE HOJE',
+    'não perguntei de treino, perguntei minha próxima refeição',
+    'O que posso comer no jantar?',
+    'Quanto de proteína consumi hoje?',
+    'Posso substituir o frango por outra proteína?',
+    'Quero uma dieta',
+  ])(
+    'bypasses incompatible workout context before interpretation for %s',
+    async (text) => {
+      const s = subject('WORKOUT_DAY_QUERY', {
+        action: 'WORKOUT_QUERY',
+        day: 'NEXT',
+      });
+      s.prisma.message.findFirst.mockResolvedValue({
+        ...(await s.prisma.message.findFirst()),
+        content: text,
+      });
+      expect(await s.service.resolve('user', 'message')).toBeNull();
+      expect(s.semantics.interpret).not.toHaveBeenCalled();
+      expect(s.workout.presentCanonicalDay).not.toHaveBeenCalled();
+      expect(s.prisma.scheduledMessage.updateMany).not.toHaveBeenCalled();
+      expect(s.row()?.responseMessageId).toBeNull();
+    },
+  );
+  it.each([
+    'MEAL_COMPLETION_CHECK',
+    'MEAL_CONTENT_REQUEST',
+    'HYDRATION_CHECK',
+  ] as const)(
+    'reads explicit workout without consuming incompatible %s',
+    async (kind) => {
+      const s = subject(kind, {
+        action: 'WORKOUT_QUERY',
+        day: 'TOMORROW',
+        reference: 'EXPLICIT',
+      });
+      s.prisma.message.findFirst.mockResolvedValue({
+        ...(await s.prisma.message.findFirst()),
+        content: 'Qual meu treino de amanhã?',
+      });
+      const reply = await s.service.resolve('user', 'message');
+      expect(s.semantics.interpret).toHaveBeenCalledWith(
+        'Qual meu treino de amanhã?',
+        null,
+      );
+      expect(reply).toMatchObject({
+        domain: 'WORKOUT',
+        pending: null,
+        next: { kind: 'WORKOUT_DAY_QUERY' },
+      });
+      if (!reply) throw new Error('Missing workout reply');
+      expect(
+        await s.service.claim(
+          s.prisma as unknown as Prisma.TransactionClient,
+          'user',
+          'conversation',
+          'message',
+          reply,
+          at,
+        ),
+      ).toBe(true);
+      expect(s.prisma.scheduledMessage.updateMany).not.toHaveBeenCalled();
+      expect(s.row()?.responseMessageId).toBeNull();
+    },
+  );
+  it.each([
+    ['E depois?', 'NEXT'],
+    ['e amanhã?', 'TOMORROW'],
+  ] as const)(
+    'preserves compatible workout follow-up %s and its claim',
+    async (text, day) => {
+      const s = subject('WORKOUT_DAY_QUERY', {
+        action: 'WORKOUT_QUERY',
+        day,
+        reference: 'PENDING',
+      });
+      const row = s.row();
+      if (!row) throw new Error('Missing workout pending');
+      s.setRow({
+        ...row,
+        context: {
+          continuation: continuation(
+            'WORKOUT_DAY_QUERY',
+            row.sentAt,
+            'UNKNOWN',
+            'USER_QUERY',
+            '2026-10-06',
+          ),
+        },
+      });
+      s.prisma.message.findFirst.mockResolvedValue({
+        ...(await s.prisma.message.findFirst()),
+        content: text,
+      });
+      const reply = await s.service.resolve('user', 'message');
+      expect(reply?.domain).toBe('WORKOUT');
+      expect(s.workout.presentCanonicalDay).toHaveBeenCalledWith(
+        'user',
+        day === 'NEXT' ? 'qual meu próximo treino' : 'amanhã',
+        at,
+        day === 'NEXT' ? '2026-10-06' : undefined,
+      );
+      if (!reply) throw new Error('Missing workout reply');
+      expect(
+        await s.service.claim(
+          s.prisma as unknown as Prisma.TransactionClient,
+          'user',
+          'conversation',
+          'message',
+          reply,
+          at,
+        ),
+      ).toBe(true);
+      expect(s.row()?.responseMessageId).toBe('message');
+    },
+  );
   it('does not conclude workout from sim without pending context', async () => {
     const s = subject(null, {
       action: 'WORKOUT_REPLY',

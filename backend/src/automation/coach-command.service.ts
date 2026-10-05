@@ -1,6 +1,7 @@
 import { chunkWorkoutWhatsApp } from '../workout/v2/workout-whatsapp.chunker';
 import { Injectable, Optional } from '@nestjs/common';
 import { explicitPlanningIntent } from '../conversation/understanding/explicit-planning-intent';
+import { explicitContinuationDomain } from '../conversation/understanding/explicit-continuation-domain.policy';
 import type { ConversationGoalDecision } from '../context/conversation-goal-planner.contract';
 import { CoachPlanningExecutionService } from './coach-planning-execution.service';
 import {
@@ -360,7 +361,7 @@ export class CoachCommandService {
     if (
       !input.planningContinuation &&
       this.continuations?.enabled(input.userId) &&
-      isWorkoutCurrentPlanRead(message.content) &&
+      this.isExclusiveWorkoutRead(message.content) &&
       (await this.processCanonicalContinuation(input))
     )
       return { handled: true, duplicated: false, intent: 'WORKOUT' };
@@ -495,6 +496,7 @@ export class CoachCommandService {
       pending.status !== 'ACTIONABLE' &&
       pending.status !== 'COMPLETED' &&
       isIsolatedReminderReply(commandText);
+    const exclusiveWorkoutRead = this.isExclusiveWorkoutRead(commandText);
     const bypassRuntime =
       profileContent !== null ||
       dailyContent !== null ||
@@ -502,11 +504,11 @@ export class CoachCommandService {
       pending.status === 'ACTIONABLE' ||
       pending.status === 'EXPIRED' ||
       pending.status === 'COMPLETED' ||
-      isWorkoutCurrentPlanRead(commandText);
+      exclusiveWorkoutRead;
     const runtimeDecision = bypassRuntime
       ? {
           source: 'LEGACY' as const,
-          reason: isWorkoutCurrentPlanRead(commandText)
+          reason: exclusiveWorkoutRead
             ? ('CANONICAL_WORKOUT_READ' as const)
             : ('PENDING_ACTION' as const),
         }
@@ -1158,13 +1160,21 @@ export class CoachCommandService {
     }
   }
 
+  private isExclusiveWorkoutRead(message: string): boolean {
+    const domain = explicitContinuationDomain(message);
+    return (
+      (domain === null || domain === 'WORKOUT') &&
+      isWorkoutCurrentPlanRead(message)
+    );
+  }
+
   private async workoutSelectionContext(
     userId: string,
     message: string,
   ): Promise<Prisma.InputJsonObject> {
     if (
       !this.currentWorkoutPlanReader ||
-      !isWorkoutCurrentPlanRead(message) ||
+      !this.isExclusiveWorkoutRead(message) ||
       this.sessionOrdinal(message) !== null
     ) {
       return {};

@@ -1,4 +1,9 @@
 import { ConversationContinuationStore } from './conversation-continuation.store';
+import { explicitContinuationDomain } from '../understanding/explicit-continuation-domain.policy';
+import {
+  dailyQuery,
+  isDailyMealRequest,
+} from '../understanding/daily-query.policy';
 import { Injectable } from '@nestjs/common';
 import { MessageType, ScheduledMessageStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -169,7 +174,24 @@ export class ConversationContinuationService {
         outcome: 'UNKNOWN',
         evidence: { safetyAction: safety.action },
       };
-    const pending = await this.pending(userId, message);
+    const explicitDomain = explicitContinuationDomain(message.content);
+    // Explicit daily reads belong to their canonical reader, not reminder replies.
+    if (isDailyMealRequest(message.content) || dailyQuery(message.content))
+      return null;
+    let pending = await this.pending(userId, message);
+    if (
+      pending &&
+      explicitDomain &&
+      explicitDomain !== pending.continuation.domain
+    ) {
+      // Workout reads use this service's owned reader, but never the old pending.
+      if (
+        explicitDomain !== 'WORKOUT' ||
+        !isWorkoutCurrentPlanRead(message.content)
+      )
+        return null;
+      pending = null;
+    }
     const interpreted = await this.semantics.interpret(
       message.content,
       pending,

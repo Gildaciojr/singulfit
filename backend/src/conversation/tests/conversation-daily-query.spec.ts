@@ -78,6 +78,23 @@ describe('ConversationDailyQueryService', () => {
     return { service, prisma, consumption, nutrition, current, input };
   }
   it.each([
+    'Qual minha próxima refeição?',
+    'Não mandei sobre treino. Perguntei QUAL A MINHA PRÓXIMA REFEIÇÃO DE HOJE',
+    'não perguntei de treino, perguntei minha próxima refeição',
+    'O que posso comer no jantar?',
+  ])(
+    'routes explicit meal read %s to the current nutrition plan',
+    async (text) => {
+      const s = subject();
+      expect(s.service.accepts(text)).toBe(true);
+      expect(await s.service.answer({ ...s.input, text })).toMatch(
+        /Almoço segunda|Jantar segunda/u,
+      );
+      expect(s.nutrition.getCurrent).toHaveBeenCalledWith('user');
+      expect(s.consumption.summarize).not.toHaveBeenCalled();
+    },
+  );
+  it.each([
     'quanto gastei hoje?',
     'quanto gastei essa semana?',
     'quantas calorias queimei hoje?',

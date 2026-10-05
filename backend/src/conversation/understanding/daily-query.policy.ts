@@ -10,6 +10,21 @@ export function foldDailyText(value: string): string {
     .trim();
 }
 export type DailyMetric = 'CALORIES' | 'PROTEIN' | 'CARBS' | 'FAT' | 'ALL';
+export function isDailyMealRequest(value: string): boolean {
+  const text = foldDailyText(value);
+  if (
+    /\b(troque|trocar|substitua|substituir|monte|crie|gere|adapte|quero outra|nao tenho)\b/u.test(
+      text,
+    )
+  )
+    return false;
+  return (
+    /\b(?:qual|quais|o que|mostre|perguntei)\b/u.test(text) &&
+    /\b(?:almoco|jantar|cafe da manha|lanche|ceia|proxima refeicao|refeicao vem depois|como agora|comer agora)\b/u.test(
+      text,
+    )
+  );
+}
 export type DailyQuery = Readonly<{
   kind: 'CONSUMPTION' | 'EXPENDITURE';
   period: ConsumptionPeriod;
