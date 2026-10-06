@@ -100,7 +100,7 @@ describe('Workout longitudinal history', () => {
     expect(strategy.sessionFocuses).not.toEqual(
       context.previousPlan?.sessionLabels,
     );
-    expect(strategy.progressionPolicy.initialState).toBe('REASSESS');
+    expect(strategy.sessionFocuses).toEqual([]);
   });
   it.each([
     ['Agora só posso treinar em casa 3x', 3, 'HOME'],
@@ -164,7 +164,7 @@ describe('Workout longitudinal history', () => {
     const strategy = new WorkoutPlanningStrategyService().build(context);
     expect(context.progressEvidence).toEqual(input.progressEvidence);
     expect(strategy.personalizationFactors).toContain('PROGRESS_EVIDENCE');
-    expect(strategy.progressionPolicy.initialState).toBe('REASSESS');
+    expect(strategy.sessionFocuses).toEqual([]);
   });
   it('F: sends canonical history and deterministic strategy to the OpenAI boundary', async () => {
     const subject = setup('user-id', [
@@ -184,7 +184,10 @@ describe('Workout longitudinal history', () => {
       createStandaloneJob: jest.fn().mockResolvedValue({
         id: 'job-id',
         promptVersionId: 'prompt-id',
-        promptVersion: { version: 8, name: WORKOUT_PLANNING_V2_PROMPT.name },
+        promptVersion: {
+          version: WORKOUT_PLANNING_V2_PROMPT.version,
+          name: WORKOUT_PLANNING_V2_PROMPT.name,
+        },
         status: 'PENDING',
       }),
       runTextJob: jest
@@ -219,10 +222,10 @@ describe('Workout longitudinal history', () => {
     ).toMatchObject({ name: 'Supino', sets: 3, repetitions: '10' });
     expect(payload.context.previousPlan?.strategy?.sessionCount).toBe(5);
     expect(payload.context.progressEvidence).toEqual(input.progressEvidence);
-    expect(payload.strategy.progressionPolicy.initialState).toBe('REASSESS');
+    expect(payload.strategy.sessionFocuses).toEqual([]);
     expect(
       payload.strategy.progressionPolicy.maximumWeeklyIncreasePercent,
-    ).toBe(0);
+    ).toBe(100);
   });
 
   it('keeps saved energy and feedback without manufacturing workout performance', async () => {
@@ -255,7 +258,7 @@ describe('Workout longitudinal history', () => {
     expect(
       new WorkoutPlanningStrategyService().build(context).progressionPolicy
         .initialState,
-    ).toBe('REASSESS');
+    ).toBe('MAINTAIN');
   });
 
   it('ignores future, stale, invalid and foreign-profile check-ins', async () => {
@@ -320,7 +323,7 @@ describe('Workout longitudinal history', () => {
     ['REASSESS', 30, null, null, null, []],
     ['PAUSE', 90, 6, 5, 5, ['ACUTE_PAIN']],
   ] as const)(
-    'chooses %s deterministically',
+    'passes %s evidence to AI without choosing its progression',
     (
       state,
       adherenceScore,
@@ -346,8 +349,12 @@ describe('Workout longitudinal history', () => {
         progressEvidence: [evidence],
       });
       const strategy = new WorkoutPlanningStrategyService().build(context);
-      expect(strategy.progressionPolicy.initialState).toBe(state);
-      if (state === 'DELOAD' || state === 'REGRESS' || state === 'PAUSE')
+      expect(context.progressEvidence[0]).toMatchObject(evidence);
+      expect(strategy.progressionPolicy.initialState).toBe(
+        safetySignals.length ? 'REASSESS' : 'MAINTAIN',
+      );
+      expect(strategy.sessionFocuses).toEqual([]);
+      if (state === 'PAUSE')
         expect(strategy.intensityPolicy.qualitativeLevel).toBe('LIGHT');
     },
   );

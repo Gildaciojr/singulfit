@@ -20,6 +20,13 @@ import {
 } from './interfaces/openai.interface';
 import { OpenAIGateway } from './openai.gateway';
 import { PromptService } from './prompt.service';
+import {
+  durableTextOperation,
+  DURABLE_TEXT_REVISION,
+  DurableTextPendingError,
+  type DurableTextOperation,
+  type DurableValidationIssue,
+} from './durable-text-operation.contract';
 
 export interface CreateAIJobInput {
   userId: string;
@@ -42,6 +49,28 @@ interface RunTextJobInput {
   input: string;
   jsonSchema?: OpenAIJsonSchema;
   timeoutMs?: number;
+  /** Recovery workers perform one GET; interactive execution has a bounded poll window. */
+  pollWindowMs?: number;
+  /** Internal bounded repair under the original claim, never a second entitlement. */
+  repairInput?: (initial: OpenAIResponseResult) => string | null;
+  executionContext?: string;
+  initialValidationIssues?: () => readonly DurableValidationIssue[];
+}
+
+export interface TextJobResponse extends OpenAIResponseResult {
+  readonly providerAttempts?: readonly OpenAIResponseResult[];
+  readonly providerCalls?: number;
+  readonly durableTextOperation?: DurableTextOperation;
+}
+
+export class AITextOperationError extends Error {
+  constructor(
+    readonly operationCause: unknown,
+    readonly response: TextJobResponse | undefined,
+    readonly providerCalls: number,
+  ) {
+    super('Bounded text operation failed');
+  }
 }
 
 interface RunVisionJobInput extends RunTextJobInput {
@@ -202,7 +231,7 @@ export class AIService {
         );
       }
 
-      const staleJobs = await transaction.aIJob.findMany({
+      const expiredJobs = await transaction.aIJob.findMany({
         where: {
           userId: input.userId,
           type: input.type,
@@ -222,8 +251,11 @@ export class AIService {
             },
           ],
         },
-        select: { id: true },
+        select: { id: true, type: true, result: true },
       });
+      const staleJobs = expiredJobs.filter(
+        (job) => !durableTextOperation(job.result),
+      );
       await transaction.aIJob.updateMany({
         where: { id: { in: staleJobs.map((job) => job.id) } },
         data: {
@@ -234,6 +266,22 @@ export class AIService {
         },
       });
       for (const staleJob of staleJobs) {
+        const usage =
+          staleJob.type === AIJobType.WORKOUT
+            ? this.boundedTextUsage(staleJob.result)
+            : null;
+        if (
+          usage &&
+          !(await transaction.aIUsage.findUnique({
+            where: { aiJobId: staleJob.id },
+          }))
+        )
+          await this.aiUsageService.recordInTransaction(transaction, {
+            userId: input.userId,
+            aiJobId: staleJob.id,
+            jobType: AIJobType.WORKOUT,
+            ...usage,
+          });
         await this.usageService.reverseInTransaction(transaction, staleJob.id);
       }
 
@@ -292,7 +340,11 @@ export class AIService {
             );
           }
 
-          if (existingJob.status !== AIJobStatus.COMPLETED) {
+          if (
+            (existingJob.status === AIJobStatus.PENDING ||
+              existingJob.status === AIJobStatus.PROCESSING) &&
+            !durableTextOperation(existingJob.result)
+          ) {
             await this.reserveStandaloneUsage(
               transaction,
               input,
@@ -355,8 +407,17 @@ export class AIService {
   async runTextJob(
     aiJobId: string,
     request: RunTextJobInput,
-  ): Promise<OpenAIResponseResult> {
-    const job = await this.claimJob(aiJobId);
+  ): Promise<TextJobResponse> {
+    const source = request.repairInput
+      ? await this.prisma.aIJob.findUnique({ where: { id: aiJobId } })
+      : null;
+    const job = await this.claimJob(
+      aiJobId,
+      undefined,
+      !!request.repairInput && !durableTextOperation(source?.result),
+    );
+
+    if (request.repairInput) return this.runDurableTextOperation(job, request);
 
     return this.openAIGateway.createTextResponse({
       instructions: job.promptVersion.prompt,
@@ -365,6 +426,238 @@ export class AIService {
       jsonSchema: request.jsonSchema,
       timeoutMs: request.timeoutMs,
     });
+  }
+
+  private async runDurableTextOperation(
+    job: Awaited<ReturnType<AIService['claimJob']>>,
+    request: RunTextJobInput,
+  ): Promise<TextJobResponse> {
+    const state: DurableTextOperation = durableTextOperation(job.result) ?? {
+      revision: DURABLE_TEXT_REVISION,
+      requestInput: request.input,
+      executionContext: request.executionContext ?? '{}',
+      deadlineAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+      attempts: [],
+      repairInput: null,
+      initialValidated: false,
+      accountingIssue: null,
+    };
+    const epoch = { startedAt: job.startedAt, attempts: job.attempts };
+    const fence = {
+      id: job.id,
+      userId: job.userId,
+      status: AIJobStatus.PROCESSING,
+      ...epoch,
+    };
+    const aggregate = (): TextJobResponse | undefined => {
+      const responses = state.attempts
+        .map((attempt) => attempt.response)
+        .filter(
+          (response): response is OpenAIResponseResult => response !== null,
+        );
+      const last = responses.at(-1);
+      return last
+        ? {
+            ...last,
+            promptTokens: responses.reduce(
+              (sum, response) => sum + response.promptTokens,
+              0,
+            ),
+            completionTokens: responses.reduce(
+              (sum, response) => sum + response.completionTokens,
+              0,
+            ),
+            totalTokens: responses.reduce(
+              (sum, response) => sum + response.totalTokens,
+              0,
+            ),
+            providerCalls: state.attempts.length,
+            providerAttempts: responses,
+            durableTextOperation: structuredClone(state),
+          }
+        : undefined;
+    };
+    const save = async (recordUsage = false) => {
+      const usage = aggregate();
+      if (recordUsage)
+        for (const attempt of state.attempts)
+          if (attempt.response) attempt.usageRecorded = true;
+      try {
+        await this.prisma.$transaction(async (transaction) => {
+          const updated = await transaction.aIJob.updateMany({
+            where: fence,
+            data: {
+              leaseExpiresAt: new Date(Date.now() + this.getLeaseMs()),
+              result: JSON.parse(
+                JSON.stringify({ durableTextOperation: state }),
+              ) as Prisma.InputJsonObject,
+            },
+          });
+          if (updated.count !== 1)
+            throw new ConflictException('Durable text lease lost');
+          if (recordUsage && usage)
+            await this.aiUsageService.recordCumulativeInTransaction(
+              transaction,
+              {
+                userId: job.userId,
+                aiJobId: job.id,
+                jobType: job.type,
+                model: usage.model,
+                promptTokens: usage.promptTokens,
+                completionTokens: usage.completionTokens,
+                totalTokens: usage.totalTokens,
+              },
+            );
+        });
+      } catch (error: unknown) {
+        if (error instanceof ConflictException) throw error;
+        // The atomic document/usage commit may have succeeded before its ACK.
+        // Replay reads the persisted marker; never terminally discard this ledger.
+        throw new DurableTextPendingError();
+      }
+    };
+    const pause = async (): Promise<never> => {
+      await this.prisma.aIJob.updateMany({
+        where: fence,
+        data: { leaseExpiresAt: new Date(0) },
+      });
+      throw new DurableTextPendingError();
+    };
+    const consume = async (
+      index: 0 | 1,
+      input: string,
+    ): Promise<OpenAIResponseResult> => {
+      let attempt = state.attempts[index];
+      if (!attempt) {
+        if (Date.now() >= Date.parse(state.deadlineAt))
+          throw new ServiceUnavailableException(
+            'Background operation deadline exceeded; generation blocked',
+          );
+        attempt = {
+          attemptKey: `${job.operationKey ?? job.id}:attempt:${index + 1}`,
+          phase: 'CREATING',
+          responseId: null,
+          usageRecorded: false,
+          response: null,
+          validationIssues: [],
+        };
+        state.attempts.push(attempt);
+        await save();
+        // X-Client-Request-Id is correlation, not documented create idempotency.
+        // An unacknowledged create is never automatically recreated.
+        attempt.responseId =
+          await this.openAIGateway.startBackgroundTextResponse({
+            instructions: job.promptVersion.prompt,
+            input,
+            requestId: attempt.attemptKey,
+            ...(index === 1
+              ? { expectedModel: state.attempts[0]?.response?.model }
+              : {}),
+            jsonSchema: request.jsonSchema,
+            timeoutMs: Math.min(
+              request.timeoutMs ?? 30_000,
+              30_000,
+              this.getLeaseMs() - 5_000,
+            ),
+          });
+        attempt.phase = 'POLLING';
+        await save();
+      } else if (!attempt.responseId) {
+        throw new ServiceUnavailableException(
+          'Provider create outcome is ambiguous; automatic generation retry blocked',
+        );
+      }
+      if (index === 1 && attempt.responseId === state.attempts[0]?.responseId)
+        throw new ServiceUnavailableException(
+          'Provider response identity reused across attempts',
+        );
+      const windowDeadline =
+        Date.now() +
+        Math.max(
+          0,
+          Math.min(
+            request.pollWindowMs ?? 30_000,
+            30_000,
+            this.getLeaseMs() - 10_000,
+          ),
+        );
+      let cancellationIssued = false;
+      while (!attempt.response) {
+        let retrieved;
+        try {
+          retrieved = await this.openAIGateway.retrieveTextResponse(
+            attempt.responseId,
+          );
+        } catch {
+          return pause();
+        }
+        if (
+          retrieved.status === 'queued' ||
+          retrieved.status === 'in_progress'
+        ) {
+          if (
+            !cancellationIssued &&
+            Date.now() >= Date.parse(state.deadlineAt)
+          ) {
+            try {
+              await this.openAIGateway.cancelTextResponse(attempt.responseId);
+              cancellationIssued = true;
+            } catch {
+              return pause();
+            }
+          }
+          if (Date.now() >= windowDeadline) return pause();
+          await new Promise<void>((resolve) => setTimeout(resolve, 500));
+          continue;
+        }
+        attempt.phase =
+          retrieved.status === 'completed' ? 'COMPLETED' : 'FAILED';
+        attempt.response = retrieved.result ?? null;
+        await save();
+        if (!attempt.response)
+          throw new ServiceUnavailableException(
+            `Background response terminated: ${retrieved.status}`,
+          );
+      }
+      const firstModel = state.attempts[0]?.response?.model;
+      if (firstModel && attempt.response.model !== firstModel) {
+        state.accountingIssue = 'MODEL_MISMATCH';
+        await save();
+        throw new ServiceUnavailableException(
+          'Provider model mismatch; durable usage requires cost reconciliation',
+        );
+      }
+      if (!attempt.usageRecorded) await save(true);
+      if (attempt.phase === 'FAILED')
+        throw new ServiceUnavailableException('Background response failed');
+      return attempt.response;
+    };
+    try {
+      if (state.accountingIssue)
+        throw new ServiceUnavailableException(
+          'Provider model mismatch; durable usage requires cost reconciliation',
+        );
+      const initial = await consume(0, state.requestInput);
+      if (!state.initialValidated) {
+        state.repairInput = request.repairInput?.(initial) ?? null;
+        state.attempts[0].validationIssues =
+          request.initialValidationIssues?.() ?? [];
+        state.initialValidated = true;
+        await save();
+      }
+      if (state.repairInput !== null) await consume(1, state.repairInput);
+      const response = aggregate();
+      if (!response)
+        throw new ServiceUnavailableException('Durable response missing');
+      return response;
+    } catch (error: unknown) {
+      if (
+        error instanceof DurableTextPendingError ||
+        error instanceof ConflictException
+      )
+        throw error;
+      throw new AITextOperationError(error, aggregate(), state.attempts.length);
+    }
   }
 
   async runVisionJob(
@@ -416,7 +709,7 @@ export class AIService {
       result?: Prisma.InputJsonValue;
     },
   ) {
-    const usage = await this.aiUsageService.recordInTransaction(transaction, {
+    const usageInput = {
       userId: input.userId,
       aiJobId: input.aiJobId,
       jobType: input.jobType,
@@ -424,7 +717,17 @@ export class AIService {
       promptTokens: input.response.promptTokens,
       completionTokens: input.response.completionTokens,
       totalTokens: input.response.totalTokens,
-    });
+    };
+    const usage =
+      'providerAttempts' in input.response
+        ? await this.aiUsageService.recordCumulativeInTransaction(
+            transaction,
+            usageInput,
+          )
+        : await this.aiUsageService.recordInTransaction(
+            transaction,
+            usageInput,
+          );
     const completed = await transaction.aIJob.updateMany({
       where: {
         id: input.aiJobId,
@@ -484,6 +787,24 @@ export class AIService {
       });
 
       if (
+        job?.status === AIJobStatus.FAILED &&
+        response &&
+        'providerAttempts' in response &&
+        expectedUserId === undefined
+      ) {
+        if (durableTextOperation(job.result)?.accountingIssue) return;
+        await this.aiUsageService.recordCumulativeInTransaction(transaction, {
+          userId: job.userId,
+          aiJobId: job.id,
+          jobType: job.type,
+          model: response.model,
+          promptTokens: response.promptTokens,
+          completionTokens: response.completionTokens,
+          totalTokens: response.totalTokens,
+        });
+        return;
+      }
+      if (
         !job ||
         job.id !== aiJobId ||
         (expectedUserId !== undefined &&
@@ -498,8 +819,8 @@ export class AIService {
         return;
       }
 
-      if (response) {
-        await this.aiUsageService.recordInTransaction(transaction, {
+      if (response && !durableTextOperation(job.result)?.accountingIssue) {
+        const usageInput = {
           userId: job.userId,
           aiJobId: job.id,
           jobType: job.type,
@@ -507,7 +828,18 @@ export class AIService {
           promptTokens: response.promptTokens,
           completionTokens: response.completionTokens,
           totalTokens: response.totalTokens,
-        });
+        };
+        if ('providerAttempts' in response) {
+          await this.aiUsageService.recordCumulativeInTransaction(
+            transaction,
+            usageInput,
+          );
+        } else {
+          await this.aiUsageService.recordInTransaction(
+            transaction,
+            usageInput,
+          );
+        }
       }
 
       await transaction.aIJob.update({
@@ -527,7 +859,22 @@ export class AIService {
           failedAt: new Date(),
           leaseExpiresAt: null,
           error: safeError,
-          ...(failureResult !== undefined ? { result: failureResult } : {}),
+          ...(failureResult !== undefined
+            ? {
+                result: durableTextOperation(job.result)
+                  ? {
+                      ...(typeof failureResult === 'object' &&
+                      failureResult !== null &&
+                      !Array.isArray(failureResult)
+                        ? failureResult
+                        : {}),
+                      durableTextOperation: JSON.parse(
+                        JSON.stringify(durableTextOperation(job.result)),
+                      ) as Prisma.InputJsonObject,
+                    }
+                  : failureResult,
+              }
+            : {}),
         },
       });
       await this.usageService.reverseInTransaction(transaction, job.id);
@@ -657,23 +1004,29 @@ export class AIService {
       CreateAIJobInput,
       'userId' | 'conversationId' | 'messageId'
     >,
+    firstClaimOnly = false,
   ) {
     const now = new Date();
     const leaseExpiresAt = new Date(now.getTime() + this.getLeaseMs());
     const claimed = await this.prisma.aIJob.updateMany({
       where: {
         id: aiJobId,
+        ...(firstClaimOnly ? { attempts: 0 } : {}),
         ...(expected ? { ...expected, type: AIJobType.IMAGE } : {}),
         OR: [
           {
             status: AIJobStatus.PENDING,
           },
-          {
-            status: AIJobStatus.PROCESSING,
-            leaseExpiresAt: {
-              lte: now,
-            },
-          },
+          ...(!firstClaimOnly
+            ? [
+                {
+                  status: AIJobStatus.PROCESSING,
+                  leaseExpiresAt: {
+                    lte: now,
+                  },
+                },
+              ]
+            : []),
         ],
       },
       data: {
@@ -715,5 +1068,37 @@ export class AIService {
     }
 
     return seconds * 1_000;
+  }
+
+  private boundedTextUsage(
+    result: Prisma.JsonValue | null,
+  ): Pick<
+    OpenAIResponseResult,
+    'model' | 'promptTokens' | 'completionTokens' | 'totalTokens'
+  > | null {
+    if (
+      !result ||
+      typeof result !== 'object' ||
+      Array.isArray(result) ||
+      result.boundedTextOperation !== true
+    )
+      return null;
+    const usage = result.aggregateUsage;
+    if (
+      !usage ||
+      typeof usage !== 'object' ||
+      Array.isArray(usage) ||
+      typeof usage.model !== 'string' ||
+      typeof usage.promptTokens !== 'number' ||
+      typeof usage.completionTokens !== 'number' ||
+      typeof usage.totalTokens !== 'number'
+    )
+      return null;
+    return {
+      model: usage.model,
+      promptTokens: usage.promptTokens,
+      completionTokens: usage.completionTokens,
+      totalTokens: usage.totalTokens,
+    };
   }
 }

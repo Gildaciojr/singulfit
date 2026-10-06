@@ -472,11 +472,7 @@ describe('CoachAdaptiveProfileCollectorService', () => {
       ]),
     );
     expect(workout?.blockingFields).toEqual(
-      expect.arrayContaining([
-        PROFILE_ACQUISITION_FIELD.TRAINING_EXPERIENCE,
-        PROFILE_ACQUISITION_FIELD.PHYSICAL_LIMITATIONS,
-        PROFILE_ACQUISITION_FIELD.TRAINING_EQUIPMENT,
-      ]),
+      expect.arrayContaining([PROFILE_ACQUISITION_FIELD.PHYSICAL_LIMITATIONS]),
     );
   });
 
@@ -541,7 +537,7 @@ describe('CoachAdaptiveProfileCollectorService', () => {
     PROFILE_ACQUISITION_MODALITY.CROSSFIT,
     PROFILE_ACQUISITION_MODALITY.CYCLING,
   ])(
-    'requires equipment for %s only after modality is available',
+    'does not block a conservative %s plan for unknown optional equipment',
     (modality) => {
       const result = decide(
         PROFILE_ACQUISITION_INTENT.WORKOUT_PLAN_REQUEST,
@@ -549,9 +545,11 @@ describe('CoachAdaptiveProfileCollectorService', () => {
         { modality },
       );
 
-      expect(result.selectedCandidate?.field).toBe(
-        PROFILE_ACQUISITION_FIELD.TRAINING_EQUIPMENT,
-      );
+      expect(result.shouldAsk).toBe(false);
+      expect(
+        result.readiness.find((item) => item.plan === 'WORKOUT')
+          ?.blockingFields,
+      ).toEqual([]);
       expect(
         candidate(result, PROFILE_ACQUISITION_FIELD.TRAINING_EQUIPMENT),
       ).toMatchObject({

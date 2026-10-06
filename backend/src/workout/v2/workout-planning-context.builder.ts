@@ -21,6 +21,10 @@ import type { WorkoutSafetyFlag } from './workout-planning-artifact.contract';
 export class WorkoutPlanningContextBuilder {
   build(input: WorkoutPlanningContextBuilderInput): WorkoutPlanningContext {
     const recognized = input.recognizedContext;
+    const profileGoal =
+      input.snapshot.training.primaryGoal.status === 'KNOWN'
+        ? input.snapshot.training.primaryGoal
+        : input.snapshot.nutrition.primaryGoal;
     const movementConstraints = this.constraints(input.snapshot, recognized);
     const profileSafetySignals: WorkoutSafetyFlag[] = [];
     const returningAfterBreak = input.snapshot.training.returningAfterBreak;
@@ -31,7 +35,7 @@ export class WorkoutPlanningContextBuilder {
     ) {
       profileSafetySignals.push('RETURN_AFTER_LONG_PAUSE');
     }
-    return Object.freeze({
+    const context: WorkoutPlanningContext = Object.freeze({
       ...(recognized.modalityResolution
         ? { modalityResolution: recognized.modalityResolution }
         : {}),
@@ -46,7 +50,7 @@ export class WorkoutPlanningContextBuilder {
         Object.freeze({ status: 'CONFIRMED', value: input.modality }),
       referenceDate: input.referenceDate.toISOString(),
       profile: Object.freeze({
-        fitnessGoal: this.snapshotValue(input.snapshot.nutrition.primaryGoal),
+        fitnessGoal: this.snapshotValue(profileGoal),
         activityLevel: this.snapshotValue(
           input.snapshot.physical.activityLevel,
         ),
@@ -54,9 +58,7 @@ export class WorkoutPlanningContextBuilder {
         sex: this.snapshotValue(input.snapshot.physical.sex),
       }),
       training: Object.freeze({
-        objective:
-          recognized.objective ??
-          this.objectiveFromGoal(input.snapshot.nutrition.primaryGoal),
+        objective: recognized.objective ?? this.objectiveFromGoal(profileGoal),
         secondaryObjectives: this.orderedArrayValue(
           recognized.secondaryObjectives,
         ),
@@ -144,6 +146,53 @@ export class WorkoutPlanningContextBuilder {
       mutation: recognized.mutation ?? null,
       lifecyclePurpose: recognized.purpose ?? 'CREATION',
     });
+    const fields: Readonly<Record<string, WorkoutPlanningValue<unknown>>> = {
+      modality: context.modality,
+      ...context.training,
+      physicalLimitations: this.snapshotValue(
+        input.snapshot.restrictions.physicalLimitations,
+      ),
+    };
+    const facts = Object.fromEntries(
+      Object.entries(fields).map(([field, fact]) => {
+        const current = recognized[field as keyof typeof recognized];
+        const inherited = recognized.mutation?.inheritedProfileFields?.includes(
+          field as keyof typeof recognized,
+        );
+        const profileModality =
+          field === 'modality' &&
+          recognized.modalityResolution?.source === 'PROFILE_FALLBACK';
+        const source =
+          recognized.factSources?.[field] ??
+          (fact.status === 'NOT_SET'
+            ? ('CONSERVATIVE_DEFAULT' as const)
+            : current &&
+                !inherited &&
+                !profileModality &&
+                fact.status === 'CONFIRMED'
+              ? ('CURRENT_EXPLICIT' as const)
+              : fact.status === 'CONFIRMED'
+                ? ('CONFIRMED_PROFILE' as const)
+                : inherited
+                  ? ('HISTORY' as const)
+                  : ('SAFE_INFERENCE' as const));
+        return [
+          field,
+          Object.freeze({
+            value: fact.status === 'NOT_SET' ? null : fact.value,
+            source,
+            status: fact.status,
+            confidence:
+              fact.status === 'CONFIRMED'
+                ? ('HIGH' as const)
+                : fact.status === 'INFERRED'
+                  ? ('MEDIUM' as const)
+                  : ('LOW' as const),
+          }),
+        ];
+      }),
+    );
+    return Object.freeze({ ...context, resolvedFacts: Object.freeze(facts) });
   }
 
   private snapshotValue<T>(

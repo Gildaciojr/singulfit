@@ -52,6 +52,7 @@ import {
 import { WorkoutPlanningReadinessService } from './workout-planning-readiness.service';
 import { WorkoutPlanningSafetyService } from './workout-planning-safety.service';
 import { WorkoutPlanningStrategyService } from './workout-planning-strategy.service';
+import type { WorkoutBlockType } from './workout-planning-strategy.contract';
 import {
   WORKOUT_PLANNING_V2_PROMPT,
   WORKOUT_PLANNING_V2_PROMPT_V3,
@@ -340,6 +341,18 @@ describe('Workout Planning Engine V2', () => {
   ): GeneratedWorkoutPlanV2Candidate {
     const ctx = context(input);
     const strategy = new WorkoutPlanningStrategyService().build(ctx);
+    const blocks: readonly WorkoutBlockType[] =
+      strategy.modality === 'CROSSFIT'
+        ? ['WARM_UP', 'TECHNIQUE', 'CONDITIONING', 'COOLDOWN']
+        : [
+            'WARM_UP',
+            strategy.modality === 'RUNNING' ||
+            strategy.modality === 'WALKING' ||
+            strategy.modality === 'CYCLING'
+              ? 'ENDURANCE'
+              : 'STRENGTH',
+            'COOLDOWN',
+          ];
     return Object.freeze({
       artifactType: strategy.artifactType,
       modality: strategy.modality,
@@ -359,7 +372,7 @@ describe('Workout Planning Engine V2', () => {
                 ? 30
                 : strategy.sessionDurationMinutes.value,
             blocks: Object.freeze(
-              strategy.requiredBlocks.map((block, blockIndex) =>
+              blocks.map((block, blockIndex) =>
                 Object.freeze({
                   blockKey: `block-${sessionIndex + 1}-${blockIndex + 1}`,
                   type: block,
@@ -367,8 +380,7 @@ describe('Workout Planning Engine V2', () => {
                   estimatedDurationMinutes:
                     (strategy.sessionDurationMinutes.status === 'NOT_SET'
                       ? 30
-                      : strategy.sessionDurationMinutes.value) /
-                    strategy.requiredBlocks.length,
+                      : strategy.sessionDurationMinutes.value) / blocks.length,
                   activities: Object.freeze([
                     activity(
                       `activity-${sessionIndex + 1}-${blockIndex + 1}`,
@@ -378,7 +390,7 @@ describe('Workout Planning Engine V2', () => {
                       (strategy.sessionDurationMinutes.status === 'NOT_SET'
                         ? 30
                         : strategy.sessionDurationMinutes.value) /
-                        strategy.requiredBlocks.length,
+                        blocks.length,
                     ),
                   ]),
                 }),
@@ -492,7 +504,7 @@ describe('Workout Planning Engine V2', () => {
       workoutSchemaForAuthorizedEquipment([]).schema,
     ))
       expect(variant.maxItems).toBe(0);
-    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(8);
+    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(9);
     expect(WORKOUT_PLANNING_V2_PROMPT_V3.version).toBe(3);
   });
   it('reproduces five 60-minute FULL_GYM sessions with bodyweight warm-up without unavailable-equipment failures', () => {
@@ -625,7 +637,10 @@ describe('Workout Planning Engine V2', () => {
       createStandaloneJob: jest.fn().mockResolvedValue({
         id: 'fake-job',
         status: AIJobStatus.PENDING,
-        promptVersion: { version: 8, name: WORKOUT_PLANNING_V2_PROMPT.name },
+        promptVersion: {
+          version: WORKOUT_PLANNING_V2_PROMPT.version,
+          name: WORKOUT_PLANNING_V2_PROMPT.name,
+        },
       }),
       runTextJob: jest
         .fn()
@@ -849,7 +864,7 @@ describe('Workout Planning Engine V2', () => {
         missingExperience,
         false,
       ).missingFields,
-    ).toContain('EXPERIENCE');
+    ).not.toContain('EXPERIENCE');
     expect(
       service.evaluate(
         profile,
@@ -887,7 +902,7 @@ describe('Workout Planning Engine V2', () => {
         },
         false,
       ).missingFields,
-    ).toContain('ENVIRONMENT');
+    ).not.toContain('ENVIRONMENT');
     expect(
       service.evaluate(
         profile,
@@ -1095,11 +1110,11 @@ describe('Workout Planning Engine V2', () => {
       'CYCLING',
       'CROSSFIT',
     ]);
-    expect(strategies[2].requiredBlocks).toContain('ENDURANCE');
+    expect(strategies[2].requiredBlocks).toEqual([]);
     expect(strategies[3].authorizedEquipment).toEqual(['BIKE', 'BODYWEIGHT']);
     expect(strategies[4]).toMatchObject({
       technicalMovementsAllowed: false,
-      requiredBlocks: expect.arrayContaining(['TECHNIQUE', 'CONDITIONING']),
+      requiredBlocks: [],
     });
     expect(JSON.stringify(context(inputs[0]))).not.toContain(
       'technical-user-id',
@@ -1162,7 +1177,6 @@ describe('Workout Planning Engine V2', () => {
         'EQUIPMENT_UNAVAILABLE',
         'TECHNICAL_MOVEMENT_UNSAFE',
         'INTENSITY_EXCESSIVE',
-        'AGGRESSIVE_PROGRESSION',
       ]),
     );
     const orphan = {
@@ -1242,7 +1256,10 @@ describe('Workout Planning Engine V2', () => {
         id: 'job-id',
         status: AIJobStatus.PENDING,
         promptVersionId: 'prompt-id',
-        promptVersion: { version: 8, name: WORKOUT_PLANNING_V2_PROMPT.name },
+        promptVersion: {
+          version: WORKOUT_PLANNING_V2_PROMPT.version,
+          name: WORKOUT_PLANNING_V2_PROMPT.name,
+        },
         result: null,
       }),
       runTextJob: jest.fn().mockResolvedValue(response),
@@ -1293,7 +1310,7 @@ describe('Workout Planning Engine V2', () => {
       },
       output: { validation: { status: 'VALID' } },
     });
-    expect(generation.completion).toEqual({
+    expect(generation.completion).toMatchObject({
       userId: 'user-id',
       aiJobId: 'job-id',
       jobType: AIJobType.WORKOUT,
@@ -1321,10 +1338,10 @@ describe('Workout Planning Engine V2', () => {
     const keyForVersion = (version: number) =>
       `workout-planning-v2:${createHash('sha256').update(`user-id:${version}:${providerRequest.input}`).digest('hex')}`;
     expect(generation.operationKey).toBe(
-      `workout-planning-v2:${createHash('sha256').update(`user-id:8:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${providerRequest.input}`).digest('hex')}`,
+      `workout-planning-v2:${createHash('sha256').update(`user-id:9:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${providerRequest.input}`).digest('hex')}`,
     );
     expect(WORKOUT_PLANNING_V2_EXECUTION_REVISION).toBe(
-      'timed-clock-canonical-v1',
+      'ai-first-v9-bounded-repair-v1',
     );
     expect(generation.operationKey).not.toBe(keyForVersion(6));
     expect(generation.operationKey).not.toBe(keyForVersion(7));
@@ -1348,7 +1365,10 @@ describe('Workout Planning Engine V2', () => {
         id: 'completed-job-id',
         status: AIJobStatus.COMPLETED,
         promptVersionId: 'prompt-id',
-        promptVersion: { version: 8, name: WORKOUT_PLANNING_V2_PROMPT.name },
+        promptVersion: {
+          version: WORKOUT_PLANNING_V2_PROMPT.version,
+          name: WORKOUT_PLANNING_V2_PROMPT.name,
+        },
         result: storedResult,
       }),
       runTextJob: jest.fn(),
@@ -1385,7 +1405,10 @@ describe('Workout Planning Engine V2', () => {
         id: 'processing-job-id',
         status: AIJobStatus.PROCESSING,
         promptVersionId: 'prompt-id',
-        promptVersion: { version: 8, name: WORKOUT_PLANNING_V2_PROMPT.name },
+        promptVersion: {
+          version: WORKOUT_PLANNING_V2_PROMPT.version,
+          name: WORKOUT_PLANNING_V2_PROMPT.name,
+        },
         result: null,
       }),
       runTextJob: jest.fn(),
@@ -1429,7 +1452,16 @@ describe('Workout Planning Engine V2', () => {
                     : {
                         ...block,
                         activities: [
-                          ...block.activities,
+                          // Reserve time for the carry while keeping its incident clock unchanged.
+                          ...block.activities.map((activity) =>
+                            activity.kind === 'TIMED'
+                              ? {
+                                  ...activity,
+                                  durationSeconds: 810,
+                                  rounds: 14,
+                                }
+                              : activity,
+                          ),
                           {
                             activityKey: 'FRIDAY_STRENGTH_3',
                             name: 'Farmer walk com halteres',
@@ -1467,7 +1499,10 @@ describe('Workout Planning Engine V2', () => {
           id: 'job-id',
           status,
           promptVersionId: 'prompt-id',
-          promptVersion: { version: 8, name: WORKOUT_PLANNING_V2_PROMPT.name },
+          promptVersion: {
+            version: WORKOUT_PLANNING_V2_PROMPT.version,
+            name: WORKOUT_PLANNING_V2_PROMPT.name,
+          },
           result: status === AIJobStatus.COMPLETED ? storedResult : null,
         }),
         runTextJob: jest.fn().mockResolvedValue(response),
@@ -1500,7 +1535,7 @@ describe('Workout Planning Engine V2', () => {
           (issue) => issue.code === 'TIMED_DURATION_IMPOSSIBLE',
         ),
       ).toBe(false);
-      expect(result.storedResult).toEqual(storedResult);
+      expect(result.storedResult).toMatchObject(storedResult);
       expect(result.output.generationMetadata).toMatchObject({
         engineVersion: 2,
         promptVersionId: 'prompt-id',
@@ -1518,7 +1553,7 @@ describe('Workout Planning Engine V2', () => {
       expect(ai.failJob).not.toHaveBeenCalled();
       if (result.status === 'PENDING_COMPLETION') {
         expect(result.completion.response.outputText).toBe(rawOutput);
-        expect(result.completion.result).toEqual(storedResult);
+        expect(result.completion.result).toMatchObject(storedResult);
       }
       expect(
         raw.sessions[4].blocks
@@ -1573,7 +1608,10 @@ describe('Workout Planning Engine V2', () => {
         id: 'job-id',
         status: AIJobStatus.PENDING,
         promptVersionId: 'prompt-id',
-        promptVersion: { version: 8, name: WORKOUT_PLANNING_V2_PROMPT.name },
+        promptVersion: {
+          version: WORKOUT_PLANNING_V2_PROMPT.version,
+          name: WORKOUT_PLANNING_V2_PROMPT.name,
+        },
         result: null,
       }),
       runTextJob: jest.fn().mockResolvedValue(response),
@@ -1609,6 +1647,10 @@ describe('Workout Planning Engine V2', () => {
       {
         candidateOutput: response.outputText,
         model: response.model,
+        executionAudit: expect.objectContaining({
+          providerCalls: 1,
+          repairAttempted: false,
+        }),
         rejection: {
           stage: 'POST_GENERATION_VALIDATION',
           issues: expect.arrayContaining([
@@ -1630,7 +1672,10 @@ describe('Workout Planning Engine V2', () => {
     const aiService = {
       createStandaloneJob: jest.fn().mockResolvedValue({
         id: 'failed-job',
-        promptVersion: { version: 8, name: WORKOUT_PLANNING_V2_PROMPT.name },
+        promptVersion: {
+          version: WORKOUT_PLANNING_V2_PROMPT.version,
+          name: WORKOUT_PLANNING_V2_PROMPT.name,
+        },
         status: AIJobStatus.FAILED,
         result: {
           candidateOutput: JSON.stringify(candidate(input)),
@@ -1661,7 +1706,10 @@ describe('Workout Planning Engine V2', () => {
         id: 'job-id',
         status: AIJobStatus.PENDING,
         promptVersionId: 'prompt-id',
-        promptVersion: { version: 8, name: WORKOUT_PLANNING_V2_PROMPT.name },
+        promptVersion: {
+          version: WORKOUT_PLANNING_V2_PROMPT.version,
+          name: WORKOUT_PLANNING_V2_PROMPT.name,
+        },
         result: null,
       }),
       runTextJob: jest.fn().mockRejectedValue(providerError),
@@ -1682,6 +1730,14 @@ describe('Workout Planning Engine V2', () => {
       'job-id',
       providerError,
       undefined,
+      undefined,
+      {
+        executionAudit: expect.objectContaining({
+          finalOutcome: 'FAILED',
+          providerCalls: 1,
+          repairAttempted: false,
+        }),
+      },
     );
     expect(aiService.completeJobInTransaction).not.toHaveBeenCalled();
   });
@@ -1799,14 +1855,9 @@ describe('Workout Planning Engine V2', () => {
       context(intermediateInput),
     );
 
-    expect(beginner.requiredBlocks).toEqual([
-      'WARM_UP',
-      'TECHNIQUE',
-      'CONDITIONING',
-      'COOLDOWN',
-    ]);
+    expect(beginner.requiredBlocks).toEqual([]);
     expect(beginner.technicalMovementsAllowed).toBe(false);
-    expect(intermediate.technicalMovementsAllowed).toBe(true);
+    expect(intermediate.technicalMovementsAllowed).toBe(false);
     expect(intermediate.appliedConstraints).toEqual([
       expect.objectContaining({ code: 'KNEE_LOAD' }),
     ]);
@@ -1886,12 +1937,8 @@ describe('Workout Planning Engine V2', () => {
     );
     const readiness = new WorkoutPlanningReadinessService();
 
-    expect(strategy.requiredBlocks).toEqual([
-      'WARM_UP',
-      'ENDURANCE',
-      'COOLDOWN',
-    ]);
-    expect(strategy.intensityPolicy.scale).toBe('CONVERSATIONAL_PACE');
+    expect(strategy.requiredBlocks).toEqual([]);
+    expect(strategy.intensityPolicy.scale).toBe('QUALITATIVE');
     expect(
       readiness.evaluate(
         snapshot(),
@@ -1947,27 +1994,27 @@ describe('Workout Planning Engine V2', () => {
         ),
       );
 
-      expect(strategy.requiredBlocks).toContain('CONDITIONING');
+      expect(strategy.requiredBlocks).toEqual([]);
       expect(strategy.requiredBlocks).not.toContain('STRENGTH');
       expect(strategy.requiredBlocks).not.toContain('HYPERTROPHY');
       expect(strategy.authorizedEquipment).toEqual(['BODYWEIGHT']);
     },
   );
 
-  it('publishes prompt V2 with explicit personalization and stereotype guards', () => {
+  it('publishes the strict V9 contract and AI technical authority', () => {
     expect(WORKOUT_PLANNING_V2_PROMPT).toMatchObject({
-      name: 'workout_planning_v2_v8',
-      version: 8,
+      name: 'workout_planning_v2_v9',
+      version: 9,
       capability: 'WORKOUT_PLANNING_V2',
     });
     expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(
-      'Nunca derive foco muscular',
+      'Você é o responsável técnico',
     );
     expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(
-      'Preferências e foco muscular explicitamente confirmados prevalecem',
+      'currentRequest.text',
     );
     expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(
-      'não repita full-body indiscriminadamente',
+      'não um treino previamente decidido',
     );
     const schema = WORKOUT_PLANNING_V2_PROMPT.schema.schema as {
       properties: {
@@ -1991,7 +2038,7 @@ describe('Workout Planning Engine V2', () => {
   });
 
   it.each([3, 4, 5, 6])(
-    'creates a differentiated gym structure for %i sessions',
+    'preserves %i sessions while leaving gym composition to the model',
     (frequency) => {
       const strategy = new WorkoutPlanningStrategyService().build(
         context(
@@ -2003,16 +2050,13 @@ describe('Workout Planning Engine V2', () => {
         ),
       );
       expect(strategy.sessionCount).toBe(frequency);
-      expect(strategy.sessionFocuses).toHaveLength(frequency);
-      expect(new Set(strategy.sessionFocuses).size).toBe(frequency);
-      if (frequency === 6)
-        expect(strategy.recoveryGuidance).toContain(
-          'janela completa de descanso',
-        );
+      expect(strategy.sessionFocuses).toEqual([]);
+      expect(strategy.requiredBlocks).toEqual([]);
+      expect(strategy.recoveryGuidance).toBe('');
     },
   );
 
-  it('differentiates gym 5x by objective and experience', () => {
+  it('passes gym objective and experience without choosing the split', () => {
     const strategy = new WorkoutPlanningStrategyService();
     const beginnerHypertrophy = strategy.build(
       context(
@@ -2045,41 +2089,41 @@ describe('Workout Planning Engine V2', () => {
       ),
     );
 
-    expect(beginnerHypertrophy.sessionFocuses).not.toEqual(
-      advancedStrength.sessionFocuses,
-    );
-    expect(advancedHypertrophy.sessionFocuses).not.toEqual(
-      advancedStrength.sessionFocuses,
-    );
-    expect(beginnerHypertrophy.sessionFocuses).not.toEqual(
-      advancedHypertrophy.sessionFocuses,
-    );
+    expect(beginnerHypertrophy.experience).toMatchObject({ value: 'BEGINNER' });
+    expect(advancedStrength.objective).toMatchObject({ value: 'STRENGTH' });
+    expect(advancedHypertrophy.objective).toMatchObject({
+      value: 'HYPERTROPHY',
+    });
+    for (const envelope of [
+      beginnerHypertrophy,
+      advancedStrength,
+      advancedHypertrophy,
+    ]) {
+      expect(envelope.sessionFocuses).toEqual([]);
+      expect(envelope.sessionCount).toBe(5);
+    }
   });
 
-  it.each([
-    ['GLUTES', 'Glúteos'],
-    ['CHEST', 'Peito'],
-  ] as const)('preserves recoverable %s priority in gym 5x', (focus, label) => {
-    const strategy = new WorkoutPlanningStrategyService().build(
-      context(
-        recognized('GYM_STRENGTH', ['BARBELL', 'DUMBBELL'], {
-          frequency: 5,
-          objective: 'HYPERTROPHY',
-          experience: 'INTERMEDIATE',
-          muscleFocus: [focus],
-          environment: 'FULL_GYM',
-        }),
-      ),
-    );
-    const prioritySessions = strategy.sessionFocuses
-      .map((session, index) => (session.includes(label) ? index : -1))
-      .filter((index) => index >= 0);
+  it.each(['GLUTES', 'CHEST'] as const)(
+    'preserves %s preference without predetermining the split',
+    (focus) => {
+      const strategy = new WorkoutPlanningStrategyService().build(
+        context(
+          recognized('GYM_STRENGTH', ['BARBELL', 'DUMBBELL'], {
+            frequency: 5,
+            objective: 'HYPERTROPHY',
+            experience: 'INTERMEDIATE',
+            muscleFocus: [focus],
+            environment: 'FULL_GYM',
+          }),
+        ),
+      );
+      expect(strategy.muscleFocus).toEqual([focus]);
+      expect(strategy.sessionFocuses).toEqual([]);
+    },
+  );
 
-    expect(prioritySessions).toHaveLength(2);
-    expect(prioritySessions[1] - prioritySessions[0]).toBeGreaterThan(1);
-  });
-
-  it('uses a conservative distribution when returning after a break', () => {
+  it('passes return context without predetermining distribution', () => {
     const base = context(
       recognized('GYM_STRENGTH', ['BARBELL'], {
         frequency: 5,
@@ -2099,12 +2143,11 @@ describe('Workout Planning Engine V2', () => {
     });
     const service = new WorkoutPlanningStrategyService();
 
-    expect(service.build(returning).sessionFocuses).not.toEqual(
-      service.build(base).sessionFocuses,
-    );
-    expect(service.build(returning).recoveryGuidance).toContain(
-      'distribuição conservadora',
-    );
+    expect(returning.training.returningAfterBreak).toMatchObject({
+      value: true,
+    });
+    expect(service.build(returning).sessionFocuses).toEqual([]);
+    expect(service.build(base).sessionFocuses).toEqual([]);
   });
 
   it('differentiates CrossFit readiness at the same frequency', () => {
@@ -2130,9 +2173,10 @@ describe('Workout Planning Engine V2', () => {
       ),
     );
 
-    expect(beginner.sessionFocuses).not.toEqual(advanced.sessionFocuses);
-    expect(beginner.sessionFocuses[0]).toContain('Fundamentos');
-    expect(advanced.sessionFocuses[0]).toContain('Levantamento técnico');
+    expect(beginner.technicalMovementsAllowed).toBe(false);
+    expect(advanced.technicalMovementsAllowed).toBe(true);
+    expect(beginner.sessionFocuses).toEqual([]);
+    expect(advanced.sessionFocuses).toEqual([]);
   });
 
   it('differentiates beginner and experienced running strategies', () => {
@@ -2162,11 +2206,10 @@ describe('Workout Planning Engine V2', () => {
       ),
     );
 
-    expect(beginner.sessionFocuses).not.toEqual(experienced.sessionFocuses);
-    expect(beginner.sessionFocuses[0]).toContain('Run/walk');
-    expect(experienced.sessionFocuses).toContain(
-      'Ritmo sustentável para progressão até 21 km',
-    );
+    expect(beginner.experience).toMatchObject({ value: 'BEGINNER' });
+    expect(experienced.experience).toMatchObject({ value: 'ADVANCED' });
+    expect(beginner.sessionFocuses).toEqual([]);
+    expect(experienced.sessionFocuses).toEqual([]);
   });
 
   it('strictly parses discriminated activities and rejects malformed JSON', () => {

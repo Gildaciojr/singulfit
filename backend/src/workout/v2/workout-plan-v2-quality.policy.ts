@@ -4,11 +4,9 @@ import type {
   WorkoutActivityV2,
 } from './workout-plan-v2.contract';
 import type { WorkoutPlanningContext } from './workout-planning-context.contract';
-import type { WorkoutPlanningStrategy } from './workout-planning-strategy.contract';
 
 export function workoutStructuralActivityIssue(
   activity: WorkoutActivityV2,
-  strategy?: WorkoutPlanningStrategy,
 ): WorkoutPlanValidationIssue | null {
   if (activity.kind === 'ENDURANCE') {
     const name = activity.name
@@ -32,9 +30,9 @@ export function workoutStructuralActivityIssue(
         ? foot || activity.equipment.includes('TREADMILL')
         : cycling ||
           activity.equipment.includes('BIKE') ||
-          (activity.mode === 'WALK' &&
-            running &&
-            strategy?.runningTransitionAuthorized !== true)
+          // Representation consistency, independent of transition authorization.
+          // Walking's prohibition is checked only by the WALKING modality guard.
+          (activity.mode === 'WALK' && running)
     )
       return {
         code: 'ENDURANCE_MODE_CONFLICT',
@@ -58,7 +56,7 @@ export function workoutStructuralActivityIssue(
     )
       return {
         code: 'TIMED_DURATION_UNCERTAIN',
-        severity: activity.rounds > 1 ? 'ERROR' : 'WARNING',
+        severity: 'WARNING',
         path: activity.activityKey,
       };
   }

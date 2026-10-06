@@ -161,7 +161,8 @@ describe('Hard modality validation before persistence and public formatting', ()
       },
     });
     expect(beginner.technicalMovementsAllowed).toBe(false);
-    expect(beginner.sessionFocuses).not.toEqual(advanced.sessionFocuses);
+    expect(beginner.sessionFocuses).toEqual([]);
+    expect(advanced.sessionFocuses).toEqual([]);
     expect(limited.appliedConstraints).toContainEqual({
       code: 'IMPACT',
       label: 'Evitar impacto',
@@ -253,7 +254,10 @@ describe('Hard modality validation before persistence and public formatting', ()
         id: 'job',
         status: AIJobStatus.PENDING,
         promptVersionId: 'v8',
-        promptVersion: { version: 8, name: WORKOUT_PLANNING_V2_PROMPT.name },
+        promptVersion: {
+          version: WORKOUT_PLANNING_V2_PROMPT.version,
+          name: WORKOUT_PLANNING_V2_PROMPT.name,
+        },
       }),
       runTextJob: jest.fn(),
       failJob: jest.fn(),
@@ -281,7 +285,10 @@ describe('Hard modality validation before persistence and public formatting', ()
       modality: 'WALKING',
       objective: 'WEIGHT_LOSS',
       title: 'Sua semana de caminhada',
-      sessions: strategy.sessionFocuses.map((label, index) => ({
+      sessions: Array.from(
+        { length: strategy.sessionCount },
+        (_, index) => `Sessão técnica ${index + 1}`,
+      ).map((label, index) => ({
         sessionKey: `s${index}`,
         sequence: index + 1,
         label,
@@ -321,7 +328,7 @@ describe('Hard modality validation before persistence and public formatting', ()
     const s = await productionWalking();
     expect(s.strategy.modality).toBe('WALKING');
     expect(s.strategy.sessionCount).toBe(5);
-    expect(new Set(s.strategy.sessionFocuses).size).toBe(5);
+    expect(s.strategy.sessionFocuses).toEqual([]);
     const result = await s.engine.generateCandidate(s.input);
     expect(result.output.validation.status).not.toBe('INVALID');
     expect(

@@ -37,6 +37,13 @@ describe('Current-turn Understanding is the Workout modality source of truth', (
   });
   beforeEach(() => provider.mockClear());
   const matrix: readonly [string, WorkoutModality][] = [
+    [
+      'Quero CrossFit 4x, estou voltando agora e quero algo mais técnico',
+      'CROSSFIT',
+    ],
+    ['Quero corrida 4x, agora quero esforço mais leve', 'RUNNING'],
+    ['Quero CrossFit, agora não quero corrida', 'CROSSFIT'],
+    ['Quero CrossFit, agora quero caminhada', 'WALKING'],
     ['monte um treino de caminhada para mim, 5 vezes por semana', 'WALKING'],
     ['monte um treino de caminhada para mim 5x', 'WALKING'],
     ['quero caminhar 4x por semana', 'WALKING'],

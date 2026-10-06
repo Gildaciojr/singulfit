@@ -57,6 +57,7 @@ export interface GenerateWorkoutPlanV2InputSource {
   readonly snapshot?: CoachProfileSnapshot;
   readonly referenceDate: Date;
   readonly currentMessage?: string;
+  readonly requestId?: string;
   readonly progressEvidence?: readonly WorkoutProgressEvidence[];
   readonly previousPlan?: WorkoutPlanV2;
 }
@@ -127,6 +128,10 @@ export class GenerateWorkoutPlanV2InputBuilder {
     return Object.freeze({
       profileId,
       generationInput: Object.freeze({
+        currentRequest: Object.freeze({
+          text: source.currentMessage ?? '',
+          ...(source.requestId ? { requestId: source.requestId } : {}),
+        }),
         userId: source.userId,
         decision,
         recognizedContext:
@@ -375,6 +380,49 @@ export class GenerateWorkoutPlanV2InputBuilder {
       ...Object.fromEntries(
         Object.entries(declared).filter(([, value]) => value !== undefined),
       ),
+      factSources: Object.freeze({
+        ...current?.factSources,
+        ...Object.fromEntries(
+          Object.entries(declared).flatMap(([field, value]) =>
+            field !== 'equipment' &&
+            field !== 'environment' &&
+            field !== 'modality' &&
+            typeof value === 'object' &&
+            value !== null &&
+            'status' in value
+              ? [
+                  [
+                    field,
+                    value.status === 'INFERRED'
+                      ? 'SAFE_INFERENCE'
+                      : 'CURRENT_EXPLICIT',
+                  ],
+                ]
+              : [],
+          ),
+        ),
+        modality:
+          declared.modalityResolution?.source === 'PROFILE_FALLBACK'
+            ? ('CONFIRMED_PROFILE' as const)
+            : declared.modality
+              ? ('CURRENT_EXPLICIT' as const)
+              : current?.modality
+                ? (current.factSources?.modality ??
+                  ('CURRENT_EXPLICIT' as const))
+                : ('CONFIRMED_PROFILE' as const),
+        environment: preserveLimitedGym
+          ? (current?.factSources?.environment ??
+            ('CONFIRMED_PROFILE' as const))
+          : declared.environment
+            ? ('CURRENT_EXPLICIT' as const)
+            : current?.factSources?.environment,
+        equipment:
+          equipment === declared.equipment && equipment
+            ? equipment.status === 'CONFIRMED'
+              ? ('CURRENT_EXPLICIT' as const)
+              : ('SAFE_INFERENCE' as const)
+            : current?.factSources?.equipment,
+      }),
       equipment,
       environment: preserveLimitedGym
         ? current?.environment

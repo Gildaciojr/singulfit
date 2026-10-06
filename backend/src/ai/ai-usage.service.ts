@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -55,6 +56,64 @@ export class AIUsageService {
     input: RecordAIUsageInput,
   ) {
     return this.createUsage(transaction, input);
+  }
+
+  /** Cumulative provider usage for a bounded operation, including terminal replay. */
+  async recordCumulativeInTransaction(
+    transaction: Prisma.TransactionClient,
+    input: RecordAIUsageInput,
+  ) {
+    this.validateTokens(
+      input.promptTokens,
+      input.completionTokens,
+      input.totalTokens,
+    );
+    const existing = await transaction.aIUsage.findUnique({
+      where: { aiJobId: input.aiJobId },
+    });
+    if (!existing) return this.createUsage(transaction, input);
+    if (existing.userId !== input.userId || existing.model !== input.model)
+      throw new ConflictException(
+        'Cumulative AI usage ownership/model mismatch',
+      );
+    const promptDelta = input.promptTokens - existing.promptTokens;
+    const completionDelta = input.completionTokens - existing.completionTokens;
+    if (promptDelta <= 0 && completionDelta <= 0) return existing;
+    if (promptDelta < 0 || completionDelta < 0)
+      throw new ConflictException('Cumulative AI usage is inconsistent');
+    const costDelta = this.estimateCost(
+      input.jobType,
+      promptDelta,
+      completionDelta,
+    );
+    const updated = await transaction.aIUsage.updateMany({
+      where: {
+        id: existing.id,
+        promptTokens: existing.promptTokens,
+        completionTokens: existing.completionTokens,
+      },
+      data: {
+        promptTokens: { increment: promptDelta },
+        completionTokens: { increment: completionDelta },
+        totalTokens: { increment: promptDelta + completionDelta },
+        estimatedCost: { increment: costDelta },
+      },
+    });
+    if (updated.count !== 1)
+      throw new ConflictException('Cumulative AI usage changed concurrently');
+    await transaction.aIUsageSummary.update({
+      where: {
+        userId_date: {
+          userId: input.userId,
+          date: this.utcDay(existing.createdAt),
+        },
+      },
+      data: {
+        totalTokens: { increment: promptDelta + completionDelta },
+        totalCostUsd: { increment: costDelta },
+      },
+    });
+    return existing;
   }
 
   estimateCost(

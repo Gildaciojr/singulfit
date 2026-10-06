@@ -25,7 +25,25 @@ export class WorkoutPlanningReadinessService {
     recognized: WorkoutRecognizedContext,
     previousPlanAvailable: boolean,
   ): WorkoutPlanningReadiness {
-    const requiredFields = this.requiredFields(artifactType, modality);
+    const requiredFields = this.requiredFields(artifactType);
+    const confirmationFields: readonly [
+      WorkoutReadinessField,
+      WorkoutPlanningValue<unknown> | undefined,
+    ][] = [
+      ['OBJECTIVE', recognized.objective],
+      ['EXPERIENCE', recognized.experience],
+      ['WEEKLY_FREQUENCY', recognized.weeklyFrequency],
+      ['SESSION_DURATION', recognized.sessionDurationMinutes],
+      ['ENVIRONMENT', recognized.environment],
+      ['EQUIPMENT', recognized.equipment],
+      ['PERCEIVED_CONDITIONING', recognized.perceivedConditioning],
+    ];
+    for (const [field, value] of confirmationFields)
+      if (
+        value?.status === 'REQUIRES_CONFIRMATION' &&
+        !requiredFields.includes(field)
+      )
+        requiredFields.push(field);
     if (
       modality === WORKOUT_MODALITY.RUNNING &&
       recognized.objective?.status !== 'NOT_SET' &&
@@ -121,7 +139,6 @@ export class WorkoutPlanningReadinessService {
 
   private requiredFields(
     artifact: WorkoutArtifactType,
-    modality: WorkoutModality,
   ): WorkoutReadinessField[] {
     if (artifact === WORKOUT_ARTIFACT_TYPE.POINT_GUIDANCE) {
       return ['MODALITY', 'PHYSICAL_LIMITATIONS'];
@@ -134,30 +151,8 @@ export class WorkoutPlanningReadinessService {
     ) {
       return ['MODALITY', 'PHYSICAL_LIMITATIONS', 'CURRENT_PLAN'];
     }
-    const fields: WorkoutReadinessField[] = [
-      'OBJECTIVE',
-      'MODALITY',
-      'SESSION_DURATION',
-      'ENVIRONMENT',
-      'PHYSICAL_LIMITATIONS',
-    ];
-    if (
-      modality !== WORKOUT_MODALITY.RUNNING &&
-      modality !== WORKOUT_MODALITY.WALKING
-    ) {
-      fields.push('EQUIPMENT');
-    }
-    if (artifact === WORKOUT_ARTIFACT_TYPE.WEEKLY_PLAN) {
-      fields.push('EXPERIENCE', 'WEEKLY_FREQUENCY');
-    }
-    if (
-      modality === WORKOUT_MODALITY.RUNNING ||
-      modality === WORKOUT_MODALITY.CYCLING
-    ) {
-      if (!fields.includes('EXPERIENCE')) fields.push('EXPERIENCE');
-      fields.push('PERCEIVED_CONDITIONING');
-    }
-    return fields;
+    // Missing nonclinical preferences do not prevent a conservative AI plan.
+    return ['MODALITY', 'PHYSICAL_LIMITATIONS'];
   }
 
   private fieldState(

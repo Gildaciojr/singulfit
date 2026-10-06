@@ -64,9 +64,20 @@ export function currentWorkoutModality(
 ): WorkoutModalityResolution {
   let value = normalize(text);
   const permission = runningTransitionPermission(value);
-  const preference = [
-    ...value.matchAll(/\b(?:agora|na verdade|prefiro)\b/gu),
-  ].at(-1);
+  const preference = [...value.matchAll(/\b(?:agora|na verdade|prefiro)\b/gu)]
+    .filter((anchor) => {
+      const tail = value.slice(anchor.index);
+      return (
+        concepts.some(([, pattern]) => {
+          const mention = pattern.exec(tail);
+          if (!mention) return false;
+          return !/\b(?:nao(?: quero)?|sem|nada de|antes fazia)\s+(?:\w+\s+){0,2}$/u.test(
+            tail.slice(0, mention.index),
+          );
+        }) || /\b(?:casa|home workout|peso corporal|academia|box)\b/u.test(tail)
+      );
+    })
+    .at(-1);
   if (preference) value = value.slice(preference.index);
   // A performance purpose is subordinate to the requested exercise, even when
   // it appears before it: "para melhorar meu crossfit, quero musculação".

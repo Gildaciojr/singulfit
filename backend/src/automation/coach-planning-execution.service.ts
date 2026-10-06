@@ -908,6 +908,7 @@ export class CoachPlanningExecutionService {
             snapshot,
             referenceDate,
             currentMessage: runtime?.currentMessage,
+            requestId: runtime?.originalRequestMessageId ?? runtime?.messageId,
             previousPlan:
               mutation.status === 'READY' ? mutation.previousPlan : undefined,
           })

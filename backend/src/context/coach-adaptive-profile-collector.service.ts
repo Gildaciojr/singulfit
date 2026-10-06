@@ -811,6 +811,16 @@ export class CoachAdaptiveProfileCollectorService {
     ) {
       return Object.freeze(['DIET'] as const);
     }
+    const optionalWorkoutFields: readonly ProfileAcquisitionField[] = [
+      PROFILE_ACQUISITION_FIELD.PRIMARY_GOAL,
+      PROFILE_ACQUISITION_FIELD.TRAINING_EXPERIENCE,
+      PROFILE_ACQUISITION_FIELD.TRAINING_ENVIRONMENT,
+      PROFILE_ACQUISITION_FIELD.TRAINING_EQUIPMENT,
+      PROFILE_ACQUISITION_FIELD.TRAINING_FREQUENCY,
+      PROFILE_ACQUISITION_FIELD.SESSION_DURATION,
+    ];
+    if (optionalWorkoutFields.includes(definition.field))
+      return definition.blocksPlans.filter((plan) => plan !== 'WORKOUT');
     return definition.blocksPlans;
   }
 

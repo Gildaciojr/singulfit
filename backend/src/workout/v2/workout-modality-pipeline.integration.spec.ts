@@ -153,7 +153,7 @@ describe('Understanding → builder → engine → parser/validator → formatte
     const prompts = {
       getActive: jest.fn(() => Promise.resolve(active)),
       createVersion: jest.fn((definition: typeof legacy) => {
-        events.push('activate-v8');
+        events.push('activate-v9');
         active = definition;
         return Promise.resolve(definition);
       }),
@@ -309,20 +309,20 @@ describe('Understanding → builder → engine → parser/validator → formatte
       modality: strategy.modality,
       objective: 'WEIGHT_LOSS',
       title: 'Planejamento personalizado',
-      sessions: strategy.sessionFocuses.map((label, index) => ({
+      sessions: Array.from(
+        { length: strategy.sessionCount },
+        (_, index) => `Sessão técnica ${index + 1}`,
+      ).map((label, index) => ({
         sessionKey: `s${index}`,
         sequence: index + 1,
         label,
         estimatedDurationMinutes: duration,
-        blocks: strategy.requiredBlocks.map((type, b) => {
+        blocks: (crossfit
+          ? (['WARM_UP', 'TECHNIQUE', 'CONDITIONING', 'COOLDOWN'] as const)
+          : (['WARM_UP', 'ENDURANCE', 'COOLDOWN'] as const)
+        ).map((type, b) => {
           const minutes =
-            ((strategy.requiredBlocks.length === 4
-              ? b === 0 || b === 3
-                ? 5
-                : 10
-              : b === 1
-                ? 20
-                : 5) *
+            ((crossfit ? (b === 0 || b === 3 ? 5 : 10) : b === 1 ? 20 : 5) *
               duration) /
             30;
           return {
@@ -365,7 +365,7 @@ describe('Understanding → builder → engine → parser/validator → formatte
             : 'Clean',
       );
       expect(s.strategy.technicalMovementsAllowed).toBe(level !== 'BEGINNER');
-      expect(s.events).toEqual(['activate-v8', 'create-job', 'provider']);
+      expect(s.events).toEqual(['activate-v9', 'create-job', 'provider']);
       expect(s.legacy.version).toBe(7);
       expect(s.legacy.name).not.toBe(WORKOUT_PLANNING_V2_PROMPT.name);
     },
@@ -499,7 +499,7 @@ describe('Understanding → builder → engine → parser/validator → formatte
           }),
         );
         expect(preflight.prepared.strategy?.technicalMovementsAllowed).toBe(
-          level === 'ADVANCED',
+          level !== 'BEGINNER',
         );
         const dispatcher = new CoachPlanningExecutionDispatcherService(
           {} as never,
@@ -530,10 +530,12 @@ describe('Understanding → builder → engine → parser/validator → formatte
         expect(result.content).toMatch(/CrossFit/i);
         expect(s.ai.createStandaloneJob).toHaveBeenCalledTimes(1);
         expect(s.ai.createStandaloneJob).toHaveBeenCalledWith(
-          expect.objectContaining({ promptName: 'workout_planning_v2_v8' }),
+          expect.objectContaining({
+            promptName: WORKOUT_PLANNING_V2_PROMPT.name,
+          }),
         );
         expect(s.ai.runTextJob).toHaveBeenCalledTimes(1);
-        expect(s.events).toEqual(['activate-v8', 'create-job', 'provider']);
+        expect(s.events).toEqual(['activate-v9', 'create-job', 'provider']);
         expect(
           persist.mock.calls[0][0].generation.output.sessions,
         ).toHaveLength(4);
@@ -564,7 +566,7 @@ describe('Understanding → builder → engine → parser/validator → formatte
       }
     },
   );
-  it('keeps advanced CrossFit skills blocked when conditioning is unknown', async () => {
+  it('does not treat unknown conditioning as a blanket technical prohibition', async () => {
     const s = await subject(
       'Monte um treino de Crossfit 4 vezes por semana',
       'ADVANCED',
@@ -576,14 +578,14 @@ describe('Understanding → builder → engine → parser/validator → formatte
       {} as never,
     ).preflight(s.input);
     expect(preflight.kind).toBe('READY');
-    expect(s.strategy.technicalMovementsAllowed).toBe(false);
+    expect(s.strategy.technicalMovementsAllowed).toBe(true);
     expect(s.context.training.perceivedConditioning).toEqual({
       status: 'NOT_SET',
     });
-    await expect(s.engine.generateCandidate(s.input)).rejects.toBeInstanceOf(
-      WorkoutPostGenerationValidationError,
-    );
-    expect(s.ai.failJob).toHaveBeenCalledTimes(1);
+    await expect(s.engine.generateCandidate(s.input)).resolves.toMatchObject({
+      status: 'PENDING_COMPLETION',
+    });
+    expect(s.ai.failJob).not.toHaveBeenCalled();
   });
   it.each([
     ['MISSING_LIMITATIONS', 'CLARIFICATION', 'READINESS_BLOCKED'],
@@ -970,7 +972,7 @@ describe('Understanding → builder → engine → parser/validator → formatte
       new WorkoutPlanV2Formatter().format(result.output).length,
     ).toBeGreaterThan(0);
     if (result.output.modality === 'WALKING') {
-      expect(new Set(s.strategy.sessionFocuses).size).toBe(5);
+      expect(s.strategy.sessionFocuses).toEqual([]);
       expect(JSON.stringify(result.output)).not.toMatch(
         /"mode":"RUN"|trote|corrida|run\/walk|jogging|sprint/iu,
       );

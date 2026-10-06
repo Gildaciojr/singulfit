@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { workoutModalityPlanIssues } from './workout-modality-expertise.policy';
-import { estimateWorkoutSession } from './workout-duration-estimator';
+import {
+  estimateWorkoutSession,
+  mandatoryWorkoutMinutes,
+} from './workout-duration-estimator';
 import {
   hasInvalidWorkoutActivityName,
   workoutWeeklyRecoveryIssues,
@@ -57,21 +60,10 @@ export class WorkoutPlanV2Validator {
             session.sessionKey,
           );
         if (tooShort || tooLong) {
-          const material = tooShort
-            ? estimate.maximumMinutes < target * 0.55
-            : estimate.minimumMinutes > target * 1.5;
           this.add(
             issues,
             tooShort ? 'SESSION_CONTENT_TOO_SHORT' : 'SESSION_CONTENT_TOO_LONG',
-            // The estimator already gives a generous upper bound. A moderate
-            // 75–80% of the target stays a warning; below 75% with known execution,
-            // or below 55% even with uncertainty, content is insufficient.
-            material ||
-              (tooShort &&
-                estimate.confidence === 'HIGH' &&
-                estimate.maximumMinutes < target * 0.75)
-              ? 'ERROR'
-              : 'WARNING',
+            'WARNING',
             session.sessionKey,
           );
         }
@@ -80,6 +72,20 @@ export class WorkoutPlanV2Validator {
         (sum, block) => sum + block.estimatedDurationMinutes,
         0,
       );
+      const mandatory = session.blocks
+        .flatMap((block) => block.activities)
+        .reduce((sum, activity) => sum + mandatoryWorkoutMinutes(activity), 0);
+      if (
+        mandatory > session.estimatedDurationMinutes ||
+        (strategy.sessionDurationMinutes.status !== 'NOT_SET' &&
+          mandatory > strategy.sessionDurationMinutes.value)
+      )
+        this.add(
+          issues,
+          'SESSION_DURATION_EXCEEDED',
+          'ERROR',
+          session.sessionKey,
+        );
       if (
         Math.abs(blockTotal - session.estimatedDurationMinutes) >
         Math.max(5, session.estimatedDurationMinutes * 0.25)
@@ -100,25 +106,22 @@ export class WorkoutPlanV2Validator {
           'ERROR',
           session.sessionKey,
         );
-      if (
-        session.blocks.reduce(
-          (sum, block) => sum + block.activities.length,
-          0,
-        ) > strategy.maximumActivitiesPerSession
-      )
-        this.add(issues, 'VOLUME_EXCESSIVE', 'ERROR', session.sessionKey);
-      for (const required of strategy.requiredBlocks)
-        if (!session.blocks.some((block) => block.type === required))
-          this.add(
-            issues,
-            'REQUIRED_BLOCK_MISSING',
-            'ERROR',
-            `${session.sessionKey}.${required}`,
-          );
       for (const block of session.blocks) {
         this.unique(keys, block.blockKey, issues);
         if (block.activities.length === 0)
           this.add(issues, 'EMPTY_BLOCK', 'ERROR', block.blockKey);
+        if (
+          block.activities.reduce(
+            (sum, activity) => sum + mandatoryWorkoutMinutes(activity),
+            0,
+          ) > block.estimatedDurationMinutes
+        )
+          this.add(
+            issues,
+            'SESSION_DURATION_EXCEEDED',
+            'ERROR',
+            block.blockKey,
+          );
         for (const activity of block.activities) {
           this.unique(keys, activity.activityKey, issues);
           activities.set(activity.activityKey, activity);
@@ -126,12 +129,6 @@ export class WorkoutPlanV2Validator {
         }
       }
     }
-    for (const rule of candidate.progression)
-      if (
-        rule.maximumChangePercent >
-        strategy.progressionPolicy.maximumWeeklyIncreasePercent
-      )
-        this.add(issues, 'AGGRESSIVE_PROGRESSION', 'ERROR', rule.ruleKey);
     for (const substitution of candidate.substitutions) {
       const source = activities.get(substitution.sourceActivityKey);
       const alternative = activities.get(substitution.alternativeActivityKey);
@@ -170,7 +167,7 @@ export class WorkoutPlanV2Validator {
     strategy: WorkoutPlanningStrategy,
     issues: WorkoutPlanValidationIssue[],
   ): void {
-    const structural = workoutStructuralActivityIssue(activity, strategy);
+    const structural = workoutStructuralActivityIssue(activity);
     if (structural) issues.push(structural);
     if (hasInvalidWorkoutActivityName(activity.name))
       this.add(issues, 'ACTIVITY_NAME_INVALID', 'ERROR', activity.activityKey);

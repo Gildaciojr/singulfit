@@ -87,7 +87,15 @@ export interface WorkoutMovementConstraint {
   readonly status: 'CONFIRMED' | 'INFERRED' | 'REQUIRES_CONFIRMATION';
 }
 
+export type WorkoutFactSource =
+  | 'CURRENT_EXPLICIT'
+  | 'CONFIRMED_PROFILE'
+  | 'HISTORY'
+  | 'SAFE_INFERENCE'
+  | 'CONSERVATIVE_DEFAULT';
+
 export interface WorkoutRecognizedContext {
+  readonly factSources?: Readonly<Partial<Record<string, WorkoutFactSource>>>;
   readonly runningTransitionPermission?: import('./workout-modality-resolution.service').RunningTransitionPermission;
   readonly modalityResolution?: import('./workout-modality-resolution.service').WorkoutModalityResolution;
   readonly runningTransitionAuthorized?: boolean;
@@ -177,6 +185,17 @@ export interface WorkoutPreviousPlanSummary {
 }
 
 export interface WorkoutPlanningContext {
+  readonly resolvedFacts?: Readonly<
+    Record<
+      string,
+      Readonly<{
+        value: unknown;
+        source: WorkoutFactSource;
+        status: WorkoutPlanningValue<unknown>['status'];
+        confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+      }>
+    >
+  >;
   readonly runningTransitionPermission?: import('./workout-modality-resolution.service').RunningTransitionPermission;
   readonly modalityResolution?: import('./workout-modality-resolution.service').WorkoutModalityResolution;
   readonly runningTransitionAuthorized?: boolean;

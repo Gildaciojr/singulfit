@@ -9,6 +9,14 @@ export interface WorkoutDurationEstimate {
   readonly confidence: 'HIGH' | 'LOW';
 }
 
+/** Only explicit clocks and mandatory between-set rests; no inferred execution speed. */
+export function mandatoryWorkoutMinutes(activity: WorkoutActivityV2): number {
+  if (activity.kind === 'ENDURANCE') return activity.durationMinutes;
+  if (activity.kind === 'TIMED') return activity.durationSeconds / 60;
+  if (activity.kind === 'MOBILITY') return (activity.durationSeconds ?? 0) / 60;
+  return (Math.max(0, activity.sets - 1) * activity.restSeconds) / 60;
+}
+
 function range(
   min: number,
   max: number,

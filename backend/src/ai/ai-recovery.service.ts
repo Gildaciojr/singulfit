@@ -1,4 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  ConflictException,
+} from '@nestjs/common';
 import {
   AIJobStatus,
   MealAnalysisStatus,
@@ -9,6 +14,11 @@ import { WORKER_NAME } from '../event-bus/event-bus.constants';
 import { EventService } from '../observability/event.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
+import {
+  durableTextOperation,
+  DurableTextPendingError,
+} from './durable-text-operation.contract';
+import { AIService, AITextOperationError } from './ai.service';
 
 const RECOVERY_BATCH_SIZE = 100;
 
@@ -21,6 +31,7 @@ export class AIRecoveryService {
     private readonly prisma: PrismaService,
     private readonly usageService: UsageService,
     private readonly eventService: EventService,
+    @Optional() private readonly aiService: AIService | undefined = undefined,
   ) {}
 
   async recover(at = new Date()): Promise<number> {
@@ -57,6 +68,7 @@ export class AIRecoveryService {
         },
         select: {
           id: true,
+          result: true,
         },
         orderBy: {
           createdAt: 'asc',
@@ -64,11 +76,61 @@ export class AIRecoveryService {
         take: RECOVERY_BATCH_SIZE,
       });
 
+      const recoveryDeadline = Date.now() + 30_000;
+      let processed = 0;
       for (const job of jobs) {
-        await this.recoverJob(job.id, at);
+        if (Date.now() >= recoveryDeadline) break;
+        processed += 1;
+        const durable = durableTextOperation(job.result);
+        if (durable) {
+          // Keep the provider ledger/reservation: replay retrieves the same Responses.
+          await this.prisma.aIJob.updateMany({
+            where: {
+              id: job.id,
+              status: AIJobStatus.PROCESSING,
+              leaseExpiresAt: { lte: at },
+            },
+            data: { status: AIJobStatus.PENDING, leaseExpiresAt: null },
+          });
+          if (
+            this.aiService &&
+            Date.parse(durable.deadlineAt) <= at.getTime()
+          ) {
+            try {
+              const response = await this.aiService.runTextJob(job.id, {
+                input: durable.requestInput,
+                executionContext: durable.executionContext,
+                pollWindowMs: 0,
+                repairInput: () =>
+                  durable.initialValidated ? durable.repairInput : null,
+              });
+              await this.aiService.failJob(
+                job.id,
+                new Error('Durable operation recovery deadline exceeded'),
+                response,
+              );
+            } catch (error: unknown) {
+              if (
+                !(error instanceof DurableTextPendingError) &&
+                !(error instanceof ConflictException)
+              )
+                await this.aiService.failJob(
+                  job.id,
+                  error instanceof AITextOperationError
+                    ? error.operationCause
+                    : error,
+                  error instanceof AITextOperationError
+                    ? error.response
+                    : undefined,
+                );
+            }
+          }
+        } else {
+          await this.recoverJob(job.id, at);
+        }
       }
 
-      return jobs.length;
+      return processed;
     } catch (error: unknown) {
       this.logger.error(
         'Falha ao recuperar jobs de IA expirados',

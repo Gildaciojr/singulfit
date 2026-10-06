@@ -25,6 +25,7 @@ export interface WorkoutSafetyGateResult {
 }
 
 export interface GenerateWorkoutPlanV2Input {
+  readonly currentRequest?: Readonly<{ text: string; requestId?: string }>;
   readonly userId: string;
   readonly decision: ConversationGoalDecision;
   readonly snapshot: CoachProfileSnapshot;

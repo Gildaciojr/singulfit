@@ -1,16 +1,20 @@
 import {
   BadGatewayException,
   BadRequestException,
+  ConflictException,
   Injectable,
   Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { AIJobStatus, AIJobType, Prisma } from '@prisma/client';
 import { createHash } from 'node:crypto';
-import { AIService } from '../../ai/ai.service';
+import { AIService, AITextOperationError } from '../../ai/ai.service';
+import {
+  durableTextOperation,
+  DurableTextPendingError,
+} from '../../ai/durable-text-operation.contract';
 import { AuditService } from '../../observability/audit.service';
 import { WorkoutPromptActivationService } from './workout-prompt-activation.service';
-import { modalityExpertise } from './workout-modality-expertise.policy';
 import { WORKOUT_PLAN_GENERATION } from '../../entitlements/entitlement.constants';
 import { WorkoutArtifactResolverService } from './workout-artifact-resolver.service';
 import { freezeWorkoutPlanV2 } from './workout-plan-v2.freeze';
@@ -39,7 +43,7 @@ import {
 } from './workout-planning-v2.prompt.definition';
 
 export const WORKOUT_PLANNING_V2_EXECUTION_REVISION =
-  'timed-clock-canonical-v1' as const;
+  'ai-first-v9-bounded-repair-v1' as const;
 
 export class WorkoutPostGenerationValidationError extends BadGatewayException {
   constructor(readonly validation: WorkoutPlanValidationResult) {
@@ -52,6 +56,10 @@ export class WorkoutPostGenerationValidationError extends BadGatewayException {
 @Injectable()
 export class WorkoutPlanningEngineV2Service {
   private readonly parser = new WorkoutPlanV2Parser();
+  private readonly preparedInputs = new WeakMap<
+    GenerateWorkoutPlanV2Input,
+    PreparedWorkoutPlanningV2
+  >();
   constructor(
     private readonly resolver: WorkoutArtifactResolverService,
     private readonly readiness: WorkoutPlanningReadinessService,
@@ -89,21 +97,31 @@ export class WorkoutPlanningEngineV2Service {
       input.recognizedContext,
       input.previousPlan !== undefined,
     );
-    const context = this.contextBuilder.build({
-      snapshot: input.snapshot,
-      artifactType: resolution.artifactType,
-      modality: resolution.modality,
-      recognizedContext: input.recognizedContext,
-      referenceDate: input.referenceDate,
-      progressEvidence: input.progressEvidence,
-      previousPlan: input.previousPlan,
-    });
+    const context = this.frozenCopy(
+      this.contextBuilder.build({
+        snapshot: input.snapshot,
+        artifactType: resolution.artifactType,
+        modality: resolution.modality,
+        recognizedContext: input.recognizedContext,
+        referenceDate: input.referenceDate,
+        progressEvidence: input.progressEvidence,
+        previousPlan: input.previousPlan,
+      }),
+    );
     const strategy = this.strategyBuilder.build(context);
     const safety = this.safety.evaluateBeforeGeneration(
       input.snapshot,
       readiness,
     );
-    return Object.freeze({ resolution, readiness, context, strategy, safety });
+    const prepared = Object.freeze({
+      resolution,
+      readiness,
+      context,
+      strategy,
+      safety,
+    });
+    this.preparedInputs.set(input, prepared);
+    return prepared;
   }
 
   async generate(
@@ -112,10 +130,33 @@ export class WorkoutPlanningEngineV2Service {
     return this.generateCandidate(input);
   }
 
+  async failCandidate(
+    generation: WorkoutPlanningGenerationResult,
+    error: unknown,
+  ): Promise<void> {
+    if (generation.completion)
+      await this.aiService.failJob(
+        generation.aiJobId,
+        error,
+        generation.completion.response,
+        undefined,
+        generation.storedResult,
+      );
+  }
+
   async generateCandidate(
     input: GenerateWorkoutPlanV2Input,
+    preflightPrepared?: PreparedWorkoutPlanningV2,
   ): Promise<WorkoutPlanningGenerationResult> {
-    const prepared = this.prepare(input);
+    if (
+      preflightPrepared &&
+      this.preparedInputs.get(input) !== preflightPrepared
+    )
+      throw new BadRequestException(
+        'Prepared workout context does not belong to input',
+      );
+    let prepared = preflightPrepared ?? this.prepare(input);
+    let effectiveInput = input;
     if (!prepared.context || !prepared.strategy || !prepared.safety)
       throw new BadRequestException(
         `Artefato de treino não resolvido: ${prepared.resolution.reason}`,
@@ -128,11 +169,11 @@ export class WorkoutPlanningEngineV2Service {
         `Geração de treino bloqueada: ${prepared.safety.outcome}`,
       );
     await this.promptActivation.ensureActive();
-    const payload = Object.freeze({
+    let payload = Object.freeze({
       schemaVersion: 2 as const,
+      currentRequest: this.frozenCopy(input.currentRequest ?? { text: '' }),
       context: prepared.context,
       strategy: prepared.strategy,
-      modalityExpertise: modalityExpertise[prepared.strategy.modality],
       safetyPolicy: Object.freeze({
         noDiagnosis: true,
         noRehabilitation: true,
@@ -141,8 +182,11 @@ export class WorkoutPlanningEngineV2Service {
         noExactPower: true,
       }),
     });
-    const canonical = this.canonicalJson(payload);
-    const operationKey = `workout-planning-v2:${createHash('sha256').update(`${input.userId}:${WORKOUT_PLANNING_V2_PROMPT.version}:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${canonical}`).digest('hex')}`;
+    let canonical = this.canonicalJson(payload);
+    const identity = input.currentRequest?.requestId
+      ? `request:${input.currentRequest.requestId}`
+      : canonical;
+    const operationKey = `workout-planning-v2:${createHash('sha256').update(`${input.userId}:${WORKOUT_PLANNING_V2_PROMPT.version}:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${identity}`).digest('hex')}`;
     const job = await this.aiService.createStandaloneJob({
       userId: input.userId,
       type: AIJobType.WORKOUT,
@@ -162,6 +206,30 @@ export class WorkoutPlanningEngineV2Service {
       await this.aiService.failJob(job.id, error);
       throw error;
     }
+    const durable = durableTextOperation(job.result);
+    if (durable) {
+      const frozen = JSON.parse(durable.executionContext) as {
+        prepared: PreparedWorkoutPlanningV2;
+        recognizedContext: GenerateWorkoutPlanV2Input['recognizedContext'];
+        previousPlan: WorkoutPlanV2 | null;
+      };
+      if (
+        !frozen.prepared?.context ||
+        !frozen.prepared.strategy ||
+        !frozen.prepared.safety
+      )
+        throw new ServiceUnavailableException(
+          'Frozen workout execution context unavailable',
+        );
+      prepared = this.frozenCopy(frozen.prepared);
+      effectiveInput = {
+        ...input,
+        recognizedContext: frozen.recognizedContext,
+        previousPlan: frozen.previousPlan ?? undefined,
+      };
+      canonical = durable.requestInput;
+      payload = JSON.parse(canonical) as typeof payload;
+    }
     if (job.status === AIJobStatus.COMPLETED) {
       const stored = this.stored(job.result);
       if (!stored)
@@ -180,7 +248,7 @@ export class WorkoutPlanningEngineV2Service {
           generatedAt: input.referenceDate.toISOString(),
           reused: true,
         },
-        input,
+        effectiveInput,
       );
       return Object.freeze({
         status: 'ALREADY_COMPLETED' as const,
@@ -196,35 +264,149 @@ export class WorkoutPlanningEngineV2Service {
       throw new ServiceUnavailableException(
         'Operação idempotente do treino V2 já falhou',
       );
-    if (job.status === AIJobStatus.PROCESSING)
+    if (
+      job.status === AIJobStatus.PROCESSING &&
+      (!durable || (job.leaseExpiresAt && job.leaseExpiresAt > new Date()))
+    )
       throw new ServiceUnavailableException(
         'Operação idempotente do treino V2 em andamento',
       );
     let response: Awaited<ReturnType<AIService['runTextJob']>> | undefined;
+    const resolvedStrategy = prepared.strategy;
+    if (!resolvedStrategy)
+      throw new ServiceUnavailableException('Workout strategy unavailable');
+    let initialOutput: WorkoutPlanV2 | undefined;
+    let initialValidation: WorkoutPlanValidationResult | undefined;
+    let repairAttempted = Boolean(
+      durable?.initialValidated && durable.repairInput !== null,
+    );
+    let attemptedProviderCalls = 0;
+    const metadata = (model: string): WorkoutPlanV2['generationMetadata'] => ({
+      engineVersion: 2,
+      promptVersionId: job.promptVersionId,
+      aiJobId: job.id,
+      operationKey,
+      model,
+      generatedAt: input.referenceDate.toISOString(),
+      reused: false,
+    });
     try {
       response = await this.aiService.runTextJob(job.id, {
         input: canonical,
+        initialValidationIssues: () => initialValidation?.issues ?? [],
+        executionContext: JSON.stringify({
+          prepared,
+          recognizedContext: effectiveInput.recognizedContext,
+          previousPlan: effectiveInput.previousPlan ?? null,
+        }),
         jsonSchema: workoutSchemaForAuthorizedEquipment(
-          prepared.strategy.authorizedEquipment,
+          resolvedStrategy.authorizedEquipment,
         ),
-      });
-      const output = this.finalize(
-        this.parser.parse(response.outputText),
-        prepared,
-        {
-          engineVersion: 2,
-          promptVersionId: job.promptVersionId,
-          aiJobId: job.id,
-          operationKey,
-          model: response.model,
-          generatedAt: input.referenceDate.toISOString(),
-          reused: false,
+        repairInput: (initial) => {
+          const originalCandidate = this.parser.parse(initial.outputText);
+          try {
+            initialOutput = this.finalize(
+              originalCandidate,
+              prepared,
+              metadata(initial.model),
+              effectiveInput,
+            );
+            initialValidation = initialOutput.validation;
+            return null;
+          } catch (error: unknown) {
+            if (!(error instanceof WorkoutPostGenerationValidationError))
+              throw error;
+            initialValidation = error.validation;
+            const errors = error.validation.issues.filter(
+              (issue) => issue.severity === 'ERROR',
+            );
+            const repairable: ReadonlySet<string> = new Set([
+              'ENDURANCE_MODE_CONFLICT',
+              'TIMED_DURATION_IMPOSSIBLE',
+              'EMPTY_BLOCK',
+              'DUPLICATE_KEY',
+              'ACTIVITY_NAME_INVALID',
+              'SUBSTITUTION_REFERENCE_INVALID',
+              'SUBSTITUTION_FUNCTION_MISMATCH',
+              'SESSION_DURATION_EXCEEDED',
+            ]);
+            if (
+              !errors.length ||
+              !errors.every((issue) => repairable.has(issue.code))
+            )
+              throw error;
+            repairAttempted = true;
+            return this.canonicalJson({
+              ...payload,
+              repair: {
+                originalCandidate,
+                validationIssues: error.validation.issues,
+                immutableFields: [
+                  'currentRequest',
+                  'context',
+                  'strategy',
+                  'safetyPolicy',
+                  'ownership',
+                ],
+                instruction:
+                  'Correct only the reported issues. Preserve all resolved constraints. Return the complete candidate.',
+              },
+            });
+          }
         },
-        input,
-      );
+      });
+      const output =
+        initialOutput ??
+        this.finalize(
+          this.parser.parse(response.outputText),
+          prepared,
+          {
+            engineVersion: 2,
+            promptVersionId: job.promptVersionId,
+            aiJobId: job.id,
+            operationKey,
+            model: response.model,
+            generatedAt: input.referenceDate.toISOString(),
+            reused: false,
+          },
+          effectiveInput,
+        );
       const storedResult: WorkoutPlanningStoredAIJobResult = Object.freeze({
         candidateOutput: response.outputText,
         model: response.model,
+        ...(response.durableTextOperation
+          ? {
+              durableTextOperation: JSON.parse(
+                JSON.stringify(response.durableTextOperation),
+              ) as Prisma.InputJsonObject,
+            }
+          : {}),
+        executionAudit: {
+          providerCalls:
+            response.providerCalls ??
+            response.providerAttempts?.length ??
+            (repairAttempted ? 2 : 1),
+          repairAttempted,
+          initialValidation: initialValidation
+            ? {
+                status: initialValidation.status,
+                issues: initialValidation.issues.map((issue) => ({ ...issue })),
+              }
+            : null,
+          finalValidation: {
+            status: output.validation.status,
+            issues: output.validation.issues.map((issue) => ({ ...issue })),
+          },
+          attempts: (response.providerAttempts ?? [response]).map(
+            (attempt) => ({
+              responseId: attempt.responseId,
+              model: attempt.model,
+              promptTokens: attempt.promptTokens,
+              completionTokens: attempt.completionTokens,
+              totalTokens: attempt.totalTokens,
+            }),
+          ),
+        },
       });
       return Object.freeze({
         status: 'PENDING_COMPLETION' as const,
@@ -241,7 +423,19 @@ export class WorkoutPlanningEngineV2Service {
           result: storedResult,
         }),
       });
-    } catch (error: unknown) {
+    } catch (caught: unknown) {
+      let error: unknown = caught;
+      // Losing the atomic claim does not authorize failing another worker's job.
+      if (
+        error instanceof ConflictException ||
+        error instanceof DurableTextPendingError
+      )
+        throw error;
+      if (error instanceof AITextOperationError) {
+        response = error.response;
+        attemptedProviderCalls = error.providerCalls;
+        error = error.operationCause;
+      }
       if (response && error instanceof WorkoutPostGenerationValidationError) {
         await this.aiService.failJob(job.id, error, response, undefined, {
           candidateOutput: response.outputText,
@@ -250,9 +444,39 @@ export class WorkoutPlanningEngineV2Service {
             stage: 'POST_GENERATION_VALIDATION',
             issues: error.validation.issues.map((issue) => ({ ...issue })),
           },
+          executionAudit: {
+            repairAttempted,
+            providerCalls:
+              response.providerCalls ??
+              response.providerAttempts?.length ??
+              (repairAttempted ? 2 : 1),
+            initialValidation: initialValidation
+              ? {
+                  status: initialValidation.status,
+                  issues: initialValidation.issues.map((issue) => ({
+                    ...issue,
+                  })),
+                }
+              : null,
+          },
         });
       } else {
-        await this.aiService.failJob(job.id, error, response);
+        await this.aiService.failJob(job.id, error, response, undefined, {
+          executionAudit: {
+            providerCalls:
+              attemptedProviderCalls || response?.providerCalls || 1,
+            repairAttempted,
+            finalOutcome: 'FAILED',
+            initialValidation: initialValidation
+              ? {
+                  status: initialValidation.status,
+                  issues: initialValidation.issues.map((issue) => ({
+                    ...issue,
+                  })),
+                }
+              : null,
+          },
+        });
       }
       throw error;
     }
@@ -358,6 +582,16 @@ export class WorkoutPlanningEngineV2Service {
       candidateOutput: value.candidateOutput,
       model: value.model,
     });
+  }
+  private frozenCopy<T>(value: T): T {
+    const copy = structuredClone(value);
+    const freeze = (nested: unknown): void => {
+      if (typeof nested !== 'object' || nested === null) return;
+      for (const child of Object.values(nested)) freeze(child);
+      Object.freeze(nested);
+    };
+    freeze(copy);
+    return copy;
   }
   private canonicalJson(value: unknown): string {
     if (

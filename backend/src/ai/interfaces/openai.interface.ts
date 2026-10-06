@@ -6,6 +6,8 @@ export interface OpenAITextRequest {
   requestId: string;
   jsonSchema?: OpenAIJsonSchema;
   timeoutMs?: number;
+  /** Durable repair must use the original model, without switching configuration. */
+  expectedModel?: string;
 }
 
 export interface OpenAIJsonSchema {
@@ -26,4 +28,16 @@ export interface OpenAIResponseResult {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+}
+
+export interface OpenAIBackgroundResponse {
+  readonly responseId: string;
+  readonly status:
+    | 'queued'
+    | 'in_progress'
+    | 'completed'
+    | 'failed'
+    | 'cancelled'
+    | 'incomplete';
+  readonly result?: OpenAIResponseResult;
 }

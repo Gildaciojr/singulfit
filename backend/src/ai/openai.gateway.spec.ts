@@ -328,4 +328,117 @@ describe('OpenAIGateway', () => {
       schema,
     });
   });
+  it('creates a stored background Response and returns identity before waiting for completion', async () => {
+    const wire = jest.spyOn(global, 'fetch');
+    wire.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'resp_background',
+          status: 'queued',
+          usage: null,
+        }),
+        { status: 200 },
+      ),
+    );
+    const id = await createGateway().startBackgroundTextResponse({
+      instructions: 'Prompt',
+      input: 'Raw request',
+      requestId: 'root:attempt:1',
+    });
+    expect(id).toBe('resp_background');
+    expect(wire).toHaveBeenCalledTimes(1);
+    const body = wire.mock.calls[0][1]?.body;
+    if (typeof body !== 'string') throw new Error('Expected body');
+    expect(JSON.parse(body)).toMatchObject({
+      model: 'text-model-test',
+      background: true,
+      store: true,
+      input: 'Raw request',
+    });
+    expect(wire.mock.calls[0][1]?.headers).not.toHaveProperty(
+      'Idempotency-Key',
+    );
+  });
+  it('retrieves the same response with GET and maps completed usage without a generation', async () => {
+    const wire = jest.spyOn(global, 'fetch');
+    wire.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'resp_background',
+          status: 'completed',
+          model: 'text-model-test',
+          usage: { input_tokens: 100, output_tokens: 20, total_tokens: 120 },
+          output: [
+            {
+              type: 'message',
+              content: [{ type: 'output_text', text: 'candidate' }],
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    await expect(
+      createGateway().retrieveTextResponse('resp_background'),
+    ).resolves.toMatchObject({
+      responseId: 'resp_background',
+      status: 'completed',
+      result: { outputText: 'candidate', totalTokens: 120 },
+    });
+    expect(wire.mock.calls[0][0]).toBe(
+      'https://api.openai.com/v1/responses/resp_background',
+    );
+    expect(wire.mock.calls[0][1]?.method).toBeUndefined();
+  });
+  it('keeps queued responses pending and preserves usage on terminal incomplete responses', async () => {
+    jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: 'resp_background',
+            status: 'in_progress',
+            usage: null,
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: 'resp_background',
+            status: 'incomplete',
+            model: 'text-model-test',
+            usage: { input_tokens: 100, output_tokens: 5, total_tokens: 105 },
+            output: [],
+          }),
+          { status: 200 },
+        ),
+      );
+    const gateway = createGateway();
+    await expect(
+      gateway.retrieveTextResponse('resp_background'),
+    ).resolves.toEqual({
+      responseId: 'resp_background',
+      status: 'in_progress',
+    });
+    await expect(
+      gateway.retrieveTextResponse('resp_background'),
+    ).resolves.toMatchObject({
+      status: 'incomplete',
+      result: { totalTokens: 105 },
+    });
+  });
+  it('refuses a repair model configuration change before creating a provider response', async () => {
+    const wire = jest.spyOn(global, 'fetch');
+    await expect(
+      createGateway().startBackgroundTextResponse({
+        instructions: 'Prompt',
+        input: 'repair',
+        requestId: 'root:attempt:2',
+        expectedModel: 'other-model',
+      }),
+    ).rejects.toThrow('model configuration changed');
+    expect(wire).not.toHaveBeenCalled();
+  });
 });

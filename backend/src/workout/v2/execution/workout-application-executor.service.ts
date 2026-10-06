@@ -104,20 +104,26 @@ export class WorkoutApplicationExecutorService {
     const prepared = preflight.prepared;
     const generation = await this.engine.generateCandidate(
       input.generationInput,
+      prepared,
     );
-    const persisted = await this.persistence.persist({
-      expectedActivePlanId:
-        input.generationInput.recognizedContext?.mutation?.sourcePlanId,
-      preservedCalendar:
-        input.generationInput.recognizedContext?.mutation?.sourceCalendar,
-      generation,
-      ownership: input.ownership,
-      executionContext: input.executionContext,
-      calendarWeekdays: this.calendarWeekdays(
-        prepared.context?.training?.availableTrainingDays ??
-          this.snapshotTrainingDays(input),
-      ),
-    });
+    const persisted = await this.persistence
+      .persist({
+        expectedActivePlanId:
+          input.generationInput.recognizedContext?.mutation?.sourcePlanId,
+        preservedCalendar:
+          input.generationInput.recognizedContext?.mutation?.sourceCalendar,
+        generation,
+        ownership: input.ownership,
+        executionContext: input.executionContext,
+        calendarWeekdays: this.calendarWeekdays(
+          prepared.context?.training?.availableTrainingDays ??
+            this.snapshotTrainingDays(input),
+        ),
+      })
+      .catch(async (error: unknown) => {
+        await this.engine.failCandidate(generation, error);
+        throw error;
+      });
     return Object.freeze({
       kind: 'PLAN' as const,
       aggregateId: persisted.aggregate.id,

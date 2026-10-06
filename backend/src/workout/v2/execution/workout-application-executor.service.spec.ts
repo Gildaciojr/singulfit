@@ -42,6 +42,7 @@ describe('WorkoutApplicationExecutorService', () => {
   function setup(prepared = ready()) {
     const engine = {
       prepare: jest.fn().mockReturnValue(prepared),
+      failCandidate: jest.fn().mockResolvedValue(undefined),
       generateCandidate: jest.fn().mockResolvedValue({
         status: 'PENDING_COMPLETION',
         output: { artifactType: 'WEEKLY_PLAN' },
@@ -82,6 +83,10 @@ describe('WorkoutApplicationExecutorService', () => {
     });
     expect(subject.engine.prepare).toHaveBeenCalledTimes(1);
     expect(subject.engine.generateCandidate).toHaveBeenCalledTimes(1);
+    expect(subject.engine.generateCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-id' }),
+      subject.engine.prepare.mock.results[0].value,
+    );
     expect(subject.persistence.persist).toHaveBeenCalledTimes(1);
     expect(subject.engine.prepare.mock.invocationCallOrder[0]).toBeLessThan(
       subject.engine.generateCandidate.mock.invocationCallOrder[0],
@@ -89,6 +94,19 @@ describe('WorkoutApplicationExecutorService', () => {
     expect(
       subject.engine.generateCandidate.mock.invocationCallOrder[0],
     ).toBeLessThan(subject.persistence.persist.mock.invocationCallOrder[0]);
+  });
+
+  it('terminates the pending AIJob when persistence fails and preserves the error', async () => {
+    const subject = setup();
+    const error = new Error('Persistence unavailable');
+    subject.persistence.persist.mockRejectedValueOnce(error);
+    await expect(subject.executor.execute(input())).rejects.toBe(error);
+    expect(subject.engine.failCandidate).toHaveBeenCalledTimes(1);
+    expect(subject.engine.failCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'PENDING_COMPLETION' }),
+      error,
+    );
+    expect(subject.engine.generateCandidate).toHaveBeenCalledTimes(1);
   });
 
   it('persists a validated explicit weekday calendar separately from session order', async () => {

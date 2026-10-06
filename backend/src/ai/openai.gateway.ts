@@ -11,6 +11,7 @@ import {
   OpenAIResponseResult,
   OpenAITextRequest,
   OpenAIVisionRequest,
+  OpenAIBackgroundResponse,
 } from './interfaces/openai.interface';
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
@@ -18,6 +19,103 @@ const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 @Injectable()
 export class OpenAIGateway {
   constructor(private readonly configService: ConfigService) {}
+
+  /** Responses REST supports background/retrieve; no SDK or create retry is used. */
+  async startBackgroundTextResponse(
+    request: OpenAITextRequest,
+  ): Promise<string> {
+    const model = this.getModel('TEXT');
+    if (request.expectedModel && request.expectedModel !== model)
+      throw new ServiceUnavailableException(
+        'Durable repair model configuration changed',
+      );
+    const response = await fetch(OPENAI_RESPONSES_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.getRequiredConfig('OPENAI_API_KEY')}`,
+        'Content-Type': 'application/json',
+        'X-Client-Request-Id': request.requestId,
+      },
+      body: JSON.stringify({
+        model,
+        instructions: this.requireText(request.instructions, 'Instruções'),
+        input: this.requireText(request.input, 'Entrada'),
+        background: true,
+        store: true,
+        ...(request.jsonSchema
+          ? {
+              text: { format: this.createJsonSchemaFormat(request.jsonSchema) },
+            }
+          : {}),
+        metadata: { ai_job_id: request.requestId },
+      }),
+      signal: AbortSignal.timeout(this.requestTimeout(request.timeoutMs)),
+    });
+    const payload = await this.readJson(response);
+    if (
+      !response.ok ||
+      !this.isRecord(payload) ||
+      typeof payload.id !== 'string' ||
+      !/^resp_[a-zA-Z0-9_-]+$/u.test(payload.id)
+    )
+      throw new BadGatewayException(
+        'Background response creation was not acknowledged',
+      );
+    return payload.id;
+  }
+
+  async retrieveTextResponse(
+    responseId: string,
+  ): Promise<OpenAIBackgroundResponse> {
+    if (!/^resp_[a-zA-Z0-9_-]+$/u.test(responseId))
+      throw new BadRequestException('Invalid provider response identity');
+    const response = await fetch(
+      `${OPENAI_RESPONSES_URL}/${encodeURIComponent(responseId)}`,
+      {
+        headers: {
+          Authorization: `Bearer ${this.getRequiredConfig('OPENAI_API_KEY')}`,
+        },
+        signal: AbortSignal.timeout(5_000),
+      },
+    );
+    const payload = await this.readJson(response);
+    if (!response.ok || !this.isRecord(payload) || payload.id !== responseId)
+      throw new BadGatewayException('Background response retrieval failed');
+    const status = payload.status;
+    if (
+      status !== 'queued' &&
+      status !== 'in_progress' &&
+      status !== 'completed' &&
+      status !== 'failed' &&
+      status !== 'cancelled' &&
+      status !== 'incomplete'
+    )
+      throw new BadGatewayException('Invalid background response status');
+    return {
+      responseId,
+      status,
+      ...(status === 'completed' || this.isRecord(payload.usage)
+        ? { result: this.parseResponse(payload, status !== 'completed') }
+        : {}),
+    };
+  }
+
+  async cancelTextResponse(responseId: string): Promise<void> {
+    if (!/^resp_[a-zA-Z0-9_-]+$/u.test(responseId))
+      throw new BadRequestException('Invalid provider response identity');
+    const response = await fetch(
+      `${OPENAI_RESPONSES_URL}/${encodeURIComponent(responseId)}/cancel`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.getRequiredConfig('OPENAI_API_KEY')}`,
+        },
+        signal: AbortSignal.timeout(5_000),
+      },
+    );
+    if (!response.ok)
+      throw new BadGatewayException('Background cancellation failed');
+  }
 
   createTextResponse(
     request: OpenAITextRequest,
@@ -128,7 +226,10 @@ export class OpenAIGateway {
     return this.parseResponse(payload);
   }
 
-  private parseResponse(payload: unknown): OpenAIResponseResult {
+  private parseResponse(
+    payload: unknown,
+    allowEmptyOutput = false,
+  ): OpenAIResponseResult {
     if (
       !this.isRecord(payload) ||
       typeof payload.id !== 'string' ||
@@ -156,7 +257,7 @@ export class OpenAIGateway {
     return {
       responseId: payload.id,
       model: payload.model,
-      outputText: this.extractOutputText(payload),
+      outputText: allowEmptyOutput ? '' : this.extractOutputText(payload),
       promptTokens,
       completionTokens,
       totalTokens,

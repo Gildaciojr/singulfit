@@ -87,7 +87,7 @@ describe('Workout quality before persistence', () => {
         workoutStructuralActivityIssue({ ...activity, ...optional }),
       ).toMatchObject({
         code: 'TIMED_DURATION_UNCERTAIN',
-        severity: 'ERROR',
+        severity: 'WARNING',
       });
   });
   it.each([300, 420])(
@@ -122,9 +122,9 @@ describe('Workout quality before persistence', () => {
   );
 
   it.each([
-    [3, null, null, 30, 'ERROR'],
-    [3, 30, null, 210, 'ERROR'],
-    [3, null, 60, 210, 'ERROR'],
+    [3, null, null, 30, 'WARNING'],
+    [3, 30, null, 210, 'WARNING'],
+    [3, null, 60, 210, 'WARNING'],
     [1, null, null, 30, 'WARNING'],
     [1, 30, null, 30, null],
     [3, 30, 60, 210, null],
@@ -155,19 +155,17 @@ describe('Workout quality before persistence', () => {
         ctx,
         new WorkoutPlanningStrategyService().build(ctx),
       );
-      if (severity === 'ERROR') expect(result.status).toBe('INVALID');
-      else
-        expect(
-          result.issues.some(
-            (item) =>
-              item.code === 'TIMED_DURATION_UNCERTAIN' &&
-              item.severity === 'ERROR',
-          ),
-        ).toBe(false);
+      expect(
+        result.issues.some(
+          (item) =>
+            item.code === 'TIMED_DURATION_UNCERTAIN' &&
+            item.severity === 'ERROR',
+        ),
+      ).toBe(false);
     },
   );
 
-  it('rejects the observed three-movement session despite long declared blocks', () => {
+  it('warns about approximate three-movement duration without coaching rejection', () => {
     const ctx = qualityContext(['MONDAY']);
     const base = qualitySession('observed');
     const session = {
@@ -185,6 +183,7 @@ describe('Workout quality before persistence', () => {
           : block.type === 'COOLDOWN'
             ? {
                 ...block,
+                estimatedDurationMinutes: 10,
                 activities: block.activities.map((activity) =>
                   activity.kind === 'ENDURANCE'
                     ? { ...activity, durationMinutes: 10 }
@@ -199,16 +198,16 @@ describe('Workout quality before persistence', () => {
       ctx,
       new WorkoutPlanningStrategyService().build(ctx),
     );
-    expect(result.status).toBe('INVALID');
+    expect(result.status).not.toBe('INVALID');
     expect(result.issues).toContainEqual({
       code: 'SESSION_CONTENT_TOO_SHORT',
-      severity: 'ERROR',
+      severity: 'WARNING',
       path: 'observed',
     });
   });
 
   it.each([30, 45, 60])(
-    'rejects materially short high-confidence content relative to %s minutes',
+    'warns about approximate short content relative to %s minutes',
     (target) => {
       const ctx = qualityContext(['MONDAY']);
       const strategy = {
@@ -226,7 +225,7 @@ describe('Workout quality before persistence', () => {
         validator.validate(qualityCandidate([short]), ctx, strategy).issues,
       ).toContainEqual({
         code: 'SESSION_CONTENT_TOO_SHORT',
-        severity: 'ERROR',
+        severity: 'WARNING',
         path: 'short',
       });
       const full = qualitySession('plausible');
@@ -299,11 +298,11 @@ describe('Workout quality before persistence', () => {
         ['HIGH', 0.79, 'WARNING'],
         ['HIGH', 0.8, null],
         ['HIGH', 0.75, 'WARNING'],
-        ['HIGH', 0.74, 'ERROR'],
-        ['HIGH', 0.55, 'ERROR'],
+        ['HIGH', 0.74, 'WARNING'],
+        ['HIGH', 0.55, 'WARNING'],
         ['LOW', 0.79, 'WARNING'],
         ['LOW', 0.55, 'WARNING'],
-        ['LOW', 0.54, 'ERROR'],
+        ['LOW', 0.54, 'WARNING'],
         ['LOW', 0.9, null],
       ] as const;
       for (const [confidence, ratio, severity] of cases) {
@@ -358,11 +357,11 @@ describe('Workout quality before persistence', () => {
         );
         if (severity) expect(issue?.severity).toBe(severity);
         else expect(issue).toBeUndefined();
-        if (confidence === 'LOW' && severity !== 'ERROR')
+        if (confidence === 'LOW')
           expect(
             result.issues.filter((item) => item.severity === 'ERROR'),
           ).toEqual([]);
-        if (severity === 'ERROR') expect(result.status).toBe('INVALID');
+        expect(result.status).not.toBe('INVALID');
       }
     },
   );
@@ -455,22 +454,19 @@ describe('Workout quality before persistence', () => {
     ).toBe(true);
   });
 
-  it('reduces unavoidable consecutive overlap for weight loss without changing spaced-day distribution', () => {
-    const strategy = new WorkoutPlanningStrategyService();
-    const consecutive = strategy.build(
-      qualityContext(['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY']),
-    );
-    expect(
-      consecutive.sessionFocuses.some((focus) =>
-        focus.includes('esforço leve'),
-      ),
-    ).toBe(true);
-    const spaced = strategy.build(
-      qualityContext(['MONDAY', 'WEDNESDAY', 'FRIDAY', 'SUNDAY']),
-    );
-    expect(
-      spaced.sessionFocuses.some((focus) => focus.includes('esforço leve')),
-    ).toBe(false);
+  it('leaves recovery distribution to AI while preserving scheduling facts', () => {
+    for (const days of [
+      ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY'],
+      ['MONDAY', 'WEDNESDAY', 'FRIDAY', 'SUNDAY'],
+    ]) {
+      const context = qualityContext(days);
+      const envelope = new WorkoutPlanningStrategyService().build(context);
+      expect(context.training.availableTrainingDays).toMatchObject({
+        value: days,
+      });
+      expect(envelope.sessionFocuses).toEqual([]);
+      expect(envelope.requiredBlocks).toEqual([]);
+    }
   });
   const context = qualityContext(['MONDAY']);
   const strategy = new WorkoutPlanningStrategyService().build(context);
@@ -510,13 +506,13 @@ describe('Workout quality before persistence', () => {
       result.issues.some((issue) => issue.code === 'ACTIVITY_NAME_INVALID'),
     ).toBe(false);
   });
-  it('accepts a representative target and rejects material under/overfill', () => {
+  it('warns about approximate underfill and rejects objectively excessive rest', () => {
     expect(validate().status).not.toBe('INVALID');
     expect(
       validate(qualitySession('short', [strength()])).issues,
     ).toContainEqual({
       code: 'SESSION_CONTENT_TOO_SHORT',
-      severity: 'ERROR',
+      severity: 'WARNING',
       path: 'short',
     });
     expect(
@@ -524,7 +520,7 @@ describe('Workout quality before persistence', () => {
         qualitySession('long', [{ ...strength(), sets: 20, restSeconds: 600 }]),
       ).issues,
     ).toContainEqual({
-      code: 'SESSION_CONTENT_TOO_LONG',
+      code: 'SESSION_DURATION_EXCEEDED',
       severity: 'ERROR',
       path: 'long',
     });
@@ -593,5 +589,47 @@ describe('Workout quality before persistence', () => {
         qualityContext(['MONDAY', 'TUESDAY']),
       ),
     ).toEqual([]);
+  });
+  it('rejects 95 explicit minutes inside a declared 60 minute session', () => {
+    const activity: WorkoutActivityV2 = {
+      ...strength('clock'),
+      kind: 'ENDURANCE',
+      name: 'Caminhada',
+      mode: 'WALK',
+      durationMinutes: 95,
+      distanceKm: null,
+      intensity: 'CONVERSATIONAL',
+    };
+    const result = validate(qualitySession('explicit-clock', [activity]));
+    expect(result.issues).toContainEqual({
+      code: 'SESSION_DURATION_EXCEEDED',
+      severity: 'ERROR',
+      path: 'explicit-clock',
+    });
+    expect(result.status).toBe('INVALID');
+  });
+  it('rejects an explicit activity clock exceeding its own block budget', () => {
+    const activity: WorkoutActivityV2 = {
+      ...strength('clock'),
+      kind: 'ENDURANCE',
+      name: 'Caminhada',
+      mode: 'WALK',
+      durationMinutes: 30,
+      distanceKm: null,
+      intensity: 'CONVERSATIONAL',
+    };
+    const base = qualitySession('block-clock', [activity]);
+    const result = validate({
+      ...base,
+      blocks: base.blocks.map((block) => ({
+        ...block,
+        estimatedDurationMinutes: 20,
+      })),
+    });
+    expect(result.issues).toContainEqual({
+      code: 'SESSION_DURATION_EXCEEDED',
+      severity: 'ERROR',
+      path: 'block-clock-main',
+    });
   });
 });
