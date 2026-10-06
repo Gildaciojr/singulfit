@@ -266,6 +266,35 @@ function setup(options?: {
 }
 
 describe('WorkoutPlanV2PersistenceService', () => {
+  it('passes the complete execution result through the persistence transaction', async () => {
+    const test = setup();
+    const generation = pendingGeneration();
+    const storedResult = {
+      ...generation.storedResult,
+      executionAudit: {
+        providerCalls: 2,
+        initialResponseId: 'resp_initial',
+        repairResponseId: 'resp_repair',
+      },
+      durableTextOperation: {
+        revision: 'workout-v9-background-v1',
+        requestInput: 'frozen request',
+        attempts: [
+          { responseId: 'resp_initial' },
+          { responseId: 'resp_repair' },
+        ],
+      },
+      terminalMetadata: { revision: 'terminal-v1' },
+    };
+    await test.service.persist(input({ ...generation, storedResult }));
+    expect(test.ai.completeJobInTransaction.mock.calls[0][0]).toBe(transaction);
+    expect(test.ai.completeJobInTransaction.mock.calls[0][1].result).toEqual({
+      ...storedResult,
+      acceptedOutput: new WorkoutPlanV2PersistenceValidator().validateInput(
+        input(generation),
+      ).document,
+    });
+  });
   it.each(['MONDAY', null] as const)(
     'keeps the source calendar weekday %s during an exercise substitution',
     (weekday) => {
@@ -297,11 +326,13 @@ describe('WorkoutPlanV2PersistenceService', () => {
           expectedActivePlanId: 'source-plan',
         }),
       ).rejects.toThrow();
-      expect(test.repository.acquireUserLock).toHaveBeenCalled();
+      expect(test.repository.acquireUserLock.mock.calls.length).toBeGreaterThan(
+        0,
+      );
       expect(findFirst).toHaveBeenCalled();
-      expect(test.repository.archiveActive).not.toHaveBeenCalled();
-      expect(test.repository.create).not.toHaveBeenCalled();
-      expect(test.ai.completeJobInTransaction).not.toHaveBeenCalled();
+      expect(test.repository.archiveActive.mock.calls).toHaveLength(0);
+      expect(test.repository.create.mock.calls).toHaveLength(0);
+      expect(test.ai.completeJobInTransaction.mock.calls).toHaveLength(0);
     },
   );
   it('persists once and completes the AIJob after accepted persistence in one transaction', async () => {

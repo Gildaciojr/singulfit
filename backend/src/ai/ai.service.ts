@@ -709,6 +709,36 @@ export class AIService {
       result?: Prisma.InputJsonValue;
     },
   ) {
+    let terminalResult = input.result;
+    if (
+      input.jobType === AIJobType.WORKOUT &&
+      'providerAttempts' in input.response
+    ) {
+      const job = await transaction.aIJob.findUnique({
+        where: { id: input.aiJobId },
+        select: { userId: true, result: true },
+      });
+      if (!job || job.userId !== input.userId)
+        throw new ConflictException('Workout completion ownership mismatch');
+      const ledger = durableTextOperation(job.result);
+      if (ledger) {
+        const existing = JSON.parse(
+          JSON.stringify(job.result),
+        ) as Prisma.InputJsonObject;
+        const supplied =
+          input.result &&
+          typeof input.result === 'object' &&
+          !Array.isArray(input.result)
+            ? input.result
+            : {};
+        // The transaction's ledger is authoritative for response IDs and usage markers.
+        terminalResult = {
+          ...existing,
+          ...supplied,
+          durableTextOperation: existing.durableTextOperation,
+        };
+      }
+    }
     const usageInput = {
       userId: input.userId,
       aiJobId: input.aiJobId,
@@ -740,7 +770,7 @@ export class AIService {
         completedAt: new Date(),
         leaseExpiresAt: null,
         error: null,
-        ...(input.result ? { result: input.result } : {}),
+        ...(terminalResult ? { result: terminalResult } : {}),
       },
     });
 

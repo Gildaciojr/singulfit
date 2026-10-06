@@ -118,8 +118,7 @@ export class WorkoutPlanV2PersistenceService {
       await this.aiService.completeJobInTransaction(transaction, {
         ...input.generation.completion,
         result: {
-          candidateOutput: input.generation.storedResult.candidateOutput,
-          model: input.generation.storedResult.model,
+          ...input.generation.storedResult,
           acceptedOutput: validated.document,
         },
       });

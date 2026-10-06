@@ -1,5 +1,11 @@
 import { ConfigService } from '@nestjs/config';
-import { AIJobStatus, AIJobType, Prisma } from '@prisma/client';
+import { AIJobStatus, AIJobType, FitnessGoal, Prisma } from '@prisma/client';
+import { WorkoutPlanV2PersistenceService } from './persistence/workout-plan-v2-persistence.service';
+import { WorkoutPlanV2PersistenceValidator } from './persistence/workout-plan-v2-persistence.validator';
+import type {
+  CreateWorkoutPlanV2Record,
+  PersistedWorkoutPlanRecord,
+} from './persistence/workout-plan-v2.repository';
 import { AIService } from '../../ai/ai.service';
 import { AIUsageService } from '../../ai/ai-usage.service';
 import type {
@@ -517,9 +523,23 @@ async function subject(
   );
   const complete = async (
     result: Awaited<ReturnType<typeof engine.generateCandidate>>,
+    thinResult = false,
   ) => {
     if (result.completion)
-      await ai.completeJobInTransaction(tx as never, result.completion);
+      await ai.completeJobInTransaction(tx as never, {
+        ...result.completion,
+        result: {
+          ...(thinResult
+            ? {
+                candidateOutput: result.storedResult.candidateOutput,
+                model: result.storedResult.model,
+              }
+            : result.storedResult),
+          acceptedOutput: JSON.parse(
+            JSON.stringify(result.output),
+          ) as Prisma.InputJsonObject,
+        },
+      });
   };
   return {
     engine,
@@ -540,6 +560,121 @@ async function subject(
 }
 
 describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
+  it.each([false, true])(
+    'preserves the completed ledger, audit and accepted candidate with repair=%s',
+    async (repair) => {
+      const s = await subject(
+        'Monte um treino de Crossfit 4x',
+        repair
+          ? [plan('CROSSFIT', 4, true), plan('CROSSFIT', 4)]
+          : [plan('CROSSFIT', 4)],
+      );
+      const result = await s.engine.generateCandidate(s.input);
+      const originalLedger = durableTextOperation(s.job()?.result);
+      expect(originalLedger).not.toBeNull();
+      let persisted: PersistedWorkoutPlanRecord | null = null;
+      const create = jest.fn(
+        (
+          _tx: Prisma.TransactionClient,
+          record: CreateWorkoutPlanV2Record,
+        ): Promise<PersistedWorkoutPlanRecord> => {
+          persisted = {
+            ...record,
+            id: 'persisted-plan',
+            createdAt: record.generatedAt,
+            updatedAt: record.generatedAt,
+            days: record.days.map((day) => ({
+              ...day,
+              id: `day-${day.dayNumber}`,
+              workoutPlanId: 'persisted-plan',
+              exercises: day.exercises.map((exercise, index) => ({
+                ...exercise,
+                id: `exercise-${day.dayNumber}-${index}`,
+                workoutDayId: `day-${day.dayNumber}`,
+              })),
+            })),
+          };
+          return Promise.resolve(persisted);
+        },
+      );
+      const persistence = new WorkoutPlanV2PersistenceService(
+        {
+          inTransaction: <T>(
+            operation: (transaction: Prisma.TransactionClient) => Promise<T>,
+          ): Promise<T> =>
+            s.prisma.$transaction((transaction) =>
+              operation(transaction as never),
+            ) as Promise<T>,
+          acquireUserLock: () => Promise.resolve(),
+          findOwnership: () =>
+            Promise.resolve({
+              profile: { goal: FitnessGoal.MAINTENANCE },
+              aiJob: s.job(),
+            }),
+          findByAIJobId: () => Promise.resolve(persisted),
+          archiveActive: () => Promise.resolve(),
+          create,
+        },
+        new WorkoutPlanV2PersistenceValidator(),
+        { recordInTransaction: jest.fn() } as never,
+        s.ai,
+      );
+      const ownership = { userId: s.input.userId, profileId: 'profile' };
+      await persistence.persist({ generation: result, ownership });
+      const terminal = s.job()?.result as Prisma.JsonObject;
+      expect(durableTextOperation(terminal)).toEqual(originalLedger);
+      expect(terminal.executionAudit).toEqual(
+        result.storedResult.executionAudit,
+      );
+      expect(terminal.acceptedOutput).toEqual(result.output);
+      expect(terminal.candidateOutput).toBe(
+        result.storedResult.candidateOutput,
+      );
+      expect(originalLedger?.requestInput).toBe(
+        s.gateway.createTextResponse.mock.calls[0][0].input,
+      );
+      expect(originalLedger?.attempts).toHaveLength(repair ? 2 : 1);
+      expect(
+        originalLedger?.attempts.every(
+          (attempt) => attempt.responseId && attempt.usageRecorded,
+        ),
+      ).toBe(true);
+      if (repair)
+        expect(originalLedger?.attempts[0].validationIssues).toContainEqual({
+          code: 'ENDURANCE_MODE_CONFLICT',
+          severity: 'ERROR',
+          path: 'MONDAY_WARMUP_1',
+        });
+      const replay = await s.engine.generateCandidate(s.input);
+      expect(replay.status).toBe('ALREADY_COMPLETED');
+      expect(
+        (await persistence.persist({ generation: replay, ownership }))
+          .persistence,
+      ).toBe('REUSED');
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(durableTextOperation(s.job()?.result)).toEqual(originalLedger);
+      expect(s.gateway.createTextResponse).toHaveBeenCalledTimes(
+        repair ? 2 : 1,
+      );
+      expect(s.reserved).toHaveBeenCalledTimes(1);
+      expect(s.confirmed).toHaveBeenCalledTimes(1);
+      expect(s.usageRows).toHaveLength(1);
+      expect(s.usageRows[0].totalTokens).toBe(repair ? 242 : 120);
+    },
+  );
+
+  it('protects a durable ledger when a completion caller supplies only final output fields', async () => {
+    const s = await subject('Monte um treino de Crossfit 4x', [
+      plan('CROSSFIT', 4),
+    ]);
+    const result = await s.engine.generateCandidate(s.input);
+    const originalLedger = durableTextOperation(s.job()?.result);
+    await s.complete(result, true);
+    expect(durableTextOperation(s.job()?.result)).toEqual(originalLedger);
+    expect((s.job()?.result as Prisma.JsonObject).acceptedOutput).toEqual(
+      result.output,
+    );
+  });
   it.each(['BEGINNER', 'INTERMEDIATE', 'ADVANCED'] as const)(
     'A/B/C/I: CrossFit 4x current beats RUNNING/5x history for %s with unknown conditioning',
     async (experience) => {
@@ -673,6 +808,16 @@ describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
     );
     expect(s.job()?.status).toBe('FAILED');
     expect(s.job()?.leaseExpiresAt).toBeNull();
+    const failedLedger = durableTextOperation(s.job()?.result);
+    expect(failedLedger?.attempts.map((attempt) => attempt.responseId)).toEqual(
+      ['response-0', 'response-1'],
+    );
+    expect(
+      failedLedger?.attempts.every((attempt) => attempt.usageRecorded),
+    ).toBe(true);
+    expect(failedLedger?.requestInput).toBe(
+      s.gateway.createTextResponse.mock.calls[0][0].input,
+    );
     expect(s.gateway.createTextResponse).toHaveBeenCalledTimes(2);
     expect(s.usageRows).toEqual([
       expect.objectContaining({ totalTokens: 242 }),
