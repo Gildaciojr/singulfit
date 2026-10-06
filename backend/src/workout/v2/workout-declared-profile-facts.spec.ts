@@ -6,6 +6,20 @@ import { productiveWorkoutProfileFacts } from '../../context/profile-acquisition
 import { workoutEquipmentBaseline } from './workout-equipment-defaults';
 
 describe('shared workout declarations', () => {
+  it('does not infer box equipment or environment from the requested CrossFit modality', () => {
+    const message =
+      'Monte um treino de Crossfit para mim, 4 vezes por semana, considerando meu perfil e meu nível atual.';
+    expect(declaredWorkoutProfileFacts(message).environment).toBeUndefined();
+    expect(productiveWorkoutProfileFacts(message).environment).toBeUndefined();
+    expect(productiveWorkoutProfileFacts(message).equipment).toBeUndefined();
+    expect(
+      builder.recognizeDeclaredContext(message).environment,
+    ).toBeUndefined();
+    expect(builder.recognizeDeclaredContext(message).equipment).toBeUndefined();
+    expect(
+      declaredWorkoutProfileFacts('Treino no box de CrossFit').environment,
+    ).toBe('CROSSFIT_BOX');
+  });
   it.each([
     ['Moro em condomínio e treino em casa 5 vezes por semana', 'HOME', 5],
     ['Estou em um hotel e corro na rua 4 vezes por semana', 'STREET', 4],

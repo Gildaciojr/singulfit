@@ -64,7 +64,7 @@ export function declaredWorkoutProfileFacts(
   let invalidEnvironment = false;
   const environmentMatches = [
     ...text.matchAll(
-      /\b(?:academia(?:\s+(?:de|do)\s+(?:condominio|hotel))?|musculacao|(?:em\s+)?casa|home(?:\s+workout)?|crossfit|box|trilha|pista|estrada|rua|(?:ao\s+)?ar livre|parque)\b/gu,
+      /\b(?:academia(?:\s+(?:de|do)\s+(?:condominio|hotel))?|musculacao|(?:em\s+)?casa|home(?:\s+workout)?|box|trilha|pista|estrada|rua|(?:ao\s+)?ar livre|parque)\b/gu,
     ),
   ];
   for (const [index, match] of environmentMatches.entries()) {
@@ -92,7 +92,7 @@ export function declaredWorkoutProfileFacts(
           : 'FULL_GYM',
       );
     } else if (/casa|home/u.test(noun)) environments.push('HOME');
-    else if (/crossfit|box/u.test(noun)) environments.push('CROSSFIT_BOX');
+    else if (/box/u.test(noun)) environments.push('CROSSFIT_BOX');
     else if (noun === 'trilha') environments.push('TRAIL');
     else if (noun === 'pista') environments.push('TRACK');
     else if (noun === 'estrada') environments.push('ROAD');

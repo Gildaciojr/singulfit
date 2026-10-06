@@ -147,6 +147,7 @@ describe('Hard modality validation before persistence and public formatting', ()
       training: {
         ...context.training,
         experience: { status: 'CONFIRMED', value: 'ADVANCED' },
+        perceivedConditioning: { status: 'CONFIRMED', value: 'HIGH' },
       },
     });
     const limited = strategyBuilder.build({

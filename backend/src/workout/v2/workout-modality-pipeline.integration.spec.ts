@@ -1,4 +1,12 @@
 import { Test, type TestingModule } from '@nestjs/testing';
+import { Logger } from '@nestjs/common';
+import { CoachAdaptiveProfileCollectorService } from '../../context/coach-adaptive-profile-collector.service';
+import { WorkoutApplicationExecutorService } from './execution/workout-application-executor.service';
+import { CoachPlanningExecutionDispatcherService } from '../../automation/coach-planning-execution-dispatcher.service';
+import type {
+  PersistWorkoutPlanV2Input,
+  PersistWorkoutPlanV2Result,
+} from './persistence/workout-plan-v2-persistence.contract';
 import { AIService } from '../../ai/ai.service';
 import { PromptService } from '../../ai/prompt.service';
 import { ConversationModule } from '../../conversation/conversation.module';
@@ -8,6 +16,7 @@ import { understandingInput } from '../../conversation/tests/conversation-unders
 import {
   routingSnapshot,
   knownDatum,
+  unknownDatum,
   goalPreparationInput,
 } from '../../conversation/tests/conversation-routing.fixtures';
 import { GenerateWorkoutPlanV2InputBuilder } from './generate-workout-plan-v2-input.builder';
@@ -64,7 +73,8 @@ describe('Understanding → builder → engine → parser/validator → formatte
   async function subject(
     text: string,
     experience: WorkoutExperienceLevel = 'BEGINNER',
-    conditioning: 'LOW' | 'MODERATE' | 'HIGH' = 'LOW',
+    conditioning: 'LOW' | 'MODERATE' | 'HIGH' | null = 'LOW',
+    trainingOverrides: Partial<CoachProfileSnapshot['training']> = {},
   ) {
     const original = routingSnapshot();
     const equipment: readonly WorkoutEquipment[] = [
@@ -76,7 +86,13 @@ describe('Understanding → builder → engine → parser/validator → formatte
     ];
     const snapshot: CoachProfileSnapshot = {
       ...original,
-      physical: { ...original.physical, ageYears: knownDatum(34) },
+      physical: {
+        ...original.physical,
+        ageYears: knownDatum(34),
+        heightCm: knownDatum(175),
+        currentWeightKg: knownDatum(80),
+        activityLevel: knownDatum('MODERATE'),
+      },
       nutrition: {
         ...original.nutrition,
         primaryGoal: knownDatum('WEIGHT_LOSS'),
@@ -86,11 +102,14 @@ describe('Understanding → builder → engine → parser/validator → formatte
         primaryGoal: knownDatum('WEIGHT_LOSS'),
         preferredModality: knownDatum('GYM_STRENGTH'),
         experienceLevel: knownDatum(experience),
-        perceivedConditioning: knownDatum(conditioning),
+        perceivedConditioning: conditioning
+          ? knownDatum(conditioning)
+          : unknownDatum(),
         availableEquipment: knownDatum(equipment),
         environment: knownDatum(
           text.includes('crossfit') ? 'CROSSFIT_BOX' : 'STREET',
         ),
+        ...trainingOverrides,
       },
     };
     const understood = await module
@@ -114,7 +133,14 @@ describe('Understanding → builder → engine → parser/validator → formatte
       ...built.generationInput,
       recognizedContext: {
         ...built.generationInput.recognizedContext,
-        sessionDurationMinutes: { status: 'CONFIRMED' as const, value: 30 },
+        sessionDurationMinutes: {
+          status: 'CONFIRMED' as const,
+          value:
+            trainingOverrides.sessionDurationMinutes &&
+            'value' in trainingOverrides.sessionDurationMinutes
+              ? trainingOverrides.sessionDurationMinutes.value
+              : 30,
+        },
       },
     };
     const events: string[] = [];
@@ -188,6 +214,8 @@ describe('Understanding → builder → engine → parser/validator → formatte
       events,
       legacy,
       prompts,
+      snapshot,
+      understood,
     };
   }
   function plan(
@@ -195,6 +223,10 @@ describe('Understanding → builder → engine → parser/validator → formatte
     level: WorkoutExperienceLevel,
   ): GeneratedWorkoutPlanV2Candidate {
     const crossfit = strategy.modality === 'CROSSFIT';
+    const duration =
+      strategy.sessionDurationMinutes.status === 'NOT_SET'
+        ? 30
+        : strategy.sessionDurationMinutes.value;
     const base = (key: string) => ({
       activityKey: key,
       source: 'MODEL_GENERATED' as const,
@@ -281,16 +313,18 @@ describe('Understanding → builder → engine → parser/validator → formatte
         sessionKey: `s${index}`,
         sequence: index + 1,
         label,
-        estimatedDurationMinutes: 30,
+        estimatedDurationMinutes: duration,
         blocks: strategy.requiredBlocks.map((type, b) => {
           const minutes =
-            strategy.requiredBlocks.length === 4
+            ((strategy.requiredBlocks.length === 4
               ? b === 0 || b === 3
                 ? 5
                 : 10
               : b === 1
                 ? 20
-                : 5;
+                : 5) *
+              duration) /
+            30;
           return {
             blockKey: `b${index}-${b}`,
             type,
@@ -334,6 +368,276 @@ describe('Understanding → builder → engine → parser/validator → formatte
       expect(s.events).toEqual(['activate-v8', 'create-job', 'provider']);
       expect(s.legacy.version).toBe(7);
       expect(s.legacy.name).not.toBe(WORKOUT_PLANNING_V2_PROMPT.name);
+    },
+  );
+  it.each([
+    ['BEGINNER', null],
+    ['INTERMEDIATE', null],
+    ['ADVANCED', 'HIGH'],
+  ] as const)(
+    'executes the production CrossFit request with %s/%s and the canonical gym profile',
+    async (level, conditioning) => {
+      const text =
+        'Monte um treino de Crossfit para mim, 4 vezes por semana, considerando meu perfil e meu nível atual.';
+      const equipment: readonly WorkoutEquipment[] = [
+        'BARBELL',
+        'BENCH',
+        'CABLE',
+        'DUMBBELL',
+        'MACHINE',
+        'PULL_UP_BAR',
+        'TREADMILL',
+      ];
+      const s = await subject(text, level, conditioning, {
+        preferredModality: knownDatum('RUNNING'),
+        weeklyFrequency: knownDatum(5),
+        environment: knownDatum('FULL_GYM'),
+        availableEquipment: knownDatum(equipment),
+        sessionDurationMinutes: knownDatum(60),
+      });
+      const collector = new CoachAdaptiveProfileCollectorService().decide({
+        snapshot: s.snapshot,
+        intent: 'WORKOUT_PLAN_REQUEST',
+        conversationContext: {
+          modality: { value: 'CROSSFIT', evidence: 'EXPLICIT' },
+        },
+        memory: { interactions: [] },
+        recentHistory: { currentLogicalTurn: 10, interactions: [] },
+      });
+      expect(s.understood.intent).toBe('WORKOUT_PLAN_REQUEST');
+      expect(s.understood.metadata.workoutModalityResolution?.modality).toBe(
+        'CROSSFIT',
+      );
+      expect(collector.shouldAsk).toBe(false);
+      expect(
+        collector.readiness.find((item) => item.plan === 'WORKOUT'),
+      ).toEqual(expect.objectContaining({ blockingFields: [], ready: true }));
+      const decision = module.get(ConversationRoutingDecisionService).decide(
+        goalPreparationInput(s.understood, {
+          snapshot: s.snapshot,
+          adaptiveDecision: collector,
+        }),
+      );
+      expect(decision.goalDecision).toEqual(
+        expect.objectContaining({
+          goal: 'GENERATE_WORKOUT_PLAN',
+          selectedProfileField: null,
+          canExecute: true,
+        }),
+      );
+      const builder = new GenerateWorkoutPlanV2InputBuilder(
+        {} as never,
+        {} as never,
+      );
+      const built = await builder.build({
+        userId: 'user-id',
+        profileId: 'profile-id',
+        snapshot: s.snapshot,
+        currentMessage: text,
+        decision: decision.goalDecision,
+        declaredContext: await builder.resolveDeclaredContext(
+          text,
+          s.understood.metadata.workoutModalityResolution,
+        ),
+        referenceDate: new Date(s.snapshot.referenceDate),
+      });
+      const persist = jest.fn(
+        ({
+          generation,
+        }: PersistWorkoutPlanV2Input): Promise<PersistWorkoutPlanV2Result> =>
+          Promise.resolve({
+            persistence: 'CREATED',
+            aiJobCompleted: true,
+            aggregate: {
+              id: 'plan',
+              userId: 'user-id',
+              profileId: 'profile-id',
+              aiJobId: generation.aiJobId,
+              title: generation.output.title,
+              objective: 'WEIGHT_LOSS',
+              status: 'ACTIVE',
+              document: generation.output,
+              days: generation.output.sessions.map((session) => ({
+                id: session.sessionKey,
+                dayNumber: session.sequence,
+                weekday: null,
+                title: session.label,
+                exercises: [],
+              })),
+              generatedAt: new Date(),
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+          }),
+      );
+      const application = new WorkoutApplicationExecutorService(s.engine, {
+        persist,
+      } as never);
+      const log = jest
+        .spyOn(Logger.prototype, 'log')
+        .mockImplementation(() => undefined);
+      try {
+        const preflight = application.preflight(built.generationInput);
+        expect(preflight.kind).toBe('READY');
+        if (preflight.kind !== 'READY')
+          throw new Error('Production profile should be ready');
+        expect(preflight.prepared.resolution.modality).toBe('CROSSFIT');
+        expect(preflight.prepared.context?.modality).toEqual({
+          status: 'CONFIRMED',
+          value: 'CROSSFIT',
+        });
+        expect(preflight.prepared.context?.training).toEqual(
+          expect.objectContaining({
+            weeklyFrequency: { status: 'CONFIRMED', value: 4 },
+            environment: { status: 'CONFIRMED', value: 'FULL_GYM' },
+            equipment: { status: 'CONFIRMED', value: equipment },
+            experience: { status: 'CONFIRMED', value: level },
+            sessionDurationMinutes: { status: 'CONFIRMED', value: 60 },
+            perceivedConditioning: conditioning
+              ? { status: 'CONFIRMED', value: conditioning }
+              : { status: 'NOT_SET' },
+          }),
+        );
+        expect(preflight.prepared.strategy?.technicalMovementsAllowed).toBe(
+          level === 'ADVANCED',
+        );
+        const dispatcher = new CoachPlanningExecutionDispatcherService(
+          {} as never,
+          {} as never,
+          {} as never,
+          undefined,
+          undefined,
+          application,
+          new WorkoutPlanV2Formatter(),
+        );
+        const result = await dispatcher.dispatchStructured({
+          userId: 'user-id',
+          legacyIntent: 'WORKOUT',
+          decision: decision.goalDecision,
+          workoutV2: {
+            generationInput: built.generationInput,
+            profileId: 'profile-id',
+            correlationId: 'incident',
+          },
+        });
+        expect(result).toEqual(
+          expect.objectContaining({
+            executor: 'WORKOUT_V2',
+            generationCompleted: true,
+            workoutDisposition: 'PLAN',
+          }),
+        );
+        expect(result.content).toMatch(/CrossFit/i);
+        expect(s.ai.createStandaloneJob).toHaveBeenCalledTimes(1);
+        expect(s.ai.createStandaloneJob).toHaveBeenCalledWith(
+          expect.objectContaining({ promptName: 'workout_planning_v2_v8' }),
+        );
+        expect(s.ai.runTextJob).toHaveBeenCalledTimes(1);
+        expect(s.events).toEqual(['activate-v8', 'create-job', 'provider']);
+        expect(
+          persist.mock.calls[0][0].generation.output.sessions,
+        ).toHaveLength(4);
+        expect(log).toHaveBeenCalledWith(
+          expect.stringContaining('"workoutPreflightKind":"READY"'),
+        );
+        const entry = log.mock.calls.find(
+          ([value]) =>
+            typeof value === 'string' &&
+            value.startsWith('Workout preflight: '),
+        )?.[0];
+        expect(entry).toBe(
+          `Workout preflight: ${JSON.stringify({
+            workoutPreflightKind: 'READY',
+            workoutResolutionReason: 'EXPLICIT_REQUEST',
+            workoutReadinessStatus: 'READY',
+            workoutMissingFields: [],
+            workoutConfirmationRequiredFields: [],
+            workoutSafetyOutcome: 'ALLOWED',
+            workoutSafetyReasonCodes: ['NO_SAFETY_RESTRICTION'],
+            resolvedWorkoutModality: 'CROSSFIT',
+          })}`,
+        );
+        expect(entry).not.toContain(text);
+        expect(entry).not.toContain('user-id');
+      } finally {
+        log.mockRestore();
+      }
+    },
+  );
+  it('keeps advanced CrossFit skills blocked when conditioning is unknown', async () => {
+    const s = await subject(
+      'Monte um treino de Crossfit 4 vezes por semana',
+      'ADVANCED',
+      null,
+      { environment: knownDatum('FULL_GYM') },
+    );
+    const preflight = new WorkoutApplicationExecutorService(
+      s.engine,
+      {} as never,
+    ).preflight(s.input);
+    expect(preflight.kind).toBe('READY');
+    expect(s.strategy.technicalMovementsAllowed).toBe(false);
+    expect(s.context.training.perceivedConditioning).toEqual({
+      status: 'NOT_SET',
+    });
+    await expect(s.engine.generateCandidate(s.input)).rejects.toBeInstanceOf(
+      WorkoutPostGenerationValidationError,
+    );
+    expect(s.ai.failJob).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    ['MISSING_LIMITATIONS', 'CLARIFICATION', 'READINESS_BLOCKED'],
+    ['ACUTE_PAIN', 'BLOCKED', 'ACUTE_PAIN'],
+  ] as const)(
+    'reports %s safely and does not call the provider',
+    async (signal, kind, reason) => {
+      const s = await subject(
+        'Monte um treino de Crossfit 4 vezes por semana',
+        'INTERMEDIATE',
+        null,
+        { environment: knownDatum('FULL_GYM') },
+      );
+      const generationInput = {
+        ...s.input,
+        snapshot:
+          signal === 'MISSING_LIMITATIONS'
+            ? {
+                ...s.snapshot,
+                restrictions: {
+                  ...s.snapshot.restrictions,
+                  physicalLimitations: unknownDatum(),
+                },
+              }
+            : s.snapshot,
+        recognizedContext: {
+          ...s.input.recognizedContext,
+          safetySignals: signal === 'ACUTE_PAIN' ? ['ACUTE_PAIN' as const] : [],
+        },
+      };
+      const log = jest
+        .spyOn(Logger.prototype, 'log')
+        .mockImplementation(() => undefined);
+      try {
+        const application = new WorkoutApplicationExecutorService(
+          s.engine,
+          {} as never,
+        );
+        const result = await application.execute({
+          generationInput,
+          ownership: { userId: 'user-id', profileId: 'profile-id' },
+        });
+        expect(result.kind).toBe(kind);
+        expect(log).toHaveBeenCalledWith(
+          expect.stringContaining(`"workoutSafetyReasonCodes":["${reason}"]`),
+        );
+        expect(log).toHaveBeenCalledWith(
+          expect.stringContaining(`"workoutPreflightKind":"${kind}"`),
+        );
+        expect(s.ai.createStandaloneJob).not.toHaveBeenCalled();
+        expect(s.ai.runTextJob).not.toHaveBeenCalled();
+      } finally {
+        log.mockRestore();
+      }
     },
   );
   it('rejects an advanced skill for a beginner before persistence', async () => {

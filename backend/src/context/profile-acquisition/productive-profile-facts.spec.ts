@@ -76,7 +76,7 @@ describe('productive profile facts', () => {
     ['academia', 'FULL_GYM'],
     ['academia pequena', 'LIMITED_GYM'],
     ['em casa', 'HOME'],
-    ['CrossFit', 'CROSSFIT_BOX'],
+    ['no box de CrossFit', 'CROSSFIT_BOX'],
     ['na trilha', 'TRAIL'],
     ['na pista', 'TRACK'],
     ['na estrada', 'ROAD'],

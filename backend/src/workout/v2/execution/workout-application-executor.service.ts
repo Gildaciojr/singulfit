@@ -1,4 +1,4 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { WorkoutWeekday } from '@prisma/client';
 import { WorkoutPlanningEngineV2Service } from '../workout-planning-engine-v2.service';
 import { WorkoutPlanV2PersistenceService } from '../persistence/workout-plan-v2-persistence.service';
@@ -8,9 +8,11 @@ import type {
   WorkoutApplicationPreflightResultV2,
 } from './workout-application-execution.contract';
 import type { WorkoutPlanningValue } from '../workout-planning-context.contract';
+import type { PreparedWorkoutPlanningV2 } from '../workout-planning-generation.contract';
 
 @Injectable()
 export class WorkoutApplicationExecutorService {
+  private readonly logger = new Logger(WorkoutApplicationExecutorService.name);
   constructor(
     private readonly engine: WorkoutPlanningEngineV2Service,
     private readonly persistence: WorkoutPlanV2PersistenceService,
@@ -20,6 +22,27 @@ export class WorkoutApplicationExecutorService {
     generationInput: WorkoutApplicationExecutionInputV2['generationInput'],
   ): WorkoutApplicationPreflightResultV2 {
     const prepared = this.engine.prepare(generationInput);
+    const result = this.preflightDecision(prepared);
+    this.logger.log(
+      `Workout preflight: ${JSON.stringify({
+        workoutPreflightKind: result.kind,
+        workoutResolutionReason: prepared.resolution.reason,
+        workoutReadinessStatus: prepared.readiness?.status ?? null,
+        workoutMissingFields: prepared.readiness?.missingFields ?? [],
+        workoutConfirmationRequiredFields:
+          prepared.readiness?.confirmationRequiredFields ?? [],
+        workoutSafetyOutcome: prepared.safety?.outcome ?? null,
+        workoutSafetyReasonCodes: prepared.safety?.reasonCodes ?? [],
+        resolvedWorkoutModality:
+          prepared.strategy?.modality ?? prepared.resolution.modality ?? null,
+      })}`,
+    );
+    return result;
+  }
+
+  private preflightDecision(
+    prepared: PreparedWorkoutPlanningV2,
+  ): WorkoutApplicationPreflightResultV2 {
     if (!prepared.context || !prepared.strategy || !prepared.safety) {
       return Object.freeze({
         kind: 'CLARIFICATION' as const,

@@ -663,6 +663,7 @@ describe('Workout Planning Engine V2', () => {
           weeklyFrequency: known(advanced ? 5 : 3),
           sessionDurationMinutes: known(45),
           perceivedConditioning: known(advanced ? 'HIGH' : 'LOW'),
+          environment: known('FULL_GYM'),
         },
       };
     };
@@ -870,6 +871,20 @@ describe('Workout Planning Engine V2', () => {
           environment: 'HOME',
           experience: 'INTERMEDIATE',
         }),
+        false,
+      ).missingFields,
+    ).not.toContain('ENVIRONMENT');
+    expect(
+      service.evaluate(
+        profile,
+        'WEEKLY_PLAN',
+        'CROSSFIT',
+        {
+          ...recognized('CROSSFIT', ['BODYWEIGHT'], {
+            experience: 'INTERMEDIATE',
+          }),
+          environment: undefined,
+        },
         false,
       ).missingFields,
     ).toContain('ENVIRONMENT');

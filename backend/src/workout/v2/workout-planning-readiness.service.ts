@@ -53,12 +53,6 @@ export class WorkoutPlanningReadinessService {
     ) {
       this.markMissing('EQUIPMENT', availableFields, missingFields);
     }
-    if (
-      modality === WORKOUT_MODALITY.CROSSFIT &&
-      this.trainingEnvironment(snapshot, recognized) !== 'CROSSFIT_BOX'
-    ) {
-      this.markMissing('ENVIRONMENT', availableFields, missingFields);
-    }
 
     const safetyFlags: WorkoutSafetyFlag[] = [
       ...(recognized.safetySignals ?? []),
@@ -158,8 +152,7 @@ export class WorkoutPlanningReadinessService {
     }
     if (
       modality === WORKOUT_MODALITY.RUNNING ||
-      modality === WORKOUT_MODALITY.CYCLING ||
-      modality === WORKOUT_MODALITY.CROSSFIT
+      modality === WORKOUT_MODALITY.CYCLING
     ) {
       if (!fields.includes('EXPERIENCE')) fields.push('EXPERIENCE');
       fields.push('PERCEIVED_CONDITIONING');

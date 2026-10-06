@@ -88,7 +88,10 @@ export class WorkoutPlanningStrategyService {
     const technicalMovementsAllowed =
       !reduced &&
       level !== 'BEGINNER' &&
-      context.training.experience.status === 'CONFIRMED';
+      context.training.experience.status === 'CONFIRMED' &&
+      (context.modality.status === 'NOT_SET' ||
+        context.modality.value !== WORKOUT_MODALITY.CROSSFIT ||
+        context.training.perceivedConditioning.status === 'CONFIRMED');
 
     const modality =
       context.modality.status === 'NOT_SET'
@@ -623,7 +626,10 @@ export class WorkoutPlanningStrategyService {
         : context.training.perceivedConditioning.value;
     const conservative = this.requiresConservativeDistribution(context);
     const cycle =
-      conservative || experience === 'BEGINNER' || conditioning === 'LOW'
+      conservative ||
+      experience === 'BEGINNER' ||
+      conditioning === null ||
+      conditioning === 'LOW'
         ? [
             'Fundamentos, mobilidade e scaling',
             'Técnica básica e WOD curto controlado',

@@ -1352,6 +1352,60 @@ describe('CoachCommandService', () => {
     expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
   });
 
+  it.each(['PLANNER_READY', 'NO_ELIGIBLE_FIELD'] as const)(
+    'preserves the V2 clarification without the technical acquisition failure: %s',
+    async (reason) => {
+      const subject = createSubject({
+        content:
+          'Monte um treino de Crossfit para mim, 4 vezes por semana, considerando meu perfil e meu nível atual.',
+        workoutClarification: true,
+      });
+      const content =
+        'Qual é seu condicionamento atual para ajustar o esforço do treino?';
+      subject.profileAcquisitionRollout.requestWorkoutClarification.mockResolvedValueOnce(
+        {
+          questionCreated: false,
+          reason: 'NO_ELIGIBLE_FIELD',
+        },
+      );
+      jest
+        .spyOn(subject.planningExecution, 'executeStructured')
+        .mockResolvedValueOnce({
+          content,
+          responseRequired: true,
+          selectedSource: 'WORKOUT_V2',
+          decision:
+            reason === 'PLANNER_READY'
+              ? {
+                  goal: 'GENERATE_WORKOUT_PLAN',
+                  targetPlan: 'WORKOUT',
+                  selectedProfileField: null,
+                  canExecute: true,
+                }
+              : undefined,
+          dispatch: {
+            content,
+            executor: 'WORKOUT_V2',
+            generationCompleted: false,
+            fallbackApplied: false,
+            workoutDisposition: 'CLARIFICATION',
+          },
+        } as never);
+      await subject.service.processTextMessage({
+        userId: 'user-id',
+        messageId: 'message-id',
+      });
+      expect(
+        subject.profileAcquisitionRollout.requestWorkoutClarification,
+      ).toHaveBeenCalledTimes(reason === 'PLANNER_READY' ? 0 : 1);
+      expect(subject.prisma.coachMessage.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ content }) }),
+      );
+      expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+      expect(subject.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
+    },
+  );
+
   it('preserves the runtime-selected profile field without re-planning', async () => {
     const subject = createSubject({
       content: 'monte um treino de corrida para mim',

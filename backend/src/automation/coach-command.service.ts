@@ -750,11 +750,18 @@ export class CoachCommandService {
               : input.intent === 'BOTH'
                 ? 'BOTH'
                 : null;
+    const plannerReadyWithoutAcquisition =
+      (execution.decision?.goal === CONVERSATION_GOAL.GENERATE_WORKOUT_PLAN ||
+        execution.decision?.goal ===
+          CONVERSATION_GOAL.GENERATE_COMBINED_PLANS) &&
+      execution.decision.canExecute &&
+      execution.decision.selectedProfileField === null;
     const productiveAcquisition =
       (execution.decision?.goal === CONVERSATION_GOAL.ASK_PROFILE_INFORMATION &&
         acquisitionIntent !== null) ||
       ((input.intent === 'WORKOUT' || input.intent === 'BOTH') &&
-        execution.dispatch?.workoutDisposition === 'CLARIFICATION');
+        execution.dispatch?.workoutDisposition === 'CLARIFICATION' &&
+        !plannerReadyWithoutAcquisition);
     if (productiveAcquisition) {
       if (!this.profileAcquisitionRollout) {
         return this.blockedProfileClarification(acquisitionIntent);
@@ -784,6 +791,16 @@ export class CoachCommandService {
           clarification.reason === 'QUESTION_ALREADY_ACTIVE'
         ) {
           return Object.freeze({ content: '', responseRequired: false });
+        }
+        if (
+          clarification.reason === 'NO_ELIGIBLE_FIELD' &&
+          execution.dispatch?.workoutDisposition === 'CLARIFICATION'
+        ) {
+          return Object.freeze({
+            content: execution.content,
+            responseRequired: true,
+            workoutDisposition: execution.dispatch?.workoutDisposition,
+          });
         }
       } catch {
         return this.blockedProfileClarification(acquisitionIntent);

@@ -230,8 +230,12 @@ describe('GenerateWorkoutPlanV2InputBuilder', () => {
     ['Quero musculação', 'GYM_STRENGTH', 'FULL_GYM'],
     ['Academia 5 vezes por semana', 'GYM_STRENGTH', 'FULL_GYM'],
     ['Treino em academia completa', 'GYM_STRENGTH', 'FULL_GYM'],
-    ['Monte um treino de CrossFit', 'CROSSFIT', 'CROSSFIT_BOX'],
-    ['Quero treinar CrossFit 4 vezes por semana', 'CROSSFIT', 'CROSSFIT_BOX'],
+    ['Monte um treino de CrossFit no box', 'CROSSFIT', 'CROSSFIT_BOX'],
+    [
+      'Quero treinar CrossFit no box 4 vezes por semana',
+      'CROSSFIT',
+      'CROSSFIT_BOX',
+    ],
     ['Quero treinar em casa', 'HOME_WORKOUT', 'HOME'],
   ])('infers supported equipment for %s', (message, modality, environment) => {
     const declared = builder.recognizeDeclaredContext(message);
@@ -405,7 +409,7 @@ describe('GenerateWorkoutPlanV2InputBuilder', () => {
     ['quero correr na rua', 'RUNNING', 'STREET'],
     ['quero correr em pista', 'RUNNING', 'TRACK'],
     ['quero correr em trilha', 'RUNNING', 'TRAIL'],
-    ['quero fazer CrossFit', 'CROSSFIT', 'CROSSFIT_BOX'],
+    ['quero fazer CrossFit no box', 'CROSSFIT', 'CROSSFIT_BOX'],
   ])(
     'maps modality and environment from %s',
     async (message, modality, environment) => {
