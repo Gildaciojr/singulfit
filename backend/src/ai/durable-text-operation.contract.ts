@@ -8,6 +8,8 @@ export interface DurableValidationIssue {
 }
 export interface DurableProviderAttempt {
   attemptKey: string;
+  /** Absent only in ledgers written before requested model identity was captured. */
+  requestedModel?: string;
   phase: 'CREATING' | 'POLLING' | 'COMPLETED' | 'FAILED';
   responseId: string | null;
   usageRecorded: boolean;
@@ -70,6 +72,9 @@ export function durableTextOperation(
       attempt === null ||
       typeof attempt !== 'object' ||
       typeof attempt.attemptKey !== 'string' ||
+      (attempt.requestedModel !== undefined &&
+        (typeof attempt.requestedModel !== 'string' ||
+          !attempt.requestedModel.trim())) ||
       typeof attempt.phase !== 'string' ||
       !['CREATING', 'POLLING', 'COMPLETED', 'FAILED'].includes(attempt.phase) ||
       (attempt.responseId !== null && typeof attempt.responseId !== 'string') ||

@@ -20,11 +20,15 @@ const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 export class OpenAIGateway {
   constructor(private readonly configService: ConfigService) {}
 
+  getRequestedTextModel(): string {
+    return this.getModel('TEXT');
+  }
+
   /** Responses REST supports background/retrieve; no SDK or create retry is used. */
   async startBackgroundTextResponse(
     request: OpenAITextRequest,
   ): Promise<string> {
-    const model = this.getModel('TEXT');
+    const model = this.getRequestedTextModel();
     if (request.expectedModel && request.expectedModel !== model)
       throw new ServiceUnavailableException(
         'Durable repair model configuration changed',

@@ -533,8 +533,28 @@ export class AIService {
           throw new ServiceUnavailableException(
             'Background operation deadline exceeded; generation blocked',
           );
+        const configuredModel = this.openAIGateway.getRequestedTextModel();
+        const first = state.attempts[0];
+        const requestedModel =
+          index === 0
+            ? configuredModel
+            : (first?.requestedModel ??
+              (first?.response?.model === configuredModel
+                ? configuredModel
+                : null));
+        // Legacy response IDs remain retrievable. Without request identity, only
+        // exact equality can authorize a new repair; do not guess an old alias.
+        if (!requestedModel)
+          throw new ServiceUnavailableException(
+            'Legacy durable repair requested model identity unavailable',
+          );
+        if (requestedModel !== configuredModel)
+          throw new ServiceUnavailableException(
+            'Durable repair model configuration changed',
+          );
         attempt = {
           attemptKey: `${job.operationKey ?? job.id}:attempt:${index + 1}`,
+          requestedModel,
           phase: 'CREATING',
           responseId: null,
           usageRecorded: false,
@@ -550,9 +570,7 @@ export class AIService {
             instructions: job.promptVersion.prompt,
             input,
             requestId: attempt.attemptKey,
-            ...(index === 1
-              ? { expectedModel: state.attempts[0]?.response?.model }
-              : {}),
+            expectedModel: attempt.requestedModel,
             jsonSchema: request.jsonSchema,
             timeoutMs: Math.min(
               request.timeoutMs ?? 30_000,

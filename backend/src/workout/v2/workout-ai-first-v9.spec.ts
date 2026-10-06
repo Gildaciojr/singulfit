@@ -7,6 +7,7 @@ import type {
   PersistedWorkoutPlanRecord,
 } from './persistence/workout-plan-v2.repository';
 import { AIService } from '../../ai/ai.service';
+import { OpenAIGateway } from '../../ai/openai.gateway';
 import { AIUsageService } from '../../ai/ai-usage.service';
 import type {
   OpenAIResponseResult,
@@ -455,6 +456,7 @@ async function subject(
   };
   let gatewayCalls = 0;
   const gateway = {
+    getRequestedTextModel: jest.fn(() => 'unchanged-model'),
     createTextResponse: jest.fn(
       (request: OpenAITextRequest): Promise<OpenAIResponseResult> => {
         const index = gatewayCalls++;
@@ -560,6 +562,99 @@ async function subject(
 }
 
 describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
+  it('repairs a requested alias with the same provider snapshot through the real background gateway', async () => {
+    const s = await subject('Monte um treino de Crossfit 4x', [
+      plan('CROSSFIT', 4, true),
+      plan('CROSSFIT', 4),
+    ]);
+    const configured = 'gpt-5.4-mini';
+    const resolved = 'gpt-5.4-mini-2026-03-17';
+    const realGateway = new OpenAIGateway({
+      get: (key: string) =>
+        key === 'OPENAI_MODEL_TEXT' ? configured : 'test-key',
+    } as never);
+    s.gateway.getRequestedTextModel.mockImplementation(() =>
+      realGateway.getRequestedTextModel(),
+    );
+    s.gateway.startBackgroundTextResponse.mockImplementation((request) =>
+      realGateway.startBackgroundTextResponse(request),
+    );
+    const generation = s.gateway.createTextResponse.getMockImplementation();
+    if (!generation) throw new Error('Missing generation fixture');
+    const wire = jest.spyOn(global, 'fetch');
+    wire.mockImplementation(async (_url, init) => {
+      if (typeof init?.body !== 'string')
+        throw new Error('Expected background POST');
+      const body = JSON.parse(init.body) as {
+        model: string;
+        instructions: string;
+        input: string;
+      };
+      expect(body.model).toBe(configured);
+      const response = await generation({
+        instructions: body.instructions,
+        input: body.input,
+        requestId: 'wire-fixture',
+      });
+      const result = {
+        ...response,
+        model: resolved,
+        responseId: response.responseId.replace('response-', 'resp_'),
+      };
+      s.providerResponses.set(result.responseId, result);
+      return new Response(
+        JSON.stringify({ id: result.responseId, status: 'queued' }),
+        { status: 200 },
+      );
+    });
+    try {
+      const result = await s.engine.generateCandidate(s.input);
+      await s.complete(result);
+      const ledger = durableTextOperation(s.job()?.result);
+      expect(ledger?.attempts.map((attempt) => attempt.requestedModel)).toEqual(
+        [configured, configured],
+      );
+      expect(
+        ledger?.attempts.map((attempt) => attempt.response?.model),
+      ).toEqual([resolved, resolved]);
+      expect(ledger?.attempts.map((attempt) => attempt.responseId)).toEqual([
+        'resp_0',
+        'resp_1',
+      ]);
+      expect(ledger?.attempts.every((attempt) => attempt.usageRecorded)).toBe(
+        true,
+      );
+      expect(s.usageRows).toHaveLength(1);
+      expect(s.usageRows[0]).toMatchObject({
+        model: resolved,
+        totalTokens: 242,
+      });
+      expect(s.usageRows[0].estimatedCost).toEqual(
+        new Prisma.Decimal('0.000566'),
+      );
+      await s.engine.generateCandidate(s.input);
+      expect(wire).toHaveBeenCalledTimes(2);
+      expect(s.reserved).toHaveBeenCalledTimes(1);
+      expect(s.confirmed).toHaveBeenCalledTimes(1);
+    } finally {
+      wire.mockRestore();
+    }
+  });
+
+  it('blocks a real configured model change before creating the repair', async () => {
+    const s = await subject('Monte um treino de Crossfit 4x', [
+      plan('CROSSFIT', 4, true),
+    ]);
+    s.gateway.getRequestedTextModel
+      .mockReturnValueOnce('unchanged-model')
+      .mockReturnValue('different-model');
+    await expect(s.engine.generateCandidate(s.input)).rejects.toThrow(
+      'Durable repair model configuration changed',
+    );
+    expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(1);
+    expect(durableTextOperation(s.job()?.result)?.attempts).toHaveLength(1);
+    expect(s.usageRows[0].totalTokens).toBe(120);
+  });
   it.each([false, true])(
     'preserves the completed ledger, audit and accepted candidate with repair=%s',
     async (repair) => {
@@ -1071,6 +1166,44 @@ describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
     expect(s.usageRows[0]?.totalTokens).toBe(120);
     expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(1);
   });
+  it.each(['unchanged-model', 'unproven-alias'])(
+    'recovers a legacy ledger and authorizes new repair only with proven identity: %s',
+    async (configured) => {
+      const s = await subject('Monte um treino de Crossfit 4x', [
+        plan('CROSSFIT', 4, true),
+        plan('CROSSFIT', 4),
+      ]);
+      s.gateway.retrieveTextResponse.mockRejectedValueOnce(
+        new Error('Restart after response ID'),
+      );
+      await expect(s.engine.generateCandidate(s.input)).rejects.toBeInstanceOf(
+        DurableTextPendingError,
+      );
+      const job = s.job();
+      const ledger = durableTextOperation(job?.result);
+      if (!job || !ledger) throw new Error('Expected durable job');
+      delete ledger.attempts[0].requestedModel;
+      job.result = JSON.parse(
+        JSON.stringify({ durableTextOperation: ledger }),
+      ) as Prisma.JsonObject;
+      job.leaseExpiresAt = new Date(0);
+      s.gateway.getRequestedTextModel.mockReturnValue(configured);
+      if (configured === 'unchanged-model') {
+        await s.complete(await s.engine.generateCandidate(s.input));
+        expect(s.usageRows[0].totalTokens).toBe(242);
+        expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(2);
+      } else {
+        await expect(s.engine.generateCandidate(s.input)).rejects.toThrow(
+          'Legacy durable repair requested model identity unavailable',
+        );
+        expect(s.usageRows[0].totalTokens).toBe(120);
+        expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(1);
+      }
+      expect(
+        durableTextOperation(s.job()?.result)?.attempts[0].responseId,
+      ).toBe('response-0');
+    },
+  );
   it('D: a rolled-back repair usage transaction is recorded once on replay', async () => {
     const s = await subject('Monte um treino de Crossfit 4x', [
       plan('CROSSFIT', 4, true),
