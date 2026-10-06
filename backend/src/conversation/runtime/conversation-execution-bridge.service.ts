@@ -11,6 +11,10 @@ import { ConversationQAFollowUpContextService } from './conversation-qa-follow-u
 import type { ConversationQAFollowUpContext } from './conversation-qa-follow-up-context.service';
 import { CurrentWorkoutPlanReaderService } from '../../workout/v2/current-workout-plan-reader.service';
 import { ConversationDailyQueryService } from './conversation-daily-query.service';
+import {
+  readOnlyFollowUp,
+  referentCompatibility,
+} from './conversation-read-only-referent.policy';
 
 export interface ConversationBridgeExecutionContext {
   readonly userId: string;
@@ -39,6 +43,36 @@ export class ConversationExecutionBridgeService {
     executionContext?: ConversationBridgeExecutionContext,
   ): Promise<ConversationBridgeResult> {
     const route = decision.executionRoute;
+    const referent = humanContext?.currentReadOnlyReferent;
+    const followUp = humanContext
+      ? readOnlyFollowUp(humanContext.currentMessage)
+      : null;
+    if (
+      route.kind === 'ANSWER_MESSAGE' &&
+      referent?.source === 'DELIVERED_WORKOUT' &&
+      referent.workoutModality &&
+      followUp?.kind === 'ALTERNATIVE_REQUEST' &&
+      referentCompatibility(followUp.currentTurn, referent) === 'COMPATIBLE'
+    ) {
+      const labels = {
+        WALKING: 'caminhada',
+        RUNNING: 'corrida',
+        CROSSFIT: 'CrossFit',
+        CYCLING: 'ciclismo',
+        GYM_STRENGTH: 'musculação',
+        HOME_WORKOUT: 'treino em casa',
+        CALISTHENICS: 'calistenia',
+        FUNCTIONAL: 'treino funcional',
+        MOBILITY: 'mobilidade',
+        ACTIVE_RECOVERY: 'recuperação ativa',
+        CARDIO_CONDITIONING: 'condicionamento',
+      } as const;
+      return Object.freeze({
+        status: 'COMPLETED',
+        routeKind: route.kind,
+        content: `Você quer uma alternativa para qual sessão do treino de ${labels[referent.workoutModality]}?`,
+      });
+    }
     if (this.dailyQueries && humanContext && executionContext) {
       const content = await this.dailyQueries.answer({
         ...executionContext,

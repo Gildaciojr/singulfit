@@ -125,6 +125,7 @@ export type ConversationGoalReason =
 export type ConversationGoalConfidence = 'HIGH' | 'MEDIUM' | 'LOW';
 
 export interface ConversationGoalDecision {
+  readonly workoutModalityResolution?: import('../workout/v2/workout-modality-resolution.service').WorkoutModalityResolution;
   readonly recognizedIntent: ConversationRecognizedIntent;
   readonly goal: ConversationGoal;
   readonly reason: ConversationGoalReason;

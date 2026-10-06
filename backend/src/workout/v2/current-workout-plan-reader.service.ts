@@ -14,7 +14,10 @@ import type {
 } from './workout-plan-v2.contract';
 import { WorkoutPlanV2StoredDocumentParser } from './workout-plan-v2-stored-document.parser';
 import { WORKOUT_PROMPT_BY_GOAL } from '../workout.constants';
-import { WORKOUT_PLANNING_V2_PROMPT } from './workout-planning-v2.prompt.definition';
+import {
+  WORKOUT_PLANNING_V2_PROMPT,
+  WORKOUT_PLANNING_V2_PROMPT_V7,
+} from './workout-planning-v2.prompt.definition';
 import { WorkoutPlanV2Formatter } from './workout-plan-v2.formatter';
 import { ConversationPublicAnswerBoundaryService } from '../../conversation/runtime/conversation-public-answer-boundary.service';
 import { CoachProactiveSchedulePolicy } from '../../automation/coach-proactive-schedule.policy';
@@ -305,7 +308,16 @@ export class CurrentWorkoutPlanReaderService {
       ...query.where,
       ...(preferCanonical
         ? {
-            aiJob: { promptVersion: { name: WORKOUT_PLANNING_V2_PROMPT.name } },
+            aiJob: {
+              promptVersion: {
+                name: {
+                  in: [
+                    WORKOUT_PLANNING_V2_PROMPT.name,
+                    WORKOUT_PLANNING_V2_PROMPT_V7.name,
+                  ],
+                },
+              },
+            },
           }
         : {}),
     };
@@ -527,6 +539,7 @@ export class CurrentWorkoutPlanReaderService {
   ): boolean {
     return (
       promptName === WORKOUT_PLANNING_V2_PROMPT.name ||
+      promptName === WORKOUT_PLANNING_V2_PROMPT_V7.name ||
       (result !== null &&
         ('acceptedOutput' in result || this.v2DocumentMarker(result)))
     );

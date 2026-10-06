@@ -1,3 +1,5 @@
+import { WORKOUT_PLANNING_V2_PROMPT } from './workout-planning-v2.prompt.definition';
+import { WorkoutPromptActivationService } from './workout-prompt-activation.service';
 import { GenerateWorkoutPlanV2InputBuilder } from './generate-workout-plan-v2-input.builder';
 import type { CurrentWorkoutPlanReaderService } from './current-workout-plan-reader.service';
 import type { CoachProfileSnapshotBuilder } from '../../context/coach-profile-snapshot.builder';
@@ -182,6 +184,7 @@ describe('Workout longitudinal history', () => {
       createStandaloneJob: jest.fn().mockResolvedValue({
         id: 'job-id',
         promptVersionId: 'prompt-id',
+        promptVersion: { version: 8, name: WORKOUT_PLANNING_V2_PROMPT.name },
         status: 'PENDING',
       }),
       runTextJob: jest
@@ -197,6 +200,10 @@ describe('Workout longitudinal history', () => {
       new WorkoutPlanningSafetyService(),
       new WorkoutPlanV2Validator(),
       ai as unknown as AIService,
+      undefined,
+      {
+        ensureActive: jest.fn().mockResolvedValue(undefined),
+      } as unknown as WorkoutPromptActivationService,
     );
     await expect(engine.generateCandidate(input)).rejects.toThrow(
       'controlled OpenAI boundary',

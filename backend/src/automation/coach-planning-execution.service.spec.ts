@@ -334,7 +334,7 @@ describe('CoachPlanningExecutionService', () => {
       }),
     };
     const workoutBuilder = {
-      recognizeDeclaredContext: jest.fn().mockReturnValue(recognizedContext),
+      resolveDeclaredContext: jest.fn().mockReturnValue(recognizedContext),
       build: jest.fn().mockResolvedValue({
         generationInput,
         profileId: 'profile-id',
@@ -409,7 +409,7 @@ describe('CoachPlanningExecutionService', () => {
       requiresRunningDistanceProfile: false,
       requiresWorkoutCalendar: true,
     });
-    expect(workoutBuilder.recognizeDeclaredContext).toHaveBeenCalledWith(
+    expect(workoutBuilder.resolveDeclaredContext).toHaveBeenCalledWith(
       currentMessage,
     );
     expect(collector.decide).toHaveBeenCalledWith(
@@ -508,7 +508,7 @@ describe('CoachPlanningExecutionService', () => {
         }),
       };
       const workoutBuilder = {
-        recognizeDeclaredContext: jest.fn().mockReturnValue(recognizedContext),
+        resolveDeclaredContext: jest.fn().mockReturnValue(recognizedContext),
         build: jest.fn().mockResolvedValue({
           generationInput,
           profileId: 'profile-id',
@@ -583,7 +583,7 @@ describe('CoachPlanningExecutionService', () => {
           }),
         }),
       );
-      expect(workoutBuilder.recognizeDeclaredContext).toHaveBeenCalledWith(
+      expect(workoutBuilder.resolveDeclaredContext).toHaveBeenCalledWith(
         currentMessage,
       );
       expect(workoutBuilder.build).not.toHaveBeenCalled();
@@ -624,7 +624,7 @@ describe('CoachPlanningExecutionService', () => {
     });
     const generationInput = Object.freeze({ userId: 'user-id' });
     const workoutBuilder = {
-      recognizeDeclaredContext: jest.fn().mockReturnValue(declared),
+      resolveDeclaredContext: jest.fn().mockReturnValue(declared),
       build: jest.fn().mockResolvedValue({
         generationInput,
         profileId: 'profile-id',

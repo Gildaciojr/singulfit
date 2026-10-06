@@ -1,4 +1,5 @@
 import { Test, type TestingModule } from '@nestjs/testing';
+import { ConversationUnderstandingEngineService } from '../understanding/conversation-understanding-engine.service';
 import { AIJobStatus } from '@prisma/client';
 import { ConversationModule } from '../conversation.module';
 import { ConversationUnderstandingService } from '../understanding/conversation-understanding.service';
@@ -271,6 +272,109 @@ describe('Nutrition read-only follow-up: real semantic pipeline', () => {
       },
     };
   }
+  it.each([
+    ['Uma alternativa de jantar é frango com batata e salada.', 'RECOVERED'],
+    ['Legumes com sopa de lentilha são uma opção para jantar.', 'FAILED'],
+  ] as const)(
+    'limits materially repeated dinner recovery to one retry: %s',
+    async (answer, outcome) => {
+      const s = subject('Outra opção');
+      s.ai.runTextJob.mockResolvedValue({
+        outputText: JSON.stringify({
+          disposition: 'ANSWER',
+          domain: 'NUTRITION',
+          answer: 'Legumes com sopa de lentilha são uma opção para jantar.',
+          followUpQuestion: null,
+          grounding: 'MIXED',
+          confidence: 'HIGH',
+        }),
+        responseId: 'first',
+        model: 'model',
+        promptTokens: 20,
+        completionTokens: 10,
+        totalTokens: 30,
+      });
+      s.gateway.createTextResponse.mockResolvedValue({
+        outputText: JSON.stringify({
+          disposition: 'ANSWER',
+          domain: 'NUTRITION',
+          answer,
+          followUpQuestion: null,
+          grounding: 'MIXED',
+          confidence: 'HIGH',
+        }),
+        responseId: 'corrected',
+        model: 'model',
+        promptTokens: 20,
+        completionTokens: 10,
+        totalTokens: 30,
+      });
+      const turn = await s.builder.build(s.input);
+      const understanding = await module
+        .get(ConversationUnderstandingService)
+        .understand(turn.understandingInput);
+      const decision = module
+        .get(ConversationRoutingDecisionService)
+        .decide({ ...turn.preparationBase, understanding });
+      const result = await s.bridge.execute(decision, turn.humanContext, {
+        ...s.input,
+        referenceDate: new Date(s.input.receivedAt),
+      });
+      expect(result).toMatchObject({
+        status: 'COMPLETED',
+        observability: {
+          nutritionAdviceInitialViolation:
+            'NUTRITION_ADVICE_REPEATS_PREVIOUS_SUGGESTION',
+          nutritionAdviceRetryOutcome: outcome,
+          effectiveReferentMeal: 'jantar',
+        },
+      });
+      expect(result.content).not.toContain('sopa de lentilhas');
+      expect(s.ai.runTextJob).toHaveBeenCalledTimes(1);
+      expect(s.gateway.createTextResponse).toHaveBeenCalledTimes(1);
+      if (outcome === 'FAILED') {
+        expect(s.ai.failJob).toHaveBeenCalledTimes(1);
+        expect(s.ai.completeJobInTransaction).not.toHaveBeenCalled();
+        expect(result.content).not.toContain('sopa de lentilha');
+      } else {
+        expect(s.ai.failJob).not.toHaveBeenCalled();
+        expect(s.ai.completeJobInTransaction).toHaveBeenCalledTimes(1);
+      }
+    },
+  );
+  it('uses one provider call for a materially different first suggestion', async () => {
+    const s = subject('Outra opção');
+    const turn = await s.builder.build(s.input);
+    const understanding = await module
+      .get(ConversationUnderstandingService)
+      .understand(turn.understandingInput);
+    const decision = module
+      .get(ConversationRoutingDecisionService)
+      .decide({ ...turn.preparationBase, understanding });
+    const result = await s.bridge.execute(decision, turn.humanContext, s.input);
+    expect(result.content).toContain('frango com batata e salada');
+    expect(s.ai.runTextJob).toHaveBeenCalledTimes(1);
+    expect(s.gateway.createTextResponse).not.toHaveBeenCalled();
+    expect(s.ai.completeJobInTransaction).toHaveBeenCalledTimes(1);
+    expect(s.ai.failJob).not.toHaveBeenCalled();
+  });
+  it('checks semantic Workout aliases before inheriting the delivered Nutrition referent', async () => {
+    const text = 'Me dá outra opção de cross';
+    const s = subject(text, null, 'NUTRITION');
+    expect(await s.gate.resolve('user-id', 'message-id')).toBeNull();
+    const turn = await s.builder.build(s.input);
+    expect(turn.humanContext.effectiveNutritionRequest).toBeUndefined();
+    expect(turn.humanContext.currentReadOnlyReferent).toBeUndefined();
+    expect(turn.understandingInput.text).toBe(text);
+    const service = new ConversationUnderstandingService(
+      module.get(ConversationUnderstandingEngineService),
+    );
+    expect(await service.understand(turn.understandingInput)).toMatchObject({
+      domain: 'WORKOUT',
+      intent: 'COMMON_MESSAGE',
+    });
+    expect(s.gateway.createTextResponse).not.toHaveBeenCalled();
+  });
   it('executes A through E in the same conversation with one recovery and an explicit domain switch', async () => {
     const texts = [
       'Me dê uma dica de lanche da tarde',

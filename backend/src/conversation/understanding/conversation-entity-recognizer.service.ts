@@ -1,12 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import type { ProfileAcquisitionField } from '../../context/coach-adaptive-profile-collector.contract';
 import { NUTRITION_ARTIFACT_TYPE } from '../../diet/v2/nutrition-planning-artifact.contract';
-import {
-  WORKOUT_ARTIFACT_TYPE,
-  WORKOUT_MODALITY,
-  type WorkoutModality,
-} from '../../workout/v2/workout-planning-artifact.contract';
+import { WORKOUT_ARTIFACT_TYPE } from '../../workout/v2/workout-planning-artifact.contract';
 import type { ConversationEntity } from '../contracts/conversation-entity.contract';
+import { currentWorkoutModality } from '../../workout/v2/workout-modality-resolution.service';
 import type {
   ConversationEntityRecognition,
   NormalizedConversationMessage,
@@ -26,32 +23,6 @@ const FOODS = Object.freeze([
   Object.freeze({ phrase: 'arroz', name: 'arroz' }),
   Object.freeze({ phrase: 'banana', name: 'banana' }),
   Object.freeze({ phrase: 'creatina', name: 'creatina' }),
-]);
-
-const MODALITIES: readonly Readonly<{
-  phrase: string;
-  modality: WorkoutModality;
-}>[] = Object.freeze([
-  Object.freeze({
-    phrase: 'musculacao',
-    modality: WORKOUT_MODALITY.GYM_STRENGTH,
-  }),
-  Object.freeze({
-    phrase: 'academia',
-    modality: WORKOUT_MODALITY.GYM_STRENGTH,
-  }),
-  Object.freeze({ phrase: 'casa', modality: WORKOUT_MODALITY.HOME_WORKOUT }),
-  Object.freeze({ phrase: 'corrida', modality: WORKOUT_MODALITY.RUNNING }),
-  Object.freeze({ phrase: 'correr', modality: WORKOUT_MODALITY.RUNNING }),
-  Object.freeze({ phrase: 'bike', modality: WORKOUT_MODALITY.CYCLING }),
-  Object.freeze({ phrase: 'ciclismo', modality: WORKOUT_MODALITY.CYCLING }),
-  Object.freeze({ phrase: 'crossfit', modality: WORKOUT_MODALITY.CROSSFIT }),
-  Object.freeze({ phrase: 'caminhada', modality: WORKOUT_MODALITY.WALKING }),
-  Object.freeze({
-    phrase: 'calistenia',
-    modality: WORKOUT_MODALITY.CALISTHENICS,
-  }),
-  Object.freeze({ phrase: 'mobilidade', modality: WORKOUT_MODALITY.MOBILITY }),
 ]);
 
 @Injectable()
@@ -74,13 +45,14 @@ export class ConversationEntityRecognizerService {
         entities.push(Object.freeze({ kind: 'FOOD', name: food.name }));
       }
     }
-    for (const item of MODALITIES) {
-      if (this.hasPhrase(text, item.phrase)) {
-        entities.push(
-          Object.freeze({ kind: 'WORKOUT_MODALITY', value: item.modality }),
-        );
-      }
-    }
+    const workoutModalityResolution = currentWorkoutModality(message.original);
+    if (workoutModalityResolution.modality)
+      entities.push(
+        Object.freeze({
+          kind: 'WORKOUT_MODALITY',
+          value: workoutModalityResolution.modality,
+        }),
+      );
 
     this.addArtifacts(text, entities);
     this.addComponents(text, entities);
@@ -88,7 +60,12 @@ export class ConversationEntityRecognizerService {
     this.addTemporalReference(text, entities);
     this.addProfileRead(message, entities);
 
-    return Object.freeze({ entities: this.unique(entities) });
+    return Object.freeze({
+      entities: this.unique(entities),
+      ...(workoutModalityResolution.action !== 'OTHER'
+        ? { workoutModalityResolution }
+        : {}),
+    });
   }
 
   private addProfileRead(

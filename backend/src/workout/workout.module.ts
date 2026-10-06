@@ -24,11 +24,20 @@ import { CurrentWorkoutPlanReaderService } from './v2/current-workout-plan-reade
 import { WorkoutPlanV2StoredDocumentParser } from './v2/workout-plan-v2-stored-document.parser';
 import { WorkoutPlanMutationResolverService } from './v2/workout-plan-mutation-resolver.service';
 import { ConversationPlanReferenceService } from '../conversation/understanding/conversation-plan-reference.service';
+import { WorkoutSemanticsModule } from './v2/workout-semantics.module';
+import { WorkoutPromptActivationService } from './v2/workout-prompt-activation.service';
 
 @Module({
-  imports: [AuthModule, AIModule, SubscriptionsModule, ContextModule],
+  imports: [
+    AuthModule,
+    AIModule,
+    SubscriptionsModule,
+    ContextModule,
+    WorkoutSemanticsModule,
+  ],
   controllers: [WorkoutController],
   providers: [
+    WorkoutPromptActivationService,
     ConversationPlanReferenceService,
     WorkoutService,
     WorkoutGeneratorService,

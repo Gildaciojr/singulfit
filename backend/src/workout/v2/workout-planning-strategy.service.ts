@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { modalityExpertise } from './workout-modality-expertise.policy';
 import {
   WORKOUT_ARTIFACT_TYPE,
   WORKOUT_MODALITY,
@@ -98,6 +99,11 @@ export class WorkoutPlanningStrategyService {
       schemaVersion: 2,
       artifactType: context.artifactType,
       modality,
+      runningTransitionPermission:
+        context.runningTransitionPermission ?? 'UNSPECIFIED',
+      runningTransitionAuthorized:
+        modality === 'WALKING' &&
+        context.runningTransitionPermission === 'ALLOW',
       objective: Object.freeze({ ...context.training.objective }),
       secondaryObjectives:
         context.training.secondaryObjectives.status === 'NOT_SET'
@@ -341,15 +347,46 @@ export class WorkoutPlanningStrategyService {
     if (modality === WORKOUT_MODALITY.CROSSFIT) {
       return this.crossfitSessionFocuses(context, count);
     }
-    if (
-      modality === WORKOUT_MODALITY.RUNNING ||
-      modality === WORKOUT_MODALITY.WALKING
-    ) {
+    if (modality === WORKOUT_MODALITY.WALKING)
+      return this.walkingSessionFocuses(context, count);
+    if (modality === WORKOUT_MODALITY.RUNNING) {
       return this.runningSessionFocuses(context, count);
     }
+    const expertise = modalityExpertise[modality];
     return Object.freeze(
-      Array.from({ length: count }, (_, index) => `Sessão ${index + 1}`),
+      Array.from(
+        { length: count },
+        (_, index) =>
+          `${expertise.focuses[index % expertise.focuses.length]} — sessão ${index + 1}`,
+      ),
     );
+  }
+
+  private walkingSessionFocuses(
+    context: WorkoutPlanningContext,
+    count: number,
+  ): readonly string[] {
+    const conservative =
+      this.requiresConservativeDistribution(context) ||
+      context.training.experience.status === 'NOT_SET' ||
+      context.training.experience.value === 'BEGINNER';
+    const incline =
+      context.training.equipment.status !== 'NOT_SET' &&
+      context.training.equipment.value.includes('TREADMILL');
+    const cycle = [
+      'Caminhada leve e cadência confortável',
+      conservative
+        ? 'Caminhada contínua leve com progressão curta'
+        : 'Caminhada contínua moderada',
+      'Caminhada intervalada por intensidade, mantendo passos sem impacto',
+      'Caminhada de recuperação e mobilidade',
+      incline && !conservative
+        ? 'Caminhada com inclinação gradual na esteira'
+        : 'Caminhada progressiva por duração em terreno regular',
+      'Caminhada leve com atenção à postura',
+      'Caminhada confortável e recuperação semanal',
+    ];
+    return this.takeCycle(cycle, count);
   }
 
   private gymSessionFocuses(

@@ -329,7 +329,8 @@ export class ConversationQAExecutorService {
     }
     let violation = nutritionAdviceViolation(nutritionAdvice, candidate);
     if (
-      violation === 'NUTRITION_ADVICE_REPEATS_CURRENT_MEAL' &&
+      (violation === 'NUTRITION_ADVICE_REPEATS_CURRENT_MEAL' ||
+        violation === 'NUTRITION_ADVICE_REPEATS_PREVIOUS_SUGGESTION') &&
       this.correctionGateway &&
       candidate.disposition === 'ANSWER'
     ) {
@@ -369,7 +370,7 @@ export class ConversationQAExecutorService {
               originalViolation: violation,
               correctiveAttempt: 1,
               instruction:
-                'O primeiro candidato repetiu a composição da refeição atual e foi descartado. Entregue uma alternativa diferente, mantendo o alvo, constraints e todas as restrições de segurança. Não altere o plano. Esta é a única tentativa corretiva.',
+                'O primeiro candidato repetiu uma composição já oferecida (refeição atual ou sugestão anterior) e foi descartado. Entregue uma alternativa diferente, mantendo o alvo, constraints e todas as restrições de segurança. Não altere o plano. Esta é a única tentativa corretiva.',
             },
           }),
           requestId: `${job.id}:nutrition-advice-correction:1`,

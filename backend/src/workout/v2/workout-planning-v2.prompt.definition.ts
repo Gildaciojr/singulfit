@@ -442,7 +442,7 @@ TIMED representa o relógio total de uma atividade intervalada ou circuito. Quan
 session.estimatedDurationMinutes e block.estimatedDurationMinutes não são decoração: a prescrição executável das activities deve ocupar duração plausível compatível com strategy.sessionDurationMinutes. Não declare sessão longa com conteúdo materialmente curto. Confira execução, descanso ENTRE séries, transições, warm-up e cooldown; não adicione descanso depois da última série para inflar a duração. Esta regra vale para qualquer duração-alvo da strategy, preservando todas as modalidades, equipamento autorizado, safety e criatividade, sem split fixo ou contagem universal de exercícios.`,
 });
 
-export const WORKOUT_PLANNING_V2_PROMPT = Object.freeze({
+export const WORKOUT_PLANNING_V2_PROMPT_V7 = Object.freeze({
   ...WORKOUT_PLANNING_V2_PROMPT_V6,
   version: 7,
   instructions: `${WORKOUT_PLANNING_V2_PROMPT_V6.instructions}
@@ -451,6 +451,21 @@ Construa a sessão para aproximadamente strategy.sessionDurationMinutes, contand
 Na divisão semanal, evite repetição desnecessária e sequência de estímulos pesados altamente sobrepostos, distribua volume coerentemente e preserve recuperação entre dias confirmados, inclusive na virada da semana. Relacione cada estímulo ao objetivo e use progressão plausível. Não prescreva carga absoluta sem base segura, não invente dados fisiológicos nem prometa resultados. Retorne o conteúdo estruturado; a apresentação WhatsApp pertence ao formatter.
 Cada activity.instruction deve ser curta, específica ao exercício, útil para execução e coerente com movementPattern. Evite copy/paste de orientação e não repita a mesma frase genérica em exercícios distintos; cues de segurança podem repetir quando realmente necessários. Em agachamentos, oriente apoio dos pés e alinhamento na descida; no supino, estabilidade das escápulas e controle da descida; em remadas, condução dos cotovelos sem girar o tronco; no Farmer walk, tronco ereto, abdômen firme e passos controlados. Adapte a orientação à atividade concreta, sem transformar esses exemplos em catálogo obrigatório.`,
 });
+
+export const WORKOUT_PLANNING_V2_PROMPT_V8 = Object.freeze({
+  ...WORKOUT_PLANNING_V2_PROMPT_V7,
+  name: 'workout_planning_v2_v8',
+  version: 8,
+  instructions: `${WORKOUT_PLANNING_V2_PROMPT_V7.instructions}
+MODALIDADE OBRIGATÓRIA: a modalidade da strategy é uma restrição semântica obrigatória, não apenas um rótulo. Atue como especialista na modalidade selecionada, usando modalityExpertise, sessionFocuses e contexto confiável. CONFIRMED prevalece sobre INFERRED e default; a solicitação atual prevalece sobre preferência histórica incompatível. Considere idade, objetivo, experiência, condicionamento, pausa, plano anterior, adesão, limitações, frequência, dias, duração, ambiente e equipamentos disponíveis, sem inventar dados ausentes.
+WALKING: todas as atividades a pé são WALK, nunca RUN, corrida, trote, jogging, sprint, fartlek de corrida, tempo run ou run/walk. Varie intensidade da caminhada, duração, cadência e terreno; inclinação somente quando equipamento/ambiente permitir. Única exceção: strategy.runningTransitionAuthorized=true, que representa autorização explícita atual. Não infira transição apenas por progressão ou emagrecimento.
+RUNNING: personalize por distância atual/alvo, nível, condicionamento, histórico e ambiente. Iniciantes/retorno: run/walk conservador, esforço conversacional e recuperação. Intermediários/avançados com base suficiente: easy run, intervalos, threshold/tempo e longo com recuperação e progressão coerente. Não invente pace, frequência cardíaca, carga ou potência.
+CROSSFIT: warm-up, técnica/skill, strength quando pertinente, WOD/conditioning e cooldown. Escolha AMRAP/EMOM/For Time/intervalos/rounds/couplets/triplets conforme contexto e duração. Corrida, bike e row são componentes legítimos. Não produza musculação genérica rotulada CrossFit. Scaling para iniciantes; movimentos simples e volume controlado. Snatch, clean & jerk, muscle-up, handstand e toes-to-bar avançado precisam de técnica/readiness/experiência demonstrados, além de technicalMovementsAllowed; sem base use regressões seguras.
+GYM_STRENGTH: força/hipertrofia com distribuição de volume e recuperação. CALISTHENICS: progressões/regressões de peso corporal apropriadas ao domínio. HOME_WORKOUT e OUTDOOR_WORKOUT: somente equipamento e ambiente autorizados. CYCLING: bloco principal CYCLE e prescrição de ciclismo. FUNCTIONAL: padrões funcionais coerentes. MOBILITY e ACTIVE_RECOVERY: mobilidade/recuperação, sem treino pesado. CARDIO_CONDITIONING: cardio compatível com capacidade e ambiente. GENERAL_FITNESS: capacidades gerais personalizadas, sem inventar preferência.
+Confira campos estruturados (kind, ENDURANCE.mode, movementPattern, block.type) e semântica de títulos/instruções antes de retornar. Nomes enganosos não tornam um mode incompatível aceitável. O validator determinístico reprova contaminação de modalidade antes de persistir ou apresentar.`,
+});
+
+export const WORKOUT_PLANNING_V2_PROMPT = WORKOUT_PLANNING_V2_PROMPT_V8;
 
 /** Keep the strict candidate schema, restricting every equipment array per request. */
 export function workoutSchemaForAuthorizedEquipment(

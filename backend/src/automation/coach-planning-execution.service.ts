@@ -785,9 +785,14 @@ export class CoachPlanningExecutionService {
     const baseWorkoutContext =
       (intent === 'WORKOUT' || intent === 'BOTH') &&
       this.workoutPlanningInputBuilder
-        ? this.workoutPlanningInputBuilder.recognizeDeclaredContext(
-            runtime?.currentMessage,
-          )
+        ? runtime?.planningDecision?.workoutModalityResolution
+          ? await this.workoutPlanningInputBuilder.resolveDeclaredContext(
+              runtime.currentMessage,
+              runtime.planningDecision.workoutModalityResolution,
+            )
+          : await this.workoutPlanningInputBuilder.resolveDeclaredContext(
+              runtime?.currentMessage,
+            )
         : undefined;
     let mutation: WorkoutPlanMutationResolution = Object.freeze({
       status: 'NOT_A_MUTATION' as const,

@@ -11,6 +11,12 @@ import { ACTIVE_CONVERSATION_QA_PROMPT } from './conversation-qa-capability';
 import { ConversationPublicAnswerBoundaryService } from './conversation-public-answer-boundary.service';
 import { normalizeConversationQACandidate } from './conversation-qa-candidate-normalizer';
 import { nutritionRequest } from '../understanding/nutrition-request.policy';
+import { currentWorkoutModality } from '../../workout/v2/workout-modality-resolution.service';
+import { WorkoutPlanV2Parser } from '../../workout/v2/workout-plan-v2.parser';
+import {
+  WORKOUT_PLANNING_V2_PROMPT,
+  WORKOUT_PLANNING_V2_PROMPT_V7,
+} from '../../workout/v2/workout-planning-v2.prompt.definition';
 import type { ConversationAnswerCandidate } from './conversation-qa.contract';
 import {
   effectiveNutritionRequest,
@@ -160,10 +166,11 @@ export class ConversationQAFollowUpContextService {
       select: { result: true },
       orderBy: [{ completedAt: 'desc' }, { id: 'desc' }],
     });
-    if (!this.validReferentCandidate(job?.result)) return null;
-    const candidate = normalizeConversationQACandidate(job.result);
-    const publicText = this.boundary.project(candidate);
-    if (!publicText || !candidate.answer) return null;
+    const candidate = this.validReferentCandidate(job?.result)
+      ? normalizeConversationQACandidate(job.result)
+      : null;
+    const publicText = candidate ? this.boundary.project(candidate) : null;
+    if (candidate && (!publicText || !candidate.answer)) return null;
     let delivered = row.content;
     if (
       typeof row.context.partCount === 'number' &&
@@ -191,8 +198,9 @@ export class ConversationQAFollowUpContextService {
       delivered = parts.map((part) => part.content).join(' ');
     }
     if (
+      candidate &&
       delivered.replace(/\s+/gu, ' ').trim() !==
-      publicText.replace(/\s+/gu, ' ').trim()
+        publicText!.replace(/\s+/gu, ' ').trim()
     )
       return null;
     if (!quote) {
@@ -210,10 +218,78 @@ export class ConversationQAFollowUpContextService {
         newerOutbound &&
         newerOutbound.timestamp > row.sentAt &&
         newerOutbound.content.replace(/\s+/gu, ' ').trim() !==
-          publicText.replace(/\s+/gu, ' ').trim()
+          (publicText ?? delivered).replace(/\s+/gu, ' ').trim()
       )
         return null;
     }
+    if (!candidate) {
+      const evidence = currentWorkoutModality(source.content);
+      if (
+        !evidence.modality ||
+        !['PLAN_REQUEST', 'MODALITY_CHANGE'].includes(evidence.action)
+      )
+        return null;
+      const workout = await this.prisma.aIJob.findFirst({
+        where: {
+          userId: input.userId,
+          type: 'WORKOUT',
+          status: 'COMPLETED',
+          createdAt: { gte: source.timestamp, lte: row.sentAt },
+          completedAt: { gte: source.timestamp, lte: row.sentAt },
+          promptVersion: {
+            name: {
+              in: [
+                WORKOUT_PLANNING_V2_PROMPT.name,
+                WORKOUT_PLANNING_V2_PROMPT_V7.name,
+              ],
+            },
+          },
+        },
+        select: {
+          userId: true,
+          result: true,
+          createdAt: true,
+          completedAt: true,
+        },
+        orderBy: [{ completedAt: 'desc' }, { id: 'desc' }],
+      });
+      if (
+        !workout ||
+        workout.userId !== input.userId ||
+        !workout.completedAt ||
+        workout.createdAt < source.timestamp ||
+        workout.createdAt > row.sentAt ||
+        workout.completedAt < workout.createdAt ||
+        workout.completedAt > row.sentAt ||
+        !this.record(workout.result) ||
+        typeof workout.result.candidateOutput !== 'string'
+      )
+        return null;
+      try {
+        const plan = new WorkoutPlanV2Parser().parse(
+          workout.result.candidateOutput,
+        );
+        if (
+          plan.modality !== evidence.modality ||
+          !plan.sessions.length ||
+          !plan.sessions.every((session) => delivered.includes(session.label))
+        )
+          return null;
+        return Object.freeze({
+          source: 'DELIVERED_WORKOUT',
+          sourceMessageId: source.id,
+          domain: 'WORKOUT',
+          workoutModality: plan.modality,
+          nutrition: null,
+          previousAnswer: delivered,
+          followUpQuestion: null,
+          deliveredAt: row.sentAt.toISOString(),
+        });
+      } catch {
+        return null;
+      }
+    }
+    if (!candidate.answer) return null;
     let nutrition = nutritionRequest(source.content);
     const followUp = readOnlyFollowUp(source.content);
     if (!nutrition && followUp) {

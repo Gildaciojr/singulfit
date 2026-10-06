@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { WorkoutSemanticsModule } from '../workout/v2/workout-semantics.module';
 import { ConversationGoalPlannerService } from '../context/conversation-goal-planner.service';
 import { CoachProfileSnapshotConversationAdapter } from './adapters/coach-profile-snapshot.adapter';
 import { ConversationGoalDecisionAdapter } from './adapters/conversation-goal-decision.adapter';
@@ -21,6 +22,7 @@ import { ConversationSafetyDetectorService } from './understanding/conversation-
 import { ConversationUnderstandingValidator } from './validators/conversation-understanding.validator';
 
 @Module({
+  imports: [WorkoutSemanticsModule],
   providers: [
     ConversationGoalPlannerService,
     CoachProfileSnapshotConversationAdapter,
@@ -44,6 +46,7 @@ import { ConversationUnderstandingValidator } from './validators/conversation-un
     ConversationUnderstandingValidator,
   ],
   exports: [
+    WorkoutSemanticsModule,
     ConversationSafetyDetectorService,
     CoachProfileSnapshotConversationAdapter,
     ConversationGoalDecisionAdapter,

@@ -4,9 +4,11 @@ import type {
   WorkoutActivityV2,
 } from './workout-plan-v2.contract';
 import type { WorkoutPlanningContext } from './workout-planning-context.contract';
+import type { WorkoutPlanningStrategy } from './workout-planning-strategy.contract';
 
 export function workoutStructuralActivityIssue(
   activity: WorkoutActivityV2,
+  strategy?: WorkoutPlanningStrategy,
 ): WorkoutPlanValidationIssue | null {
   if (activity.kind === 'ENDURANCE') {
     const name = activity.name
@@ -22,10 +24,17 @@ export function workoutStructuralActivityIssue(
       /^(?:(?:treino|passeio)\s+(?:de\s+)?)?(?:caminhada|corrida|caminhar|correr)\b/u.test(
         name,
       );
+    const running = /\b(?:corrida|correr|trote|jogging|sprint|run)\b/u.test(
+      name,
+    );
     if (
       activity.mode === 'CYCLE'
         ? foot || activity.equipment.includes('TREADMILL')
-        : cycling || activity.equipment.includes('BIKE')
+        : cycling ||
+          activity.equipment.includes('BIKE') ||
+          (activity.mode === 'WALK' &&
+            running &&
+            strategy?.runningTransitionAuthorized !== true)
     )
       return {
         code: 'ENDURANCE_MODE_CONFLICT',

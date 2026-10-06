@@ -83,6 +83,7 @@ export type ConversationRationaleCode =
   | 'IMPLEMENTATION_PENDING';
 
 export interface ConversationMetadata {
+  readonly workoutModalityResolution?: import('../../workout/v2/workout-modality-resolution.service').WorkoutModalityResolution;
   readonly contractVersion: typeof CONVERSATION_UNDERSTANDING_VERSION;
   readonly source: ConversationUnderstandingSource;
   readonly operationKey: string;

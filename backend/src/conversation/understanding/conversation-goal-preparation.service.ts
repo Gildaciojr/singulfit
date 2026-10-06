@@ -86,7 +86,9 @@ export class ConversationGoalPreparationService {
     const explicitTarget = this.mergeTargets([
       this.referenceTarget(input.understanding.references),
       this.entityTarget(input.understanding.entities),
-      input.continuity.targetPlan,
+      input.understanding.metadata.workoutModalityResolution
+        ? null
+        : input.continuity.targetPlan,
     ]);
     if (
       fixed &&

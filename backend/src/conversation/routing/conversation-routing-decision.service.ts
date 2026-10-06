@@ -22,7 +22,12 @@ export class ConversationRoutingDecisionService {
 
   decide(input: ConversationGoalPreparationInput): ConversationRoutingDecision {
     const plannerInput = this.preparation.prepare(input);
-    const goalDecision = this.planner.plan(plannerInput);
+    const planned = this.planner.plan(plannerInput);
+    const resolution = input.understanding.metadata.workoutModalityResolution;
+    const goalDecision =
+      resolution?.modality && input.understanding.domain === 'WORKOUT'
+        ? Object.freeze({ ...planned, workoutModalityResolution: resolution })
+        : planned;
     const executionRoute = this.router.route({
       understanding: input.understanding,
       goalDecision,

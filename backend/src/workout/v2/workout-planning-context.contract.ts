@@ -88,6 +88,9 @@ export interface WorkoutMovementConstraint {
 }
 
 export interface WorkoutRecognizedContext {
+  readonly runningTransitionPermission?: import('./workout-modality-resolution.service').RunningTransitionPermission;
+  readonly modalityResolution?: import('./workout-modality-resolution.service').WorkoutModalityResolution;
+  readonly runningTransitionAuthorized?: boolean;
   readonly previousPlanPolicy?: 'CONTEXT_ONLY' | 'REPLACE_FREELY';
   readonly artifactType?: WorkoutArtifactType;
   readonly modality?: WorkoutPlanningValue<WorkoutModality>;
@@ -174,6 +177,9 @@ export interface WorkoutPreviousPlanSummary {
 }
 
 export interface WorkoutPlanningContext {
+  readonly runningTransitionPermission?: import('./workout-modality-resolution.service').RunningTransitionPermission;
+  readonly modalityResolution?: import('./workout-modality-resolution.service').WorkoutModalityResolution;
+  readonly runningTransitionAuthorized?: boolean;
   readonly previousPlanPolicy?: 'CONTEXT_ONLY' | 'REPLACE_FREELY';
   readonly schemaVersion: 2;
   readonly artifactType: WorkoutArtifactType;

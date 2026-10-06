@@ -2,7 +2,10 @@ import { FitnessGoal, WorkoutWeekday } from '@prisma/client';
 import { CurrentWorkoutPlanReaderService } from './current-workout-plan-reader.service';
 import { WorkoutPlanV2StoredDocumentParser } from './workout-plan-v2-stored-document.parser';
 import { WORKOUT_PROMPT_BY_GOAL } from '../workout.constants';
-import { WORKOUT_PLANNING_V2_PROMPT } from './workout-planning-v2.prompt.definition';
+import {
+  WORKOUT_PLANNING_V2_PROMPT,
+  WORKOUT_PLANNING_V2_PROMPT_V7,
+} from './workout-planning-v2.prompt.definition';
 
 function activity(key: string, name: string) {
   return {
@@ -164,6 +167,26 @@ function legacyRecord(options?: {
 }
 
 describe('CurrentWorkoutPlanReaderService', () => {
+  it('keeps canonical V7 plans readable after the isolated V8 rollout', async () => {
+    const previous = record();
+    const s = setup();
+    s.findFirst.mockResolvedValue({
+      ...previous,
+      aiJob: {
+        ...previous.aiJob,
+        promptVersion: { name: WORKOUT_PLANNING_V2_PROMPT_V7.name },
+      },
+    });
+    expect((await s.service.read('user-id', true)).status).toBe('AVAILABLE');
+    expect(
+      await s.service.present(
+        'user-id',
+        'hoje',
+        new Date('2026-08-17T15:00:00Z'),
+        true,
+      ),
+    ).toContain('Agachamento');
+  });
   it('never queries legacy when canonical is absent, while the historical read remains available', async () => {
     const s = setup(legacyRecord());
     s.findFirst.mockResolvedValueOnce(null);
@@ -354,7 +377,16 @@ describe('CurrentWorkoutPlanReaderService', () => {
         where: {
           userId: 'user-id',
           status: 'ACTIVE',
-          aiJob: { promptVersion: { name: WORKOUT_PLANNING_V2_PROMPT.name } },
+          aiJob: {
+            promptVersion: {
+              name: {
+                in: [
+                  WORKOUT_PLANNING_V2_PROMPT.name,
+                  WORKOUT_PLANNING_V2_PROMPT_V7.name,
+                ],
+              },
+            },
+          },
         },
       }),
     );

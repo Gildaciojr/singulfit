@@ -35,6 +35,7 @@ export interface ConversationReferenceResolution {
 }
 
 export interface ConversationEntityRecognition {
+  readonly workoutModalityResolution?: import('../../workout/v2/workout-modality-resolution.service').WorkoutModalityResolution;
   readonly entities: readonly ConversationEntity[];
 }
 

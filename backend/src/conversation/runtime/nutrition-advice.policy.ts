@@ -19,6 +19,7 @@ export interface NutritionAdviceContext {
   readonly excludedFoods: readonly string[];
   readonly originalMeals: readonly PublicNutritionResponse['days'][number]['meals'][number][];
   readonly recentSuggestions: readonly string[];
+  readonly previousAdvice?: string | null;
   readonly unresolvedSafety: boolean;
   readonly unresolvedOriginalMeal: boolean;
   readonly temporalContext: ConversationAIValue;
@@ -37,6 +38,45 @@ function matchesFoodTerm(text: string, food: string): boolean {
     })
     .join('\\s+');
   return new RegExp(`\\b${pattern}\\b`, 'u').test(normalizeFoodTerm(text));
+}
+
+/** Lexical composition, not food taxonomy: presentation and preparation are not ingredients. */
+export function materiallyRepeatsNutritionAdvice(
+  previous: string,
+  candidate: string,
+): boolean {
+  const functional = new Set(
+    'a o as os um uma uns umas de do da dos das e com para por ao na no nas nos que meu minha seu sua voce pode uma opcao alternativa ideia sugestao jantar almoco lanche refeicao cafe manha tarde noite prepare preparar experimente experimentar escolha escolher sirva servir boa bom deliciosa delicioso simples pratica pratico nova novo diferente'.split(
+      ' ',
+    ),
+  );
+  const signature = (value: string): readonly string[] => [
+    ...new Set(
+      normalizeFoodTerm(value)
+        .split(' ')
+        .filter(
+          (term) =>
+            term.length > 2 &&
+            !functional.has(term) &&
+            !/^(?:cozid|grelhad|assad|refogad)\w*$/u.test(term),
+        ),
+    ),
+  ];
+  const left = signature(previous);
+  const right = signature(candidate);
+  if (left.length < 2 || right.length < 2) return false;
+  const remaining = [...right];
+  let common = 0;
+  for (const term of left) {
+    const index = remaining.findIndex(
+      (other) => matchesFoodTerm(term, other) || matchesFoodTerm(other, term),
+    );
+    if (index >= 0) {
+      common++;
+      remaining.splice(index, 1);
+    }
+  }
+  return common >= 2 && (2 * common) / (left.length + right.length) >= 0.8;
 }
 
 function record(
@@ -161,6 +201,10 @@ export function nutritionAdviceContext(
     recentSuggestions: Object.freeze(
       [...history, ...(previousAnswer ? [previousAnswer] : [])].slice(-3),
     ),
+    previousAdvice:
+      human.currentReadOnlyReferent?.domain === 'NUTRITION'
+        ? previousAnswer
+        : null,
     unresolvedSafety:
       [
         safety.foodRestrictions,
@@ -291,6 +335,12 @@ export function nutritionAdviceViolation(
   if (context.excludedFoods.some((food) => matchesFoodTerm(text, food)))
     return 'NUTRITION_ADVICE_REJECTED_FOOD';
   if (candidate.disposition !== 'ANSWER') return null;
+  if (
+    context.previousAdvice &&
+    candidate.answer &&
+    materiallyRepeatsNutritionAdvice(context.previousAdvice, candidate.answer)
+  )
+    return 'NUTRITION_ADVICE_REPEATS_PREVIOUS_SUGGESTION';
   for (const meal of context.originalMeals) {
     if (meal.items.length < 2) continue;
     const copied = meal.items.every((item) => {

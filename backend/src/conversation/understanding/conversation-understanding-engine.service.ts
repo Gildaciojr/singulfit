@@ -77,12 +77,17 @@ export class ConversationUnderstandingEngineService {
       intent,
     );
     const safety = this.safetyDetector.detect(normalized);
-    const metadata = this.metadata(
-      input,
-      references,
-      ambiguity.ambiguity.present,
-      safety.safety.requiresSafeResponse,
-    );
+    const metadata = {
+      ...this.metadata(
+        input,
+        references,
+        ambiguity.ambiguity.present,
+        safety.safety.requiresSafeResponse,
+      ),
+      ...(entities.workoutModalityResolution
+        ? { workoutModalityResolution: entities.workoutModalityResolution }
+        : {}),
+    };
 
     if (safety.safety.requiresSafeResponse) {
       return this.validated(

@@ -5,6 +5,12 @@ import {
 } from './workout-declared-profile-facts';
 import { workoutEquipmentBaseline } from './workout-equipment-defaults';
 import {
+  deterministicWorkoutModality,
+  currentWorkoutModality,
+  runningTransitionPermission,
+  type WorkoutModalityResolution,
+} from './workout-modality-resolution.service';
+import {
   BadRequestException,
   Injectable,
   NotFoundException,
@@ -81,11 +87,41 @@ export class GenerateWorkoutPlanV2InputBuilder {
     ]);
     const decision = this.generationDecision(source.decision, snapshot);
     const history = await this.history(source, profileId);
+    const structured = source.recognizedContext?.modality;
+    const permission = runningTransitionPermission(source.currentMessage ?? '');
+    const supplied: WorkoutModalityResolution | undefined =
+      source.decision?.workoutModalityResolution ??
+      source.recognizedContext?.modalityResolution ??
+      (structured?.status === 'CONFIRMED' &&
+      !source.recognizedContext?.mutation?.inheritedProfileFields?.includes(
+        'modality',
+      )
+        ? {
+            modality: structured.value,
+            confidence: 'HIGH',
+            source: 'DETERMINISTIC',
+            action: 'PLAN_REQUEST',
+            runningTransitionPermission: permission,
+            runningTransitionAuthorized:
+              structured.value === 'WALKING' && permission === 'ALLOW',
+          }
+        : undefined);
     const recognizedContext = this.recognizedContext(
       source.recognizedContext,
       snapshot,
-      source.declaredContext ??
-        this.recognizeDeclaredContext(source.currentMessage),
+      source.declaredContext?.modalityResolution
+        ? source.declaredContext
+        : {
+            ...source.declaredContext,
+            ...Object.fromEntries(
+              Object.entries(
+                await this.resolveDeclaredContext(
+                  source.currentMessage,
+                  supplied,
+                ),
+              ).filter(([, value]) => value !== undefined),
+            ),
+          },
     );
 
     return Object.freeze({
@@ -112,6 +148,37 @@ export class GenerateWorkoutPlanV2InputBuilder {
     message: string | undefined,
   ): WorkoutRecognizedContext {
     return this.declaredContext(message);
+  }
+
+  async resolveDeclaredContext(
+    message: string | undefined,
+    supplied?: WorkoutModalityResolution,
+  ): Promise<WorkoutRecognizedContext> {
+    if (!message && !supplied) return this.declaredContext(message);
+    const resolution = supplied ?? currentWorkoutModality(message ?? '');
+    const declared = await Promise.resolve(
+      this.declaredContext(message, resolution),
+    );
+    if (resolution.action === 'AMBIGUOUS')
+      throw new BadRequestException('Qual modalidade de treino você prefere?');
+    if (!resolution.modality) {
+      if (declared.modality)
+        throw new BadRequestException(
+          'Qual modalidade você quer usar neste treino?',
+        );
+      return {
+        ...declared,
+        runningTransitionPermission: resolution.runningTransitionPermission,
+        runningTransitionAuthorized: false,
+      };
+    }
+    return {
+      ...declared,
+      modality: { status: 'CONFIRMED', value: resolution.modality },
+      modalityResolution: resolution,
+      runningTransitionPermission: resolution.runningTransitionPermission,
+      runningTransitionAuthorized: resolution.runningTransitionAuthorized,
+    };
   }
 
   private async history(
@@ -340,11 +407,14 @@ export class GenerateWorkoutPlanV2InputBuilder {
 
   private declaredContext(
     message: string | undefined,
+    resolution?: WorkoutModalityResolution,
   ): WorkoutRecognizedContext {
     if (!message?.trim()) return Object.freeze({});
     const text = this.normalize(message);
     const equipmentScope = declaredWorkoutProfileFacts(text).equipmentScope;
-    const modality = this.declaredModality(text);
+    const modality = resolution
+      ? (resolution.modality ?? undefined)
+      : this.declaredModality(text);
     const environment = declaredWorkoutEnvironment(text);
     const experience = this.declaredExperience(text);
     const objective = this.declaredObjective(text);
@@ -471,26 +541,7 @@ export class GenerateWorkoutPlanV2InputBuilder {
   }
 
   private declaredModality(text: string): WorkoutModality | undefined {
-    if (/\bcrossfit\b/u.test(text)) return WORKOUT_MODALITY.CROSSFIT;
-    if (/\b(musculacao|academia)\b/u.test(text))
-      return WORKOUT_MODALITY.GYM_STRENGTH;
-    if (
-      /\b(corrida|correr|corro|comecar a correr)\b/u.test(text) ||
-      /\b(?:prova de|preparar para)\s*\d+(?:[.,]\d+)?\s*km\b/u.test(text)
-    )
-      return WORKOUT_MODALITY.RUNNING;
-    if (/\b(caminhada|caminhar)\b/u.test(text)) return WORKOUT_MODALITY.WALKING;
-    if (/\b(bike|ciclismo|pedalar)\b/u.test(text))
-      return WORKOUT_MODALITY.CYCLING;
-    if (/\b(cardio|aerobico|aerobica)\b/u.test(text))
-      return WORKOUT_MODALITY.CARDIO_CONDITIONING;
-    if (/\b(funcional|treino funcional)\b/u.test(text))
-      return WORKOUT_MODALITY.FUNCTIONAL;
-    if (/\bcalistenia\b/u.test(text)) return WORKOUT_MODALITY.CALISTHENICS;
-    if (/\bmobilidade\b/u.test(text)) return WORKOUT_MODALITY.MOBILITY;
-    if (/\b(em casa|treino em casa|home workout|peso corporal)\b/u.test(text))
-      return WORKOUT_MODALITY.HOME_WORKOUT;
-    return undefined;
+    return deterministicWorkoutModality(text);
   }
 
   private declaredExperience(text: string): WorkoutExperienceLevel | undefined {

@@ -120,6 +120,7 @@ export interface WorkoutPlanValidationIssue {
   readonly code:
     | 'ARTIFACT_MISMATCH'
     | 'MODALITY_MISMATCH'
+    | 'MODALITY_ACTIVITY_CONFLICT'
     | 'OBJECTIVE_MISMATCH'
     | 'SESSION_COUNT_MISMATCH'
     | 'SESSION_DURATION_EXCEEDED'

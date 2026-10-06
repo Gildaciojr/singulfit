@@ -1,3 +1,4 @@
+import { WorkoutPromptActivationService } from './workout-prompt-activation.service';
 import { WorkoutApplicationExecutorService } from './execution/workout-application-executor.service';
 import type { WorkoutPlanV2PersistenceService } from './persistence/workout-plan-v2-persistence.service';
 import { createHash } from 'node:crypto';
@@ -413,6 +414,10 @@ describe('Workout Planning Engine V2', () => {
         WorkoutPlanningSafetyService,
         WorkoutPlanV2Validator,
         { provide: AIService, useValue: aiService },
+        {
+          provide: WorkoutPromptActivationService,
+          useValue: { ensureActive: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 
@@ -487,7 +492,7 @@ describe('Workout Planning Engine V2', () => {
       workoutSchemaForAuthorizedEquipment([]).schema,
     ))
       expect(variant.maxItems).toBe(0);
-    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(7);
+    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(8);
     expect(WORKOUT_PLANNING_V2_PROMPT_V3.version).toBe(3);
   });
   it('reproduces five 60-minute FULL_GYM sessions with bodyweight warm-up without unavailable-equipment failures', () => {
@@ -617,9 +622,11 @@ describe('Workout Planning Engine V2', () => {
 
   it('sends individualized canonical payloads with deterministic user-isolated identities', async () => {
     const ai = {
-      createStandaloneJob: jest
-        .fn()
-        .mockResolvedValue({ id: 'fake-job', status: AIJobStatus.PENDING }),
+      createStandaloneJob: jest.fn().mockResolvedValue({
+        id: 'fake-job',
+        status: AIJobStatus.PENDING,
+        promptVersion: { version: 8, name: WORKOUT_PLANNING_V2_PROMPT.name },
+      }),
       runTextJob: jest
         .fn()
         .mockRejectedValue(new Error('mock payload captured')),
@@ -1180,6 +1187,10 @@ describe('Workout Planning Engine V2', () => {
         WorkoutPlanningSafetyService,
         WorkoutPlanV2Validator,
         { provide: AIService, useValue: ai },
+        {
+          provide: WorkoutPromptActivationService,
+          useValue: { ensureActive: jest.fn().mockResolvedValue(undefined) },
+        },
         { provide: PrismaService, useValue: {} },
       ],
     }).compile();
@@ -1216,6 +1227,7 @@ describe('Workout Planning Engine V2', () => {
         id: 'job-id',
         status: AIJobStatus.PENDING,
         promptVersionId: 'prompt-id',
+        promptVersion: { version: 8, name: WORKOUT_PLANNING_V2_PROMPT.name },
         result: null,
       }),
       runTextJob: jest.fn().mockResolvedValue(response),
@@ -1239,6 +1251,10 @@ describe('Workout Planning Engine V2', () => {
         WorkoutPlanningSafetyService,
         WorkoutPlanV2Validator,
         { provide: AIService, useValue: ai },
+        {
+          provide: WorkoutPromptActivationService,
+          useValue: { ensureActive: jest.fn().mockResolvedValue(undefined) },
+        },
         { provide: PrismaService, useValue: prisma },
       ],
     }).compile();
@@ -1290,7 +1306,7 @@ describe('Workout Planning Engine V2', () => {
     const keyForVersion = (version: number) =>
       `workout-planning-v2:${createHash('sha256').update(`user-id:${version}:${providerRequest.input}`).digest('hex')}`;
     expect(generation.operationKey).toBe(
-      `workout-planning-v2:${createHash('sha256').update(`user-id:7:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${providerRequest.input}`).digest('hex')}`,
+      `workout-planning-v2:${createHash('sha256').update(`user-id:8:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${providerRequest.input}`).digest('hex')}`,
     );
     expect(WORKOUT_PLANNING_V2_EXECUTION_REVISION).toBe(
       'timed-clock-canonical-v1',
@@ -1317,6 +1333,7 @@ describe('Workout Planning Engine V2', () => {
         id: 'completed-job-id',
         status: AIJobStatus.COMPLETED,
         promptVersionId: 'prompt-id',
+        promptVersion: { version: 8, name: WORKOUT_PLANNING_V2_PROMPT.name },
         result: storedResult,
       }),
       runTextJob: jest.fn(),
@@ -1353,6 +1370,7 @@ describe('Workout Planning Engine V2', () => {
         id: 'processing-job-id',
         status: AIJobStatus.PROCESSING,
         promptVersionId: 'prompt-id',
+        promptVersion: { version: 8, name: WORKOUT_PLANNING_V2_PROMPT.name },
         result: null,
       }),
       runTextJob: jest.fn(),
@@ -1434,6 +1452,7 @@ describe('Workout Planning Engine V2', () => {
           id: 'job-id',
           status,
           promptVersionId: 'prompt-id',
+          promptVersion: { version: 8, name: WORKOUT_PLANNING_V2_PROMPT.name },
           result: status === AIJobStatus.COMPLETED ? storedResult : null,
         }),
         runTextJob: jest.fn().mockResolvedValue(response),
@@ -1539,6 +1558,7 @@ describe('Workout Planning Engine V2', () => {
         id: 'job-id',
         status: AIJobStatus.PENDING,
         promptVersionId: 'prompt-id',
+        promptVersion: { version: 8, name: WORKOUT_PLANNING_V2_PROMPT.name },
         result: null,
       }),
       runTextJob: jest.fn().mockResolvedValue(response),
@@ -1595,6 +1615,7 @@ describe('Workout Planning Engine V2', () => {
     const aiService = {
       createStandaloneJob: jest.fn().mockResolvedValue({
         id: 'failed-job',
+        promptVersion: { version: 8, name: WORKOUT_PLANNING_V2_PROMPT.name },
         status: AIJobStatus.FAILED,
         result: {
           candidateOutput: JSON.stringify(candidate(input)),
@@ -1625,6 +1646,7 @@ describe('Workout Planning Engine V2', () => {
         id: 'job-id',
         status: AIJobStatus.PENDING,
         promptVersionId: 'prompt-id',
+        promptVersion: { version: 8, name: WORKOUT_PLANNING_V2_PROMPT.name },
         result: null,
       }),
       runTextJob: jest.fn().mockRejectedValue(providerError),
@@ -1919,8 +1941,8 @@ describe('Workout Planning Engine V2', () => {
 
   it('publishes prompt V2 with explicit personalization and stereotype guards', () => {
     expect(WORKOUT_PLANNING_V2_PROMPT).toMatchObject({
-      name: 'workout_planning_v2',
-      version: 7,
+      name: 'workout_planning_v2_v8',
+      version: 8,
       capability: 'WORKOUT_PLANNING_V2',
     });
     expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(

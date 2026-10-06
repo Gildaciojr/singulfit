@@ -1,4 +1,5 @@
 import { normalizeFoodTerm } from '../../context/food-preference-policy';
+import type { WorkoutModality } from '../../workout/v2/workout-planning-artifact.contract';
 import {
   nutritionRequest,
   selfContainedNutritionRequest,
@@ -91,10 +92,15 @@ export function referentCompatibility(
   const incompatibleEntity = current.entities.some((entity) => {
     switch (entity.kind) {
       case 'WORKOUT_ARTIFACT':
-      case 'WORKOUT_MODALITY':
       case 'EXERCISE':
       case 'EQUIPMENT':
         return referent.domain !== 'WORKOUT';
+      case 'WORKOUT_MODALITY':
+        return (
+          referent.domain !== 'WORKOUT' ||
+          (referent.workoutModality !== undefined &&
+            entity.value !== referent.workoutModality)
+        );
       case 'NUTRITION_ARTIFACT':
       case 'MEAL':
       case 'FOOD':
@@ -121,7 +127,8 @@ export interface ReadOnlyFollowUp {
   readonly currentTurn: ReadOnlyCurrentTurn;
 }
 export interface CurrentReadOnlyReferent {
-  readonly source: 'DELIVERED_QA';
+  readonly source: 'DELIVERED_QA' | 'DELIVERED_WORKOUT';
+  readonly workoutModality?: WorkoutModality;
   readonly sourceMessageId: string;
   readonly domain: 'NUTRITION' | 'WORKOUT' | 'PROGRESS' | 'GENERAL';
   readonly nutrition: NutritionRequest | null;

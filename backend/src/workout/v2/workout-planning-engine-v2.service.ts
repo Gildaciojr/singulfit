@@ -2,11 +2,15 @@ import {
   BadGatewayException,
   BadRequestException,
   Injectable,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { AIJobStatus, AIJobType, Prisma } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { AIService } from '../../ai/ai.service';
+import { AuditService } from '../../observability/audit.service';
+import { WorkoutPromptActivationService } from './workout-prompt-activation.service';
+import { modalityExpertise } from './workout-modality-expertise.policy';
 import { WORKOUT_PLAN_GENERATION } from '../../entitlements/entitlement.constants';
 import { WorkoutArtifactResolverService } from './workout-artifact-resolver.service';
 import { freezeWorkoutPlanV2 } from './workout-plan-v2.freeze';
@@ -56,6 +60,8 @@ export class WorkoutPlanningEngineV2Service {
     private readonly safety: WorkoutPlanningSafetyService,
     private readonly validator: WorkoutPlanV2Validator,
     private readonly aiService: AIService,
+    @Optional() private readonly audit: AuditService | undefined = undefined,
+    private readonly promptActivation: WorkoutPromptActivationService,
   ) {}
 
   prepare(input: GenerateWorkoutPlanV2Input): PreparedWorkoutPlanningV2 {
@@ -121,10 +127,12 @@ export class WorkoutPlanningEngineV2Service {
       throw new BadRequestException(
         `Geração de treino bloqueada: ${prepared.safety.outcome}`,
       );
+    await this.promptActivation.ensureActive();
     const payload = Object.freeze({
       schemaVersion: 2 as const,
       context: prepared.context,
       strategy: prepared.strategy,
+      modalityExpertise: modalityExpertise[prepared.strategy.modality],
       safetyPolicy: Object.freeze({
         noDiagnosis: true,
         noRehabilitation: true,
@@ -144,6 +152,16 @@ export class WorkoutPlanningEngineV2Service {
         ? { usageEntitlementCode: WORKOUT_PLAN_GENERATION }
         : {}),
     });
+    if (
+      job.promptVersion?.version !== WORKOUT_PLANNING_V2_PROMPT.version ||
+      job.promptVersion?.name !== WORKOUT_PLANNING_V2_PROMPT.name
+    ) {
+      const error = new ServiceUnavailableException(
+        'WORKOUT_PROMPT_VERSION_MISMATCH',
+      );
+      await this.aiService.failJob(job.id, error);
+      throw error;
+    }
     if (job.status === AIJobStatus.COMPLETED) {
       const stored = this.stored(job.result);
       if (!stored)
@@ -264,6 +282,34 @@ export class WorkoutPlanningEngineV2Service {
       prepared.context,
       prepared.strategy,
     );
+    if (this.audit)
+      void this.audit
+        .record({
+          userId: input.userId,
+          action: 'WORKOUT_MODALITY_VALIDATED',
+          entityType: 'AI_JOB',
+          entityId: generationMetadata.aiJobId,
+          metadata: {
+            requestedWorkoutModality:
+              prepared.context.modalityResolution?.modality ?? null,
+            resolvedWorkoutModality: prepared.strategy.modality,
+            modalityResolutionSource:
+              prepared.context.modalityResolution?.source ?? 'PROFILE_FALLBACK',
+            modalityConfidence:
+              prepared.context.modalityResolution?.confidence ??
+              (prepared.context.modality.status === 'CONFIRMED'
+                ? 'HIGH'
+                : 'LOW'),
+            modalityValidationOutcome: validation.status,
+            modalityViolationCode:
+              validation.issues.find(
+                (issue) =>
+                  issue.code === 'MODALITY_ACTIVITY_CONFLICT' ||
+                  issue.code === 'MODALITY_MISMATCH',
+              )?.code ?? null,
+          },
+        })
+        .catch(() => undefined);
     if (this.safety.evaluateAfterGeneration(validation).outcome === 'BLOCKED')
       throw new WorkoutPostGenerationValidationError(validation);
     const reference = prepared.context.previousPlan

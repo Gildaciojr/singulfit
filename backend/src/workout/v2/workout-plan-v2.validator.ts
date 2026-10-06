@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { workoutModalityPlanIssues } from './workout-modality-expertise.policy';
 import { estimateWorkoutSession } from './workout-duration-estimator';
 import {
   hasInvalidWorkoutActivityName,
@@ -22,7 +23,9 @@ export class WorkoutPlanV2Validator {
     context: WorkoutPlanningContext,
     strategy: WorkoutPlanningStrategy,
   ): WorkoutPlanValidationResult {
-    const issues: WorkoutPlanValidationIssue[] = [];
+    const issues: WorkoutPlanValidationIssue[] = [
+      ...workoutModalityPlanIssues(candidate, strategy),
+    ];
     if (candidate.artifactType !== strategy.artifactType)
       this.add(issues, 'ARTIFACT_MISMATCH', 'ERROR', 'artifactType');
     if (candidate.modality !== strategy.modality)
@@ -167,7 +170,7 @@ export class WorkoutPlanV2Validator {
     strategy: WorkoutPlanningStrategy,
     issues: WorkoutPlanValidationIssue[],
   ): void {
-    const structural = workoutStructuralActivityIssue(activity);
+    const structural = workoutStructuralActivityIssue(activity, strategy);
     if (structural) issues.push(structural);
     if (hasInvalidWorkoutActivityName(activity.name))
       this.add(issues, 'ACTIVITY_NAME_INVALID', 'ERROR', activity.activityKey);

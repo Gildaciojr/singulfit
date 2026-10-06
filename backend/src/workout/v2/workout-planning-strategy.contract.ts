@@ -73,6 +73,8 @@ export type WorkoutPersonalizationFactor =
   | 'PREVIOUS_PLAN';
 
 export interface WorkoutPlanningStrategy {
+  readonly runningTransitionPermission?: import('./workout-modality-resolution.service').RunningTransitionPermission;
+  readonly runningTransitionAuthorized?: boolean;
   readonly schemaVersion: 2;
   readonly artifactType: WorkoutArtifactType;
   readonly modality: WorkoutModality;

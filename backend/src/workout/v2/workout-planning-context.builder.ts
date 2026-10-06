@@ -32,6 +32,13 @@ export class WorkoutPlanningContextBuilder {
       profileSafetySignals.push('RETURN_AFTER_LONG_PAUSE');
     }
     return Object.freeze({
+      ...(recognized.modalityResolution
+        ? { modalityResolution: recognized.modalityResolution }
+        : {}),
+      runningTransitionPermission:
+        recognized.runningTransitionPermission ?? 'UNSPECIFIED',
+      runningTransitionAuthorized:
+        recognized.runningTransitionPermission === 'ALLOW',
       schemaVersion: 2,
       artifactType: input.artifactType,
       modality:
