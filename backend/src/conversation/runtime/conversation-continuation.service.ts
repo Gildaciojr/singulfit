@@ -2,6 +2,11 @@ import { ConversationContinuationStore } from './conversation-continuation.store
 import { explicitContinuationDomain } from '../understanding/explicit-continuation-domain.policy';
 import { selfContainedNutritionRequest } from '../understanding/nutrition-request.policy';
 import {
+  effectiveNutritionRequest,
+  readOnlyFollowUp,
+  referentCompatibility,
+} from './conversation-read-only-referent.policy';
+import {
   dailyQuery,
   isDailyMealRequest,
 } from '../understanding/daily-query.policy';
@@ -179,6 +184,36 @@ export class ConversationContinuationService {
     if (isDailyMealRequest(message.content) || dailyQuery(message.content))
       return null;
     if (selfContainedNutritionRequest(message.content)) return null;
+    const followUp = readOnlyFollowUp(message.content);
+    if (followUp) {
+      const lookup = {
+        userId,
+        conversationId: message.conversationId,
+        messageId,
+      };
+      if (await this.qaFollowUp.hasBlockingLifecycle(lookup, message.timestamp))
+        return null;
+      if (
+        followUp.currentTurn.domain === 'WORKOUT' ||
+        followUp.currentTurn.domain === 'COMBINED'
+      )
+        return null;
+      const referent = await this.qaFollowUp.findReferent(lookup);
+      if (
+        referent &&
+        referentCompatibility(followUp.currentTurn, referent) !== 'COMPATIBLE'
+      )
+        return null;
+      if (referent && effectiveNutritionRequest(followUp, referent))
+        return {
+          content: SAFE_CONTEXT,
+          domain: 'GENERAL',
+          pending: null,
+          next: null,
+          outcome: 'UNKNOWN',
+          evidence: { delegateRuntime: true },
+        };
+    }
     const explicitDomain = explicitContinuationDomain(message.content);
     let pending = await this.pending(userId, message);
     if (

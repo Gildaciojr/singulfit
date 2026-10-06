@@ -136,7 +136,11 @@ describe('Canonical conversation continuation', () => {
         },
       }),
     };
-    const qa = { findPending: jest.fn().mockResolvedValue(null) };
+    const qa = {
+      findPending: jest.fn().mockResolvedValue(null),
+      findReferent: jest.fn().mockResolvedValue(null),
+      hasBlockingLifecycle: jest.fn().mockResolvedValue(false),
+    };
     const store = new ConversationContinuationStore(
       prisma as unknown as PrismaService,
       config as unknown as ConversationRuntimeOperationalConfigService,

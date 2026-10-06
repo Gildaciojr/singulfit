@@ -67,6 +67,21 @@ export class ConversationRuntimeAuditService {
           totalTokens: input.bridge.observability?.totalTokens ?? 0,
           answerFallbackReason:
             input.bridge.observability?.fallbackReason ?? 'NONE',
+          effectiveReferentSource:
+            input.bridge.observability?.effectiveReferentSource ?? null,
+          effectiveReferentMessageId:
+            input.bridge.observability?.effectiveReferentMessageId ?? null,
+          effectiveReferentDomain:
+            input.bridge.observability?.effectiveReferentDomain ?? null,
+          effectiveReferentMeal:
+            input.bridge.observability?.effectiveReferentMeal ?? null,
+          nutritionAdviceInitialViolation:
+            input.bridge.observability?.nutritionAdviceInitialViolation ?? null,
+          nutritionAdviceRetryAttempted:
+            input.bridge.observability?.nutritionAdviceRetryAttempted ?? false,
+          nutritionAdviceRetryOutcome:
+            input.bridge.observability?.nutritionAdviceRetryOutcome ??
+            'NOT_ATTEMPTED',
         },
       });
     } catch (error) {

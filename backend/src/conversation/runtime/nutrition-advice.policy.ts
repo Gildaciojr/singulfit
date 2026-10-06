@@ -70,7 +70,8 @@ export function nutritionAdviceContext(
   previousAnswer: string | null,
   referenceDate: Date,
 ): NutritionAdviceContext | null {
-  const request = nutritionRequest(human.currentMessage);
+  const request =
+    human.effectiveNutritionRequest ?? nutritionRequest(human.currentMessage);
   if (!request || request.intent === 'PLAN_LOOKUP') return null;
   const safety =
     record(personalized) && record(personalized.safety)

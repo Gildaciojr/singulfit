@@ -1,4 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { ConversationQAFollowUpContextService } from './conversation-qa-follow-up-context.service';
+import {
+  effectiveNutritionRequest,
+  nutritionRequestText,
+  readOnlyFollowUp,
+  referentCompatibility,
+} from './conversation-read-only-referent.policy';
 import {
   CoachProfileAcquisitionCycleStatus,
   MessageDirection,
@@ -57,6 +64,8 @@ export class ConversationTurnContextBuilderService {
     private readonly humanContextBuilder: CoachConversationHumanContextBuilder,
     private readonly normalizer: ConversationMessageNormalizerService,
     private readonly entityRecognizer: ConversationEntityRecognizerService,
+    @Optional()
+    private readonly qaFollowUp?: ConversationQAFollowUpContextService,
   ) {}
 
   async build(
@@ -253,13 +262,34 @@ export class ConversationTurnContextBuilderService {
       targetPlan: this.targetPlan(input.legacyIntent),
     });
     const profile = this.snapshotAdapter.adapt(snapshot);
+    const followUp = readOnlyFollowUp(input.text);
+    const locatedReferent =
+      followUp &&
+      activeProfileField === null &&
+      !pendingConfirmation &&
+      this.qaFollowUp
+        ? await this.qaFollowUp.findReferent(input)
+        : null;
+    const referent =
+      followUp &&
+      locatedReferent &&
+      referentCompatibility(followUp.currentTurn, locatedReferent) ===
+        'COMPATIBLE'
+        ? locatedReferent
+        : null;
+    const effectiveRequest =
+      followUp && referent
+        ? effectiveNutritionRequest(followUp, referent)
+        : null;
     const understandingInput = Object.freeze({
       contractVersion: CONVERSATION_UNDERSTANDING_VERSION,
       userId: input.userId,
       conversationId: input.conversationId,
       messageId: input.messageId,
       channel: 'WHATSAPP' as const,
-      text: input.text,
+      text: effectiveRequest
+        ? `${nutritionRequestText(effectiveRequest)}. ${input.text}`
+        : input.text,
       receivedAt: input.receivedAt,
       replyToExternalMessageId: input.replyToExternalMessageId ?? null,
       profile,
@@ -279,10 +309,18 @@ export class ConversationTurnContextBuilderService {
       continuity,
       referenceDate: snapshot.referenceDate,
     });
-    const humanContext = this.humanContextBuilder.build(snapshot, {
-      expectedUserId: input.userId,
-      currentMessage: input.text,
-      recentHistory: history,
+    const humanContext = Object.freeze({
+      ...this.humanContextBuilder.build(snapshot, {
+        expectedUserId: input.userId,
+        currentMessage: input.text,
+        recentHistory: history,
+      }),
+      ...(referent
+        ? {
+            currentReadOnlyReferent: referent,
+            effectiveNutritionRequest: effectiveRequest,
+          }
+        : {}),
     });
     return Object.freeze({
       understandingInput,

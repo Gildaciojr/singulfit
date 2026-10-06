@@ -27,6 +27,16 @@ export interface ConversationAnswerCandidate {
 }
 
 export interface ConversationQAObservability {
+  readonly effectiveReferentSource?: string;
+  readonly effectiveReferentMessageId?: string;
+  readonly effectiveReferentDomain?: string;
+  readonly effectiveReferentMeal?: string | null;
+  readonly nutritionAdviceInitialViolation?: string;
+  readonly nutritionAdviceRetryAttempted?: boolean;
+  readonly nutritionAdviceRetryOutcome?:
+    | 'RECOVERED'
+    | 'FAILED'
+    | 'NOT_ATTEMPTED';
   readonly answerSource: 'AI' | 'AI_REUSED' | 'DETERMINISTIC_FALLBACK';
   readonly disposition: ConversationAnswerDisposition | null;
   readonly domain: ConversationAnswerDomain | null;

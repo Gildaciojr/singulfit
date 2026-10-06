@@ -10,6 +10,13 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { ACTIVE_CONVERSATION_QA_PROMPT } from './conversation-qa-capability';
 import { ConversationPublicAnswerBoundaryService } from './conversation-public-answer-boundary.service';
 import { normalizeConversationQACandidate } from './conversation-qa-candidate-normalizer';
+import { nutritionRequest } from '../understanding/nutrition-request.policy';
+import type { ConversationAnswerCandidate } from './conversation-qa.contract';
+import {
+  effectiveNutritionRequest,
+  readOnlyFollowUp,
+  type CurrentReadOnlyReferent,
+} from './conversation-read-only-referent.policy';
 
 export interface ConversationQAFollowUpLookupInput {
   readonly userId: string;
@@ -29,6 +36,205 @@ export class ConversationQAFollowUpContextService {
     private readonly prisma: PrismaService,
     private readonly boundary: ConversationPublicAnswerBoundaryService,
   ) {}
+
+  async hasBlockingLifecycle(
+    input: ConversationQAFollowUpLookupInput,
+    at: Date,
+  ): Promise<boolean> {
+    const [mutation, profile] = await Promise.all([
+      this.prisma.pendingConversationAction?.findFirst({
+        where: {
+          userId: input.userId,
+          conversationId: input.conversationId,
+          expiresAt: { gt: at },
+          status: {
+            in: ['PENDING', 'CONSUMED_PENDING_EXECUTION', 'EXECUTING'],
+          },
+        },
+        select: { id: true },
+      }),
+      this.prisma.coachProfileAcquisitionCycle?.findFirst({
+        where: {
+          userId: input.userId,
+          active: true,
+          expiresAt: { gt: at },
+          status: { in: ['ASKED', 'CONFIRMATION_PENDING'] },
+        },
+        select: { id: true },
+      }),
+    ]);
+    return Boolean(mutation || profile);
+  }
+
+  async findReferent(
+    input: ConversationQAFollowUpLookupInput,
+  ): Promise<CurrentReadOnlyReferent | null> {
+    const current = await this.prisma.message.findFirst({
+      where: {
+        id: input.messageId,
+        conversationId: input.conversationId,
+        conversation: { userId: input.userId },
+        type: 'TEXT',
+        direction: 'INBOUND',
+      },
+      select: { timestamp: true, replyToExternalMessageId: true },
+    });
+    if (!current || (await this.hasBlockingLifecycle(input, current.timestamp)))
+      return null;
+    return this.deliveredReferent(
+      input,
+      current.timestamp,
+      current.replyToExternalMessageId,
+      0,
+    );
+  }
+
+  private async deliveredReferent(
+    input: ConversationQAFollowUpLookupInput,
+    before: Date,
+    quote: string | null,
+    depth: number,
+  ): Promise<CurrentReadOnlyReferent | null> {
+    if (depth >= 4) return null;
+    const row = await this.prisma.scheduledMessage.findFirst({
+      where: {
+        userId: input.userId,
+        conversationId: input.conversationId,
+        status: 'SENT',
+        sentAt: { lt: before, gt: new Date(before.getTime() - 86_400_000) },
+        ...(quote ? { externalMessageId: quote } : {}),
+      },
+      orderBy: [{ sentAt: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true,
+        userId: true,
+        conversationId: true,
+        content: true,
+        context: true,
+        sentAt: true,
+      },
+    });
+    if (
+      !row ||
+      row.userId !== input.userId ||
+      row.conversationId !== input.conversationId ||
+      !row.sentAt ||
+      row.sentAt >= before ||
+      !this.record(row.context) ||
+      row.context.source !== 'WHATSAPP_COACH_COMMAND' ||
+      typeof row.context.sourceMessageId !== 'string'
+    )
+      return null;
+    const source = await this.prisma.message.findFirst({
+      where: {
+        id: row.context.sourceMessageId,
+        conversationId: input.conversationId,
+        conversation: { userId: input.userId },
+        direction: 'INBOUND',
+        type: 'TEXT',
+        timestamp: { lt: before },
+      },
+      select: {
+        id: true,
+        content: true,
+        timestamp: true,
+        replyToExternalMessageId: true,
+      },
+    });
+    if (
+      !source ||
+      source.id !== row.context.sourceMessageId ||
+      source.timestamp >= row.sentAt
+    )
+      return null;
+    const job = await this.prisma.aIJob.findFirst({
+      where: {
+        userId: input.userId,
+        conversationId: input.conversationId,
+        messageId: source.id,
+        type: 'TEXT',
+        status: 'COMPLETED',
+        completedAt: { lte: row.sentAt },
+        promptVersion: { name: ACTIVE_CONVERSATION_QA_PROMPT.name },
+      },
+      select: { result: true },
+      orderBy: [{ completedAt: 'desc' }, { id: 'desc' }],
+    });
+    if (!this.validReferentCandidate(job?.result)) return null;
+    const candidate = normalizeConversationQACandidate(job.result);
+    const publicText = this.boundary.project(candidate);
+    if (!publicText || !candidate.answer) return null;
+    let delivered = row.content;
+    if (
+      typeof row.context.partCount === 'number' &&
+      row.context.partCount > 1
+    ) {
+      const parts = await this.prisma.scheduledMessage.findMany({
+        where: {
+          userId: input.userId,
+          conversationId: input.conversationId,
+          context: { path: ['sourceMessageId'], equals: source.id },
+          status: 'SENT',
+          sentAt: { lt: before },
+        },
+        select: { content: true, context: true },
+        orderBy: [{ scheduledFor: 'asc' }, { id: 'asc' }],
+      });
+      if (
+        parts.length !== row.context.partCount ||
+        parts.some(
+          (part, index) =>
+            !this.record(part.context) || part.context.partIndex !== index,
+        )
+      )
+        return null;
+      delivered = parts.map((part) => part.content).join(' ');
+    }
+    if (
+      delivered.replace(/\s+/gu, ' ').trim() !==
+      publicText.replace(/\s+/gu, ' ').trim()
+    )
+      return null;
+    if (!quote) {
+      const newerOutbound = await this.prisma.message.findFirst({
+        where: {
+          conversationId: input.conversationId,
+          conversation: { userId: input.userId },
+          direction: 'OUTBOUND',
+          timestamp: { gt: row.sentAt, lt: before },
+        },
+        select: { content: true, timestamp: true },
+        orderBy: [{ timestamp: 'desc' }, { id: 'desc' }],
+      });
+      if (
+        newerOutbound &&
+        newerOutbound.timestamp > row.sentAt &&
+        newerOutbound.content.replace(/\s+/gu, ' ').trim() !==
+          publicText.replace(/\s+/gu, ' ').trim()
+      )
+        return null;
+    }
+    let nutrition = nutritionRequest(source.content);
+    const followUp = readOnlyFollowUp(source.content);
+    if (!nutrition && followUp) {
+      const prior = await this.deliveredReferent(
+        input,
+        source.timestamp,
+        source.replyToExternalMessageId ?? null,
+        depth + 1,
+      );
+      nutrition = prior ? effectiveNutritionRequest(followUp, prior) : null;
+    }
+    return Object.freeze({
+      source: 'DELIVERED_QA',
+      sourceMessageId: source.id,
+      domain: candidate.domain,
+      nutrition,
+      previousAnswer: candidate.answer,
+      followUpQuestion: candidate.followUpQuestion,
+      deliveredAt: row.sentAt.toISOString(),
+    });
+  }
 
   async findPending(
     input: ConversationQAFollowUpLookupInput,
@@ -178,5 +384,32 @@ export class ConversationQAFollowUpContextService {
 
   private record(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  private validReferentCandidate(
+    value: unknown,
+  ): value is ConversationAnswerCandidate {
+    return (
+      this.record(value) &&
+      value.disposition === 'ANSWER' &&
+      typeof value.domain === 'string' &&
+      ['NUTRITION', 'WORKOUT', 'PROGRESS', 'GENERAL'].includes(value.domain) &&
+      typeof value.answer === 'string' &&
+      value.answer.trim().length > 0 &&
+      value.answer.length <= 4000 &&
+      (value.followUpQuestion === null ||
+        (typeof value.followUpQuestion === 'string' &&
+          value.followUpQuestion.length <= 500)) &&
+      typeof value.grounding === 'string' &&
+      [
+        'CURRENT_PLAN',
+        'PROFILE',
+        'RECENT_CONTEXT',
+        'GENERAL_KNOWLEDGE',
+        'MIXED',
+      ].includes(value.grounding) &&
+      typeof value.confidence === 'string' &&
+      ['HIGH', 'MEDIUM', 'LOW'].includes(value.confidence)
+    );
   }
 }

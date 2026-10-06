@@ -2,6 +2,7 @@ import { ConflictException, Injectable, Optional } from '@nestjs/common';
 import { AIJobStatus, AIJobType, Prisma } from '@prisma/client';
 import { performance } from 'node:perf_hooks';
 import { AIService } from '../../ai/ai.service';
+import { OpenAIGateway } from '../../ai/openai.gateway';
 import type { ConversationAIValue } from '../../ai/conversation-ai.contract';
 import type { CoachConversationHumanContext } from '../../context/coach-conversation-human-context.contract';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -94,6 +95,7 @@ export class ConversationQAExecutorService {
     private readonly deterministicNutrition?: ConversationNutritionDeterministicAnswerService,
     @Optional()
     private readonly personalized?: PersonalizedCoachContextService,
+    @Optional() private readonly correctionGateway?: OpenAIGateway,
   ) {}
 
   async execute(
@@ -265,17 +267,154 @@ export class ConversationQAExecutorService {
         this.elapsed(providerStartedAt),
       );
     }
-    const providerDurationMs = this.elapsed(providerStartedAt);
+    let providerDurationMs = this.elapsed(providerStartedAt);
+    let recovery: Partial<ConversationQAObservability> = {};
+    const finish = (
+      result: ConversationQAExecutionResult,
+    ): ConversationQAExecutionResult => ({
+      ...result,
+      observability: {
+        ...result.observability,
+        ...recovery,
+        ...(input.humanContext.currentReadOnlyReferent
+          ? {
+              effectiveReferentSource:
+                input.humanContext.currentReadOnlyReferent.source,
+              effectiveReferentMessageId:
+                input.humanContext.currentReadOnlyReferent.sourceMessageId,
+              effectiveReferentDomain:
+                input.humanContext.currentReadOnlyReferent.domain,
+              effectiveReferentMeal:
+                input.humanContext.effectiveNutritionRequest?.meal ?? null,
+            }
+          : {}),
+      },
+    });
+    const safeNutritionFallback = (
+      reason: string,
+    ): ConversationQAExecutionResult => {
+      const fallback: ConversationAnswerCandidate = {
+        disposition: 'CLARIFY',
+        domain: 'NUTRITION',
+        answer: null,
+        followUpQuestion:
+          'Que alimentos você tem disponíveis para uma alternativa?',
+        grounding: 'RECENT_CONTEXT',
+        confidence: 'LOW',
+      };
+      const fallbackViolation = nutritionAdviceViolation(
+        nutritionAdvice,
+        fallback,
+      );
+      if (fallbackViolation)
+        return finish(
+          this.failed(fallbackViolation, providerDurationMs, response),
+        );
+      const result = this.candidateResult(
+        fallback,
+        'DETERMINISTIC_FALLBACK',
+        providerDurationMs,
+        response,
+      );
+      return finish({
+        ...result,
+        observability: { ...result.observability, fallbackReason: reason },
+      });
+    };
 
-    const candidate = this.parseText(response.outputText);
+    let candidate = this.parseText(response.outputText);
     if (!candidate) {
       await this.ai.failJob(job.id, new Error('INVALID_QA_RESPONSE'), response);
       return this.failed('INVALID_AI_RESPONSE', providerDurationMs, response);
     }
-    const violation = nutritionAdviceViolation(nutritionAdvice, candidate);
+    let violation = nutritionAdviceViolation(nutritionAdvice, candidate);
+    if (
+      violation === 'NUTRITION_ADVICE_REPEATS_CURRENT_MEAL' &&
+      this.correctionGateway &&
+      candidate.disposition === 'ANSWER'
+    ) {
+      recovery = {
+        nutritionAdviceInitialViolation: violation,
+        nutritionAdviceRetryAttempted: false,
+        nutritionAdviceRetryOutcome: 'NOT_ATTEMPTED',
+      };
+      const remaining = this.providerBudget(deadlineAtMs);
+      if (!remaining) {
+        await this.ai.failJob(
+          job.id,
+          new Error('INSUFFICIENT_RUNTIME_BUDGET'),
+          response,
+        );
+        return safeNutritionFallback('INSUFFICIENT_RUNTIME_BUDGET');
+      }
+      recovery = {
+        ...recovery,
+        nutritionAdviceRetryAttempted: true,
+        nutritionAdviceRetryOutcome: 'FAILED',
+      };
+      try {
+        const corrected = await this.correctionGateway.createTextResponse({
+          instructions: job.promptVersion.prompt,
+          input: JSON.stringify({
+            ...this.payload(
+              input.route,
+              input.humanContext,
+              currentNutrition,
+              input.previousAnswer ?? null,
+              input.previousFollowUpQuestion ?? null,
+              personalized,
+              nutritionAdvice,
+            ),
+            nutritionAdviceCorrection: {
+              originalViolation: violation,
+              correctiveAttempt: 1,
+              instruction:
+                'O primeiro candidato repetiu a composição da refeição atual e foi descartado. Entregue uma alternativa diferente, mantendo o alvo, constraints e todas as restrições de segurança. Não altere o plano. Esta é a única tentativa corretiva.',
+            },
+          }),
+          requestId: `${job.id}:nutrition-advice-correction:1`,
+          jsonSchema: COACH_CONVERSATIONAL_QA_V4_PROMPT.schema,
+          timeoutMs: remaining,
+        });
+        response = {
+          ...corrected,
+          promptTokens: response.promptTokens + corrected.promptTokens,
+          completionTokens:
+            response.completionTokens + corrected.completionTokens,
+          totalTokens: response.totalTokens + corrected.totalTokens,
+        };
+      } catch (error: unknown) {
+        await this.ai.failJob(job.id, error, response);
+        return finish(
+          this.failed(
+            'PROVIDER_EXECUTION_FAILED',
+            this.elapsed(providerStartedAt),
+            response,
+          ),
+        );
+      }
+      providerDurationMs = this.elapsed(providerStartedAt);
+      candidate = this.parseText(response.outputText);
+      if (!candidate) {
+        await this.ai.failJob(
+          job.id,
+          new Error('INVALID_QA_RESPONSE'),
+          response,
+        );
+        return safeNutritionFallback('INVALID_AI_RESPONSE');
+      }
+      violation = nutritionAdviceViolation(nutritionAdvice, candidate);
+      if (violation) {
+        await this.ai.failJob(job.id, new Error(violation), response);
+        return safeNutritionFallback(violation);
+      }
+      recovery = { ...recovery, nutritionAdviceRetryOutcome: 'RECOVERED' };
+    }
     if (violation) {
       await this.ai.failJob(job.id, new Error(violation), response);
-      return this.failed(violation, providerDurationMs, response, candidate);
+      return finish(
+        this.failed(violation, providerDurationMs, response, candidate),
+      );
     }
     if (
       this.personalized &&
@@ -291,11 +430,31 @@ export class ConversationQAExecutorService {
         new Error('UNSUPPORTED_PERSONAL_ASSERTION'),
         response,
       );
-      return this.failed(
-        'UNSUPPORTED_PERSONAL_ASSERTION',
-        providerDurationMs,
+      if (recovery.nutritionAdviceRetryAttempted) {
+        recovery = { ...recovery, nutritionAdviceRetryOutcome: 'FAILED' };
+        return safeNutritionFallback('UNSUPPORTED_PERSONAL_ASSERTION');
+      }
+      return finish(
+        this.failed(
+          'UNSUPPORTED_PERSONAL_ASSERTION',
+          providerDurationMs,
+          response,
+        ),
+      );
+    }
+
+    if (
+      recovery.nutritionAdviceRetryAttempted &&
+      candidate.disposition !== 'DEFER_TO_SIDE_EFFECT_PIPELINE' &&
+      !this.boundary.project(candidate)
+    ) {
+      await this.ai.failJob(
+        job.id,
+        new Error('PUBLIC_BOUNDARY_REJECTED'),
         response,
       );
+      recovery = { ...recovery, nutritionAdviceRetryOutcome: 'FAILED' };
+      return safeNutritionFallback('PUBLIC_BOUNDARY_REJECTED');
     }
 
     try {
@@ -310,15 +469,19 @@ export class ConversationQAExecutorService {
       );
     } catch (error: unknown) {
       await this.ai.failJob(job.id, error, response);
-      return this.failed(
-        'AI_JOB_COMPLETION_FAILED',
-        providerDurationMs,
-        response,
-        candidate,
+      return finish(
+        this.failed(
+          'AI_JOB_COMPLETION_FAILED',
+          providerDurationMs,
+          response,
+          candidate,
+        ),
       );
     }
 
-    return this.candidateResult(candidate, 'AI', providerDurationMs, response);
+    return finish(
+      this.candidateResult(candidate, 'AI', providerDurationMs, response),
+    );
   }
 
   private async join(
@@ -409,7 +572,41 @@ export class ConversationQAExecutorService {
     previousFollowUpQuestion: string | null = null,
     personalized: ConversationAIValue = null,
     nutritionAdvice: NutritionAdviceContext | null = null,
-  ): ConversationAIValue {
+  ): Readonly<Record<string, ConversationAIValue>> {
+    const recent = (context.recentConversation ?? []).filter(
+      (turn) => !personalized || Boolean(turn.origin),
+    );
+    const personalHistory: unknown = this.record(personalized)
+      ? personalized.recentConversation
+      : null;
+    const recentConversation = recent.length
+      ? recent
+      : Array.isArray(personalHistory)
+        ? personalHistory.flatMap((turn: unknown) =>
+            this.record(turn) &&
+            (turn.direction === 'INBOUND' || turn.direction === 'OUTBOUND') &&
+            typeof turn.text === 'string'
+              ? [
+                  {
+                    direction: turn.direction === 'INBOUND' ? 'USER' : 'COACH',
+                    text: turn.text,
+                    origin: null,
+                  },
+                ]
+              : [],
+          )
+        : [];
+    const trusted =
+      personalized &&
+      typeof personalized === 'object' &&
+      !Array.isArray(personalized)
+        ? Object.fromEntries(
+            Object.entries(personalized).map(([key, value]) => [
+              key,
+              key === 'recentConversation' ? [] : value,
+            ]),
+          )
+        : personalized;
     return Object.freeze({
       request: context.currentMessage,
       route: route.kind,
@@ -419,7 +616,7 @@ export class ConversationQAExecutorService {
         ? { nutritionGuidance: nutritionAdvicePayload(nutritionAdvice) }
         : {}),
       trustedContext:
-        personalized ??
+        trusted ??
         Object.freeze({
           preferredName: context.preferredName?.value ?? null,
           goal: context.goal?.value ?? null,
@@ -441,7 +638,7 @@ export class ConversationQAExecutorService {
           ),
         }),
       recentConversation: Object.freeze(
-        (personalized ? [] : (context.recentConversation ?? [])).map((turn) =>
+        recentConversation.slice(-8).map((turn) =>
           Object.freeze({
             direction: turn.direction,
             text: turn.text,

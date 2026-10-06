@@ -1,5 +1,7 @@
 import { AIJobStatus, AIJobType } from '@prisma/client';
 import { ConflictException } from '@nestjs/common';
+import type { OpenAIGateway } from '../../ai/openai.gateway';
+import { AIService } from '../../ai/ai.service';
 import { ConversationPublicAnswerBoundaryService } from '../runtime/conversation-public-answer-boundary.service';
 import { ConversationQAExecutorService } from '../runtime/conversation-qa-executor.service';
 import { ConversationNutritionDeterministicAnswerService } from '../runtime/conversation-nutrition-deterministic-answer.service';
@@ -106,6 +108,7 @@ describe('ConversationQAExecutorService', () => {
     status: AIJobStatus = AIJobStatus.PENDING,
     deterministicNutrition = false,
     personalized?: PersonalizedCoachContextService,
+    correctionGateway?: OpenAIGateway,
   ) {
     const response = {
       responseId: 'provider-response',
@@ -121,6 +124,7 @@ describe('ConversationQAExecutorService', () => {
         userId: 'user-id',
         status,
         result: status === AIJobStatus.COMPLETED ? output : null,
+        promptVersion: { prompt: 'Existing QA instructions' },
       }),
       runTextJob: jest.fn().mockResolvedValue(response),
       completeJobInTransaction: jest.fn().mockResolvedValue(undefined),
@@ -156,6 +160,7 @@ describe('ConversationQAExecutorService', () => {
           ? new ConversationNutritionDeterministicAnswerService()
           : undefined,
         personalized,
+        correctionGateway,
       ),
       ai,
       prisma,
@@ -318,8 +323,400 @@ describe('ConversationQAExecutorService', () => {
     expect(subject.ai.createJob).not.toHaveBeenCalled();
     expect(subject.ai.runTextJob).not.toHaveBeenCalled();
   });
+  it('uses one bounded authorized personalized history when the unified window is absent', async () => {
+    const personalized = {
+      build: jest.fn().mockResolvedValue({
+        recentConversation: [
+          { direction: 'INBOUND', text: 'Me dá uma ideia de jantar' },
+          { direction: 'OUTBOUND', text: 'Uma opção de jantar é sopa.' },
+        ],
+      }),
+      answer: jest.fn().mockReturnValue(null),
+      validatesAnswer: jest.fn().mockReturnValue(true),
+    };
+    const s = createSubject(
+      {
+        disposition: 'ANSWER',
+        domain: 'GENERAL',
+        answer: 'Posso ajudar com isso.',
+        followUpQuestion: null,
+        grounding: 'RECENT_CONTEXT',
+        confidence: 'HIGH',
+      },
+      AIJobStatus.PENDING,
+      false,
+      personalized as unknown as PersonalizedCoachContextService,
+    );
+    await s.service.execute({
+      userId: 'user-id',
+      conversationId: 'conversation-id',
+      messageId: 'message-id',
+      route: route('ANSWER_MESSAGE'),
+      humanContext: human('Pode explicar?'),
+    });
+    const payload: unknown = JSON.parse(
+      s.ai.runTextJob.mock.calls[0][1].input as string,
+    );
+    expect(payload).toMatchObject({
+      trustedContext: { recentConversation: [] },
+      recentConversation: [
+        { direction: 'USER', text: 'Me dá uma ideia de jantar', origin: null },
+        {
+          direction: 'COACH',
+          text: 'Uma opção de jantar é sopa.',
+          origin: null,
+        },
+      ],
+    });
+    expect(
+      (s.ai.runTextJob.mock.calls[0][1].input as string).split(
+        'Uma opção de jantar é sopa.',
+      ),
+    ).toHaveLength(2);
+  });
 
   describe('contextual meal advice', () => {
+    describe('bounded corrective recovery', () => {
+      const repeated = 'Iogurte natural com banana e aveia.';
+      const candidate = (answer: string) => ({
+        disposition: 'ANSWER',
+        domain: 'NUTRITION',
+        answer,
+        followUpQuestion: null,
+        grounding: 'MIXED',
+        confidence: 'HIGH',
+      });
+      function recovery(
+        first = repeated,
+        second = 'Uma opção diferente é pão integral com frango desfiado.',
+      ) {
+        const gateway = {
+          createTextResponse: jest.fn().mockResolvedValue({
+            responseId: 'correction',
+            model: 'model',
+            outputText: JSON.stringify(candidate(second)),
+            promptTokens: 25,
+            completionTokens: 15,
+            totalTokens: 40,
+          }),
+        };
+        const subject = createSubject(
+          candidate(first),
+          AIJobStatus.PENDING,
+          true,
+          undefined,
+          gateway as unknown as OpenAIGateway,
+        );
+        subject.currentNutrition.read.mockResolvedValue({
+          status: 'AVAILABLE',
+          plan: {
+            ...publicPlan,
+            days: [
+              {
+                meals: [
+                  {
+                    name: 'Lanche da tarde',
+                    time: '16:00',
+                    items: [
+                      { name: 'Iogurte natural', quantity: '1 pote' },
+                      { name: 'Banana', quantity: '1 unidade' },
+                      { name: 'Aveia', quantity: '1 colher' },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        });
+        const request = {
+          userId: 'user-id',
+          conversationId: 'conversation-id',
+          messageId: 'message-id',
+          route: route('NUTRITION_GUIDANCE'),
+          humanContext: human('Me dê uma dica de lanche da tarde'),
+          referenceDate: new Date('2026-10-05T18:00:00Z'),
+          deadlineAtMs: Date.now() + 25_000,
+        };
+        const stored: {
+          id: string;
+          userId: string;
+          type: AIJobType;
+          status: AIJobStatus;
+          result: unknown;
+          error?: string;
+        } = {
+          id: 'job-id',
+          userId: 'user-id',
+          type: AIJobType.TEXT,
+          status: AIJobStatus.PROCESSING,
+          result: null,
+        };
+        const usage = {
+          recordInTransaction: jest.fn().mockResolvedValue(undefined),
+        };
+        const usageReservations = {
+          reverseInTransaction: jest.fn().mockResolvedValue(undefined),
+        };
+        const transaction = {
+          aIJob: {
+            findUnique: jest
+              .fn()
+              .mockImplementation(() => Promise.resolve(stored)),
+            update: jest
+              .fn()
+              .mockImplementation(
+                (input: { data: { status: AIJobStatus; error: string } }) => {
+                  Object.assign(stored, input.data);
+                  return Promise.resolve(stored);
+                },
+              ),
+          },
+        };
+        const failureAI = new AIService(
+          {
+            $transaction: (execute: (tx: object) => Promise<void>) =>
+              execute(transaction),
+          } as never,
+          {} as never,
+          gateway as unknown as OpenAIGateway,
+          usage as never,
+          {} as never,
+          usageReservations as never,
+          {} as never,
+          {} as never,
+        );
+        subject.ai.failJob.mockImplementation(
+          failureAI.failJob.bind(failureAI),
+        );
+        subject.ai.completeJobInTransaction.mockImplementation(
+          (
+            _tx: object,
+            input: {
+              result: unknown;
+              response: {
+                totalTokens: number;
+                promptTokens: number;
+                completionTokens: number;
+              };
+            },
+          ) => {
+            stored.status = AIJobStatus.COMPLETED;
+            stored.result = input.result;
+            usage.recordInTransaction(_tx, {
+              aiJobId: stored.id,
+              ...input.response,
+            });
+          },
+        );
+        return { ...subject, gateway, request, stored, usage, failureAI };
+      }
+      it('corrects the production snack copy once within the original deadline and job', async () => {
+        const s = recovery();
+        const result = await s.service.execute(s.request);
+        expect(result).toMatchObject({
+          status: 'COMPLETED',
+          content: 'Uma opção diferente é pão integral com frango desfiado.',
+          observability: {
+            nutritionAdviceInitialViolation:
+              'NUTRITION_ADVICE_REPEATS_CURRENT_MEAL',
+            nutritionAdviceRetryAttempted: true,
+            nutritionAdviceRetryOutcome: 'RECOVERED',
+            totalTokens: 70,
+          },
+        });
+        expect(s.gateway.createTextResponse).toHaveBeenCalledTimes(1);
+        expect(s.gateway.createTextResponse.mock.calls[0][0]).toMatchObject({
+          instructions: 'Existing QA instructions',
+          requestId: 'job-id:nutrition-advice-correction:1',
+        });
+        const call = s.gateway.createTextResponse.mock.calls[0][0] as {
+          input: string;
+          timeoutMs: number;
+        };
+        expect(JSON.parse(call.input) as unknown).toMatchObject({
+          nutritionAdviceCorrection: {
+            originalViolation: 'NUTRITION_ADVICE_REPEATS_CURRENT_MEAL',
+            correctiveAttempt: 1,
+          },
+        });
+        expect(call.timeoutMs).toBeLessThanOrEqual(22_500);
+        expect(s.ai.createJob).toHaveBeenCalledTimes(1);
+        expect(s.ai.completeJobInTransaction).toHaveBeenCalledTimes(1);
+        expect(s.ai.failJob).not.toHaveBeenCalled();
+        expect(s.stored.status).toBe(AIJobStatus.COMPLETED);
+        expect(s.ai.runTextJob).toHaveBeenCalledTimes(1);
+        expect(s.usage.recordInTransaction).toHaveBeenCalledTimes(1);
+      });
+      it('clarifies safely when the only corrective candidate still repeats', async () => {
+        const s = recovery(repeated, repeated);
+        expect(await s.service.execute(s.request)).toMatchObject({
+          status: 'COMPLETED',
+          content: 'Que alimentos você tem disponíveis para uma alternativa?',
+          observability: {
+            disposition: 'CLARIFY',
+            answerSource: 'DETERMINISTIC_FALLBACK',
+            nutritionAdviceRetryOutcome: 'FAILED',
+            totalTokens: 70,
+          },
+        });
+        expect(s.gateway.createTextResponse).toHaveBeenCalledTimes(1);
+        expect(s.ai.failJob).toHaveBeenCalledTimes(1);
+        expect(s.ai.completeJobInTransaction).not.toHaveBeenCalled();
+        expect(s.stored).toMatchObject({
+          status: AIJobStatus.FAILED,
+          result: null,
+          error: 'NUTRITION_ADVICE_REPEATS_CURRENT_MEAL',
+        });
+        expect(s.usage.recordInTransaction).toHaveBeenCalledTimes(1);
+        expect(s.usage.recordInTransaction).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            promptTokens: 45,
+            completionTokens: 25,
+            totalTokens: 70,
+          }),
+        );
+        await s.failureAI.failJob('job-id', new Error('duplicate failure'), {
+          responseId: 'duplicate',
+          model: 'model',
+          outputText: '',
+          promptTokens: 45,
+          completionTokens: 25,
+          totalTokens: 70,
+        });
+        expect(s.usage.recordInTransaction).toHaveBeenCalledTimes(1);
+      });
+      it('does not call the corrective provider for an initially valid answer', async () => {
+        const s = recovery('Pão integral com frango desfiado.');
+        expect(await s.service.execute(s.request)).toMatchObject({
+          status: 'COMPLETED',
+        });
+        expect(s.gateway.createTextResponse).not.toHaveBeenCalled();
+        expect(s.ai.runTextJob).toHaveBeenCalledTimes(1);
+        expect(s.stored.status).toBe(AIJobStatus.COMPLETED);
+      });
+      it('does not retry safety violations', async () => {
+        const s = recovery('Uma opção é pasta de amendoim.');
+        s.request.humanContext = {
+          ...s.request.humanContext,
+          restrictions: { value: ['amendoim'], sources: [] },
+        };
+        expect(await s.service.execute(s.request)).toMatchObject({
+          status: 'FAILED',
+        });
+        expect(s.gateway.createTextResponse).not.toHaveBeenCalled();
+      });
+      it('does not retry without the remaining provider budget', async () => {
+        const s = recovery();
+        const baseTime = Date.now();
+        let clockTime = baseTime;
+        s.ai.runTextJob.mockImplementation(() => {
+          clockTime = baseTime + 24_000;
+          return Promise.resolve({
+            responseId: 'first',
+            model: 'model',
+            outputText: JSON.stringify(candidate(repeated)),
+            promptTokens: 20,
+            completionTokens: 10,
+            totalTokens: 30,
+          });
+        });
+        const now = jest.spyOn(Date, 'now').mockImplementation(() => clockTime);
+        try {
+          expect(await s.service.execute(s.request)).toMatchObject({
+            status: 'COMPLETED',
+            observability: {
+              nutritionAdviceInitialViolation:
+                'NUTRITION_ADVICE_REPEATS_CURRENT_MEAL',
+              nutritionAdviceRetryAttempted: false,
+              disposition: 'CLARIFY',
+              fallbackReason: 'INSUFFICIENT_RUNTIME_BUDGET',
+              totalTokens: 30,
+            },
+          });
+          expect(s.ai.runTextJob).toHaveBeenCalledTimes(1);
+          expect(s.gateway.createTextResponse).not.toHaveBeenCalled();
+          expect(s.stored.status).toBe(AIJobStatus.FAILED);
+          expect(s.usage.recordInTransaction).toHaveBeenCalledTimes(1);
+        } finally {
+          now.mockRestore();
+        }
+      });
+      it('does not retry provider failures', async () => {
+        const s = recovery();
+        s.ai.runTextJob.mockRejectedValue(new Error('Provider unavailable'));
+        expect(await s.service.execute(s.request)).toMatchObject({
+          status: 'FAILED',
+          reason: 'PROVIDER_EXECUTION_FAILED',
+        });
+        expect(s.gateway.createTextResponse).not.toHaveBeenCalled();
+      });
+      it('revalidates food safety on the corrective candidate', async () => {
+        const s = recovery(repeated, 'Uma opção é pasta de amendoim.');
+        s.request.humanContext = {
+          ...s.request.humanContext,
+          restrictions: { value: ['amendoim'], sources: [] },
+        };
+        expect(await s.service.execute(s.request)).toMatchObject({
+          status: 'COMPLETED',
+          content: 'Que alimentos você tem disponíveis para uma alternativa?',
+          observability: {
+            nutritionAdviceRetryAttempted: true,
+            nutritionAdviceRetryOutcome: 'FAILED',
+            disposition: 'CLARIFY',
+            fallbackReason: 'NUTRITION_ADVICE_UNSAFE_FOOD',
+            totalTokens: 70,
+          },
+        });
+        expect(s.gateway.createTextResponse).toHaveBeenCalledTimes(1);
+        expect(s.ai.completeJobInTransaction).not.toHaveBeenCalled();
+        expect(s.stored).toMatchObject({
+          status: AIJobStatus.FAILED,
+          result: null,
+          error: 'NUTRITION_ADVICE_UNSAFE_FOOD',
+        });
+        expect(s.usage.recordInTransaction).toHaveBeenCalledTimes(1);
+      });
+      it.each(['ownership', 'database', 'stored', 'joining'])(
+        'does not start corrective recovery for %s',
+        async (mode) => {
+          const s = recovery();
+          if (mode === 'ownership')
+            s.ai.createJob.mockResolvedValue({
+              id: 'job-id',
+              userId: 'foreign',
+              status: AIJobStatus.PENDING,
+            });
+          if (mode === 'database')
+            s.ai.createJob.mockRejectedValue(new Error('Database unavailable'));
+          if (mode === 'stored')
+            s.ai.createJob.mockResolvedValue({
+              id: 'job-id',
+              userId: 'user-id',
+              status: AIJobStatus.COMPLETED,
+              result: candidate(repeated),
+            });
+          if (mode === 'joining') {
+            s.ai.createJob.mockResolvedValue({
+              id: 'job-id',
+              userId: 'user-id',
+              status: AIJobStatus.PROCESSING,
+            });
+            s.ai.getJob.mockResolvedValue({
+              id: 'job-id',
+              userId: 'user-id',
+              status: AIJobStatus.COMPLETED,
+              result: candidate(repeated),
+            });
+          }
+          expect(await s.service.execute(s.request)).toMatchObject({
+            status: 'FAILED',
+          });
+          expect(s.ai.runTextJob).not.toHaveBeenCalled();
+          expect(s.gateway.createTextResponse).not.toHaveBeenCalled();
+        },
+      );
+    });
     const snackPlan: PublicNutritionResponse = Object.freeze({
       ...publicPlan,
       days: Object.freeze([

@@ -92,11 +92,9 @@ export class ConversationExecutionBridgeService {
           routeKind: route.kind,
         });
       }
-      const directlyEligible = this.qaEligible(
-        payload.cue,
-        payload.currentMessage,
-        humanContext,
-      );
+      const directlyEligible =
+        Boolean(humanContext.effectiveNutritionRequest) ||
+        this.qaEligible(payload.cue, payload.currentMessage, humanContext);
       const previousFollowUp = directlyEligible
         ? null
         : await this.previousFollowUpQuestion(payload.cue, executionContext);
@@ -148,9 +146,13 @@ export class ConversationExecutionBridgeService {
         entities: decision.understanding.entities,
         route: decision.executionRoute,
         humanContext,
-        previousAnswer: previousFollowUp?.previousAnswer ?? null,
-        previousFollowUpQuestion:
-          previousFollowUp?.previousFollowUpQuestion ?? null,
+        previousAnswer:
+          humanContext.currentReadOnlyReferent?.previousAnswer ??
+          previousFollowUp?.previousAnswer ??
+          null,
+        previousFollowUpQuestion: humanContext.currentReadOnlyReferent
+          ? humanContext.currentReadOnlyReferent.followUpQuestion
+          : (previousFollowUp?.previousFollowUpQuestion ?? null),
       });
     } catch {
       return Object.freeze({

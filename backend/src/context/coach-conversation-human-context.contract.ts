@@ -1,4 +1,6 @@
 import type { CoachProfileDataSource } from './coach-profile-snapshot.contract';
+import type { CurrentReadOnlyReferent } from '../conversation/runtime/conversation-read-only-referent.policy';
+import type { NutritionRequest } from '../conversation/understanding/nutrition-request.policy';
 
 export interface CoachConversationHumanFact<T> {
   readonly value: T;
@@ -30,6 +32,8 @@ export type CoachConversationTurnCue =
   | 'COMMON';
 
 export interface CoachConversationHumanContext {
+  readonly currentReadOnlyReferent?: CurrentReadOnlyReferent | null;
+  readonly effectiveNutritionRequest?: NutritionRequest | null;
   readonly currentMessage: string;
   readonly turnCue: CoachConversationTurnCue;
   readonly preferredName: CoachConversationHumanFact<string> | null;
