@@ -1,5 +1,8 @@
 import { WorkoutPlanV2Formatter } from './workout-plan-v2.formatter';
-import { projectWorkoutActivity } from './workout-public-projection';
+import {
+  projectWorkoutActivity,
+  projectWorkoutRepetitions,
+} from './workout-public-projection';
 import { workoutPublicTextIssues } from './workout-public-text.policy';
 import { WorkoutPlanV2Validator } from './workout-plan-v2.validator';
 import { CurrentWorkoutPlanReaderService } from './current-workout-plan-reader.service';
@@ -24,6 +27,79 @@ describe('Fail-closed Workout public projection', () => {
   const formatter = new WorkoutPlanV2Formatter();
   const context = qualityContext(['MONDAY']);
   const strategy = new WorkoutPlanningStrategyService().build(context);
+  it.each([
+    ['8', '8'],
+    ['8-10', '8-10'],
+    ['8-10 por lado', '8-10 por lado'],
+    ['8 reps', '8'],
+    ['10 repetições por perna', '10 por perna'],
+    ['30 s', '30 s'],
+    ['30-45 s', '30-45 s'],
+    ['30 s por lado', '30 s por lado'],
+    ['30-40 s por lado', '30-40 s por lado'],
+    ['30 segundos', '30 s'],
+    ['30-45 segundos por lado', '30-45 s por lado'],
+    [' 30 – 45 SEGUNDOS por lado ', '30-45 s por lado'],
+  ])(
+    'projects only structured numeric prescriptions: %s',
+    (input, expected) => {
+      expect(projectWorkoutRepetitions(input)).toBe(expected);
+    },
+  );
+
+  it.each([
+    'até falhar',
+    '30 s até falhar',
+    '30 segundos com carga máxima',
+    'segure o máximo possível',
+    '30 s e depois faça burpees',
+    '0 s',
+    '-30 s',
+    '45-30 s',
+    '30.5 s',
+    '30 min',
+    '9007199254740992 s',
+    '30-9007199254740992 s',
+  ])('rejects free text or invalid timed prescriptions: %s', (input) => {
+    expect(projectWorkoutRepetitions(input)).toBeNull();
+  });
+
+  it.each(['30-45 s', '30-40 s por lado'])(
+    'validates safe timed STRENGTH without removing the repetitions guard: %s',
+    (repetitions) => {
+      const candidate = qualityCandidate([
+        {
+          ...qualitySession('s1', [{ ...strength(), repetitions }]),
+          weekday: 'MONDAY',
+        },
+      ]);
+      const validator = new WorkoutPlanV2Validator();
+      const result = validator.validate(candidate, context, strategy, true);
+      expect(
+        result.issues.filter((issue) => issue.severity === 'ERROR'),
+      ).toEqual([]);
+      expect(result.issues).not.toContainEqual(
+        expect.objectContaining({ code: 'PUBLIC_REPETITIONS_REQUIRED' }),
+      );
+      const unsafe = qualityCandidate([
+        {
+          ...qualitySession('s1', [
+            { ...strength(), repetitions: '30 s até falhar' },
+          ]),
+          weekday: 'MONDAY',
+        },
+      ]);
+      expect(
+        validator.validate(unsafe, context, strategy, true).issues,
+      ).toContainEqual(
+        expect.objectContaining({
+          code: 'PUBLIC_REPETITIONS_REQUIRED',
+          severity: 'ERROR',
+        }),
+      );
+    },
+  );
+
   it('composes distinct presses, rows and hinges from AI-authored execution facts', () => {
     const bench = {
       ...strength(),

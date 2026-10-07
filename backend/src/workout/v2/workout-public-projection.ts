@@ -333,6 +333,21 @@ export function projectWorkoutActivity(
 
 export function projectWorkoutRepetitions(value: string | null): string | null {
   if (!value) return null;
+  const timed =
+    /^([1-9]\d*)(?:\s*[-–]\s*([1-9]\d*))?\s+(?:s|segundos?)(?:\s+(por lado))?$/u.exec(
+      normalize(value),
+    );
+  if (timed) {
+    const minimum = Number(timed[1]);
+    const maximum = timed[2] ? Number(timed[2]) : minimum;
+    if (
+      !Number.isSafeInteger(minimum) ||
+      !Number.isSafeInteger(maximum) ||
+      maximum < minimum
+    )
+      return null;
+    return `${timed[1]}${timed[2] ? `-${timed[2]}` : ''} s${timed[3] ? ` ${timed[3]}` : ''}`;
+  }
   const match =
     /^(\d+(?:\s*[-–a]\s*\d+)?)(?:\s*(?:repeticoes|reps))?(?:\s*\(?((?:por|de cada|cada) (?:lado|perna|braco))\)?)?$/u.exec(
       normalize(value),
