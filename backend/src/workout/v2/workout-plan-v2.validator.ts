@@ -289,9 +289,15 @@ export class WorkoutPlanV2Validator {
           (activity.movementPattern === 'SQUAT' ||
             /(corrida|salto|lunge|agachamento)/i.test(activity.name))) ||
         (constraint.code === 'OVERHEAD' &&
-          /overhead|desenvolvimento|snatch/i.test(activity.name)) ||
+          (/overhead|desenvolvimento|snatch/i.test(activity.name) ||
+            (activity.movementPattern === 'PUSH' &&
+              activity.publicIdentity?.plane === 'VERTICAL'))) ||
         (constraint.code === 'SPINAL_LOAD' &&
-          /levantamento terra|deadlift/i.test(activity.name));
+          (/levantamento terra|deadlift/i.test(activity.name) ||
+            (activity.movementPattern === 'HINGE' &&
+              activity.equipment.some((equipment) =>
+                ['BARBELL', 'DUMBBELL', 'KETTLEBELL'].includes(equipment),
+              ))));
       if (conflict)
         this.add(issues, 'LIMITATION_CONFLICT', 'ERROR', activity.activityKey);
     }

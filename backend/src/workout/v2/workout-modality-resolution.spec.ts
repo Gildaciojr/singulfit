@@ -45,6 +45,91 @@ describe('Current-turn Understanding is the Workout modality source of truth', (
   });
   beforeEach(() => provider.mockClear());
   it.each([
+    ['CrossFit', 'CROSSFIT'],
+    ['corrida', 'RUNNING'],
+    ['treino em casa', 'HOME_WORKOUT'],
+    ['caminhada', 'WALKING'],
+    ['ciclismo', 'CYCLING'],
+    ['treino funcional', 'FUNCTIONAL'],
+    ['treino cardio', 'CARDIO_CONDITIONING'],
+    ['musculação', 'GYM_STRENGTH'],
+  ] as const)(
+    'preserves undeclared facts while overriding frequency/duration for %s',
+    async (request, modality) => {
+      for (const [suffix, count, duration, frequencySource, durationSource] of [
+        ['2 vezes por semana', 2, 60, 'CURRENT_EXPLICIT', 'CONFIRMED_PROFILE'],
+        [
+          '30 minutos por treino',
+          5,
+          30,
+          'CONFIRMED_PROFILE',
+          'CURRENT_EXPLICIT',
+        ],
+      ] as const) {
+        const text = `Monte um ${request} para mim, ${suffix}.`;
+        const original = routingSnapshot();
+        const snapshot = {
+          ...original,
+          training: {
+            ...original.training,
+            weeklyFrequency: knownDatum(5),
+            sessionDurationMinutes: knownDatum(60),
+            preferredModality: knownDatum('RUNNING'),
+          },
+        };
+        const understanding = await module
+          .get(ConversationUnderstandingService)
+          .understand(
+            understandingInput(text, {
+              recentHistory: [
+                historyEntry(
+                  'Seu treino anterior: corrida 5 vezes por semana, 60 minutos.',
+                ),
+              ],
+            }),
+          );
+        const decision = module
+          .get(ConversationRoutingDecisionService)
+          .decide(
+            goalPreparationInput(understanding, { snapshot }),
+          ).goalDecision;
+        const built = await new GenerateWorkoutPlanV2InputBuilder(
+          {} as never,
+          { fitnessCheckIn: { findMany: () => Promise.resolve([]) } } as never,
+        ).build({
+          userId: 'user-id',
+          profileId: 'profile-id',
+          snapshot,
+          decision,
+          currentMessage: text,
+          referenceDate: new Date(snapshot.referenceDate),
+        });
+        expect(built.generationInput.recognizedContext?.modality).toEqual({
+          status: 'CONFIRMED',
+          value: modality,
+        });
+        const context = new WorkoutPlanningContextBuilder().build({
+          ...built.generationInput,
+          artifactType: 'WEEKLY_PLAN',
+          modality,
+        });
+        const strategy = new WorkoutPlanningStrategyService().build(context);
+        expect(strategy.sessionCount).toBe(count);
+        expect(strategy.sessionDurationMinutes).toEqual({
+          status: 'CONFIRMED',
+          value: duration,
+        });
+        expect(context.resolvedFacts?.weeklyFrequency.source).toBe(
+          frequencySource,
+        );
+        expect(context.resolvedFacts?.sessionDurationMinutes.source).toBe(
+          durationSource,
+        );
+        expect(provider).not.toHaveBeenCalled();
+      }
+    },
+  );
+  it.each([
     [
       'Monte um treino de musculação para mim, 2 vezes por semana, com 30 minutos por treino.',
       2,

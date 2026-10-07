@@ -1,4 +1,5 @@
 import { Injectable, Optional } from '@nestjs/common';
+import { isExplicitWorkoutPlanAdjustment } from './workout-plan-adjustment-request.policy';
 import {
   ConversationPlanReferenceService,
   type ConversationPlanReferenceInput,
@@ -204,6 +205,7 @@ export class WorkoutPlanMutationResolverService {
     | 'AMBIGUOUS_MODALITY'
     | null {
     if (isFullPlanReplacementRequest(text)) return null;
+    if (isExplicitWorkoutPlanAdjustment(text)) return 'ADAPTATION';
     if (
       /\b(vou comecar a correr|quero comecar a correr)\b/u.test(text) &&
       !/\b(adapte|adapta|ajuste|ajusta|inclua|incluir)\b/u.test(text)

@@ -10,12 +10,35 @@ import {
 } from './workout-planning-v2.prompt.definition';
 
 function activity(key: string, name: string) {
+  // The authored identity must describe the exercise used by the calendar assertion.
+  const identity =
+    name === 'Supino'
+      ? {
+          movementPattern: 'PUSH',
+          equipment: ['DUMBBELL'],
+          publicIdentity: {
+            targetRegion: 'CHEST',
+            plane: 'HORIZONTAL',
+            bodyPosition: 'LYING',
+            jointAction: null,
+          },
+        }
+      : name === 'Remada'
+        ? {
+            movementPattern: 'PULL',
+            equipment: ['DUMBBELL'],
+            publicIdentity: {
+              targetRegion: 'BACK',
+              plane: 'HORIZONTAL',
+              bodyPosition: 'STANDING',
+              jointAction: null,
+            },
+          }
+        : { movementPattern: 'SQUAT', equipment: ['BODYWEIGHT'] };
   return {
     activityKey: key,
     name,
     source: 'MODEL_GENERATED',
-    movementPattern: 'SQUAT',
-    equipment: ['BODYWEIGHT'],
     instruction: 'Execute com controle.',
     alerts: [],
     appliedConstraintCodes: [],
@@ -24,6 +47,7 @@ function activity(key: string, name: string) {
     repetitions: '10',
     restSeconds: 60,
     intensity: 'MODERATE',
+    ...identity,
   };
 }
 

@@ -20,7 +20,9 @@ import type {
   WorkoutPlanV2,
   WorkoutActivityV2,
   WorkoutPublicExerciseIdentity,
+  WorkoutBlockV2,
 } from './workout-plan-v2.contract';
+import { projectWorkoutHumanName } from './workout-human-name.policy';
 import { commercialWorkoutPlan } from './workout-commercial-quality.fixtures';
 import {
   WORKOUT_PLANNING_V2_PROMPT_V9,
@@ -28,6 +30,184 @@ import {
 } from './workout-planning-v2.prompt.definition';
 
 describe('Fail-closed Workout public projection', () => {
+  const woodchop: WorkoutActivityV2 = {
+    ...strength(),
+    name: 'Woodchop no cabo',
+    movementPattern: 'CORE',
+    equipment: ['CABLE'],
+    publicIdentity: {
+      targetRegion: 'TRUNK',
+      jointAction: 'ROTATION',
+      bodyPosition: 'SEATED',
+      plane: 'TRANSVERSE',
+    },
+  };
+  it.each(['TRUNK', 'WHOLE_BODY'] as const)(
+    'preserves CORE Woodchop with explicit rotation of %s',
+    (targetRegion) => {
+      const activity = {
+        ...woodchop,
+        publicIdentity: { ...woodchop.publicIdentity!, targetRegion },
+      };
+      expect(projectWorkoutActivity(activity).displayName).toBe(
+        'Woodchop no cabo',
+      );
+      const output = new WorkoutPlanV2Formatter().formatActivity(activity);
+      expect(output).toContain('Woodchop no cabo');
+      expect(output).not.toContain('Estabilização do tronco sentado no cabo');
+    },
+  );
+  it.each<WorkoutActivityV2>([
+    { ...woodchop, equipment: ['BODYWEIGHT'] },
+    { ...woodchop, publicIdentity: null },
+    {
+      ...woodchop,
+      publicIdentity: {
+        ...woodchop.publicIdentity!,
+        jointAction: 'STABILIZATION',
+      },
+    },
+    {
+      ...woodchop,
+      publicIdentity: { ...woodchop.publicIdentity!, targetRegion: 'CHEST' },
+    },
+    { ...woodchop, movementPattern: 'PUSH' },
+  ])('rejects incompatible Woodchop semantics: %j', (activity) => {
+    expect(projectWorkoutHumanName(activity)).toBeNull();
+    expect(projectWorkoutActivity(activity).displayName).not.toBe(
+      'Woodchop no cabo',
+    );
+  });
+  const mobility: WorkoutActivityV2 = {
+    ...strength(),
+    kind: 'MOBILITY',
+    movementPattern: 'MOBILITY',
+    name: 'Mobilidade dinâmica geral',
+    repetitions: null,
+    holdSeconds: null,
+    durationSeconds: 120,
+    publicIdentity: {
+      targetRegion: 'WHOLE_BODY',
+      jointAction: null,
+      bodyPosition: 'STANDING',
+      plane: 'NONE',
+    },
+  };
+  it.each([
+    'Mobilidade dinâmica geral',
+    'Mobilidade dinâmica',
+    'Mobilidade final',
+  ])('preserves safe whole-body mobility name: %s', (name) => {
+    expect(projectWorkoutActivity({ ...mobility, name }).displayName).toBe(
+      name,
+    );
+    expect(
+      new WorkoutPlanV2Formatter().formatActivity({ ...mobility, name }),
+    ).toContain(name);
+  });
+  it.each([
+    'Faça qualquer mobilidade',
+    'Escolha uma mobilidade',
+    'Mobilidade não disponível',
+    'Use 20 kg na mobilidade',
+    'Mobilidade dinâmica geral e depois faça burpees',
+  ])('rejects unsafe mobility name: %s', (name) => {
+    expect(projectWorkoutHumanName({ ...mobility, name })).toBeNull();
+  });
+  it.each<WorkoutActivityV2>([
+    { ...mobility, movementPattern: 'CORE' },
+    { ...mobility, publicIdentity: null },
+    {
+      ...mobility,
+      publicIdentity: { ...mobility.publicIdentity!, targetRegion: 'CHEST' },
+    },
+  ])('rejects contradictory or absent mobility identity: %j', (activity) => {
+    expect(projectWorkoutHumanName(activity)).toBeNull();
+  });
+  it.each(['WARM_UP', 'COOLDOWN'] as const)(
+    'omits only the single-round continuous heading for %s without changing clocks',
+    (type) => {
+      const session = qualitySession('presentation', [mobility]);
+      const block: WorkoutBlockV2 = {
+        ...session.blocks[0],
+        type,
+        work: {
+          format: 'CONTINUOUS',
+          rounds: 1,
+          durationSeconds: 240,
+          intervalSeconds: null,
+          movementActivityKeys: [mobility.activityKey],
+        },
+      };
+      const value = { ...session, blocks: [block] };
+      const before = JSON.stringify(value);
+      const output = new WorkoutPlanV2Formatter().formatSession(value);
+      expect(output).not.toContain('Circuito contínuo');
+      expect(output).toContain('Mobilidade dinâmica geral');
+      expect(output).toContain('Tempo total: 2 min');
+      expect(JSON.stringify(value)).toBe(before);
+    },
+  );
+  it.each([
+    'AMRAP',
+    'EMOM',
+    'FOR_TIME',
+    'INTERVAL',
+    'ROUNDS',
+    'CHIPPER',
+    'CONTINUOUS',
+  ] as const)('retains %s work outside the exact suppressed case', (format) => {
+    const session = qualitySession('presentation', [strength()]);
+    const block: WorkoutBlockV2 = {
+      ...session.blocks[0],
+      type: format === 'CONTINUOUS' ? 'STRENGTH' : 'WARM_UP',
+      work: {
+        format,
+        rounds: 1,
+        durationSeconds: 240,
+        intervalSeconds: null,
+        movementActivityKeys: [strength().activityKey],
+      },
+    };
+    expect(
+      new WorkoutPlanV2Formatter().formatSession({
+        ...session,
+        blocks: [block],
+      }),
+    ).toContain('· 4 min');
+  });
+  it('retains continuous warm-up with multiple rounds', () => {
+    const session = qualitySession('presentation', [strength()]);
+    const block: WorkoutBlockV2 = {
+      ...session.blocks[0],
+      type: 'WARM_UP',
+      work: {
+        format: 'CONTINUOUS',
+        rounds: 2,
+        durationSeconds: 240,
+        intervalSeconds: null,
+        movementActivityKeys: [strength().activityKey],
+      },
+    };
+    expect(
+      new WorkoutPlanV2Formatter().formatSession({
+        ...session,
+        blocks: [block],
+      }),
+    ).toContain('Circuito contínuo');
+  });
+  it.each([
+    ['HYPERTROPHY', '💪 *Acessórios*'],
+    ['CORE', '🧱 *Core*'],
+  ] as const)('uses the fixed public label for %s', (type, label) => {
+    const session = qualitySession('presentation', [strength()]);
+    const output = new WorkoutPlanV2Formatter().formatSession({
+      ...session,
+      blocks: [{ ...session.blocks[0], type, title: 'Bloco de treino' }],
+    });
+    expect(output).toContain(label);
+    expect(output).not.toContain('💪 *Bloco de treino*');
+  });
   const formatter = new WorkoutPlanV2Formatter();
   const context = qualityContext(['MONDAY']);
   const strategy = new WorkoutPlanningStrategyService().build(context);
@@ -39,6 +219,70 @@ describe('Fail-closed Workout public projection', () => {
     plane: WorkoutPublicExerciseIdentity['plane'];
     equipment: WorkoutActivityV2['equipment'];
   }>[] = [
+    {
+      name: 'Flexão de braços',
+      pattern: 'PUSH',
+      region: 'CHEST',
+      position: 'PRONE',
+      plane: 'HORIZONTAL',
+      equipment: ['BODYWEIGHT'],
+    },
+    {
+      name: 'Avanço alternado',
+      pattern: 'SQUAT',
+      region: 'HIPS',
+      position: 'STANDING',
+      plane: 'SAGITTAL',
+      equipment: ['BODYWEIGHT'],
+    },
+    {
+      name: 'Ponte de quadril',
+      pattern: 'HINGE',
+      region: 'HIPS',
+      position: 'LYING',
+      plane: 'SAGITTAL',
+      equipment: ['BODYWEIGHT'],
+    },
+    {
+      name: 'Farmer carry com halteres',
+      pattern: 'CARRY',
+      region: 'WHOLE_BODY',
+      position: 'STANDING',
+      plane: 'SAGITTAL',
+      equipment: ['DUMBBELL'],
+    },
+    {
+      name: 'Snatch técnico com barra',
+      pattern: 'HINGE',
+      region: 'WHOLE_BODY',
+      position: 'STANDING',
+      plane: 'SAGITTAL',
+      equipment: ['BARBELL'],
+    },
+    {
+      name: 'Jerk técnico com barra',
+      pattern: 'PUSH',
+      region: 'SHOULDERS',
+      position: 'STANDING',
+      plane: 'VERTICAL',
+      equipment: ['BARBELL'],
+    },
+    {
+      name: 'Pull-up assistido',
+      pattern: 'PULL',
+      region: 'BACK',
+      position: 'HANGING',
+      plane: 'VERTICAL',
+      equipment: ['PULL_UP_BAR'],
+    },
+    {
+      name: 'Burpee adaptado',
+      pattern: 'LOCOMOTION',
+      region: 'WHOLE_BODY',
+      position: 'STANDING',
+      plane: 'SAGITTAL',
+      equipment: ['BODYWEIGHT'],
+    },
     {
       name: 'Agachamento goblet com kettlebell',
       pattern: 'SQUAT',
@@ -181,6 +425,37 @@ describe('Fail-closed Workout public projection', () => {
       expect(formatter.formatActivity(activity)).toContain(entry.name);
     },
   );
+  it.each(humanNames)(
+    'rejects contradictory family identity for $name',
+    (entry) => {
+      expect(
+        projectWorkoutHumanName({
+          ...strength(),
+          name: entry.name,
+          equipment: entry.equipment,
+          movementPattern: entry.pattern,
+          publicIdentity: {
+            targetRegion: 'ELBOWS',
+            bodyPosition: entry.position,
+            plane: entry.plane,
+            jointAction: null,
+          },
+        }),
+      ).toBeNull();
+    },
+  );
+  it('keeps the last fallback human without inventing a named exercise', () => {
+    const activity = {
+      ...strength(),
+      name: 'Escolha um exercício',
+      publicIdentity: null,
+      movementPattern: 'HINGE' as const,
+    };
+    const output = formatter.formatActivity(activity);
+    expect(output).toContain('Extensão de quadril');
+    expect(output).not.toMatch(/Padrão de|dobradiça|Escolha um exercício/u);
+    expect(projectWorkoutActivity(activity).omittedUnverifiedText).toBe(true);
+  });
   it.each([
     'Bicicleta não disponível',
     'Exercício não definido',

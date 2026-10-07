@@ -186,6 +186,11 @@ describe('WorkoutPlanMutationResolverService', () => {
       'DURATION',
     ],
     [
+      'Quero mudar meu treino para 3 vezes por semana',
+      { weeklyFrequency: { status: 'CONFIRMED', value: 3 } },
+      'FREQUENCY',
+    ],
+    [
       'Vou treinar só 3 vezes esta semana',
       { weeklyFrequency: { status: 'CONFIRMED', value: 3 } },
       'FREQUENCY',

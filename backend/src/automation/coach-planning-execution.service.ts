@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { isExplicitWorkoutPlanAdjustment } from '../workout/v2/workout-plan-adjustment-request.policy';
 import { canGenerateWorkout } from '../workout/v2/workout-generation-authorization.policy';
 import { productiveWorkoutProfileFacts } from '../context/profile-acquisition/productive-profile-facts';
 import { type NutritionArtifactType } from '@prisma/client';
@@ -962,8 +963,11 @@ export class CoachPlanningExecutionService {
       .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase();
     if (/\bnovo plano\b/u.test(normalized)) return false;
-    return /\b(troque|trocar|substitua|substituir|nao posso fazer|nao tenho|sem essa maquina|agora|adapte|adapta|adaptar|ajuste|ajusta|inclua|incluir|so tenho|so vou treinar|vou treinar so|focar mais|vou comecar a correr|quero comecar a correr)\b/u.test(
-      normalized,
+    return (
+      isExplicitWorkoutPlanAdjustment(message) ||
+      /\b(troque|trocar|substitua|substituir|nao posso fazer|nao tenho|sem essa maquina|agora|adapte|adapta|adaptar|ajuste|ajusta|inclua|incluir|so tenho|so vou treinar|vou treinar so|focar mais|vou comecar a correr|quero comecar a correr)\b/u.test(
+        normalized,
+      )
     );
   }
 

@@ -39,7 +39,10 @@ describe('Production GYM commercial presentation hotfix', () => {
     expect(projectWorkoutActivity(overhead).displayName).toMatch(
       /desenvolvimento.*sentado/iu,
     );
-    expect(projectWorkoutActivity(row).displayName).toMatch(/remada.*cabo/iu);
+    expect(projectWorkoutActivity(row).displayName).toBe(row.name);
+    expect(
+      projectWorkoutActivity({ ...row, name: 'XTrainerPro 20 kg' }).displayName,
+    ).toMatch(/remada.*cabo/iu);
     expect(projectWorkoutActivity(bench).displayName).not.toBe(
       projectWorkoutActivity(overhead).displayName,
     );
@@ -141,7 +144,11 @@ describe('Production GYM commercial presentation hotfix', () => {
       ...session,
       blocks: [{ ...session.blocks[0], work }],
     });
-    expect(output).toContain(expected);
+    if (format === 'CONTINUOUS' && rounds === 1) {
+      expect(output).not.toContain('Circuito contínuo');
+      expect(output).toContain('Caminhada');
+      expect(output).toContain('Tempo: 10 min');
+    } else expect(output).toContain(expected);
     expect(output).not.toMatch(/CONTINUOUS|FOR_TIME|INTERVAL|1 rodadas/u);
     if (format === 'CONTINUOUS' && rounds === 1)
       expect(output).not.toContain('rodada');

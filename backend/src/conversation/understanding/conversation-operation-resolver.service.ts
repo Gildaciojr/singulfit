@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { isExplicitWorkoutPlanAdjustment } from '../../workout/v2/workout-plan-adjustment-request.policy';
 import type { ConversationUnderstandingInput } from '../contracts/conversation-understanding.contract';
 import { CONVERSATION_OPERATION } from '../contracts/conversation-intent.contract';
 import type {
@@ -41,10 +42,15 @@ export class ConversationOperationResolverService {
         ) ||
         /\bme preparar para uma prova de \d+ km\b/u.test(text)) &&
       !message.question;
-    const explicitUpdate = this.explicitPersistentMutation(message);
+    const explicitWorkoutAdjustment =
+      !message.question && isExplicitWorkoutPlanAdjustment(text);
+    const explicitUpdate =
+      this.explicitPersistentMutation(message) || explicitWorkoutAdjustment;
     const add = (operation: ConversationOperation): void => {
       if (!candidates.includes(operation)) candidates.push(operation);
     };
+    if (!fullReplacement && explicitWorkoutAdjustment)
+      add(CONVERSATION_OPERATION.UPDATE_PLAN);
     if (
       !message.question &&
       /^(?:nao tenho|me de outra opcao|substitua essa refeicao)\b/u.test(
@@ -73,7 +79,7 @@ export class ConversationOperationResolverService {
       add(CONVERSATION_OPERATION.PRESENT_CURRENT_PLAN);
     }
     if (!fullReplacement && /\b(tro(?:c|qu)\w*|substitu\w*)\b/u.test(text)) {
-      const persistentMutation = this.explicitPersistentMutation(message);
+      const persistentMutation = explicitUpdate;
       add(
         persistentMutation &&
           /\b(alimento|comida|refeicao|exercicio|whey|frango|arroz|banana|creatina)\b/u.test(
@@ -93,7 +99,7 @@ export class ConversationOperationResolverService {
     ) {
       if (!explicitWorkoutRequest || explicitUpdate)
         add(
-          this.explicitPersistentMutation(message)
+          explicitUpdate
             ? CONVERSATION_OPERATION.UPDATE_PLAN
             : CONVERSATION_OPERATION.PROVIDE_GUIDANCE,
         );

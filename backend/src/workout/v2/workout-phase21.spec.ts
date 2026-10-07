@@ -82,6 +82,7 @@ describe('Phase 2.1 objective boundaries', () => {
       ...strength(),
       equipment: ['PULL_UP_BAR' as const],
       name: 'Barra fixa',
+      movementPattern: 'PULL' as const,
       instruction: 'Mantenha a técnica, não a cabine.',
       publicIdentity: undefined,
     };

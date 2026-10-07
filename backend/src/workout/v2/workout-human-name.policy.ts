@@ -13,6 +13,7 @@ interface NameGrammar {
   readonly positions?: readonly WorkoutPublicExerciseIdentity['bodyPosition'][];
   readonly plane?: WorkoutPublicExerciseIdentity['plane'];
   readonly equipment?: WorkoutEquipment;
+  readonly coreJointAction?: WorkoutPublicExerciseIdentity['jointAction'];
 }
 
 // Presentation families only: never choose exercises, loads, sets or programming.
@@ -71,6 +72,12 @@ const grammars: readonly NameGrammar[] = [
     noun: /^woodchop$/u,
     patterns: ['ROTATION'],
     regions: ['TRUNK', 'WHOLE_BODY'],
+    coreJointAction: 'ROTATION',
+  },
+  {
+    noun: /^mobilidade(?: dinamica(?: geral)?| final)?$/u,
+    patterns: ['MOBILITY'],
+    regions: ['WHOLE_BODY'],
   },
   {
     noun: /^desenvolvimento(?: (?:em pe|sentado|de ombros))?$/u,
@@ -94,6 +101,59 @@ const grammars: readonly NameGrammar[] = [
     noun: /^clean(?: tecnico)?$/u,
     patterns: ['HINGE'],
     regions: ['WHOLE_BODY', 'HIPS'],
+  },
+  {
+    noun: /^snatch(?: tecnico)?$/u,
+    patterns: ['HINGE'],
+    regions: ['WHOLE_BODY', 'HIPS'],
+    positions: ['STANDING'],
+  },
+  {
+    noun: /^jerk(?: tecnico)?$/u,
+    patterns: ['PUSH'],
+    regions: ['SHOULDERS', 'WHOLE_BODY'],
+    plane: 'VERTICAL',
+    positions: ['STANDING'],
+  },
+  {
+    noun: /^pull-up(?: assistido| estrito)?$/u,
+    patterns: ['PULL'],
+    regions: ['BACK'],
+    plane: 'VERTICAL',
+    positions: ['HANGING'],
+    equipment: 'PULL_UP_BAR',
+  },
+  {
+    noun: /^burpee(?: adaptado)?$/u,
+    patterns: ['LOCOMOTION', 'SQUAT', 'PUSH'],
+    regions: ['WHOLE_BODY'],
+    equipment: 'BODYWEIGHT',
+  },
+  {
+    noun: /^flexao de bracos(?: na parede)?$/u,
+    patterns: ['PUSH'],
+    regions: ['CHEST'],
+    plane: 'HORIZONTAL',
+    positions: ['PRONE', 'STANDING', 'INCLINED'],
+    equipment: 'BODYWEIGHT',
+  },
+  {
+    noun: /^(?:avanco|lunge)(?: alternado| reverso)?$/u,
+    patterns: ['SQUAT'],
+    regions: ['HIPS', 'KNEES'],
+    positions: ['STANDING'],
+  },
+  {
+    noun: /^ponte de quadril$/u,
+    patterns: ['HINGE'],
+    regions: ['HIPS'],
+    positions: ['LYING'],
+  },
+  {
+    noun: /^farmer carry$/u,
+    patterns: ['CARRY'],
+    regions: ['WHOLE_BODY', 'TRUNK'],
+    positions: ['STANDING'],
   },
 ];
 const equipmentSuffixes: readonly (readonly [string, WorkoutEquipment])[] = [
@@ -149,13 +209,28 @@ export function projectWorkoutHumanName(
   if (suffix && !activity.equipment.includes(suffix[1])) return null;
   const stem = suffix ? value.slice(0, -(suffix[0].length + 1)) : value;
   const grammar = grammars.find(({ noun }) => noun.test(stem));
-  if (!grammar || !grammar.patterns.includes(activity.movementPattern))
+  if (!grammar) return null;
+  if (
+    stem === 'farmer carry' &&
+    !activity.equipment.some((item) =>
+      ['DUMBBELL', 'KETTLEBELL', 'BARBELL'].includes(item),
+    )
+  )
     return null;
+  const identity = activity.publicIdentity;
+  const compatibleCore =
+    activity.movementPattern === 'CORE' &&
+    grammar.coreJointAction !== undefined &&
+    identity?.jointAction === grammar.coreJointAction &&
+    (identity.targetRegion === 'TRUNK' ||
+      identity.targetRegion === 'WHOLE_BODY');
+  if (!grammar.patterns.includes(activity.movementPattern) && !compatibleCore)
+    return null;
+  if (activity.movementPattern === 'MOBILITY' && !identity) return null;
   if (grammar.equipment && !activity.equipment.includes(grammar.equipment))
     return null;
   if (stem === 'barra fixa' && !activity.equipment.includes('PULL_UP_BAR'))
     return null;
-  const identity = activity.publicIdentity;
   if (identity) {
     if (
       (grammar.regions && !grammar.regions.includes(identity.targetRegion)) ||

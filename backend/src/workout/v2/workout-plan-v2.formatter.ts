@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   projectWorkoutActivity,
   projectWorkoutHeading,
+  projectWorkoutProgression,
 } from './workout-public-projection';
 import {
   workoutCandidatePublicTextIssues,
@@ -90,6 +91,20 @@ export class WorkoutPlanV2Formatter {
         )}`,
       );
     }
+    const progression = [
+      ...new Set(
+        plan.progression.flatMap((rule) => {
+          const text = projectWorkoutProgression(rule, plan.strategy);
+          return text ? [text] : [];
+        }),
+      ),
+    ];
+    if (progression.length)
+      messages.push(
+        this.publicText(
+          `📈 *Progressão*\n\n${progression.map((text) => `• ${text}`).join('\n')}`,
+        ),
+      );
     return Object.freeze(messages);
   }
 
@@ -128,6 +143,8 @@ export class WorkoutPlanV2Formatter {
       WARM_UP: '🔥 *Aquecimento*',
       MOBILITY: '🧩 *Mobilidade*',
       STRENGTH: '💪 *Força principal*',
+      HYPERTROPHY: '💪 *Acessórios*',
+      CORE: '🧱 *Core*',
       ENDURANCE: '🏃 *Condicionamento*',
       CONDITIONING: '🏃 *Condicionamento*',
       TECHNIQUE: '🧩 *Técnica*',
@@ -148,7 +165,12 @@ export class WorkoutPlanV2Formatter {
               labels[block.type] ??
                 `💪 *${this.publicHeading(block.title, 'Bloco de treino')}*`,
             ),
-            ...(block.work
+            ...(block.work &&
+            !(
+              (block.type === 'WARM_UP' || block.type === 'COOLDOWN') &&
+              block.work.format === 'CONTINUOUS' &&
+              block.work.rounds === 1
+            )
               ? [
                   `*${this.workFormat(block.work.format)}* · ${presentWorkoutSeconds(block.work.durationSeconds)}${block.work.rounds !== null && !(block.work.format === 'CONTINUOUS' && block.work.rounds === 1) ? ` · ${block.work.rounds} ${block.work.rounds === 1 ? 'rodada' : 'rodadas'}` : ''}${block.work.intervalSeconds !== null ? ` · intervalos de ${presentWorkoutSeconds(block.work.intervalSeconds)}` : ''}`,
                   ...(block.work.format === 'EMOM'

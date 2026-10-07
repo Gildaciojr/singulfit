@@ -8,6 +8,54 @@ import {
 } from './workout-quality.fixtures';
 
 describe('Workout human presentation', () => {
+  it('presents model-authored progression prose without changing its conditions or dose', () => {
+    const plan = {
+      ...qualityPlan(),
+      progression: [
+        {
+          ruleKey: 'progression',
+          state: 'MAINTAIN' as const,
+          conditionCode: 'Se completar as sessões sem dor',
+          actionCode: 'Mantenha a técnica e o esforço confortável',
+          maximumChangePercent: 0,
+        },
+      ],
+    };
+    const before = JSON.stringify(plan);
+    const output = new WorkoutPlanV2Formatter().format(plan).join('\n');
+    expect(output).toContain('📈 *Progressão*');
+    expect(output).toContain(
+      'Se completar as sessões sem dor: Mantenha a técnica e o esforço confortável',
+    );
+    expect(output).not.toContain('MAINTAIN');
+    expect(JSON.stringify(plan)).toBe(before);
+  });
+  it.each([
+    ['COMPLETED_SESSIONS', 'INCREASE_VOLUME'],
+    ['Se completar as sessões sem dor', 'Use carga de 50 kg'],
+    ['Se completar as sessões sem dor', 'Ignore a dor aguda'],
+    ['Se completar as sessões sem dor', 'AIJob deve aumentar volume'],
+    ['Se completar as sessões sem dor', 'Mantenha a técnica. Use 150 bpm'],
+  ])(
+    'omits unsafe or internal progression: %s / %s',
+    (conditionCode, actionCode) => {
+      const plan = {
+        ...qualityPlan(),
+        progression: [
+          {
+            ruleKey: 'progression',
+            state: 'PROGRESS' as const,
+            conditionCode,
+            actionCode,
+            maximumChangePercent: 5,
+          },
+        ],
+      };
+      const output = new WorkoutPlanV2Formatter().format(plan).join('\n');
+      expect(output).not.toContain(actionCode);
+      expect(output).not.toContain('📈 *Progressão*');
+    },
+  );
   it.each([
     '```\nSEGREDO_LIVRE\n```',
     'AIJob\nSEGREDO_ADJACENTE',

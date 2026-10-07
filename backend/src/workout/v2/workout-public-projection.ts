@@ -1,6 +1,12 @@
-import type { WorkoutActivityV2 } from './workout-plan-v2.contract';
+import type {
+  WorkoutActivityV2,
+  WorkoutProgressionRule,
+} from './workout-plan-v2.contract';
 import { ConversationPublicAnswerBoundaryService } from '../../conversation/runtime/conversation-public-answer-boundary.service';
-import { workoutPublicTextIssues } from './workout-public-text.policy';
+import {
+  workoutPublicTextIssues,
+  type WorkoutPublicTextConstraints,
+} from './workout-public-text.policy';
 import { projectWorkoutHumanName } from './workout-human-name.policy';
 
 /** Positive presentation vocabulary, never an exercise selector or equipment detector. */
@@ -65,6 +71,31 @@ const cueGrammars: readonly (readonly [CoachingCueKind, RegExp])[] = [
   ],
 ];
 const publicBoundary = new ConversationPublicAnswerBoundaryService();
+
+/** Preserve model-authored prose; legacy codes are never translated into invented coaching. */
+export function projectWorkoutProgression(
+  rule: WorkoutProgressionRule,
+  constraints: WorkoutPublicTextConstraints,
+): string | null {
+  const parts = [rule.conditionCode.trim(), rule.actionCode.trim()];
+  if (
+    parts.some(
+      (text) =>
+        text.length > 240 ||
+        text.split(/\s+/u).length < 3 ||
+        !/^[\p{L}\p{N} ,.%()–-]+[.!?]?$/u.test(text) ||
+        /\b(?:ignore|ignorar|desconsidere|ate falhar|carga maxima|sem limite)\b/u.test(
+          normalize(text),
+        ) ||
+        publicBoundary.projectStructuredText(text) === null,
+    )
+  )
+    return null;
+  const text = parts.join(': ');
+  return workoutPublicTextIssues(text, constraints, rule.ruleKey).length
+    ? null
+    : text;
+}
 // Compositional vocabulary for technique, not exercise/equipment selection.
 const techniqueWords = new Set(
   'a o as os ao aos do da dos das de com sem para por e na no nas nos ate uma um que se nem mantenha preserve controle evite execute conduza aproxime leve desloque apoie segure toque desca suba eleve estenda flexione alterne reduza aumente comece termine coluna postura tronco corpo escapulas ombros punhos joelhos pes cotovelos quadril abdomen peito pernas bracos calcanhares tornozelos pescoco respiracao amplitude movimento movimentos tecnica execucao descida subida ritmo impulso alinhamento banco apoio barra halteres pesos neutra neutro relaxada relaxado alinhada alinhado alinhadas alinhados estavel estaveis ereto firme firmes apoiado apoiada apoiadas apoiados proximos proximas controlada controlado controladas controlados suavemente suaves leve levemente confortavel confortaveis moderado moderada gradualmente breve pouca baixa livre solta frente tras junto enquanto mantendo perder balancar arquear girar levantar tirar tensionar elevar encolher bater relaxar travar travalos fim altura alto baixo volta pausa resistencia'.split(
@@ -158,7 +189,7 @@ function structuredIdentity(activity: WorkoutActivityV2): string | null {
     PUSH: 'Empurrada',
     PULL: 'Puxada',
     CARRY: 'Transporte de carga',
-    LOCOMOTION: 'Locomoção',
+    LOCOMOTION: 'Deslocamento',
     ROTATION: 'Rotação',
     CORE: 'Estabilização',
     MOBILITY: 'Mobilidade',
@@ -222,16 +253,16 @@ function structuredIdentity(activity: WorkoutActivityV2): string | null {
 }
 const patterns: Readonly<Record<WorkoutActivityV2['movementPattern'], string>> =
   {
-    SQUAT: 'Padrão de agachamento',
-    HINGE: 'Padrão de dobradiça de quadril',
-    PUSH: 'Movimento de empurrar',
-    PULL: 'Movimento de puxar',
+    SQUAT: 'Agachamento',
+    HINGE: 'Extensão de quadril',
+    PUSH: 'Exercício de empurrar',
+    PULL: 'Exercício de puxar',
     CARRY: 'Transporte de carga',
-    LOCOMOTION: 'Locomoção',
+    LOCOMOTION: 'Deslocamento',
     ROTATION: 'Rotação',
     CORE: 'Estabilidade do tronco',
     MOBILITY: 'Mobilidade',
-    OTHER: 'Movimento do bloco',
+    OTHER: 'Exercício da sessão',
   };
 const headings = new Set([
   'sua semana de treino',
