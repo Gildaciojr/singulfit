@@ -1,6 +1,7 @@
 import type { WorkoutActivityV2 } from './workout-plan-v2.contract';
 import { ConversationPublicAnswerBoundaryService } from '../../conversation/runtime/conversation-public-answer-boundary.service';
 import { workoutPublicTextIssues } from './workout-public-text.policy';
+import { projectWorkoutHumanName } from './workout-human-name.policy';
 
 /** Positive presentation vocabulary, never an exercise selector or equipment detector. */
 const normalize = (text: string): string =>
@@ -219,21 +220,6 @@ function structuredIdentity(activity: WorkoutActivityV2): string | null {
     .join(' e ');
   return [movement, position, equipment].filter(Boolean).join(' ');
 }
-const names = new Map([
-  ['agachamento', 'Agachamento'],
-  ['agachamento controlado', 'Agachamento controlado'],
-  ['supino', 'Supino'],
-  ['remada', 'Remada'],
-  ['barra fixa', 'Barra fixa'],
-  ['agachamento com apoio e scaling', 'Agachamento com apoio e scaling'],
-  ['thruster com halteres', 'Thruster com halteres'],
-  ['clean tecnico com barra', 'Clean técnico com barra'],
-]);
-const namedEquipment = new Map([
-  ['barra fixa', 'PULL_UP_BAR' as const],
-  ['thruster com halteres', 'DUMBBELL' as const],
-  ['clean tecnico com barra', 'BARBELL' as const],
-]);
 const patterns: Readonly<Record<WorkoutActivityV2['movementPattern'], string>> =
   {
     SQUAT: 'Padrão de agachamento',
@@ -296,20 +282,15 @@ export interface WorkoutPublicActivityProjection {
 export function projectWorkoutActivity(
   activity: WorkoutActivityV2,
 ): WorkoutPublicActivityProjection {
-  const rawName = normalize(activity.name);
-  const requiredEquipment = namedEquipment.get(rawName);
-  const supportedName =
-    requiredEquipment && !activity.equipment.includes(requiredEquipment)
-      ? undefined
-      : names.get(rawName);
+  const supportedName = projectWorkoutHumanName(activity);
   // Endurance's executable mode is structured; no textual mode/equipment modifier is needed.
   const displayName =
     activity.kind === 'ENDURANCE'
       ? ({ WALK: 'Caminhada', RUN: 'Corrida', CYCLE: 'Ciclismo' } as const)[
           activity.mode
         ]
-      : (structuredIdentity(activity) ??
-        supportedName ??
+      : (supportedName ??
+        structuredIdentity(activity) ??
         patterns[activity.movementPattern]);
   const instruction = projectCoachingCue(activity.instruction, activity);
   const alerts = activity.alerts.flatMap((text) => {

@@ -20,6 +20,14 @@ import type { WorkoutModality } from './workout-planning-artifact.contract';
 import { OpenAIGateway } from '../../ai/openai.gateway';
 import { WorkoutPlanningContextBuilder } from './workout-planning-context.builder';
 import { WorkoutPlanningStrategyService } from './workout-planning-strategy.service';
+import {
+  qualityPlan,
+  qualitySession,
+  qualityCandidate,
+  strength,
+} from './workout-quality.fixtures';
+import { WorkoutPlanV2Validator } from './workout-plan-v2.validator';
+import { estimateWorkoutSession } from './workout-duration-estimator';
 
 describe('Current-turn Understanding is the Workout modality source of truth', () => {
   let module: TestingModule;
@@ -36,6 +44,248 @@ describe('Current-turn Understanding is the Workout modality source of truth', (
     provider.mockRestore();
   });
   beforeEach(() => provider.mockClear());
+  it.each([
+    [
+      'Monte um treino de musculação para mim, 2 vezes por semana, com 30 minutos por treino.',
+      2,
+      30,
+      true,
+      true,
+      false,
+    ],
+    [
+      'Monte um treino de musculação para mim, 3 vezes por semana, 45 minutos.',
+      3,
+      45,
+      true,
+      true,
+      false,
+    ],
+    [
+      'Monte um treino de musculação para mim, 2 vezes por semana.',
+      2,
+      60,
+      true,
+      false,
+      false,
+    ],
+    [
+      'Monte um treino de musculação para mim, 30 minutos por treino.',
+      5,
+      30,
+      false,
+      true,
+      false,
+    ],
+    ['Monte um treino de musculação para mim.', 5, 60, false, false, false],
+    [
+      'Monte um treino de musculação para mim, 4 vezes por semana, 30 minutos por treino.',
+      4,
+      30,
+      true,
+      true,
+      true,
+    ],
+  ] as const)(
+    'resolves current frequency/duration over conflicting history and profile: %s',
+    async (
+      text,
+      frequency,
+      minutes,
+      explicitFrequency,
+      explicitDuration,
+      previous,
+    ) => {
+      const understanding = await module
+        .get(ConversationUnderstandingService)
+        .understand(
+          understandingInput(text, {
+            recentHistory: [
+              historyEntry(
+                'Seu treino anterior é 5 vezes por semana com 60 minutos por treino.',
+              ),
+            ],
+          }),
+        );
+      const decision = module
+        .get(ConversationRoutingDecisionService)
+        .decide(goalPreparationInput(understanding)).goalDecision;
+      const original = routingSnapshot();
+      const snapshot = {
+        ...original,
+        training: {
+          ...original.training,
+          weeklyFrequency: knownDatum(5),
+          sessionDurationMinutes: knownDatum(60),
+        },
+      };
+      const oldPlan = qualityPlan();
+      const previousPlan = {
+        ...oldPlan,
+        sessions: oldPlan.sessions.slice(0, 3),
+        strategy: {
+          ...oldPlan.strategy,
+          sessionCount: 3,
+          sessionDurationMinutes: { status: 'CONFIRMED' as const, value: 45 },
+        },
+      };
+      const built = await new GenerateWorkoutPlanV2InputBuilder(
+        {} as never,
+        { fitnessCheckIn: { findMany: () => Promise.resolve([]) } } as never,
+        previous
+          ? ({
+              readPrevious: () =>
+                Promise.resolve({ userId: 'user-id', document: previousPlan }),
+            } as never)
+          : undefined,
+      ).build({
+        userId: 'user-id',
+        profileId: 'profile-id',
+        snapshot,
+        decision,
+        currentMessage: text,
+        referenceDate: new Date(snapshot.referenceDate),
+        ...(previous ? { previousPlan } : {}),
+      });
+      const context = new WorkoutPlanningContextBuilder().build({
+        ...built.generationInput,
+        artifactType: 'WEEKLY_PLAN',
+        modality: 'GYM_STRENGTH',
+      });
+      const strategy = new WorkoutPlanningStrategyService().build(context);
+      expect(context.modality).toEqual({
+        status: 'CONFIRMED',
+        value: 'GYM_STRENGTH',
+      });
+      expect(context.training.weeklyFrequency).toEqual({
+        status: 'CONFIRMED',
+        value: frequency,
+      });
+      expect(context.training.sessionDurationMinutes).toEqual({
+        status: 'CONFIRMED',
+        value: minutes,
+      });
+      expect(context.resolvedFacts?.weeklyFrequency.source).toBe(
+        explicitFrequency ? 'CURRENT_EXPLICIT' : 'CONFIRMED_PROFILE',
+      );
+      expect(context.resolvedFacts?.sessionDurationMinutes.source).toBe(
+        explicitDuration ? 'CURRENT_EXPLICIT' : 'CONFIRMED_PROFILE',
+      );
+      expect(strategy.sessionCount).toBe(frequency);
+      if (previous) {
+        expect(built.generationInput.previousPlan?.strategy.sessionCount).toBe(
+          3,
+        );
+        expect(
+          built.generationInput.previousPlan?.strategy.sessionDurationMinutes,
+        ).toEqual({ status: 'CONFIRMED', value: 45 });
+      }
+      expect(strategy.sessionDurationMinutes).toEqual({
+        status: 'CONFIRMED',
+        value: minutes,
+      });
+      expect(provider).not.toHaveBeenCalled();
+      if (frequency === 2 && minutes === 30) {
+        const sessions = (['MONDAY', 'THURSDAY'] as const).map(
+          (weekday, index) => ({
+            ...qualitySession(
+              `short-${index}`,
+              Array.from({ length: 4 }, (_, i) => ({
+                ...strength(`short-${index}-${i}`),
+                sets: 3,
+                repetitions: '10',
+                restSeconds: 60,
+              })),
+            ),
+            weekday,
+            sequence: index + 1,
+            estimatedDurationMinutes: 30,
+            blocks: [
+              {
+                blockKey: `short-${index}-main`,
+                title: 'Principal',
+                type: 'STRENGTH' as const,
+                estimatedDurationMinutes: 30,
+                activities: Array.from({ length: 4 }, (_, i) => ({
+                  ...strength(`short-${index}-${i}`),
+                  sets: 3,
+                  repetitions: '10',
+                  restSeconds: 60,
+                })),
+              },
+            ],
+          }),
+        );
+        const validator = new WorkoutPlanV2Validator();
+        expect(
+          validator
+            .validate(qualityCandidate(sessions), context, strategy, true)
+            .issues.filter((issue) => issue.severity === 'ERROR'),
+        ).toEqual([]);
+        for (const session of sessions) {
+          expect(session.estimatedDurationMinutes).toBeLessThanOrEqual(30);
+          expect(
+            estimateWorkoutSession(session).minimumMinutes,
+          ).toBeLessThanOrEqual(30);
+          expect(
+            estimateWorkoutSession(session).maximumMinutes,
+          ).toBeGreaterThanOrEqual(24);
+        }
+        const copied = sessions.map((session, index) => ({
+          ...qualitySession(`copy-${index}`),
+          weekday: session.weekday,
+          sequence: index + 1,
+          estimatedDurationMinutes: 30,
+          blocks: qualitySession(`copy-${index}`).blocks.map((block) => ({
+            ...block,
+            estimatedDurationMinutes:
+              block.type === 'STRENGTH' ? 15 : block.estimatedDurationMinutes,
+          })),
+        }));
+        expect(
+          validator.validate(qualityCandidate(copied), context, strategy, true)
+            .issues,
+        ).toContainEqual(
+          expect.objectContaining({
+            code: 'SESSION_DURATION_EXCEEDED',
+            severity: 'ERROR',
+          }),
+        );
+        expect(
+          validator.validate(
+            qualityCandidate([
+              { ...sessions[0], estimatedDurationMinutes: 31 },
+              sessions[1],
+            ]),
+            context,
+            strategy,
+            true,
+          ).issues,
+        ).toContainEqual(
+          expect.objectContaining({
+            code: 'SESSION_DURATION_EXCEEDED',
+            severity: 'ERROR',
+          }),
+        );
+        expect(
+          validator.validate(
+            qualityCandidate([
+              ...sessions,
+              { ...sessions[0], sessionKey: 'extra' },
+            ]),
+            context,
+            strategy,
+            true,
+          ).issues,
+        ).toContainEqual(
+          expect.objectContaining({
+            code: 'SESSION_COUNT_MISMATCH',
+            severity: 'ERROR',
+          }),
+        );
+      }
+    },
+  );
   const matrix: readonly [string, WorkoutModality][] = [
     [
       'Quero CrossFit 4x, estou voltando agora e quero algo mais técnico',

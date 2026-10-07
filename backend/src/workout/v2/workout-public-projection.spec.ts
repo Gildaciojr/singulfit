@@ -16,7 +16,11 @@ import {
   strength,
 } from './workout-quality.fixtures';
 import type { PrismaService } from '../../prisma/prisma.service';
-import type { WorkoutPlanV2 } from './workout-plan-v2.contract';
+import type {
+  WorkoutPlanV2,
+  WorkoutActivityV2,
+  WorkoutPublicExerciseIdentity,
+} from './workout-plan-v2.contract';
 import { commercialWorkoutPlan } from './workout-commercial-quality.fixtures';
 import {
   WORKOUT_PLANNING_V2_PROMPT_V9,
@@ -27,6 +31,212 @@ describe('Fail-closed Workout public projection', () => {
   const formatter = new WorkoutPlanV2Formatter();
   const context = qualityContext(['MONDAY']);
   const strategy = new WorkoutPlanningStrategyService().build(context);
+  const humanNames: readonly Readonly<{
+    name: string;
+    pattern: WorkoutActivityV2['movementPattern'];
+    region: WorkoutPublicExerciseIdentity['targetRegion'];
+    position: WorkoutPublicExerciseIdentity['bodyPosition'];
+    plane: WorkoutPublicExerciseIdentity['plane'];
+    equipment: WorkoutActivityV2['equipment'];
+  }>[] = [
+    {
+      name: 'Agachamento goblet com kettlebell',
+      pattern: 'SQUAT',
+      region: 'HIPS',
+      position: 'STANDING',
+      plane: 'SAGITTAL',
+      equipment: ['KETTLEBELL'],
+    },
+    {
+      name: 'Puxada neutra na polia',
+      pattern: 'PULL',
+      region: 'BACK',
+      position: 'SEATED',
+      plane: 'VERTICAL',
+      equipment: ['CABLE'],
+    },
+    {
+      name: 'Clean técnico com barra',
+      pattern: 'HINGE',
+      region: 'WHOLE_BODY',
+      position: 'STANDING',
+      plane: 'SAGITTAL',
+      equipment: ['BARBELL'],
+    },
+    {
+      name: 'Agachamento livre',
+      pattern: 'SQUAT',
+      region: 'HIPS',
+      position: 'STANDING',
+      plane: 'SAGITTAL',
+      equipment: ['BODYWEIGHT'],
+    },
+    {
+      name: 'Levantamento terra romeno com barra',
+      pattern: 'HINGE',
+      region: 'HIPS',
+      position: 'STANDING',
+      plane: 'SAGITTAL',
+      equipment: ['BARBELL'],
+    },
+    {
+      name: 'Supino inclinado com barra',
+      pattern: 'PUSH',
+      region: 'CHEST',
+      position: 'INCLINED',
+      plane: 'HORIZONTAL',
+      equipment: ['BARBELL'],
+    },
+    {
+      name: 'Supino reto com halteres',
+      pattern: 'PUSH',
+      region: 'CHEST',
+      position: 'LYING',
+      plane: 'HORIZONTAL',
+      equipment: ['DUMBBELL'],
+    },
+    {
+      name: 'Remada unilateral com halter',
+      pattern: 'PULL',
+      region: 'BACK',
+      position: 'INCLINED',
+      plane: 'HORIZONTAL',
+      equipment: ['DUMBBELL'],
+    },
+    {
+      name: 'Remada baixa no cabo',
+      pattern: 'PULL',
+      region: 'BACK',
+      position: 'SEATED',
+      plane: 'HORIZONTAL',
+      equipment: ['CABLE'],
+    },
+    {
+      name: 'Leg press',
+      pattern: 'SQUAT',
+      region: 'KNEES',
+      position: 'SEATED',
+      plane: 'SAGITTAL',
+      equipment: ['MACHINE'],
+    },
+    {
+      name: 'Prancha frontal',
+      pattern: 'CORE',
+      region: 'TRUNK',
+      position: 'LYING',
+      plane: 'NONE',
+      equipment: ['BODYWEIGHT'],
+    },
+    {
+      name: 'Prancha lateral',
+      pattern: 'CORE',
+      region: 'TRUNK',
+      position: 'SIDE_LYING',
+      plane: 'NONE',
+      equipment: ['BODYWEIGHT'],
+    },
+    {
+      name: 'Dead bug',
+      pattern: 'CORE',
+      region: 'TRUNK',
+      position: 'LYING',
+      plane: 'NONE',
+      equipment: ['BODYWEIGHT'],
+    },
+    {
+      name: 'Woodchop no cabo',
+      pattern: 'ROTATION',
+      region: 'TRUNK',
+      position: 'STANDING',
+      plane: 'TRANSVERSE',
+      equipment: ['CABLE'],
+    },
+    {
+      name: 'Desenvolvimento em pé com barra',
+      pattern: 'PUSH',
+      region: 'SHOULDERS',
+      position: 'STANDING',
+      plane: 'VERTICAL',
+      equipment: ['BARBELL'],
+    },
+  ];
+  it.each(humanNames)(
+    'presents approved human name $name instead of anatomical fallback',
+    (entry) => {
+      const activity: WorkoutActivityV2 = {
+        ...strength(),
+        name: entry.name,
+        movementPattern: entry.pattern,
+        equipment: entry.equipment,
+        publicIdentity: {
+          plane: entry.plane,
+          targetRegion: entry.region,
+          bodyPosition: entry.position,
+          jointAction: null,
+        },
+      };
+      const projected = projectWorkoutActivity(activity);
+      expect(projected.displayName).toBe(entry.name);
+      expect(projected.omittedUnverifiedText).toBe(false);
+      expect(formatter.formatActivity(activity)).toContain(entry.name);
+    },
+  );
+  it.each([
+    'Bicicleta não disponível',
+    'Exercício não definido',
+    'Use 100 kg no agachamento',
+    'Escolha qualquer exercício',
+    'Agachamento placeholder',
+    'Agachamento com HyperCable9000',
+    'Agachamento com barra',
+    'Leg press',
+    'Prancha frontal',
+    'Supino reto',
+    'Agachamento 170 bpm',
+    'Agachamento 250 W',
+    'Agachamento a 4:30/km',
+  ])(
+    'falls back for unknown, unsafe or contradictory human name %s',
+    (name) => {
+      const projection = projectWorkoutActivity({ ...strength(), name });
+      expect(projection.displayName).not.toBe(name);
+      expect(projection.displayName).toBe(
+        projectWorkoutActivity({ ...strength(), name: 'Unknown' }).displayName,
+      );
+      expect(projection.omittedUnverifiedText).toBe(true);
+    },
+  );
+  it('rejects a contradictory public position while preserving structured endurance', () => {
+    const bench = humanNames.find(
+      (entry) => entry.name === 'Supino inclinado com barra',
+    );
+    if (!bench) throw new Error('Missing bench fixture');
+    expect(
+      projectWorkoutActivity({
+        ...strength(),
+        name: bench.name,
+        movementPattern: bench.pattern,
+        equipment: bench.equipment,
+        publicIdentity: {
+          plane: 'HORIZONTAL',
+          targetRegion: 'CHEST',
+          bodyPosition: 'LYING',
+          jointAction: null,
+        },
+      }).displayName,
+    ).not.toBe(bench.name);
+    expect(
+      projectWorkoutActivity({
+        ...strength(),
+        kind: 'ENDURANCE',
+        mode: 'WALK',
+        name: 'Bicicleta não disponível',
+        durationMinutes: 5,
+        distanceKm: null,
+        intensity: 'CONVERSATIONAL',
+      }).displayName,
+    ).toBe('Caminhada');
+  });
   it.each([
     ['8', '8'],
     ['8-10', '8-10'],

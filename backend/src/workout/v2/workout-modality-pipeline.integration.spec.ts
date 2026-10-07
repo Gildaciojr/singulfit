@@ -380,7 +380,16 @@ describe('Understanding → builder → engine → parser/validator → formatte
       const output = new WorkoutPlanV2Formatter()
         .format(result.output)
         .join('\n');
-      expect(output).toMatch(/agachamento em pé/iu);
+      // The advanced fixture labels a SQUAT as a clean; retain its fallback.
+      expect(output).toContain(
+        level === 'BEGINNER'
+          ? 'Agachamento com apoio e scaling'
+          : level === 'INTERMEDIATE'
+            ? 'Thruster com halteres'
+            : 'Agachamento em pé',
+      );
+      if (level === 'ADVANCED')
+        expect(output).not.toContain('Clean técnico com barra');
       expect(output).toContain(
         level === 'BEGINNER'
           ? 'peso corporal'
