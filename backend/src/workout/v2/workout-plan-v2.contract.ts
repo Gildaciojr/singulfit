@@ -60,7 +60,37 @@ export interface WorkoutPublicExerciseIdentity {
   readonly jointAction: (typeof WORKOUT_IDENTITY_ACTIONS)[number] | null;
 }
 
+export interface WorkoutMetricPrescription {
+  readonly kind:
+    | 'LOAD_KG'
+    | 'PERCENT_1RM'
+    | 'PACE_SECONDS_PER_KM'
+    | 'HEART_RATE_BPM'
+    | 'POWER_WATTS';
+  readonly value: number;
+  readonly basis: 'USER_REPORTED' | 'OBSERVED' | 'ADJUSTABLE_START';
+  readonly referenceId: string | null;
+}
+export interface WorkoutExecutionPrescription {
+  readonly kind: 'COUNT' | 'SECONDS' | 'METERS' | 'MAXIMUM_TECHNICAL_REPS';
+  readonly minimum: number | null;
+  readonly maximum: number | null;
+  readonly perSide: boolean;
+  readonly alternating: boolean;
+}
+export interface WorkoutPrescription {
+  readonly execution: WorkoutExecutionPrescription | null;
+  readonly load: WorkoutMetricPrescription | null;
+  readonly effort: Readonly<{
+    kind: 'RPE' | 'RIR' | 'TECHNICAL_FAILURE' | 'MAXIMUM_TECHNICAL_REPS';
+    value: number | null;
+  }> | null;
+  readonly enduranceMetrics: readonly WorkoutMetricPrescription[];
+}
+
 export interface WorkoutActivityBase {
+  /** V12 typed execution, effort and metrics; absent in historical documents. */
+  readonly prescription?: WorkoutPrescription | null;
   /** Absent in historical V9; V10 requires it for non-ENDURANCE activities. */
   readonly publicIdentity?: WorkoutPublicExerciseIdentity | null;
   readonly activityKey: string;

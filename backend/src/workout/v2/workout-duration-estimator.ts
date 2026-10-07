@@ -15,7 +15,14 @@ export function mandatoryWorkoutMinutes(activity: WorkoutActivityV2): number {
   if (activity.kind === 'ENDURANCE') return activity.durationMinutes;
   if (activity.kind === 'TIMED') return activity.durationSeconds / 60;
   if (activity.kind === 'MOBILITY') return (activity.durationSeconds ?? 0) / 60;
-  return (Math.max(0, activity.sets - 1) * activity.restSeconds) / 60;
+  const execution = activity.prescription?.execution;
+  const explicitWork =
+    execution?.kind === 'SECONDS' && execution.minimum !== null
+      ? activity.sets * execution.minimum * (execution.perSide ? 2 : 1)
+      : 0;
+  return (
+    (explicitWork + Math.max(0, activity.sets - 1) * activity.restSeconds) / 60
+  );
 }
 export function mandatoryWorkoutBlockMinutes(block: WorkoutBlockV2): number {
   return block.work
@@ -88,6 +95,15 @@ export function estimateWorkoutActivity(
     return range(0.5, 5, 'LOW');
   }
   const rest = (Math.max(0, activity.sets - 1) * activity.restSeconds) / 60;
+  const execution = activity.prescription?.execution;
+  if (execution?.kind === 'SECONDS' && execution.minimum !== null) {
+    const sides = execution.perSide ? 2 : 1;
+    return range(
+      rest + (activity.sets * execution.minimum * sides) / 60,
+      rest +
+        (activity.sets * (execution.maximum ?? execution.minimum) * sides) / 60,
+    );
+  }
   const repetitions = repetitionRange(activity.repetitions);
   // Deliberately broad execution bounds; unilateral/open prescriptions are uncertain.
   return repetitions

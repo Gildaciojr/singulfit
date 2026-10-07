@@ -37,6 +37,7 @@ import {
   WORKOUT_PLANNING_V2_PROMPT,
   WORKOUT_PLANNING_V2_PROMPT_V9,
   WORKOUT_PLANNING_V2_PROMPT_V10,
+  WORKOUT_PLANNING_V2_PROMPT_V11,
 } from './workout-planning-v2.prompt.definition';
 import {
   durableTextOperation,
@@ -70,6 +71,7 @@ interface StoredJob {
     | ((
         | typeof WORKOUT_PLANNING_V2_PROMPT_V9
         | typeof WORKOUT_PLANNING_V2_PROMPT_V10
+        | typeof WORKOUT_PLANNING_V2_PROMPT_V11
       ) & { id: string; prompt: string });
   providerResponseId?: string | null;
   status: AIJobStatus;
@@ -252,7 +254,23 @@ function plan(
                   durationMinutes: activity.durationMinutes,
                   distanceKm: activity.distanceKm,
                 }
-              : activity,
+              : activity.kind === 'STRENGTH'
+                ? {
+                    ...activity,
+                    prescription: {
+                      execution: {
+                        kind: 'COUNT' as const,
+                        minimum: 8,
+                        maximum: 12,
+                        perSide: false,
+                        alternating: false,
+                      },
+                      load: null,
+                      effort: null,
+                      enduranceMetrics: [],
+                    },
+                  }
+                : activity,
           ),
         })),
       };
@@ -1010,12 +1028,14 @@ describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
   );
   async function seedHistoricalJob(
     s: Awaited<ReturnType<typeof subject>>,
-    version: 9 | 10 = 9,
+    version: 9 | 10 | 11 = 9,
   ) {
     const definition =
       version === 9
         ? WORKOUT_PLANNING_V2_PROMPT_V9
-        : WORKOUT_PLANNING_V2_PROMPT_V10;
+        : version === 10
+          ? WORKOUT_PLANNING_V2_PROMPT_V10
+          : WORKOUT_PLANNING_V2_PROMPT_V11;
     const prepared = s.engine.prepare({
       ...s.input,
       recognizedContext:
@@ -1039,7 +1059,18 @@ describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
           schemaVersion: 2,
           currentRequest: s.input.currentRequest ?? { text: '' },
           context: prepared.context,
-          strategy: prepared.strategy,
+          strategy: prepared.strategy
+            ? {
+                ...prepared.strategy,
+                intensityPolicy: {
+                  ...prepared.strategy.intensityPolicy,
+                  exactLoadAllowed: false,
+                  exactPaceAllowed: false,
+                  exactPowerAllowed: false,
+                  exactHeartRateAllowed: undefined,
+                },
+              }
+            : null,
           safetyPolicy: {
             noDiagnosis: true,
             noRehabilitation: true,
@@ -1081,6 +1112,7 @@ describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
           activities: block.activities.map((activity) => {
             const historical = { ...activity };
             delete historical.publicIdentity;
+            delete historical.prescription;
             return historical;
           }),
         }));
@@ -1111,6 +1143,35 @@ describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
       expect(s.reserved).toHaveBeenCalledTimes(1);
       expect(s.jobStore.create).toHaveBeenCalledTimes(1);
       expect(s.confirmed).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each([9, 10, 11] as const)(
+    'generates and replays legacy V%s strength without V12 execution fields',
+    async (version) => {
+      const legacy = plan('GYM_STRENGTH', 3);
+      const candidate = {
+        ...legacy,
+        sessions: legacy.sessions.map((session) => ({
+          ...session,
+          blocks: session.blocks.map((block) => ({
+            ...block,
+            activities: block.activities.map((activity) => {
+              const historical = { ...activity };
+              delete historical.prescription;
+              return historical;
+            }),
+          })),
+        })),
+      };
+      const s = await subject('Monte musculação 3x', [candidate]);
+      const job = await seedHistoricalJob(s, version);
+      const generated = await s.engine.generateCandidate(s.input);
+      expect(generated.aiJobId).toBe(job.id);
+      await s.complete(generated);
+      const replay = await s.engine.generateCandidate(s.input);
+      expect(replay.aiJobId).toBe(job.id);
+      expect(replay.status).toBe('ALREADY_COMPLETED');
+      expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(1);
     },
   );
   it('recovers the same PROCESSING V9 job without requestId and retrieves the existing provider response', async () => {
@@ -1153,7 +1214,51 @@ describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
     expect(s.gateway.startBackgroundTextResponse).not.toHaveBeenCalled();
     expect(s.jobStore.create).toHaveBeenCalledTimes(1);
   });
-  it('uses V11 for a new no-requestId operation when historical V10/V9 are absent', async () => {
+  it.each([null, 'request-id'])(
+    'preserves V11 operation identity, provider response and accounting across V12 rollout with requestId=%s',
+    async (requestId) => {
+      const s = await subject(
+        'Monte musculação 3x',
+        [plan('GYM_STRENGTH', 3)],
+        {},
+        [],
+        [],
+        requestId,
+      );
+      const job = await seedHistoricalJob(s, 11);
+      s.gateway.retrieveTextResponse.mockRejectedValueOnce(
+        new Error('Lost V11 poll ACK'),
+      );
+      await expect(s.engine.generateCandidate(s.input)).rejects.toBeInstanceOf(
+        DurableTextPendingError,
+      );
+      const recovered = await s.engine.generateCandidate(s.input);
+      expect(recovered.aiJobId).toBe(job.id);
+      expect(recovered.operationKey).toBe(job.operationKey);
+      expect(
+        s.gateway.startBackgroundTextResponse.mock.calls[0][0].instructions,
+      ).toBe(WORKOUT_PLANNING_V2_PROMPT_V11.instructions);
+      await s.complete(recovered);
+      expect((await s.engine.generateCandidate(s.input)).status).toBe(
+        'ALREADY_COMPLETED',
+      );
+      expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(1);
+      expect(s.reserved).toHaveBeenCalledTimes(1);
+      expect(s.confirmed).toHaveBeenCalledTimes(1);
+      expect(s.jobStore.create).toHaveBeenCalledTimes(1);
+    },
+  );
+  it('keeps a terminal FAILED V11 instead of creating a V12 job', async () => {
+    const s = await subject('Monte musculação 3x', []);
+    const job = await seedHistoricalJob(s, 11);
+    job.status = AIJobStatus.FAILED;
+    await expect(s.engine.generateCandidate(s.input)).rejects.toThrow(
+      'já falhou',
+    );
+    expect(s.gateway.startBackgroundTextResponse).not.toHaveBeenCalled();
+    expect(s.jobStore.create).toHaveBeenCalledTimes(1);
+  });
+  it('uses V12 for a new no-requestId operation when historical V10/V9 are absent', async () => {
     const s = await subject(
       'Monte Crossfit 3x, segunda, quarta e sexta',
       [plan('CROSSFIT', 3)],
@@ -1164,8 +1269,8 @@ describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
     );
     await s.engine.generateCandidate(s.input);
     expect(s.job()?.promptVersion).toMatchObject({
-      version: 11,
-      name: 'workout_planning_v2_v11',
+      version: 12,
+      name: 'workout_planning_v2_v12',
     });
     expect(s.reserved).toHaveBeenCalledTimes(1);
   });
@@ -1328,7 +1433,11 @@ describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
           ...block,
           activities: block.activities.map((activity) =>
             activity.kind === 'STRENGTH'
-              ? { ...activity, repetitions: 'conforme necessário' }
+              ? {
+                  ...activity,
+                  repetitions: 'conforme necessário',
+                  prescription: null,
+                }
               : activity,
           ),
         })),
@@ -1469,6 +1578,18 @@ describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
                     activities: [
                       {
                         ...strength(`${session.sessionKey}-strength-1`),
+                        prescription: {
+                          execution: {
+                            kind: 'COUNT',
+                            minimum: 8,
+                            maximum: 12,
+                            perSide: false,
+                            alternating: false,
+                          },
+                          load: null,
+                          effort: null,
+                          enduranceMetrics: [],
+                        },
                         sets: 3,
                         restSeconds: 60,
                         equipment: entry.equipment ?? ['BODYWEIGHT'],

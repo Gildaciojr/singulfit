@@ -549,6 +549,141 @@ describe('Fail-closed Workout public projection', () => {
     expect(projectWorkoutRepetitions(input)).toBeNull();
   });
 
+  const incidentPrescriptions = [
+    ['CF1_M3', 'Prancha com toque de ombro', 'CORE', '20 toques', 'BODYWEIGHT'],
+    ['CF2_M1', 'Farmer carry com halteres', 'CARRY', '40-60 m', 'DUMBBELL'],
+    [
+      'CF3_M1',
+      'Suitcase carry com halter',
+      'CARRY',
+      '30-40 m por lado',
+      'DUMBBELL',
+    ],
+    ['CF3_SK_1', 'Dead bug', 'CORE', '8-10 alternando lados', 'BODYWEIGHT'],
+  ] as const;
+  const incidentActivities: readonly WorkoutActivityV2[] =
+    incidentPrescriptions.map(
+      ([activityKey, name, movementPattern, repetitions, equipment]) => ({
+        ...strength(activityKey),
+        name,
+        movementPattern,
+        repetitions,
+        equipment: [equipment],
+        publicIdentity: {
+          targetRegion: movementPattern === 'CORE' ? 'TRUNK' : 'WHOLE_BODY',
+          plane: 'NONE',
+          bodyPosition: movementPattern === 'CORE' ? 'LYING' : 'STANDING',
+          jointAction: movementPattern === 'CORE' ? 'STABILIZATION' : null,
+        },
+      }),
+    );
+  it.each(incidentActivities)(
+    'projects production prescription $activityKey: $repetitions',
+    (activity) => {
+      if (activity.kind !== 'STRENGTH')
+        throw new Error('Expected strength fixture');
+      expect(projectWorkoutActivity(activity).repetitions).toBe(
+        activity.repetitions,
+      );
+      expect(formatter.formatActivity(activity).replace(/–/gu, '-')).toContain(
+        activity.repetitions,
+      );
+    },
+  );
+  it('validates the four CrossFit incident prescriptions through the shared public policy', () => {
+    const crossfitContext = {
+      ...context,
+      modality: { status: 'CONFIRMED' as const, value: 'CROSSFIT' as const },
+    };
+    const crossfitStrategy = {
+      ...new WorkoutPlanningStrategyService().build(crossfitContext),
+      authorizedEquipment: ['BODYWEIGHT', 'DUMBBELL'] as const,
+    };
+    const candidate = {
+      ...qualityCandidate([
+        qualitySession('crossfit-incident', incidentActivities),
+      ]),
+      modality: 'CROSSFIT' as const,
+    };
+    expect(
+      new WorkoutPlanV2Validator().validate(
+        candidate,
+        crossfitContext,
+        crossfitStrategy,
+        true,
+      ).issues,
+    ).not.toContainEqual(
+      expect.objectContaining({ code: 'PUBLIC_REPETITIONS_REQUIRED' }),
+    );
+  });
+  it.each([
+    ['CORE', '20 toque', '20 toques'],
+    ['CORE', '12-16 toques', '12-16 toques'],
+    ['CORE', '8 alternando lados', '8 alternando lados'],
+    ['CORE', '8 – 10 ALTERNANDO LADOS', '8-10 alternando lados'],
+    ['CARRY', '40 m', '40 m'],
+  ] as const)(
+    'normalizes closed prescriptions %s / %s',
+    (movementPattern, repetitions, expected) => {
+      expect(
+        projectWorkoutActivity({ ...strength(), movementPattern, repetitions })
+          .repetitions,
+      ).toBe(expected);
+    },
+  );
+  it.each([
+    ['PUSH', '40-60 m'],
+    ['SQUAT', '30 m'],
+    ['CORE', '20 qualquer coisa'],
+    ['CORE', '20 explosivos'],
+    ['CORE', '20 pesados'],
+    ['CORE', '20 movimentos livres'],
+    ['CORE', '8-10 rápido'],
+    ['CORE', '8-10 até falhar'],
+    ['CARRY', '40-60 kg'],
+    ['CARRY', '80% 1RM'],
+    ['CARRY', '40 lb'],
+    ['CARRY', '40 lbs'],
+    ['CARRY', '40 km/h'],
+    ['CARRY', '40 mph'],
+    ['CARRY', '40 watts'],
+    ['CARRY', '40 W'],
+    ['CARRY', '40 bpm'],
+    ['CORE', 'ritmo forte'],
+    ['CORE', 'o máximo possível'],
+    ['CORE', '8-10 alternando lados e depois 20 kg'],
+    ['CARRY', '60-40 m'],
+    ['CARRY', '0 m'],
+    ['CARRY', '9007199254740992 m'],
+    ['CORE', '0 toques'],
+    ['CORE', '10-8 alternando lados'],
+  ] as const)(
+    'rejects incompatible or unstructured prescriptions %s / %s',
+    (movementPattern, repetitions) => {
+      const activity = { ...strength(), movementPattern, repetitions };
+      expect(projectWorkoutActivity(activity).repetitions).toBeNull();
+      expect(
+        new WorkoutPlanV2Validator().validate(
+          qualityCandidate([qualitySession('rejected', [activity])]),
+          context,
+          strategy,
+          true,
+        ).issues,
+      ).toContainEqual(
+        expect.objectContaining({
+          code: 'PUBLIC_REPETITIONS_REQUIRED',
+          severity: 'ERROR',
+        }),
+      );
+    },
+  );
+  it.each(['40 m', '40-60 m', '30-40 m por lado'])(
+    'rejects distance without explicit CARRY context: %s',
+    (value) => {
+      expect(projectWorkoutRepetitions(value)).toBeNull();
+    },
+  );
+
   it.each(['30-45 s', '30-40 s por lado'])(
     'validates safe timed STRENGTH without removing the repetitions guard: %s',
     (repetitions) => {

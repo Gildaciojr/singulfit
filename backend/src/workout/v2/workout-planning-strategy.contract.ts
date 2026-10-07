@@ -33,9 +33,10 @@ export interface WorkoutIntensityPolicy {
   readonly minimum: number | null;
   readonly maximum: number | null;
   readonly qualitativeLevel: 'LIGHT' | 'MODERATE' | 'HIGH';
-  readonly exactLoadAllowed: false;
-  readonly exactPaceAllowed: false;
-  readonly exactPowerAllowed: false;
+  readonly exactLoadAllowed: boolean;
+  readonly exactPaceAllowed: boolean;
+  readonly exactPowerAllowed: boolean;
+  readonly exactHeartRateAllowed?: boolean;
 }
 
 export interface WorkoutProgressionPolicy {

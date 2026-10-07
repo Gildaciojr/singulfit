@@ -1,3 +1,9 @@
+import {
+  normalizeWorkoutExecutionText as projectWorkoutRepetitions,
+  presentWorkoutExecution,
+  workoutPrescriptionTextConstraints,
+} from './workout-prescription.policy';
+export { normalizeWorkoutExecutionText as projectWorkoutRepetitions } from './workout-prescription.policy';
 import type {
   WorkoutActivityV2,
   WorkoutProgressionRule,
@@ -8,6 +14,7 @@ import {
   type WorkoutPublicTextConstraints,
 } from './workout-public-text.policy';
 import { projectWorkoutHumanName } from './workout-human-name.policy';
+import { hasInvalidWorkoutActivityName } from './workout-plan-v2-quality.policy';
 
 /** Positive presentation vocabulary, never an exercise selector or equipment detector. */
 const normalize = (text: string): string =>
@@ -84,7 +91,7 @@ export function projectWorkoutProgression(
         text.length > 240 ||
         text.split(/\s+/u).length < 3 ||
         !/^[\p{L}\p{N} ,.%()–-]+[.!?]?$/u.test(text) ||
-        /\b(?:ignore|ignorar|desconsidere|ate falhar|carga maxima|sem limite)\b/u.test(
+        /\b(?:ignore|ignorar|desconsidere)\s+(?:a\s+)?(?:dor|limitacoes?|restricoes?)\b/u.test(
           normalize(text),
         ) ||
         publicBoundary.projectStructuredText(text) === null,
@@ -313,7 +320,17 @@ export interface WorkoutPublicActivityProjection {
 export function projectWorkoutActivity(
   activity: WorkoutActivityV2,
 ): WorkoutPublicActivityProjection {
-  const supportedName = projectWorkoutHumanName(activity);
+  const supportedName =
+    projectWorkoutHumanName(activity) ??
+    (activity.prescription &&
+    !hasInvalidWorkoutActivityName(activity.name) &&
+    !workoutPublicTextIssues(
+      activity.name,
+      workoutPrescriptionTextConstraints(activity),
+      activity.activityKey,
+    ).length
+      ? publicBoundary.projectStructuredText(activity.name)
+      : null);
   // Endurance's executable mode is structured; no textual mode/equipment modifier is needed.
   const displayName =
     activity.kind === 'ENDURANCE'
@@ -323,13 +340,25 @@ export function projectWorkoutActivity(
       : (supportedName ??
         structuredIdentity(activity) ??
         patterns[activity.movementPattern]);
-  const instruction = projectCoachingCue(activity.instruction, activity);
+  const presentCue = (text: string): string | null =>
+    activity.prescription
+      ? workoutPublicTextIssues(
+          text,
+          workoutPrescriptionTextConstraints(activity),
+          activity.activityKey,
+        ).length
+        ? null
+        : publicBoundary.projectStructuredText(text)
+      : projectCoachingCue(text, activity);
+  const instruction = presentCue(activity.instruction);
   const alerts = activity.alerts.flatMap((text) => {
-    const safe = projectCoachingCue(text, activity);
+    const safe = presentCue(text);
     return safe ? [safe] : [];
   });
   const rawReps = 'repetitions' in activity ? activity.repetitions : null;
-  const repetitions = projectWorkoutRepetitions(rawReps);
+  const repetitions = activity.prescription?.execution
+    ? presentWorkoutExecution(activity.prescription.execution)
+    : projectWorkoutRepetitions(rawReps, activity);
   return Object.freeze({
     displayName,
     instruction: instruction ?? '',
@@ -341,29 +370,4 @@ export function projectWorkoutActivity(
       alerts.length !== activity.alerts.length ||
       (rawReps !== null && repetitions === null),
   });
-}
-
-export function projectWorkoutRepetitions(value: string | null): string | null {
-  if (!value) return null;
-  const timed =
-    /^([1-9]\d*)(?:\s*[-–]\s*([1-9]\d*))?\s+(?:s|segundos?)(?:\s+(por lado))?$/u.exec(
-      normalize(value),
-    );
-  if (timed) {
-    const minimum = Number(timed[1]);
-    const maximum = timed[2] ? Number(timed[2]) : minimum;
-    if (
-      !Number.isSafeInteger(minimum) ||
-      !Number.isSafeInteger(maximum) ||
-      maximum < minimum
-    )
-      return null;
-    return `${timed[1]}${timed[2] ? `-${timed[2]}` : ''} s${timed[3] ? ` ${timed[3]}` : ''}`;
-  }
-  const match =
-    /^(\d+(?:\s*[-–a]\s*\d+)?)(?:\s*(?:repeticoes|reps))?(?:\s*\(?((?:por|de cada|cada) (?:lado|perna|braco))\)?)?$/u.exec(
-      normalize(value),
-    );
-  if (!match) return null;
-  return `${match[1]}${match[2] ? ` ${match[2].replace(/^(?:de cada|cada)/u, 'por')}` : ''}`;
 }

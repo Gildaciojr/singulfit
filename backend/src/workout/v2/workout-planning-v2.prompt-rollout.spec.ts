@@ -17,9 +17,21 @@ import {
   WORKOUT_PLANNING_V2_PROMPT_V9,
   WORKOUT_PLANNING_V2_PROMPT_V10,
   WORKOUT_PLANNING_V2_PROMPT_V11,
+  WORKOUT_PLANNING_V2_PROMPT_V12,
 } from './workout-planning-v2.prompt.definition';
 
 describe('workout planning prompt rollout', () => {
+  it('distinguishes adjustable recommendations from fabricated facts in effective V12 instructions', () => {
+    const text = WORKOUT_PLANNING_V2_PROMPT_V12.instructions;
+    expect(text).toContain('STRENGTH exige prescription.execution');
+    expect(text).toContain('ADJUSTABLE_START');
+    expect(text).toContain(
+      'não apresente cargas, pace ou potência como fatos confirmados sem evidência',
+    );
+    expect(text).not.toContain('não invente cargas exatas, pace ou potência');
+    expect(text).not.toContain('sem inventar cargas ou transformar');
+    expect(text).not.toContain('sem inventar carga absoluta');
+  });
   it('pins the complete immutable V10 definition and instructions to production 17836b0', () => {
     expect(
       createHash('sha256')
@@ -35,8 +47,8 @@ describe('workout planning prompt rollout', () => {
       'QUALIDADE GYM E CALENDÁRIO:',
     );
   });
-  it('selects immutable V11 with the identical commercial instructions from f0f6d33 and the existing schema/capability/model', () => {
-    expect(WORKOUT_PLANNING_V2_PROMPT).toBe(WORKOUT_PLANNING_V2_PROMPT_V11);
+  it('preserves immutable V11 while selecting the typed V12 capability contract', () => {
+    expect(WORKOUT_PLANNING_V2_PROMPT).toBe(WORKOUT_PLANNING_V2_PROMPT_V12);
     expect(WORKOUT_PLANNING_V2_PROMPT_V11).toMatchObject({
       name: 'workout_planning_v2_v11',
       version: 11,
@@ -60,13 +72,19 @@ describe('workout planning prompt rollout', () => {
       'APRESENTAÇÃO EXECUTÁVEL:',
     );
   });
-  it('uses the real prompt lifecycle to lazily activate V11 while preserving active V10 and historical V9/V8', async () => {
+  it('uses the real prompt lifecycle to lazily activate V12 while preserving active V11/V10 and historical V9/V8', async () => {
     const rows: {
       name: string;
       version: number;
       prompt: string;
       isActive: boolean;
     }[] = [
+      {
+        name: WORKOUT_PLANNING_V2_PROMPT_V11.name,
+        version: 11,
+        prompt: WORKOUT_PLANNING_V2_PROMPT_V11.instructions,
+        isActive: true,
+      },
       {
         name: WORKOUT_PLANNING_V2_PROMPT_V10.name,
         version: 10,
@@ -123,14 +141,17 @@ describe('workout planning prompt rollout', () => {
     ).ensureActive();
     expect(
       (await prompts.getActive(WORKOUT_PLANNING_V2_PROMPT.name)).version,
-    ).toBe(11);
+    ).toBe(12);
     expect(
       (await prompts.getActive(WORKOUT_PLANNING_V2_PROMPT_V8.name)).version,
     ).toBe(8);
     expect(
       (await prompts.getActive(WORKOUT_PLANNING_V2_PROMPT_V9.name)).prompt,
     ).toBe(WORKOUT_PLANNING_V2_PROMPT_V9.instructions);
-    expect(rows.filter((row) => row.isActive)).toHaveLength(4);
+    expect(rows.filter((row) => row.isActive)).toHaveLength(5);
+    expect(
+      (await prompts.getActive(WORKOUT_PLANNING_V2_PROMPT_V11.name)).prompt,
+    ).toBe(WORKOUT_PLANNING_V2_PROMPT_V11.instructions);
     expect(
       (await prompts.getActive(WORKOUT_PLANNING_V2_PROMPT_V10.name)).prompt,
     ).toBe(WORKOUT_PLANNING_V2_PROMPT_V10.instructions);
@@ -144,7 +165,7 @@ describe('workout planning prompt rollout', () => {
     ).ensureActive();
     expect(promptVersion.create).toHaveBeenCalledTimes(1);
   });
-  it('activates immutable v11 via the existing prompt lifecycle without a migration or seed', async () => {
+  it('activates immutable v12 via the existing prompt lifecycle without a migration or seed', async () => {
     const prompts = {
       getActive: jest.fn().mockResolvedValue({ version: 7 }),
       createVersion: jest.fn().mockResolvedValue({ id: 'v8' }),
@@ -159,17 +180,17 @@ describe('workout planning prompt rollout', () => {
     ).ensureActive();
     expect(prompts.createVersion).toHaveBeenCalledWith(
       expect.objectContaining({
-        version: 11,
+        version: 12,
         prompt: WORKOUT_PLANNING_V2_PROMPT.instructions,
         isActive: true,
       }),
     );
     expect(prompts.activate).not.toHaveBeenCalled();
   });
-  it('does not rewrite an already active v11 or overwrite a historical mismatch', async () => {
+  it('does not rewrite an already active v12 or overwrite a historical mismatch', async () => {
     const prompts = {
       getActive: jest.fn().mockResolvedValue({
-        version: 11,
+        version: 12,
         prompt: WORKOUT_PLANNING_V2_PROMPT.instructions,
       }),
       createVersion: jest.fn(),
@@ -184,7 +205,7 @@ describe('workout planning prompt rollout', () => {
     expect(prisma.promptVersion.findUnique).not.toHaveBeenCalled();
     expect(prompts.createVersion).not.toHaveBeenCalled();
     prompts.getActive.mockResolvedValue({
-      version: 11,
+      version: 12,
       prompt: 'unexpected immutable content',
     });
     await expect(activation.ensureActive()).rejects.toThrow(
@@ -218,16 +239,16 @@ describe('workout planning prompt rollout', () => {
       'cues de segurança podem repetir quando realmente necessários',
     );
   });
-  it('freezes historical v6 instructions while selecting v11', () => {
-    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(11);
+  it('freezes historical v6 instructions while selecting v12', () => {
+    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(12);
     expect(
       createHash('sha256')
         .update(WORKOUT_PLANNING_V2_PROMPT_V6.instructions)
         .digest('hex'),
     ).toBe('2d94eff78b1dff71226957c3a07e4f4ae24a2c6565fe390e16795cb4ecb57436');
   });
-  it('selects v11 while retaining immutable v7 and its schema', () => {
-    expect(WORKOUT_PLANNING_V2_PROMPT).toBe(WORKOUT_PLANNING_V2_PROMPT_V11);
+  it('selects v12 while retaining immutable v7 and its schema', () => {
+    expect(WORKOUT_PLANNING_V2_PROMPT).toBe(WORKOUT_PLANNING_V2_PROMPT_V12);
     expect(WORKOUT_PLANNING_V2_PROMPT_V7.version).toBe(7);
     expect(WORKOUT_PLANNING_V2_PROMPT_V8.schema).toBe(
       WORKOUT_PLANNING_V2_PROMPT_V7.schema,
@@ -278,8 +299,8 @@ describe('workout planning prompt rollout', () => {
     expect(migration).toContain("'WORKOUT_PLANNING_V2',\n  'TEXT',");
   });
 
-  it('selects version 11 without mutating the historical definitions', () => {
-    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(11);
+  it('selects version 12 without mutating the historical definitions', () => {
+    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(12);
     expect(WORKOUT_PLANNING_V2_PROMPT_V4.version).toBe(4);
     expect(
       createHash('sha256')

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { presentWorkoutMetric } from './workout-prescription.policy';
 import {
   projectWorkoutActivity,
   projectWorkoutHeading,
@@ -14,6 +15,7 @@ import type {
   WorkoutActivityV2,
   WorkoutPlanV2,
   WorkoutSessionV2,
+  WorkoutMetricPrescription,
 } from './workout-plan-v2.contract';
 import type {
   WorkoutEnvironment,
@@ -221,6 +223,17 @@ export class WorkoutPlanV2Formatter {
     return this.publicText(
       [
         `*${ordinal === undefined ? '' : `${ordinal}. `}${projected.displayName}*\n${this.parameters(activity, projected.repetitions)}`,
+        ...(activity.prescription?.load
+          ? [this.metricLine(activity.prescription.load)]
+          : []),
+        ...(activity.prescription?.enduranceMetrics.map((metric) =>
+          this.metricLine(metric),
+        ) ?? []),
+        ...(activity.prescription?.effort
+          ? [
+              `• Esforço: ${activity.prescription.effort.kind === 'TECHNICAL_FAILURE' ? 'até a falha técnica' : activity.prescription.effort.kind === 'MAXIMUM_TECHNICAL_REPS' ? 'máximo de repetições mantendo técnica' : `${activity.prescription.effort.kind} ${activity.prescription.effort.value}`}`,
+            ]
+          : []),
         ...(projected.instruction.trim()
           ? [`💡 ${projected.instruction}`]
           : []),
@@ -234,6 +247,18 @@ export class WorkoutPlanV2Formatter {
           : []),
       ].join('\n\n'),
     );
+  }
+
+  private metricLine(metric: WorkoutMetricPrescription): string {
+    const label =
+      metric.basis === 'USER_REPORTED'
+        ? 'Referência informada por você'
+        : metric.basis === 'OBSERVED'
+          ? 'Referência registrada'
+          : ['LOAD_KG', 'PERCENT_1RM'].includes(metric.kind)
+            ? 'Carga sugerida'
+            : 'Meta sugerida';
+    return `• ${label}: ${presentWorkoutMetric(metric)}`;
   }
 
   private publicText(text: string): string {

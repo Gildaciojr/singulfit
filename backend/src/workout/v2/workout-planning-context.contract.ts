@@ -94,7 +94,18 @@ export type WorkoutFactSource =
   | 'SAFE_INFERENCE'
   | 'CONSERVATIVE_DEFAULT';
 
+export interface WorkoutMetricEvidence {
+  readonly id: string;
+  readonly kind:
+    | import('./workout-plan-v2.contract').WorkoutMetricPrescription['kind']
+    | 'ONE_REP_MAX_KG';
+  readonly value: number;
+  readonly source: 'USER_REPORTED' | 'OBSERVED';
+}
+
 export interface WorkoutRecognizedContext {
+  /** Backend-owned evidence, never accepted from generated candidates. */
+  readonly metricEvidence?: readonly WorkoutMetricEvidence[];
   readonly factSources?: Readonly<Partial<Record<string, WorkoutFactSource>>>;
   readonly runningTransitionPermission?: import('./workout-modality-resolution.service').RunningTransitionPermission;
   readonly modalityResolution?: import('./workout-modality-resolution.service').WorkoutModalityResolution;
@@ -186,6 +197,7 @@ export interface WorkoutPreviousPlanSummary {
 }
 
 export interface WorkoutPlanningContext {
+  readonly metricEvidence?: readonly WorkoutMetricEvidence[];
   readonly resolvedFacts?: Readonly<
     Record<
       string,

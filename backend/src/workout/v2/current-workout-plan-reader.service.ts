@@ -21,6 +21,7 @@ import {
   WORKOUT_PLANNING_V2_PROMPT_V7,
   WORKOUT_PLANNING_V2_PROMPT_V9,
   WORKOUT_PLANNING_V2_PROMPT_V10,
+  WORKOUT_PLANNING_V2_PROMPT_V11,
 } from './workout-planning-v2.prompt.definition';
 import { WorkoutPlanV2Formatter } from './workout-plan-v2.formatter';
 import { ConversationPublicAnswerBoundaryService } from '../../conversation/runtime/conversation-public-answer-boundary.service';
@@ -317,6 +318,7 @@ export class CurrentWorkoutPlanReaderService {
                 name: {
                   in: [
                     WORKOUT_PLANNING_V2_PROMPT.name,
+                    WORKOUT_PLANNING_V2_PROMPT_V11.name,
                     WORKOUT_PLANNING_V2_PROMPT_V10.name,
                     WORKOUT_PLANNING_V2_PROMPT_V9.name,
                     WORKOUT_PLANNING_V2_PROMPT_V7.name,
@@ -550,6 +552,7 @@ export class CurrentWorkoutPlanReaderService {
   ): boolean {
     return (
       promptName === WORKOUT_PLANNING_V2_PROMPT.name ||
+      promptName === WORKOUT_PLANNING_V2_PROMPT_V11.name ||
       promptName === WORKOUT_PLANNING_V2_PROMPT_V10.name ||
       promptName === WORKOUT_PLANNING_V2_PROMPT_V9.name ||
       promptName === WORKOUT_PLANNING_V2_PROMPT_V7.name ||

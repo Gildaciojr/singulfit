@@ -7,6 +7,7 @@ import {
   WORKOUT_PLANNING_V2_PROMPT_V7,
   WORKOUT_PLANNING_V2_PROMPT_V9,
   WORKOUT_PLANNING_V2_PROMPT_V10,
+  WORKOUT_PLANNING_V2_PROMPT_V11,
 } from './workout-planning-v2.prompt.definition';
 
 function activity(key: string, name: string) {
@@ -196,6 +197,7 @@ describe('CurrentWorkoutPlanReaderService', () => {
   it.each([
     WORKOUT_PLANNING_V2_PROMPT.name,
     WORKOUT_PLANNING_V2_PROMPT_V10.name,
+    WORKOUT_PLANNING_V2_PROMPT_V11.name,
     WORKOUT_PLANNING_V2_PROMPT_V9.name,
   ])(
     'keeps canonical plans from %s readable with the rollout filter and temporal ordering',
@@ -438,6 +440,7 @@ describe('CurrentWorkoutPlanReaderService', () => {
               name: {
                 in: [
                   WORKOUT_PLANNING_V2_PROMPT.name,
+                  WORKOUT_PLANNING_V2_PROMPT_V11.name,
                   WORKOUT_PLANNING_V2_PROMPT_V10.name,
                   WORKOUT_PLANNING_V2_PROMPT_V9.name,
                   WORKOUT_PLANNING_V2_PROMPT_V7.name,

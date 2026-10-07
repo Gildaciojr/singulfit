@@ -4,6 +4,7 @@ import type {
   WorkoutPlanValidationIssue,
 } from './workout-plan-v2.contract';
 import type { WorkoutPlanningStrategy } from './workout-planning-strategy.contract';
+import { workoutPrescriptionTextConstraints } from './workout-prescription.policy';
 
 /** Equipment vocabulary only: this policy never selects movements or programming. */
 const aliases: Readonly<Record<WorkoutEquipment, readonly string[]>> = {
@@ -120,21 +121,43 @@ export function workoutCandidatePublicTextIssues(
     fields.push([session.sessionKey, session.label]);
     for (const block of session.blocks) {
       fields.push([block.blockKey, block.title]);
-      for (const activity of block.activities)
-        fields.push([
-          activity.activityKey,
-          [
-            activity.name,
-            activity.instruction,
-            ...activity.alerts,
-            ...('repetitions' in activity ? [activity.repetitions ?? ''] : []),
-          ].join('\n'),
-        ]);
     }
   }
   for (const rule of candidate.progression)
     fields.push([rule.ruleKey, `${rule.conditionCode}\n${rule.actionCode}`]);
-  return fields.flatMap(([path, text]) =>
-    workoutPublicTextIssues(text, strategy, path),
-  );
+  // Metrics belong to an activity's typed prescription, never arbitrary plan prose.
+  const plainText = {
+    authorizedEquipment: strategy.authorizedEquipment,
+    intensityPolicy: {
+      exactLoadAllowed: false,
+      exactPaceAllowed: false,
+      exactPowerAllowed: false,
+    },
+  };
+  return [
+    ...fields.flatMap(([path, text]) =>
+      workoutPublicTextIssues(text, plainText, path),
+    ),
+    ...candidate.sessions.flatMap((session) =>
+      session.blocks.flatMap((block) =>
+        block.activities.flatMap((activity) =>
+          workoutPublicTextIssues(
+            [
+              activity.name,
+              activity.instruction,
+              ...activity.alerts,
+              ...('repetitions' in activity
+                ? [activity.repetitions ?? '']
+                : []),
+            ].join('\n'),
+            {
+              ...workoutPrescriptionTextConstraints(activity),
+              authorizedEquipment: strategy.authorizedEquipment,
+            },
+            activity.activityKey,
+          ),
+        ),
+      ),
+    ),
+  ];
 }

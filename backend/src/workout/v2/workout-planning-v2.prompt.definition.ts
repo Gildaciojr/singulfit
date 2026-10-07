@@ -685,7 +685,152 @@ export const WORKOUT_PLANNING_V2_PROMPT_V11 = Object.freeze({
     '\n' + v11CommercialInstructions + '\nREPAIR:',
   ),
 });
-export const WORKOUT_PLANNING_V2_PROMPT = WORKOUT_PLANNING_V2_PROMPT_V11;
+const metricSchema = {
+  type: 'object',
+  properties: {
+    kind: {
+      type: 'string',
+      enum: [
+        'LOAD_KG',
+        'PERCENT_1RM',
+        'PACE_SECONDS_PER_KM',
+        'HEART_RATE_BPM',
+        'POWER_WATTS',
+      ],
+    },
+    value: { type: 'number', exclusiveMinimum: 0 },
+    basis: {
+      type: 'string',
+      enum: ['USER_REPORTED', 'OBSERVED', 'ADJUSTABLE_START'],
+    },
+    referenceId: { type: ['string', 'null'] },
+  },
+  required: ['kind', 'value', 'basis', 'referenceId'],
+  additionalProperties: false,
+};
+const prescriptionSchema = {
+  type: 'object',
+  properties: {
+    execution: {
+      anyOf: [
+        {
+          type: 'object',
+          properties: {
+            kind: {
+              type: 'string',
+              enum: ['COUNT', 'SECONDS', 'METERS', 'MAXIMUM_TECHNICAL_REPS'],
+            },
+            minimum: { type: ['number', 'null'], exclusiveMinimum: 0 },
+            maximum: { type: ['number', 'null'], exclusiveMinimum: 0 },
+            perSide: { type: 'boolean' },
+            alternating: { type: 'boolean' },
+          },
+          required: ['kind', 'minimum', 'maximum', 'perSide', 'alternating'],
+          additionalProperties: false,
+        },
+        { type: 'null' },
+      ],
+    },
+    load: { anyOf: [metricSchema, { type: 'null' }] },
+    effort: {
+      anyOf: [
+        {
+          type: 'object',
+          properties: {
+            kind: {
+              type: 'string',
+              enum: [
+                'RPE',
+                'RIR',
+                'TECHNICAL_FAILURE',
+                'MAXIMUM_TECHNICAL_REPS',
+              ],
+            },
+            value: { type: ['number', 'null'] },
+          },
+          required: ['kind', 'value'],
+          additionalProperties: false,
+        },
+        { type: 'null' },
+      ],
+    },
+    enduranceMetrics: { type: 'array', items: metricSchema },
+  },
+  required: ['execution', 'load', 'effort', 'enduranceMetrics'],
+  additionalProperties: false,
+};
+function v12Schema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(v12Schema);
+  if (value === null || typeof value !== 'object') return value;
+  const object = value as Record<string, unknown>;
+  const result = Object.fromEntries(
+    Object.entries(object).map(([key, nested]) => [key, v12Schema(nested)]),
+  );
+  if (
+    object.properties &&
+    typeof object.properties === 'object' &&
+    'activityKey' in object.properties
+  ) {
+    result.properties = {
+      ...(result.properties as Record<string, unknown>),
+      prescription: { anyOf: [prescriptionSchema, { type: 'null' }] },
+    };
+    result.required = [
+      ...(result.required as readonly string[]),
+      'prescription',
+    ];
+  }
+  return result;
+}
+export const WORKOUT_PLANNING_V2_PROMPT_V12 = Object.freeze({
+  ...WORKOUT_PLANNING_V2_PROMPT_V11,
+  name: 'workout_planning_v2_v12',
+  version: 12,
+  schema: Object.freeze({
+    ...WORKOUT_PLANNING_V2_PROMPT_V11.schema,
+    name: 'workout_plan_v2_v12',
+    schema: v12Schema(
+      WORKOUT_PLANNING_V2_PROMPT_V11.schema.schema,
+    ) as typeof WORKOUT_PLANNING_V2_PROMPT_V11.schema.schema,
+  }),
+  instructions:
+    WORKOUT_PLANNING_V2_PROMPT_V11.instructions
+      .replace(
+        'não invente fatos, experiência, desempenho, pace, FC, cargas ou domínio técnico',
+        'não invente fatos, experiência, desempenho ou domínio técnico; não apresente cargas, pace ou potência como fatos confirmados sem evidência; recomendações ajustáveis pertencem aos campos tipados de prescription',
+      )
+      .replace(
+        'Sem pace/FC/zona realmente confirmados, use esforço percebido, talk test e intensidade qualitativa. Não invente metas de pace.',
+        'Sem pace/FC/zona realmente confirmados, prefira esforço percebido, talk test e intensidade qualitativa; uma meta recomendada ajustável pode usar ADJUSTABLE_START com RPE/RIR no contrato tipado, sem alegar desempenho confirmado.',
+      )
+      .replace(
+        'sem inventar carga absoluta',
+        'com carga contextualizada em prescription.load',
+      )
+      .replace(
+        'sem inventar cargas ou transformar falha muscular em default',
+        'sem afirmar cargas confirmadas sem evidência ou transformar falha muscular em default',
+      )
+      .replace(
+        /TEXTO PÚBLICO:[^\n]+/u,
+        'TEXTO PÚBLICO: apresente as decisões técnicas com clareza; não publique metadados, placeholders ou fatos confirmados sem evidência. Equipamentos devem estar disponíveis.',
+      )
+      .replace(
+        /APRESENTAÇÃO EXECUTÁVEL:[^\n]+/u,
+        'APRESENTAÇÃO EXECUTÁVEL: descreva a execução em prescription.execution e os demais campos tipados, mantendo nomes humanos e cues técnicos úteis.',
+      )
+      .replace(
+        /SAFETY:[^\n]+/u,
+        'SAFETY: não diagnostique nem prescreva reabilitação. Dor, limitações, retorno após pausa e domínio técnico prevalecem; não invente métricas confirmadas.',
+      ) +
+    '\n' +
+    `
+CAPABILITY POLICY V12: use prescription para execução, carga, esforço e métricas endurance. repetitions permanece contagem/execução, nunca carga. COUNT, SECONDS, METERS (somente CARRY) e MAXIMUM_TECHNICAL_REPS representam execução; não dependa de vocabulário de exercício. Falha técnica e máximo de reps são decisões contextuais, não defaults; MAXIMUM_TECHNICAL_REPS requer bloco com tempo limitado e técnica preservada. Não confunda AMRAP com falha muscular. Respeite experiência e blocos técnicos.
+LOAD_KG pertence a load; PERCENT_1RM exige referência ONE_REP_MAX_KG em context.metricEvidence. Pace em segundos/km, FC em bpm e potência em watts pertencem a enduranceMetrics de ENDURANCE compatível (potência somente CYCLE). USER_REPORTED/OBSERVED exige referenceId, unidade, valor e source correspondentes ao evidence fornecido pelo backend. Nunca crie evidence. Quando não há referência histórica, uma recomendação pode usar ADJUSTABLE_START, referenceId=null, esforço RPE/RIR e técnica como ponto inicial ajustável, sem afirmar desempenho conhecido. As capacidades da strategy são contexto de elegibilidade, não prova de métricas confirmadas. Não esconder carga, pace, FC ou potência no campo repetitions. Mantenha todo equipment, dose, tempo, modalidade e pedido atual coerentes. Campos prescription não usados ficam null ou enduranceMetrics=[]; planos antigos não precisam ser reescritos.
+`.trim() +
+    '\nCONTRATO V12: STRENGTH exige prescription.execution; MOBILITY com repetitions não nulo também exige execução tipada. repetitions deve concordar com execution em dose, unidade e lateralidade; nome, instrução e alerts devem concordar com load/enduranceMetrics. Uma carga recomendada ajustável não é um fato confirmado inventado.',
+});
+export const WORKOUT_PLANNING_V2_PROMPT = WORKOUT_PLANNING_V2_PROMPT_V12;
 
 /** Keep the strict candidate schema, restricting every equipment array per request. */
 export function workoutSchemaForAuthorizedEquipment(
@@ -693,7 +838,8 @@ export function workoutSchemaForAuthorizedEquipment(
   definition:
     | typeof WORKOUT_PLANNING_V2_PROMPT_V9
     | typeof WORKOUT_PLANNING_V2_PROMPT_V10
-    | typeof WORKOUT_PLANNING_V2_PROMPT_V11 = WORKOUT_PLANNING_V2_PROMPT,
+    | typeof WORKOUT_PLANNING_V2_PROMPT_V11
+    | typeof WORKOUT_PLANNING_V2_PROMPT_V12 = WORKOUT_PLANNING_V2_PROMPT,
 ): OpenAIJsonSchema {
   const allowed = [...new Set(authorizedEquipment)];
   function objectSchema(

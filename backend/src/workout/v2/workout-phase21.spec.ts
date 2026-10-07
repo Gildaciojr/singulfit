@@ -150,7 +150,22 @@ describe('Phase 2.1 objective boundaries', () => {
       schemaVersion: 2,
       currentRequest: input.currentRequest,
       context: legacy.context,
-      strategy: legacy.strategy,
+      // This hash pins a historical envelope, not today's capability decisions.
+      strategy: legacy.strategy
+        ? {
+            ...legacy.strategy,
+            intensityPolicy: {
+              scale: legacy.strategy.intensityPolicy.scale,
+              minimum: legacy.strategy.intensityPolicy.minimum,
+              maximum: legacy.strategy.intensityPolicy.maximum,
+              qualitativeLevel:
+                legacy.strategy.intensityPolicy.qualitativeLevel,
+              exactLoadAllowed: false,
+              exactPaceAllowed: false,
+              exactPowerAllowed: false,
+            },
+          }
+        : null,
       safetyPolicy: {
         noDiagnosis: true,
         noRehabilitation: true,

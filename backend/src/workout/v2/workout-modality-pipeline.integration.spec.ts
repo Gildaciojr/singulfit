@@ -769,6 +769,18 @@ describe('Understanding → builder → engine → parser/validator → formatte
         },
         sets: 1,
         repetitions: '8',
+        prescription: {
+          execution: {
+            kind: 'COUNT',
+            minimum: 8,
+            maximum: 8,
+            perSide: false,
+            alternating: false,
+          },
+          load: null,
+          effort: null,
+          enduranceMetrics: [],
+        },
         restSeconds: 0,
         intensity: 'MODERATE',
       },

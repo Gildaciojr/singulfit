@@ -36,6 +36,9 @@ export class WorkoutPlanningContextBuilder {
       profileSafetySignals.push('RETURN_AFTER_LONG_PAUSE');
     }
     const context: WorkoutPlanningContext = Object.freeze({
+      ...(recognized.metricEvidence?.length
+        ? { metricEvidence: Object.freeze([...recognized.metricEvidence]) }
+        : {}),
       ...(recognized.modalityResolution
         ? { modalityResolution: recognized.modalityResolution }
         : {}),

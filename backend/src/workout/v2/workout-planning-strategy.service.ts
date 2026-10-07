@@ -108,9 +108,12 @@ export class WorkoutPlanningStrategyService {
           : context.training.intensityPreference.status === 'NOT_SET'
             ? ('MODERATE' as const)
             : context.training.intensityPreference.value,
-        exactLoadAllowed: false as const,
-        exactPaceAllowed: false as const,
-        exactPowerAllowed: false as const,
+        // Capability is not permission to invent a confirmed metric. Each typed
+        // prescription still requires contextual validation and provenance.
+        exactLoadAllowed: context.safetySignals.length === 0,
+        exactPaceAllowed: context.safetySignals.length === 0,
+        exactPowerAllowed: context.safetySignals.length === 0,
+        exactHeartRateAllowed: context.safetySignals.length === 0,
       }),
       progressionPolicy: Object.freeze({
         initialState: limited ? ('REASSESS' as const) : ('MAINTAIN' as const),

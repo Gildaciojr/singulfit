@@ -41,6 +41,7 @@ import { WorkoutPlanningStrategyService } from './workout-planning-strategy.serv
 import {
   WORKOUT_PLANNING_V2_PROMPT,
   WORKOUT_PLANNING_V2_PROMPT_V9,
+  WORKOUT_PLANNING_V2_PROMPT_V11,
   WORKOUT_PLANNING_V2_PROMPT_V10,
   workoutSchemaForAuthorizedEquipment,
 } from './workout-planning-v2.prompt.definition';
@@ -193,9 +194,9 @@ export class WorkoutPlanningEngineV2Service {
       safetyPolicy: Object.freeze({
         noDiagnosis: true,
         noRehabilitation: true,
-        noExactLoad: true,
-        noExactPace: true,
-        noExactPower: true,
+        noExactLoad: !prepared.strategy.intensityPolicy.exactLoadAllowed,
+        noExactPace: !prepared.strategy.intensityPolicy.exactPaceAllowed,
+        noExactPower: !prepared.strategy.intensityPolicy.exactPowerAllowed,
       }),
     });
     let canonical = this.canonicalJson(payload);
@@ -209,28 +210,76 @@ export class WorkoutPlanningEngineV2Service {
             recognizedContext: input.legacyV9RecognizedContext,
           })
         : prepared;
+    // Historical operation identities retain the pre-capability envelope. This
+    // changes version selection only, never durable state, claims or attempts.
+    const historicalPayload = {
+      ...payload,
+      strategy: {
+        ...prepared.strategy,
+        intensityPolicy: {
+          scale: prepared.strategy.intensityPolicy.scale,
+          minimum: prepared.strategy.intensityPolicy.minimum,
+          maximum: prepared.strategy.intensityPolicy.maximum,
+          qualitativeLevel: prepared.strategy.intensityPolicy.qualitativeLevel,
+          exactLoadAllowed: false,
+          exactPaceAllowed: false,
+          exactPowerAllowed: false,
+        },
+      },
+      safetyPolicy: {
+        noDiagnosis: true,
+        noRehabilitation: true,
+        noExactLoad: true,
+        noExactPace: true,
+        noExactPower: true,
+      },
+    };
+    const historicalIdentity = input.currentRequest?.requestId
+      ? identity
+      : this.canonicalJson(historicalPayload);
     const legacyIdentity = input.currentRequest?.requestId
       ? identity
       : this.canonicalJson({
-          ...payload,
+          ...historicalPayload,
           context: legacyPrepared.context,
-          strategy: legacyPrepared.strategy,
+          strategy: legacyPrepared.strategy
+            ? {
+                ...legacyPrepared.strategy,
+                intensityPolicy: {
+                  scale: legacyPrepared.strategy.intensityPolicy.scale,
+                  minimum: legacyPrepared.strategy.intensityPolicy.minimum,
+                  maximum: legacyPrepared.strategy.intensityPolicy.maximum,
+                  qualitativeLevel:
+                    legacyPrepared.strategy.intensityPolicy.qualitativeLevel,
+                  exactLoadAllowed: false,
+                  exactPaceAllowed: false,
+                  exactPowerAllowed: false,
+                },
+              }
+            : null,
         });
     const legacyKey = `workout-planning-v2:${createHash('sha256').update(`${input.userId}:9:ai-first-v9-bounded-repair-v1:${legacyIdentity}`).digest('hex')}`;
-    const v10Key = `workout-planning-v2:${createHash('sha256').update(`${input.userId}:10:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${identity}`).digest('hex')}`;
-    const v10 =
+    const v11Key = `workout-planning-v2:${createHash('sha256').update(`${input.userId}:11:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${historicalIdentity}`).digest('hex')}`;
+    const v11 =
       typeof this.aiService.findWorkoutOperation === 'function'
+        ? await this.aiService.findWorkoutOperation(input.userId, v11Key)
+        : null;
+    const v10Key = `workout-planning-v2:${createHash('sha256').update(`${input.userId}:10:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${historicalIdentity}`).digest('hex')}`;
+    const v10 =
+      !v11 && typeof this.aiService.findWorkoutOperation === 'function'
         ? await this.aiService.findWorkoutOperation(input.userId, v10Key)
         : null;
     const legacy =
-      !v10 && typeof this.aiService.findWorkoutOperation === 'function'
+      !v11 && !v10 && typeof this.aiService.findWorkoutOperation === 'function'
         ? await this.aiService.findWorkoutOperation(input.userId, legacyKey)
         : null;
-    const definition = v10
-      ? WORKOUT_PLANNING_V2_PROMPT_V10
-      : legacy
-        ? WORKOUT_PLANNING_V2_PROMPT_V9
-        : WORKOUT_PLANNING_V2_PROMPT;
+    const definition = v11
+      ? WORKOUT_PLANNING_V2_PROMPT_V11
+      : v10
+        ? WORKOUT_PLANNING_V2_PROMPT_V10
+        : legacy
+          ? WORKOUT_PLANNING_V2_PROMPT_V9
+          : WORKOUT_PLANNING_V2_PROMPT;
     if (legacy) {
       prepared = legacyPrepared;
       if (!prepared.context || !prepared.strategy || !prepared.safety)
@@ -249,12 +298,15 @@ export class WorkoutPlanningEngineV2Service {
       };
       canonical = this.canonicalJson(payload);
     }
-    const operationKey = v10
-      ? v10Key
-      : legacy
-        ? legacyKey
-        : `workout-planning-v2:${createHash('sha256').update(`${input.userId}:${definition.version}:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${identity}`).digest('hex')}`;
+    const operationKey = v11
+      ? v11Key
+      : v10
+        ? v10Key
+        : legacy
+          ? legacyKey
+          : `workout-planning-v2:${createHash('sha256').update(`${input.userId}:${definition.version}:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${identity}`).digest('hex')}`;
     const job =
+      v11 ??
       v10 ??
       legacy ??
       (await this.aiService.createStandaloneJob({
@@ -320,6 +372,7 @@ export class WorkoutPlanningEngineV2Service {
         },
         effectiveInput,
         definition.version >= 10,
+        definition.version >= 12,
       );
       return Object.freeze({
         status: 'ALREADY_COMPLETED' as const,
@@ -387,6 +440,7 @@ export class WorkoutPlanningEngineV2Service {
               metadata(initial.model),
               effectiveInput,
               definition.version >= 10,
+              definition.version >= 12,
             );
             initialValidation = initialOutput.validation;
             return null;
@@ -460,6 +514,7 @@ export class WorkoutPlanningEngineV2Service {
           },
           effectiveInput,
           definition.version >= 10,
+          definition.version >= 12,
         );
       const storedResult: WorkoutPlanningStoredAIJobResult = Object.freeze({
         candidateOutput: response.outputText,
@@ -587,6 +642,7 @@ export class WorkoutPlanningEngineV2Service {
     generationMetadata: WorkoutPlanV2['generationMetadata'],
     input: GenerateWorkoutPlanV2Input,
     requireWeekdays = false,
+    requireTypedExecution = false,
   ): WorkoutPlanV2 {
     if (!prepared.context || !prepared.strategy || !prepared.readiness)
       throw new BadGatewayException('Contexto de treino V2 ausente');
@@ -608,6 +664,7 @@ export class WorkoutPlanningEngineV2Service {
       requireWeekdays &&
         input.recognizedContext?.mutation?.kind !== 'EXERCISE_SUBSTITUTION',
       requireWeekdays,
+      requireTypedExecution,
     );
     if (this.audit)
       void this.audit

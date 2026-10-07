@@ -522,7 +522,7 @@ describe('Workout Planning Engine V2', () => {
       workoutSchemaForAuthorizedEquipment([]).schema,
     ))
       expect(variant.maxItems).toBe(0);
-    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(11);
+    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(12);
     expect(WORKOUT_PLANNING_V2_PROMPT_V3.version).toBe(3);
   });
   it('reproduces five 60-minute FULL_GYM sessions with bodyweight warm-up without unavailable-equipment failures', () => {
@@ -1356,7 +1356,7 @@ describe('Workout Planning Engine V2', () => {
     const keyForVersion = (version: number) =>
       `workout-planning-v2:${createHash('sha256').update(`user-id:${version}:${providerRequest.input}`).digest('hex')}`;
     expect(generation.operationKey).toBe(
-      `workout-planning-v2:${createHash('sha256').update(`user-id:11:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${providerRequest.input}`).digest('hex')}`,
+      `workout-planning-v2:${createHash('sha256').update(`user-id:12:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${providerRequest.input}`).digest('hex')}`,
     );
     expect(WORKOUT_PLANNING_V2_EXECUTION_REVISION).toBe(
       'ai-first-v10-weekday-v1',

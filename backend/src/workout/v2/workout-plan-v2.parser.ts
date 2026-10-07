@@ -333,6 +333,14 @@ export class WorkoutPlanV2Parser {
   private activity(value: unknown, path: string): WorkoutActivityV2 {
     const item = this.record(value, `activities.${path}`);
     const base = {
+      ...(item.prescription === undefined
+        ? {}
+        : {
+            prescription:
+              item.prescription === null
+                ? null
+                : this.prescription(item.prescription),
+          }),
       ...(item.publicIdentity === undefined
         ? {}
         : {
@@ -379,6 +387,7 @@ export class WorkoutPlanV2Parser {
       'kind',
     );
     const commonKeys = [
+      'prescription',
       'publicIdentity',
       'activityKey',
       'name',
@@ -628,6 +637,113 @@ export class WorkoutPlanV2Parser {
   }
   private invalid(path: string): never {
     throw new BadGatewayException(`Plano de treino V2 inválido em ${path}`);
+  }
+  private prescription(
+    value: unknown,
+  ): import('./workout-plan-v2.contract').WorkoutPrescription {
+    const item = this.record(value, 'prescription');
+    this.exactKeys(
+      item,
+      ['execution', 'load', 'effort', 'enduranceMetrics'],
+      'prescription',
+    );
+    const execution =
+      item.execution === null
+        ? null
+        : this.record(item.execution, 'prescription.execution');
+    if (execution)
+      this.exactKeys(
+        execution,
+        ['kind', 'minimum', 'maximum', 'perSide', 'alternating'],
+        'prescription.execution',
+      );
+    const effort =
+      item.effort === null
+        ? null
+        : this.record(item.effort, 'prescription.effort');
+    if (effort)
+      this.exactKeys(effort, ['kind', 'value'], 'prescription.effort');
+    return Object.freeze({
+      execution: execution
+        ? Object.freeze({
+            kind: this.oneOf(
+              execution.kind,
+              ['COUNT', 'SECONDS', 'METERS', 'MAXIMUM_TECHNICAL_REPS'],
+              'execution.kind',
+            ),
+            minimum: this.nullableNumber(
+              execution.minimum,
+              0,
+              Number.MAX_SAFE_INTEGER,
+              'execution.minimum',
+            ),
+            maximum: this.nullableNumber(
+              execution.maximum,
+              0,
+              Number.MAX_SAFE_INTEGER,
+              'execution.maximum',
+            ),
+            perSide: this.boolean(execution.perSide, 'perSide'),
+            alternating: this.boolean(execution.alternating, 'alternating'),
+          })
+        : null,
+      load: item.load === null ? null : this.metric(item.load),
+      effort: effort
+        ? Object.freeze({
+            kind: this.oneOf(
+              effort.kind,
+              ['RPE', 'RIR', 'TECHNICAL_FAILURE', 'MAXIMUM_TECHNICAL_REPS'],
+              'effort.kind',
+            ),
+            value: this.nullableNumber(
+              effort.value,
+              0,
+              Number.MAX_SAFE_INTEGER,
+              'effort.value',
+            ),
+          })
+        : null,
+      enduranceMetrics: Object.freeze(
+        this.array(item.enduranceMetrics, 'enduranceMetrics').map((metric) =>
+          this.metric(metric),
+        ),
+      ),
+    });
+  }
+  private metric(
+    value: unknown,
+  ): import('./workout-plan-v2.contract').WorkoutMetricPrescription {
+    const item = this.record(value, 'metric');
+    this.exactKeys(item, ['kind', 'value', 'basis', 'referenceId'], 'metric');
+    return Object.freeze({
+      kind: this.oneOf(
+        item.kind,
+        [
+          'LOAD_KG',
+          'PERCENT_1RM',
+          'PACE_SECONDS_PER_KM',
+          'HEART_RATE_BPM',
+          'POWER_WATTS',
+        ],
+        'metric.kind',
+      ),
+      value:
+        this.nullableNumber(
+          item.value,
+          0,
+          Number.MAX_SAFE_INTEGER,
+          'metric.value',
+        ) ?? this.invalid('metric.value'),
+      basis: this.oneOf(
+        item.basis,
+        ['USER_REPORTED', 'OBSERVED', 'ADJUSTABLE_START'],
+        'metric.basis',
+      ),
+      referenceId:
+        item.referenceId === null
+          ? null
+          : this.key(item.referenceId, 'referenceId'),
+    });
   }
   private exactKeys(
     value: Record<string, unknown>,
