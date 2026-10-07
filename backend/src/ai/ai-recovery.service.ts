@@ -90,7 +90,11 @@ export class AIRecoveryService {
               status: AIJobStatus.PROCESSING,
               leaseExpiresAt: { lte: at },
             },
-            data: { status: AIJobStatus.PENDING, leaseExpiresAt: null },
+            data: {
+              status: AIJobStatus.PENDING,
+              startedAt: null,
+              leaseExpiresAt: null,
+            },
           });
           if (
             this.aiService &&
