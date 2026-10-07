@@ -1,8 +1,10 @@
 import { Injectable } from '@nestjs/common';
+import { WorkoutWeekday } from '@prisma/client';
+import { workoutCandidatePublicTextIssues } from './workout-public-text.policy';
 import { workoutModalityPlanIssues } from './workout-modality-expertise.policy';
 import {
   estimateWorkoutSession,
-  mandatoryWorkoutMinutes,
+  mandatoryWorkoutBlockMinutes,
 } from './workout-duration-estimator';
 import {
   hasInvalidWorkoutActivityName,
@@ -25,9 +27,14 @@ export class WorkoutPlanV2Validator {
     candidate: GeneratedWorkoutPlanV2Candidate,
     context: WorkoutPlanningContext,
     strategy: WorkoutPlanningStrategy,
+    requireWeekdays = false,
+    validatePublicText = requireWeekdays,
   ): WorkoutPlanValidationResult {
     const issues: WorkoutPlanValidationIssue[] = [
       ...workoutModalityPlanIssues(candidate, strategy),
+      ...(validatePublicText
+        ? workoutCandidatePublicTextIssues(candidate, strategy)
+        : []),
     ];
     if (candidate.artifactType !== strategy.artifactType)
       this.add(issues, 'ARTIFACT_MISMATCH', 'ERROR', 'artifactType');
@@ -43,9 +50,38 @@ export class WorkoutPlanV2Validator {
       this.add(issues, 'OBJECTIVE_MISMATCH', 'ERROR', 'objective');
     if (candidate.sessions.length !== strategy.sessionCount)
       this.add(issues, 'SESSION_COUNT_MISMATCH', 'ERROR', 'sessions');
+    const schedule = context.training.scheduledTrainingDays;
+    const prescribed =
+      schedule?.status === 'CONFIRMED' ? schedule.value : undefined;
+    if (
+      requireWeekdays &&
+      prescribed &&
+      (prescribed.length !== candidate.sessions.length ||
+        prescribed.some(
+          (day) =>
+            !candidate.sessions.some((session) => session.weekday === day),
+        ))
+    )
+      this.add(issues, 'WEEKDAY_UNAVAILABLE', 'ERROR', 'sessions');
     const keys = new Set<string>();
     const activities = new Map<string, WorkoutActivityV2>();
+    const weekdays = new Set<string>();
     for (const session of candidate.sessions) {
+      if (requireWeekdays && !session.weekday)
+        this.add(issues, 'WEEKDAY_REQUIRED', 'ERROR', session.sessionKey);
+      if (session.weekday) {
+        if (!Object.values(WorkoutWeekday).includes(session.weekday))
+          this.add(issues, 'INVALID_PARAMETER', 'ERROR', session.sessionKey);
+        if (weekdays.has(session.weekday))
+          this.add(issues, 'DUPLICATE_WEEKDAY', 'ERROR', session.sessionKey);
+        weekdays.add(session.weekday);
+        const available = context.training.availableTrainingDays;
+        if (
+          available.status === 'CONFIRMED' &&
+          !available.value.includes(session.weekday)
+        )
+          this.add(issues, 'WEEKDAY_UNAVAILABLE', 'ERROR', session.sessionKey);
+      }
       this.unique(keys, session.sessionKey, issues);
       const estimate = estimateWorkoutSession(session);
       if (strategy.sessionDurationMinutes.status !== 'NOT_SET') {
@@ -72,9 +108,10 @@ export class WorkoutPlanV2Validator {
         (sum, block) => sum + block.estimatedDurationMinutes,
         0,
       );
-      const mandatory = session.blocks
-        .flatMap((block) => block.activities)
-        .reduce((sum, activity) => sum + mandatoryWorkoutMinutes(activity), 0);
+      const mandatory = session.blocks.reduce(
+        (sum, block) => sum + mandatoryWorkoutBlockMinutes(block),
+        0,
+      );
       if (
         mandatory > session.estimatedDurationMinutes ||
         (strategy.sessionDurationMinutes.status !== 'NOT_SET' &&
@@ -107,14 +144,33 @@ export class WorkoutPlanV2Validator {
           session.sessionKey,
         );
       for (const block of session.blocks) {
+        const work = block.work;
+        if (
+          work &&
+          (work.movementActivityKeys.length !== block.activities.length ||
+            new Set(work.movementActivityKeys).size !==
+              work.movementActivityKeys.length ||
+            work.movementActivityKeys.some(
+              (key) =>
+                !block.activities.some(
+                  (activity) => activity.activityKey === key,
+                ),
+            ) ||
+            (work.format === 'EMOM' &&
+              (work.intervalSeconds !== 60 ||
+                work.rounds === null ||
+                work.rounds * 60 !== work.durationSeconds)) ||
+            (work.format === 'INTERVAL' &&
+              (work.intervalSeconds === null ||
+                work.rounds === null ||
+                work.intervalSeconds * work.rounds !== work.durationSeconds)))
+        )
+          this.add(issues, 'WORK_STRUCTURE_INVALID', 'ERROR', block.blockKey);
         this.unique(keys, block.blockKey, issues);
         if (block.activities.length === 0)
           this.add(issues, 'EMPTY_BLOCK', 'ERROR', block.blockKey);
         if (
-          block.activities.reduce(
-            (sum, activity) => sum + mandatoryWorkoutMinutes(activity),
-            0,
-          ) > block.estimatedDurationMinutes
+          mandatoryWorkoutBlockMinutes(block) > block.estimatedDurationMinutes
         )
           this.add(
             issues,
@@ -123,6 +179,25 @@ export class WorkoutPlanV2Validator {
             block.blockKey,
           );
         for (const activity of block.activities) {
+          if (validatePublicText && activity.kind !== 'ENDURANCE') {
+            if (!activity.publicIdentity)
+              this.add(
+                issues,
+                'PUBLIC_IDENTITY_REQUIRED',
+                'ERROR',
+                activity.activityKey,
+              );
+            else if (
+              activity.movementPattern === 'OTHER' &&
+              activity.publicIdentity.jointAction === null
+            )
+              this.add(
+                issues,
+                'PUBLIC_IDENTITY_INCOMPLETE',
+                'ERROR',
+                activity.activityKey,
+              );
+          }
           this.unique(keys, activity.activityKey, issues);
           activities.set(activity.activityKey, activity);
           this.activity(activity, context, strategy, issues);

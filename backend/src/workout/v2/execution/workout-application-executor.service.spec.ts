@@ -45,7 +45,7 @@ describe('WorkoutApplicationExecutorService', () => {
       failCandidate: jest.fn().mockResolvedValue(undefined),
       generateCandidate: jest.fn().mockResolvedValue({
         status: 'PENDING_COMPLETION',
-        output: { artifactType: 'WEEKLY_PLAN' },
+        output: { artifactType: 'WEEKLY_PLAN', sessions: [] },
       }),
     };
     const persistence = {
@@ -126,6 +126,30 @@ describe('WorkoutApplicationExecutorService', () => {
     await subject.executor.execute(input(['MONDAY', 'MONDAY', 'invalid']));
     expect(subject.persistence.persist).toHaveBeenCalledWith(
       expect.objectContaining({ calendarWeekdays: undefined }),
+    );
+  });
+
+  it('persists AI weekdays instead of slicing the profile availability', async () => {
+    const subject = setup();
+    subject.engine.generateCandidate.mockResolvedValueOnce({
+      status: 'PENDING_COMPLETION',
+      output: {
+        artifactType: 'WEEKLY_PLAN',
+        sessions: [
+          { weekday: 'MONDAY' },
+          { weekday: 'TUESDAY' },
+          { weekday: 'THURSDAY' },
+          { weekday: 'FRIDAY' },
+        ],
+      },
+    });
+    await subject.executor.execute(
+      input(['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY']),
+    );
+    expect(subject.persistence.persist).toHaveBeenCalledWith(
+      expect.objectContaining({
+        calendarWeekdays: ['MONDAY', 'TUESDAY', 'THURSDAY', 'FRIDAY'],
+      }),
     );
   });
 
@@ -220,7 +244,7 @@ describe('WorkoutApplicationExecutorService', () => {
     const subject = setup();
     subject.engine.generateCandidate.mockResolvedValueOnce({
       status: 'ALREADY_COMPLETED',
-      output: { artifactType: 'WEEKLY_PLAN' },
+      output: { artifactType: 'WEEKLY_PLAN', sessions: [] },
     });
     subject.persistence.persist.mockResolvedValueOnce({
       persistence: 'REUSED',

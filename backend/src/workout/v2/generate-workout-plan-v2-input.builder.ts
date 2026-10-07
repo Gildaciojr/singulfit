@@ -124,6 +124,24 @@ export class GenerateWorkoutPlanV2InputBuilder {
             ),
           },
     );
+    const legacyDeclared = {
+      ...source.declaredContext,
+      ...(await this.resolveDeclaredContext(
+        source.currentMessage,
+        source.declaredContext?.modalityResolution ?? supplied,
+        true,
+      )),
+    };
+    delete legacyDeclared.scheduledTrainingDays;
+    const legacyCurrent = source.recognizedContext
+      ? { ...source.recognizedContext }
+      : undefined;
+    if (legacyCurrent) delete legacyCurrent.scheduledTrainingDays;
+    const legacyV9RecognizedContext = this.recognizedContext(
+      legacyCurrent,
+      snapshot,
+      legacyDeclared,
+    );
 
     return Object.freeze({
       profileId,
@@ -133,6 +151,11 @@ export class GenerateWorkoutPlanV2InputBuilder {
           ...(source.requestId ? { requestId: source.requestId } : {}),
         }),
         userId: source.userId,
+        legacyV9RecognizedContext:
+          legacyV9RecognizedContext.purpose === 'REPLACEMENT' &&
+          !history.previousPlan
+            ? { ...legacyV9RecognizedContext, purpose: 'CREATION' as const }
+            : legacyV9RecognizedContext,
         decision,
         recognizedContext:
           recognizedContext.purpose === 'REPLACEMENT' && !history.previousPlan
@@ -158,11 +181,13 @@ export class GenerateWorkoutPlanV2InputBuilder {
   async resolveDeclaredContext(
     message: string | undefined,
     supplied?: WorkoutModalityResolution,
+    legacyV9 = false,
   ): Promise<WorkoutRecognizedContext> {
-    if (!message && !supplied) return this.declaredContext(message);
+    if (!message && !supplied)
+      return this.declaredContext(message, undefined, legacyV9);
     const resolution = supplied ?? currentWorkoutModality(message ?? '');
     const declared = await Promise.resolve(
-      this.declaredContext(message, resolution),
+      this.declaredContext(message, resolution, legacyV9),
     );
     if (resolution.action === 'AMBIGUOUS')
       throw new BadRequestException('Qual modalidade de treino você prefere?');
@@ -456,6 +481,7 @@ export class GenerateWorkoutPlanV2InputBuilder {
   private declaredContext(
     message: string | undefined,
     resolution?: WorkoutModalityResolution,
+    legacyV9 = false,
   ): WorkoutRecognizedContext {
     if (!message?.trim()) return Object.freeze({});
     const text = this.normalize(message);
@@ -470,6 +496,10 @@ export class GenerateWorkoutPlanV2InputBuilder {
     const muscleFocus = this.declaredMuscleFocus(text);
     const distances = this.runningDistances(text);
     const targetEventDate = this.declaredEventDate(text);
+    const days = legacyV9
+      ? { available: this.declaredTrainingDays(text) }
+      : this.trainingDayClauses(text);
+    const availableTrainingDays = days.available;
     const frequency = declaredWorkoutFrequency(text);
     const duration = this.integer(
       text,
@@ -518,7 +548,10 @@ export class GenerateWorkoutPlanV2InputBuilder {
         duration === null
           ? undefined
           : Object.freeze({ status: 'CONFIRMED' as const, value: duration }),
-      availableTrainingDays: this.declaredTrainingDays(text),
+      availableTrainingDays,
+      ...('scheduled' in days && days.scheduled
+        ? { scheduledTrainingDays: days.scheduled }
+        : {}),
       equipment:
         this.declaredEquipment(equipmentScope.text) ??
         (equipmentScope.restricted
@@ -655,6 +688,100 @@ export class GenerateWorkoutPlanV2InputBuilder {
     return Object.freeze(objectives);
   }
 
+  private trainingDayClauses(text: string): {
+    available?: WorkoutPlanningValue<readonly string[]>;
+    scheduled?: readonly string[];
+  } {
+    const labels = [
+      'segunda',
+      'terca',
+      'quarta',
+      'quinta',
+      'sexta',
+      'sabado',
+      'domingo',
+    ];
+    const days = [
+      'MONDAY',
+      'TUESDAY',
+      'WEDNESDAY',
+      'THURSDAY',
+      'FRIDAY',
+      'SATURDAY',
+      'SUNDAY',
+    ];
+    const available = new Set<string>();
+    const scheduled = new Set<string>();
+    const denied = new Set<string>();
+    let mentioned = false;
+    let uncertain = false;
+    for (const clause of this.declarationClauses(text)) {
+      const found = labels.flatMap((label, index) =>
+        new RegExp(`\\b${label}(?:-feira)?\\b`, 'u').test(clause)
+          ? [index]
+          : [],
+      );
+      if (!found.length) continue;
+      mentioned = true;
+      if (
+        /\b(talvez|acho que|nao sei se|possivelmente|provavelmente|depende|ou)\b/u.test(
+          clause,
+        )
+      ) {
+        uncertain = true;
+        continue;
+      }
+      const range = clause.match(
+        /\b(segunda|terca|quarta|quinta|sexta|sabado|domingo)(?:-feira)?\s+(?:a|ate)\s+(segunda|terca|quarta|quinta|sexta|sabado|domingo)\b/u,
+      );
+      const indexes = range
+        ? Array.from(
+            {
+              length:
+                ((labels.indexOf(range[2]) - labels.indexOf(range[1]) + 7) %
+                  7) +
+                1,
+            },
+            (_, i) => (labels.indexOf(range[1]) + i) % 7,
+          )
+        : found;
+      if (
+        /\b(nao posso|nao consigo|nao treino|indisponivel|sem disponibilidade|menos|exceto)\b/u.test(
+          clause,
+        )
+      ) {
+        indexes.forEach((i) => denied.add(days[i]));
+        continue;
+      }
+      const options =
+        /\b(posso|consigo|disponivel|disponibilidade|da para)\b/u.test(clause);
+      const prescription = /\b(quero|queria|monte|crie|treino|treinar)\b/u.test(
+        clause,
+      );
+      if (!options && !prescription) {
+        uncertain = true;
+        continue;
+      }
+      indexes.forEach((i) => (options ? available : scheduled).add(days[i]));
+    }
+    const prescribed = days.filter(
+      (day) => scheduled.has(day) && !denied.has(day),
+    );
+    const options = days.filter(
+      (day) => available.has(day) && !denied.has(day),
+    );
+    const value = prescribed.length ? prescribed : options;
+    return {
+      available: value.length
+        ? { status: 'CONFIRMED', value: Object.freeze(value) }
+        : mentioned || uncertain
+          ? { status: 'REQUIRES_CONFIRMATION', value: [] }
+          : undefined,
+      ...(prescribed.length ? { scheduled: Object.freeze(prescribed) } : {}),
+    };
+  }
+
+  /** Historical V9 recognition, retained solely for persisted operation identity. */
   private declaredTrainingDays(
     text: string,
   ): WorkoutPlanningValue<readonly string[]> | undefined {

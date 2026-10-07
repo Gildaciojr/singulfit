@@ -55,6 +55,7 @@ import { WorkoutPlanningStrategyService } from './workout-planning-strategy.serv
 import type { WorkoutBlockType } from './workout-planning-strategy.contract';
 import {
   WORKOUT_PLANNING_V2_PROMPT,
+  WORKOUT_PLANNING_V2_PROMPT_V9,
   WORKOUT_PLANNING_V2_PROMPT_V3,
   workoutSchemaForAuthorizedEquipment,
 } from './workout-planning-v2.prompt.definition';
@@ -298,6 +299,12 @@ describe('Workout Planning Engine V2', () => {
           : `Atividade ${block}`,
       source: 'MODEL_GENERATED' as const,
       movementPattern: 'OTHER' as const,
+      publicIdentity: {
+        plane: 'SAGITTAL' as const,
+        targetRegion: 'WHOLE_BODY' as const,
+        bodyPosition: 'STANDING' as const,
+        jointAction: 'STABILIZATION' as const,
+      },
       equipment: Object.freeze([equipment]),
       instruction: 'Execução controlada',
       alerts: Object.freeze([]),
@@ -365,6 +372,17 @@ describe('Workout Planning Engine V2', () => {
         Array.from({ length: strategy.sessionCount }, (_, sessionIndex) =>
           Object.freeze({
             sessionKey: `session-${sessionIndex + 1}`,
+            weekday: (
+              [
+                'MONDAY',
+                'WEDNESDAY',
+                'FRIDAY',
+                'SUNDAY',
+                'TUESDAY',
+                'THURSDAY',
+                'SATURDAY',
+              ] as const
+            )[sessionIndex],
             sequence: sessionIndex + 1,
             label: `Sessão ${sessionIndex + 1}`,
             estimatedDurationMinutes:
@@ -504,7 +522,7 @@ describe('Workout Planning Engine V2', () => {
       workoutSchemaForAuthorizedEquipment([]).schema,
     ))
       expect(variant.maxItems).toBe(0);
-    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(9);
+    expect(WORKOUT_PLANNING_V2_PROMPT.version).toBe(10);
     expect(WORKOUT_PLANNING_V2_PROMPT_V3.version).toBe(3);
   });
   it('reproduces five 60-minute FULL_GYM sessions with bodyweight warm-up without unavailable-equipment failures', () => {
@@ -1338,10 +1356,10 @@ describe('Workout Planning Engine V2', () => {
     const keyForVersion = (version: number) =>
       `workout-planning-v2:${createHash('sha256').update(`user-id:${version}:${providerRequest.input}`).digest('hex')}`;
     expect(generation.operationKey).toBe(
-      `workout-planning-v2:${createHash('sha256').update(`user-id:9:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${providerRequest.input}`).digest('hex')}`,
+      `workout-planning-v2:${createHash('sha256').update(`user-id:10:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${providerRequest.input}`).digest('hex')}`,
     );
     expect(WORKOUT_PLANNING_V2_EXECUTION_REVISION).toBe(
-      'ai-first-v9-bounded-repair-v1',
+      'ai-first-v10-weekday-v1',
     );
     expect(generation.operationKey).not.toBe(keyForVersion(6));
     expect(generation.operationKey).not.toBe(keyForVersion(7));
@@ -1467,6 +1485,12 @@ describe('Workout Planning Engine V2', () => {
                             name: 'Farmer walk com halteres',
                             source: 'MODEL_GENERATED' as const,
                             movementPattern: 'CARRY' as const,
+                            publicIdentity: {
+                              plane: 'SAGITTAL' as const,
+                              targetRegion: 'WHOLE_BODY' as const,
+                              bodyPosition: 'STANDING' as const,
+                              jointAction: null,
+                            },
                             equipment: ['DUMBBELL' as const],
                             instruction: 'Caminhe com controle.',
                             alerts: [],
@@ -2002,21 +2026,21 @@ describe('Workout Planning Engine V2', () => {
   );
 
   it('publishes the strict V9 contract and AI technical authority', () => {
-    expect(WORKOUT_PLANNING_V2_PROMPT).toMatchObject({
+    expect(WORKOUT_PLANNING_V2_PROMPT_V9).toMatchObject({
       name: 'workout_planning_v2_v9',
       version: 9,
       capability: 'WORKOUT_PLANNING_V2',
     });
-    expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(
+    expect(WORKOUT_PLANNING_V2_PROMPT_V9.instructions).toContain(
       'Você é o responsável técnico',
     );
-    expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(
+    expect(WORKOUT_PLANNING_V2_PROMPT_V9.instructions).toContain(
       'currentRequest.text',
     );
-    expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(
+    expect(WORKOUT_PLANNING_V2_PROMPT_V9.instructions).toContain(
       'não um treino previamente decidido',
     );
-    const schema = WORKOUT_PLANNING_V2_PROMPT.schema.schema as {
+    const schema = WORKOUT_PLANNING_V2_PROMPT_V9.schema.schema as {
       properties: {
         sessions: {
           items: {

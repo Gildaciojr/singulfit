@@ -1,0 +1,140 @@
+import type { WorkoutEquipment } from './workout-planning-context.contract';
+import type {
+  GeneratedWorkoutPlanV2Candidate,
+  WorkoutPlanValidationIssue,
+} from './workout-plan-v2.contract';
+import type { WorkoutPlanningStrategy } from './workout-planning-strategy.contract';
+
+/** Equipment vocabulary only: this policy never selects movements or programming. */
+const aliases: Readonly<Record<WorkoutEquipment, readonly string[]>> = {
+  BARBELL: ['barra', 'barras', 'barra olimpica', 'barbell'],
+  DUMBBELL: ['halter', 'halteres', 'dumbbell', 'dumbbells'],
+  KETTLEBELL: ['kettlebell', 'kettlebells', 'kb'],
+  MACHINE: ['maquina', 'maquinas', 'machine'],
+  CABLE: ['cabo', 'cabos', 'crossover', 'pulley'],
+  BENCH: ['banco', 'bancos', 'bench'],
+  PULL_UP_BAR: ['barra fixa', 'barras fixas', 'pull up bar'],
+  RESISTANCE_BAND: [
+    'elastico',
+    'elasticos',
+    'faixa elastica',
+    'band',
+    'bands',
+    'resistance band',
+  ],
+  BODYWEIGHT: ['peso corporal', 'bodyweight'],
+  BIKE: [
+    'bike',
+    'bikes',
+    'bicicleta',
+    'bicicletas',
+    'air bike',
+    'assault bike',
+    'bicicleta ergometrica',
+  ],
+  TREADMILL: ['esteira', 'esteiras', 'treadmill'],
+  ROW_ERGOMETER: ['remo', 'remador', 'rower', 'ergometro de remo'],
+};
+const vocabulary = Object.entries(aliases)
+  .flatMap(([equipment, words]) =>
+    words.map((word) => ({ word, equipment: equipment as WorkoutEquipment })),
+  )
+  .sort((a, b) => b.word.length - a.word.length);
+const escape = (text: string): string =>
+  text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+const equipmentPattern = new RegExp(
+  `(?<![\\p{L}\\p{N}_])(?:${vocabulary.map(({ word }) => escape(word).replace(/ /gu, '\\s+')).join('|')})(?![\\p{L}\\p{N}_])`,
+  'gu',
+);
+const normalize = (text: string): string =>
+  text
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase();
+
+export interface WorkoutPublicTextConstraints {
+  readonly authorizedEquipment: readonly WorkoutEquipment[];
+  readonly intensityPolicy: {
+    readonly exactLoadAllowed: boolean;
+    readonly exactPaceAllowed: boolean;
+    readonly exactPowerAllowed: boolean;
+    /** No confirmed HR target exists in the current planning contract. */
+    readonly exactHeartRateAllowed?: boolean;
+  };
+}
+export function workoutPublicTextIssues(
+  text: string,
+  strategy: WorkoutPublicTextConstraints,
+  path: string,
+): readonly WorkoutPlanValidationIssue[] {
+  const value = normalize(text);
+  const codes = new Set<WorkoutPlanValidationIssue['code']>();
+  for (const match of value.matchAll(equipmentPattern)) {
+    const reference = vocabulary.find(
+      ({ word }) => word === match[0].replace(/\s+/gu, ' '),
+    );
+    if (
+      reference &&
+      !strategy.authorizedEquipment?.includes(reference.equipment)
+    )
+      codes.add('UNAUTHORIZED_EQUIPMENT_REFERENCE');
+  }
+  if (
+    strategy.intensityPolicy?.exactLoadAllowed !== true &&
+    /\b\d+(?:[.,]\d+)?\s*(?:(?:kg|kgs|quilogramas?|quilos?|kilos?|lb|lbs|libras?|pounds?|gramas?|g)\b|%\s*(?:de\s+|do\s+)?(?:1\s*rm\b|(?:seu\s+)?maximo\b))/u.test(
+      value,
+    )
+  )
+    codes.add('UNAUTHORIZED_EXACT_LOAD');
+  if (
+    strategy.intensityPolicy?.exactPaceAllowed !== true &&
+    /\b\d+(?::\d{1,2}|[.,]\d+)?\s*(?:(?:min(?:utos?)?\s*)?(?:\/|por)\s*(?:km|quilometros?)|km\s*\/\s*h|m\s*\/\s*s)\b/u.test(
+      value,
+    )
+  )
+    codes.add('UNAUTHORIZED_EXACT_PACE');
+  if (
+    strategy.intensityPolicy?.exactPowerAllowed !== true &&
+    /\b\d+(?:[.,]\d+)?\s*(?:w|watts?|kw|quilowatts?)\b/u.test(value)
+  )
+    codes.add('UNAUTHORIZED_EXACT_POWER');
+  if (
+    strategy.intensityPolicy?.exactHeartRateAllowed !== true &&
+    /\b\d+(?:[.,]\d+)?\s*(?:bpm|batimentos\s+por\s+minuto)\b/u.test(value)
+  )
+    codes.add('UNAUTHORIZED_EXACT_HEART_RATE');
+  return [...codes].map((code) => ({ code, severity: 'ERROR' as const, path }));
+}
+
+export function workoutCandidatePublicTextIssues(
+  candidate: GeneratedWorkoutPlanV2Candidate,
+  strategy: WorkoutPlanningStrategy,
+): readonly WorkoutPlanValidationIssue[] {
+  const fields: Array<readonly [string, string]> = [
+    ['title', candidate.title],
+    ...candidate.adaptationRules.map(
+      (text, i) => [`adaptationRules.${i}`, text] as const,
+    ),
+  ];
+  for (const session of candidate.sessions) {
+    fields.push([session.sessionKey, session.label]);
+    for (const block of session.blocks) {
+      fields.push([block.blockKey, block.title]);
+      for (const activity of block.activities)
+        fields.push([
+          activity.activityKey,
+          [
+            activity.name,
+            activity.instruction,
+            ...activity.alerts,
+            ...('repetitions' in activity ? [activity.repetitions ?? ''] : []),
+          ].join('\n'),
+        ]);
+    }
+  }
+  for (const rule of candidate.progression)
+    fields.push([rule.ruleKey, `${rule.conditionCode}\n${rule.actionCode}`]);
+  return fields.flatMap(([path, text]) =>
+    workoutPublicTextIssues(text, strategy, path),
+  );
+}

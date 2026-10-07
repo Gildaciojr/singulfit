@@ -5,6 +5,7 @@ import { WORKOUT_PROMPT_BY_GOAL } from '../workout.constants';
 import {
   WORKOUT_PLANNING_V2_PROMPT,
   WORKOUT_PLANNING_V2_PROMPT_V7,
+  WORKOUT_PLANNING_V2_PROMPT_V9,
 } from './workout-planning-v2.prompt.definition';
 
 function activity(key: string, name: string) {
@@ -382,6 +383,7 @@ describe('CurrentWorkoutPlanReaderService', () => {
               name: {
                 in: [
                   WORKOUT_PLANNING_V2_PROMPT.name,
+                  WORKOUT_PLANNING_V2_PROMPT_V9.name,
                   WORKOUT_PLANNING_V2_PROMPT_V7.name,
                 ],
               },

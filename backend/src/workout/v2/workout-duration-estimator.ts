@@ -1,6 +1,7 @@
 import type {
   WorkoutActivityV2,
   WorkoutSessionV2,
+  WorkoutBlockV2,
 } from './workout-plan-v2.contract';
 
 export interface WorkoutDurationEstimate {
@@ -15,6 +16,14 @@ export function mandatoryWorkoutMinutes(activity: WorkoutActivityV2): number {
   if (activity.kind === 'TIMED') return activity.durationSeconds / 60;
   if (activity.kind === 'MOBILITY') return (activity.durationSeconds ?? 0) / 60;
   return (Math.max(0, activity.sets - 1) * activity.restSeconds) / 60;
+}
+export function mandatoryWorkoutBlockMinutes(block: WorkoutBlockV2): number {
+  return block.work
+    ? block.work.durationSeconds / 60
+    : block.activities.reduce(
+        (sum, activity) => sum + mandatoryWorkoutMinutes(activity),
+        0,
+      );
 }
 
 function range(
@@ -97,10 +106,24 @@ export function estimateWorkoutActivity(
 export function estimateWorkoutSession(
   session: WorkoutSessionV2,
 ): WorkoutDurationEstimate {
-  const activities = session.blocks.flatMap((block) => block.activities);
-  const estimates = activities.map(estimateWorkoutActivity);
+  const estimates = session.blocks.flatMap((block) =>
+    block.work
+      ? [
+          range(
+            block.work.durationSeconds / 60,
+            block.work.durationSeconds / 60,
+          ),
+        ]
+      : block.activities.map(estimateWorkoutActivity),
+  );
   // All blocks, including warm-up/cooldown, are included once. Transitions are a range.
-  const transitions = Math.max(0, activities.length - 1);
+  const transitions = Math.max(
+    0,
+    session.blocks.reduce(
+      (sum, block) => sum + (block.work ? 1 : block.activities.length),
+      0,
+    ) - 1,
+  );
   return range(
     estimates.reduce((sum, item) => sum + item.minimumMinutes, 0) +
       transitions * 0.25,

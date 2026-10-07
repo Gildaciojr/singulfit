@@ -205,6 +205,8 @@ describe('Workout human presentation', () => {
       'long',
       Array.from({ length: 20 }, (_, index) => ({
         ...strength(`activity-${index}`),
+        // Legacy accepted plans have no compositional identity.
+        publicIdentity: undefined,
         instruction: 'Mantenha o movimento confortável. '.repeat(8),
       })),
     );

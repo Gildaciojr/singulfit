@@ -13,9 +13,11 @@ import { normalizeConversationQACandidate } from './conversation-qa-candidate-no
 import { nutritionRequest } from '../understanding/nutrition-request.policy';
 import { currentWorkoutModality } from '../../workout/v2/workout-modality-resolution.service';
 import { WorkoutPlanV2Parser } from '../../workout/v2/workout-plan-v2.parser';
+import { projectWorkoutHeading } from '../../workout/v2/workout-public-projection';
 import {
   WORKOUT_PLANNING_V2_PROMPT,
   WORKOUT_PLANNING_V2_PROMPT_V7,
+  WORKOUT_PLANNING_V2_PROMPT_V9,
 } from '../../workout/v2/workout-planning-v2.prompt.definition';
 import type { ConversationAnswerCandidate } from './conversation-qa.contract';
 import {
@@ -240,6 +242,7 @@ export class ConversationQAFollowUpContextService {
             name: {
               in: [
                 WORKOUT_PLANNING_V2_PROMPT.name,
+                WORKOUT_PLANNING_V2_PROMPT_V9.name,
                 WORKOUT_PLANNING_V2_PROMPT_V7.name,
               ],
             },
@@ -272,7 +275,17 @@ export class ConversationQAFollowUpContextService {
         if (
           plan.modality !== evidence.modality ||
           !plan.sessions.length ||
-          !plan.sessions.every((session) => delivered.includes(session.label))
+          !plan.sessions.every(
+            (session) =>
+              delivered.includes(session.label) ||
+              delivered.includes(
+                projectWorkoutHeading(
+                  session.label,
+                  'Treino programado',
+                  session.sequence,
+                ),
+              ),
+          )
         )
           return null;
         return Object.freeze({

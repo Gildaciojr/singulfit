@@ -1,5 +1,12 @@
 import { BadGatewayException } from '@nestjs/common';
 import {
+  WORKOUT_WORK_FORMATS,
+  WORKOUT_IDENTITY_PLANES,
+  WORKOUT_IDENTITY_REGIONS,
+  WORKOUT_IDENTITY_POSITIONS,
+  WORKOUT_IDENTITY_ACTIONS,
+} from './workout-plan-v2.contract';
+import {
   WORKOUT_ARTIFACT_TYPE,
   WORKOUT_MODALITY,
   type WorkoutArtifactType,
@@ -42,6 +49,8 @@ const BLOCKS: readonly WorkoutBlockType[] = [
   'STRENGTH',
   'HYPERTROPHY',
   'SKILL',
+  'GYMNASTICS',
+  'WEIGHTLIFTING',
   'CONDITIONING',
   'INTERVAL',
   'ENDURANCE',
@@ -166,11 +175,35 @@ export class WorkoutPlanV2Parser {
     const item = this.record(value, `sessions.${index}`);
     this.exactKeys(
       item,
-      ['sessionKey', 'sequence', 'label', 'estimatedDurationMinutes', 'blocks'],
+      [
+        'sessionKey',
+        'sequence',
+        'label',
+        'estimatedDurationMinutes',
+        'blocks',
+        'weekday',
+      ],
       `sessions.${index}`,
     );
     return Object.freeze({
       sessionKey: this.key(item.sessionKey, 'sessionKey'),
+      ...(item.weekday !== undefined
+        ? {
+            weekday: this.oneOf(
+              item.weekday,
+              [
+                'MONDAY',
+                'TUESDAY',
+                'WEDNESDAY',
+                'THURSDAY',
+                'FRIDAY',
+                'SATURDAY',
+                'SUNDAY',
+              ] as const,
+              'weekday',
+            ),
+          }
+        : {}),
       sequence: this.integer(item.sequence, 1, 7, 'sequence'),
       label: this.text(item.label, 'label'),
       estimatedDurationMinutes: this.integer(
@@ -195,11 +228,21 @@ export class WorkoutPlanV2Parser {
     const item = this.record(value, `sessions.${session}.blocks.${index}`);
     this.exactKeys(
       item,
-      ['blockKey', 'type', 'title', 'estimatedDurationMinutes', 'activities'],
+      [
+        'blockKey',
+        'type',
+        'title',
+        'estimatedDurationMinutes',
+        'activities',
+        'work',
+      ],
       `sessions.${session}.blocks.${index}`,
     );
     return Object.freeze({
       blockKey: this.key(item.blockKey, 'blockKey'),
+      ...(item.work === undefined
+        ? {}
+        : { work: item.work === null ? null : this.blockWork(item.work) }),
       type: this.oneOf(item.type, BLOCKS, 'block.type'),
       title: this.text(item.title, 'block.title'),
       estimatedDurationMinutes: this.integer(
@@ -217,9 +260,87 @@ export class WorkoutPlanV2Parser {
     });
   }
 
+  private blockWork(value: unknown): NonNullable<WorkoutBlockV2['work']> {
+    const item = this.record(value, 'block.work');
+    this.exactKeys(
+      item,
+      [
+        'format',
+        'durationSeconds',
+        'rounds',
+        'intervalSeconds',
+        'movementActivityKeys',
+      ],
+      'block.work',
+    );
+    return Object.freeze({
+      format: this.oneOf(item.format, WORKOUT_WORK_FORMATS, 'work.format'),
+      durationSeconds: this.integer(
+        item.durationSeconds,
+        1,
+        10800,
+        'work.duration',
+      ),
+      rounds: this.nullableInteger(item.rounds, 1, 180, 'work.rounds'),
+      intervalSeconds: this.nullableInteger(
+        item.intervalSeconds,
+        1,
+        3600,
+        'work.interval',
+      ),
+      movementActivityKeys: Object.freeze(
+        this.array(item.movementActivityKeys, 'work.movements').map((key) =>
+          this.key(key, 'work.movement'),
+        ),
+      ),
+    });
+  }
+  private publicIdentity(
+    value: unknown,
+  ): NonNullable<WorkoutActivityV2['publicIdentity']> {
+    const item = this.record(value, 'publicIdentity');
+    this.exactKeys(
+      item,
+      ['plane', 'targetRegion', 'bodyPosition', 'jointAction'],
+      'publicIdentity',
+    );
+    return Object.freeze({
+      plane: this.oneOf(
+        item.plane,
+        WORKOUT_IDENTITY_PLANES,
+        'publicIdentity.plane',
+      ),
+      targetRegion: this.oneOf(
+        item.targetRegion,
+        WORKOUT_IDENTITY_REGIONS,
+        'publicIdentity.region',
+      ),
+      bodyPosition: this.oneOf(
+        item.bodyPosition,
+        WORKOUT_IDENTITY_POSITIONS,
+        'publicIdentity.position',
+      ),
+      jointAction:
+        item.jointAction === null
+          ? null
+          : this.oneOf(
+              item.jointAction,
+              WORKOUT_IDENTITY_ACTIONS,
+              'publicIdentity.action',
+            ),
+    });
+  }
   private activity(value: unknown, path: string): WorkoutActivityV2 {
     const item = this.record(value, `activities.${path}`);
     const base = {
+      ...(item.publicIdentity === undefined
+        ? {}
+        : {
+            publicIdentity:
+              item.publicIdentity === null
+                ? null
+                : this.publicIdentity(item.publicIdentity),
+          }),
       activityKey: this.key(item.activityKey, 'activityKey'),
       name: this.text(item.name, 'activity.name'),
       source: this.oneOf(item.source, ['MODEL_GENERATED'], 'source'),
@@ -258,6 +379,7 @@ export class WorkoutPlanV2Parser {
       'kind',
     );
     const commonKeys = [
+      'publicIdentity',
       'activityKey',
       'name',
       'source',

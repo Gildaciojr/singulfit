@@ -30,6 +30,7 @@ export interface GenerateWorkoutPlanV2Input {
   readonly decision: ConversationGoalDecision;
   readonly snapshot: CoachProfileSnapshot;
   readonly recognizedContext: WorkoutRecognizedContext;
+  readonly legacyV9RecognizedContext?: WorkoutRecognizedContext;
   readonly referenceDate: Date;
   readonly progressEvidence?: readonly WorkoutProgressEvidence[];
   readonly previousPlan?: WorkoutPlanV2;

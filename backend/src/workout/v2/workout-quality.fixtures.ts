@@ -46,6 +46,12 @@ export function strength(key = 'strength'): StrengthActivity {
     name: 'Agachamento controlado',
     source: 'MODEL_GENERATED',
     movementPattern: 'SQUAT',
+    publicIdentity: {
+      plane: 'SAGITTAL',
+      targetRegion: 'HIPS',
+      bodyPosition: 'STANDING',
+      jointAction: null,
+    },
     equipment: ['BODYWEIGHT'],
     instruction: 'Não force a amplitude.',
     alerts: [],

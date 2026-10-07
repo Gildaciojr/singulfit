@@ -1021,6 +1021,13 @@ export class AIService {
     return job;
   }
 
+  async findWorkoutOperation(userId: string, operationKey: string) {
+    return this.prisma.aIJob.findFirst({
+      where: { userId, operationKey, type: AIJobType.WORKOUT },
+      include: { promptVersion: true },
+    });
+  }
+
   private assertCompatibleType(jobType: AIJobType, messageType: MessageType) {
     const expectedMessageType: Partial<Record<AIJobType, MessageType>> = {
       [AIJobType.TEXT]: MessageType.TEXT,

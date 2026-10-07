@@ -7,6 +7,16 @@ import {
   type CurrentReadOnlyReferent,
 } from '../runtime/conversation-read-only-referent.policy';
 import { nutritionRequest } from '../understanding/nutrition-request.policy';
+import { Prisma } from '@prisma/client';
+import {
+  qualityCandidate,
+  qualitySession,
+} from '../../workout/v2/workout-quality.fixtures';
+import {
+  WORKOUT_PLANNING_V2_PROMPT_V9,
+  WORKOUT_PLANNING_V2_PROMPT_V10,
+  WORKOUT_PLANNING_V2_PROMPT_V7,
+} from '../../workout/v2/workout-planning-v2.prompt.definition';
 
 describe('delivered read-only referent', () => {
   const input = {
@@ -83,6 +93,89 @@ describe('delivered read-only referent', () => {
       ),
     };
   }
+  it.each([
+    [WORKOUT_PLANNING_V2_PROMPT_V9.name],
+    [WORKOUT_PLANNING_V2_PROMPT_V10.name],
+    [WORKOUT_PLANNING_V2_PROMPT_V7.name],
+    [WORKOUT_PLANNING_V2_PROMPT_V9.name, WORKOUT_PLANNING_V2_PROMPT_V10.name],
+    [WORKOUT_PLANNING_V2_PROMPT_V10.name, WORKOUT_PLANNING_V2_PROMPT_V9.name],
+  ])(
+    'recovers the most recent eligible delivered Workout across prompts: %s',
+    async (...names: string[]) => {
+      const candidate = {
+        ...qualityCandidate([qualitySession()]),
+        modality: 'WALKING',
+        sessions: [{ ...qualitySession(), blocks: [] }],
+      };
+      const jobs = names.map((name, index) => ({
+        name,
+        userId: 'user',
+        result: { candidateOutput: JSON.stringify(candidate) },
+        createdAt: new Date(sourceTime.getTime() + 1000),
+        completedAt: new Date(sourceTime.getTime() + 2000 + index * 1000),
+      }));
+      const selected: string[] = [];
+      const s = subject();
+      s.prisma.message.findFirst
+        .mockReset()
+        .mockResolvedValueOnce({
+          timestamp: before,
+          replyToExternalMessageId: null,
+        })
+        .mockResolvedValueOnce({
+          id: 'dinner',
+          content: 'Monte um treino de caminhada',
+          timestamp: sourceTime,
+        })
+        .mockResolvedValue(null);
+      s.prisma.scheduledMessage.findFirst.mockResolvedValue({
+        id: 'sent',
+        userId: 'user',
+        conversationId: 'conversation',
+        content: 'Corpo inteiro',
+        context: {
+          source: 'WHATSAPP_COACH_COMMAND',
+          sourceMessageId: 'dinner',
+        },
+        sentAt: deliveredTime,
+      });
+      s.prisma.aIJob.findFirst
+        .mockReset()
+        .mockImplementation((query: Prisma.AIJobFindFirstArgs) => {
+          if (query.where?.type !== 'WORKOUT') return Promise.resolve(null);
+          const filter = query.where.promptVersion;
+          const nameFilter =
+            filter && 'name' in filter ? filter.name : undefined;
+          const eligible =
+            nameFilter && typeof nameFilter === 'object' && 'in' in nameFilter
+              ? nameFilter.in
+              : [];
+          expect(query.orderBy).toEqual([
+            { completedAt: 'desc' },
+            { id: 'desc' },
+          ]);
+          const job = jobs
+            .filter(
+              (row) => Array.isArray(eligible) && eligible.includes(row.name),
+            )
+            .sort(
+              (a, b) => b.completedAt.getTime() - a.completedAt.getTime(),
+            )[0];
+          if (job) selected.push(job.name);
+          return Promise.resolve(job ?? null);
+        });
+      expect(await s.service.findReferent(input)).toEqual(
+        expect.objectContaining({
+          source: 'DELIVERED_WORKOUT',
+          domain: 'WORKOUT',
+          workoutModality: 'WALKING',
+        }),
+      );
+      expect(selected).toEqual([names[names.length - 1]]);
+      expect(candidate.sessions[0]).not.toHaveProperty('weekday');
+      expect(candidate.sessions[0].blocks).toEqual([]);
+    },
+  );
   it('recovers the latest delivered dinner without a follow-up question', async () => {
     const s = subject();
     expect(await s.service.findReferent(input)).toEqual(referent);

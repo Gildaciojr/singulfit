@@ -19,6 +19,8 @@ export type WorkoutBlockType =
   | 'STRENGTH'
   | 'HYPERTROPHY'
   | 'SKILL'
+  | 'GYMNASTICS'
+  | 'WEIGHTLIFTING'
   | 'CONDITIONING'
   | 'INTERVAL'
   | 'ENDURANCE'

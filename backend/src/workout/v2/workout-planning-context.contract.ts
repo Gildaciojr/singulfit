@@ -110,6 +110,7 @@ export interface WorkoutRecognizedContext {
   readonly weeklyFrequency?: WorkoutPlanningValue<number>;
   readonly sessionDurationMinutes?: WorkoutPlanningValue<number>;
   readonly availableTrainingDays?: WorkoutPlanningValue<readonly string[]>;
+  readonly scheduledTrainingDays?: readonly string[];
   readonly environment?: WorkoutPlanningValue<WorkoutEnvironment>;
   readonly equipment?: WorkoutPlanningValue<readonly WorkoutEquipment[]>;
   readonly perceivedConditioning?: WorkoutPlanningValue<
@@ -232,6 +233,7 @@ export interface WorkoutPlanningContext {
     >;
     readonly returningAfterBreak: WorkoutPlanningValue<boolean>;
     readonly availableTrainingDays: WorkoutPlanningValue<readonly string[]>;
+    readonly scheduledTrainingDays?: WorkoutPlanningValue<readonly string[]>;
     readonly dailyTrainingWindows: WorkoutPlanningValue<readonly string[]>;
     readonly muscleFocus: WorkoutPlanningValue<readonly WorkoutMuscleFocus[]>;
     readonly targetDistanceKm: WorkoutPlanningValue<number>;

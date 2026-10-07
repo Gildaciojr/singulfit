@@ -266,6 +266,33 @@ function setup(options?: {
 }
 
 describe('WorkoutPlanV2PersistenceService', () => {
+  it('persists the AI weekday rather than slicing available days', async () => {
+    const test = setup();
+    const generation = pendingGeneration();
+    const selected = {
+      ...generation,
+      output: {
+        ...generation.output,
+        sessions: generation.output.sessions.map((session) => ({
+          ...session,
+          weekday: 'THURSDAY' as const,
+        })),
+      },
+    };
+    await test.service.persist({
+      ...input(selected),
+      calendarWeekdays: [
+        'MONDAY',
+        'TUESDAY',
+        'WEDNESDAY',
+        'THURSDAY',
+        'FRIDAY',
+      ],
+    });
+    expect(test.repository.create.mock.calls[0][1].days[0].weekday).toBe(
+      'THURSDAY',
+    );
+  });
   it('passes the complete execution result through the persistence transaction', async () => {
     const test = setup();
     const generation = pendingGeneration();

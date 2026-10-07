@@ -115,10 +115,16 @@ export class WorkoutApplicationExecutorService {
         generation,
         ownership: input.ownership,
         executionContext: input.executionContext,
-        calendarWeekdays: this.calendarWeekdays(
-          prepared.context?.training?.availableTrainingDays ??
-            this.snapshotTrainingDays(input),
-        ),
+        calendarWeekdays:
+          generation.output.sessions.length > 0 &&
+          generation.output.sessions.every((session) => session.weekday)
+            ? generation.output.sessions
+                .map((session) => session.weekday)
+                .filter((day): day is WorkoutWeekday => day !== undefined)
+            : this.calendarWeekdays(
+                prepared.context?.training?.availableTrainingDays ??
+                  this.snapshotTrainingDays(input),
+              ),
       })
       .catch(async (error: unknown) => {
         await this.engine.failCandidate(generation, error);

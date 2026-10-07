@@ -1,4 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import { projectWorkoutHeading } from './workout-public-projection';
+import { workoutCandidatePublicTextIssues } from './workout-public-text.policy';
 import { AIJobStatus, AIJobType, Prisma, WorkoutWeekday } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type {
@@ -17,6 +19,7 @@ import { WORKOUT_PROMPT_BY_GOAL } from '../workout.constants';
 import {
   WORKOUT_PLANNING_V2_PROMPT,
   WORKOUT_PLANNING_V2_PROMPT_V7,
+  WORKOUT_PLANNING_V2_PROMPT_V9,
 } from './workout-planning-v2.prompt.definition';
 import { WorkoutPlanV2Formatter } from './workout-plan-v2.formatter';
 import { ConversationPublicAnswerBoundaryService } from '../../conversation/runtime/conversation-public-answer-boundary.service';
@@ -217,7 +220,7 @@ export class CurrentWorkoutPlanReaderService {
     if (selection.kind === 'SESSION')
       return this.formatSession(selection.session);
     return [
-      result.plan.document.title,
+      projectWorkoutHeading(result.plan.document.title, 'Seu plano de treino'),
       ...result.plan.document.sessions.map((session) => {
         const calendar = result.plan.calendar.find(
           (entry) => entry.sessionSequence === session.sequence,
@@ -225,7 +228,7 @@ export class CurrentWorkoutPlanReaderService {
         const day = calendar?.weekday
           ? ` — ${this.weekdayLabel(calendar.weekday)}`
           : '';
-        return `Sessão ${session.sequence}${day}: ${session.label} (${session.estimatedDurationMinutes} min)`;
+        return `Sessão ${session.sequence}${day}: ${projectWorkoutHeading(session.label, 'Treino programado', session.sequence)} (${session.estimatedDurationMinutes} min)`;
       }),
       '',
       'Peça por hoje, amanhã, dia da semana ou número da sessão para ver os exercícios.',
@@ -313,6 +316,7 @@ export class CurrentWorkoutPlanReaderService {
                 name: {
                   in: [
                     WORKOUT_PLANNING_V2_PROMPT.name,
+                    WORKOUT_PLANNING_V2_PROMPT_V9.name,
                     WORKOUT_PLANNING_V2_PROMPT_V7.name,
                   ],
                 },
@@ -339,6 +343,11 @@ export class CurrentWorkoutPlanReaderService {
       : null;
     const timezone = record.user.preferences?.timezone ?? 'America/Sao_Paulo';
     if (document) {
+      if (
+        aiJob.promptVersion?.name === 'workout_planning_v2_v10' &&
+        workoutCandidatePublicTextIssues(document, document.strategy).length
+      )
+        return Object.freeze({ status: 'INVALID_V2_PLAN', plan: null });
       if (!this.validTimezone(timezone)) {
         return Object.freeze({ status: 'INVALID_V2_PLAN', plan: null });
       }

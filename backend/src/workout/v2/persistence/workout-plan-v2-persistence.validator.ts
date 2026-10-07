@@ -8,6 +8,7 @@ import {
   AIJobStatus,
   AIJobType,
   Prisma,
+  WorkoutWeekday,
   type FitnessGoal,
 } from '@prisma/client';
 import type {
@@ -103,7 +104,12 @@ export class WorkoutPlanV2PersistenceValidator {
       );
       if (
         calendar.size !== projection.days.length ||
-        projection.days.some((day) => !calendar.has(day.dayNumber))
+        projection.days.some((day) => !calendar.has(day.dayNumber)) ||
+        plan.sessions.some(
+          (session) =>
+            session.weekday !== undefined &&
+            session.weekday !== calendar.get(session.sequence),
+        )
       )
         throw new BadRequestException(
           'Calendário original incompatível com a substituição',
@@ -228,6 +234,18 @@ export class WorkoutPlanV2PersistenceValidator {
         ? calendarWeekdays
         : null;
     const sequences = new Set<number>();
+    const chosenDays = plan.sessions.map((session) => session.weekday);
+    if (
+      chosenDays.some((day) => day !== undefined) &&
+      (chosenDays.some(
+        (day) =>
+          day === undefined || !Object.values(WorkoutWeekday).includes(day),
+      ) ||
+        new Set(chosenDays).size !== chosenDays.length)
+    )
+      throw new BadRequestException(
+        'Calendário selecionado pela IA inválido ou duplicado',
+      );
     const days = plan.sessions.map((session, index) => {
       if (!Number.isInteger(session.sequence) || session.sequence < 1)
         throw new BadRequestException(
@@ -258,7 +276,7 @@ export class WorkoutPlanV2PersistenceValidator {
         );
       return Object.freeze({
         dayNumber: session.sequence,
-        weekday: calendar?.[index] ?? null,
+        weekday: session.weekday ?? calendar?.[index] ?? null,
         title: session.label,
         exercises: Object.freeze(exercises),
       });

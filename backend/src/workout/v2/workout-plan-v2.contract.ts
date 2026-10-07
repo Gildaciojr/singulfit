@@ -13,7 +13,56 @@ import type {
   WorkoutPlanningStrategy,
 } from './workout-planning-strategy.contract';
 
+export const WORKOUT_IDENTITY_PLANES = [
+  'HORIZONTAL',
+  'VERTICAL',
+  'SAGITTAL',
+  'FRONTAL',
+  'TRANSVERSE',
+  'NONE',
+] as const;
+export const WORKOUT_IDENTITY_REGIONS = [
+  'CHEST',
+  'SHOULDERS',
+  'BACK',
+  'ELBOWS',
+  'HIPS',
+  'KNEES',
+  'ANKLES',
+  'TRUNK',
+  'WHOLE_BODY',
+] as const;
+export const WORKOUT_IDENTITY_POSITIONS = [
+  'STANDING',
+  'SEATED',
+  'LYING',
+  'INCLINED',
+  'PRONE',
+  'HANGING',
+  'KNEELING',
+  'QUADRUPED',
+  'SIDE_LYING',
+] as const;
+export const WORKOUT_IDENTITY_ACTIONS = [
+  'FLEXION',
+  'EXTENSION',
+  'ABDUCTION',
+  'ADDUCTION',
+  'ROTATION',
+  'STABILIZATION',
+] as const;
+/** AI-authored execution semantics, not a backend exercise catalog. */
+export interface WorkoutPublicExerciseIdentity {
+  readonly plane: (typeof WORKOUT_IDENTITY_PLANES)[number];
+  readonly targetRegion: (typeof WORKOUT_IDENTITY_REGIONS)[number];
+  readonly bodyPosition: (typeof WORKOUT_IDENTITY_POSITIONS)[number];
+  /** Required for OTHER, whose movementPattern does not identify an action. */
+  readonly jointAction: (typeof WORKOUT_IDENTITY_ACTIONS)[number] | null;
+}
+
 export interface WorkoutActivityBase {
+  /** Absent in historical V9; V10 requires it for non-ENDURANCE activities. */
+  readonly publicIdentity?: WorkoutPublicExerciseIdentity | null;
   readonly activityKey: string;
   readonly name: string;
   readonly source: 'MODEL_GENERATED';
@@ -72,7 +121,26 @@ export type WorkoutActivityV2 =
   | EnduranceActivity
   | MobilityActivity;
 
+export const WORKOUT_WORK_FORMATS = [
+  'AMRAP',
+  'EMOM',
+  'FOR_TIME',
+  'INTERVAL',
+  'ROUNDS',
+  'CHIPPER',
+  'CONTINUOUS',
+  'OTHER',
+] as const;
+export interface WorkoutBlockWork {
+  readonly format: (typeof WORKOUT_WORK_FORMATS)[number];
+  readonly durationSeconds: number;
+  readonly rounds: number | null;
+  readonly intervalSeconds: number | null;
+  /** Ordered movement references: EMOM cycles through this order, one per interval. */
+  readonly movementActivityKeys: readonly string[];
+}
 export interface WorkoutBlockV2 {
+  readonly work?: WorkoutBlockWork | null;
   readonly blockKey: string;
   readonly type: WorkoutBlockType;
   readonly title: string;
@@ -81,6 +149,8 @@ export interface WorkoutBlockV2 {
 }
 
 export interface WorkoutSessionV2 {
+  /** V10 calendar decision; absent in legacy V9 documents. */
+  readonly weekday?: import('@prisma/client').WorkoutWeekday;
   readonly sessionKey: string;
   readonly sequence: number;
   readonly label: string;
@@ -123,6 +193,9 @@ export interface WorkoutPlanValidationIssue {
     | 'MODALITY_ACTIVITY_CONFLICT'
     | 'OBJECTIVE_MISMATCH'
     | 'SESSION_COUNT_MISMATCH'
+    | 'WEEKDAY_REQUIRED'
+    | 'WEEKDAY_UNAVAILABLE'
+    | 'DUPLICATE_WEEKDAY'
     | 'SESSION_DURATION_EXCEEDED'
     | 'ACTIVITY_NAME_INVALID'
     | 'ENDURANCE_MODE_CONFLICT'
@@ -138,6 +211,14 @@ export interface WorkoutPlanValidationIssue {
     | 'DUPLICATE_KEY'
     | 'INVALID_PARAMETER'
     | 'EQUIPMENT_UNAVAILABLE'
+    | 'UNAUTHORIZED_EQUIPMENT_REFERENCE'
+    | 'UNAUTHORIZED_EXACT_LOAD'
+    | 'UNAUTHORIZED_EXACT_PACE'
+    | 'UNAUTHORIZED_EXACT_POWER'
+    | 'UNAUTHORIZED_EXACT_HEART_RATE'
+    | 'PUBLIC_IDENTITY_REQUIRED'
+    | 'PUBLIC_IDENTITY_INCOMPLETE'
+    | 'WORK_STRUCTURE_INVALID'
     | 'ENVIRONMENT_INCOMPATIBLE'
     | 'LIMITATION_CONFLICT'
     | 'VOLUME_EXCESSIVE'

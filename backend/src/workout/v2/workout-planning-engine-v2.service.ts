@@ -39,11 +39,12 @@ import { WorkoutPlanningSafetyService } from './workout-planning-safety.service'
 import { WorkoutPlanningStrategyService } from './workout-planning-strategy.service';
 import {
   WORKOUT_PLANNING_V2_PROMPT,
+  WORKOUT_PLANNING_V2_PROMPT_V9,
   workoutSchemaForAuthorizedEquipment,
 } from './workout-planning-v2.prompt.definition';
 
 export const WORKOUT_PLANNING_V2_EXECUTION_REVISION =
-  'ai-first-v9-bounded-repair-v1' as const;
+  'ai-first-v10-weekday-v1' as const;
 
 export class WorkoutPostGenerationValidationError extends BadGatewayException {
   constructor(readonly validation: WorkoutPlanValidationResult) {
@@ -186,19 +187,63 @@ export class WorkoutPlanningEngineV2Service {
     const identity = input.currentRequest?.requestId
       ? `request:${input.currentRequest.requestId}`
       : canonical;
-    const operationKey = `workout-planning-v2:${createHash('sha256').update(`${input.userId}:${WORKOUT_PLANNING_V2_PROMPT.version}:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${identity}`).digest('hex')}`;
-    const job = await this.aiService.createStandaloneJob({
-      userId: input.userId,
-      type: AIJobType.WORKOUT,
-      promptName: WORKOUT_PLANNING_V2_PROMPT.name,
-      operationKey,
-      ...(prepared.context.artifactType === 'WEEKLY_PLAN'
-        ? { usageEntitlementCode: WORKOUT_PLAN_GENERATION }
-        : {}),
-    });
+    const legacyPrepared =
+      !input.currentRequest?.requestId && input.legacyV9RecognizedContext
+        ? this.prepare({
+            ...input,
+            recognizedContext: input.legacyV9RecognizedContext,
+          })
+        : prepared;
+    const legacyIdentity = input.currentRequest?.requestId
+      ? identity
+      : this.canonicalJson({
+          ...payload,
+          context: legacyPrepared.context,
+          strategy: legacyPrepared.strategy,
+        });
+    const legacyKey = `workout-planning-v2:${createHash('sha256').update(`${input.userId}:9:ai-first-v9-bounded-repair-v1:${legacyIdentity}`).digest('hex')}`;
+    const legacy =
+      typeof this.aiService.findWorkoutOperation === 'function'
+        ? await this.aiService.findWorkoutOperation(input.userId, legacyKey)
+        : null;
+    const definition = legacy
+      ? WORKOUT_PLANNING_V2_PROMPT_V9
+      : WORKOUT_PLANNING_V2_PROMPT;
+    if (legacy) {
+      prepared = legacyPrepared;
+      if (!prepared.context || !prepared.strategy || !prepared.safety)
+        throw new ServiceUnavailableException(
+          'Legacy workout context unavailable',
+        );
+      effectiveInput = {
+        ...input,
+        recognizedContext:
+          input.legacyV9RecognizedContext ?? input.recognizedContext,
+      };
+      payload = {
+        ...payload,
+        context: prepared.context,
+        strategy: prepared.strategy,
+      };
+      canonical = this.canonicalJson(payload);
+    }
+    const operationKey = legacy
+      ? legacyKey
+      : `workout-planning-v2:${createHash('sha256').update(`${input.userId}:${definition.version}:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${identity}`).digest('hex')}`;
+    const job =
+      legacy ??
+      (await this.aiService.createStandaloneJob({
+        userId: input.userId,
+        type: AIJobType.WORKOUT,
+        promptName: definition.name,
+        operationKey,
+        ...(prepared.context?.artifactType === 'WEEKLY_PLAN'
+          ? { usageEntitlementCode: WORKOUT_PLAN_GENERATION }
+          : {}),
+      }));
     if (
-      job.promptVersion?.version !== WORKOUT_PLANNING_V2_PROMPT.version ||
-      job.promptVersion?.name !== WORKOUT_PLANNING_V2_PROMPT.name
+      job.promptVersion?.version !== definition.version ||
+      job.promptVersion?.name !== definition.name
     ) {
       const error = new ServiceUnavailableException(
         'WORKOUT_PROMPT_VERSION_MISMATCH',
@@ -249,6 +294,7 @@ export class WorkoutPlanningEngineV2Service {
           reused: true,
         },
         effectiveInput,
+        definition.version >= 10,
       );
       return Object.freeze({
         status: 'ALREADY_COMPLETED' as const,
@@ -301,6 +347,7 @@ export class WorkoutPlanningEngineV2Service {
         }),
         jsonSchema: workoutSchemaForAuthorizedEquipment(
           resolvedStrategy.authorizedEquipment,
+          definition,
         ),
         repairInput: (initial) => {
           const originalCandidate = this.parser.parse(initial.outputText);
@@ -310,6 +357,7 @@ export class WorkoutPlanningEngineV2Service {
               prepared,
               metadata(initial.model),
               effectiveInput,
+              definition.version >= 10,
             );
             initialValidation = initialOutput.validation;
             return null;
@@ -327,6 +375,17 @@ export class WorkoutPlanningEngineV2Service {
               'DUPLICATE_KEY',
               'ACTIVITY_NAME_INVALID',
               'SUBSTITUTION_REFERENCE_INVALID',
+              'WEEKDAY_REQUIRED',
+              'WEEKDAY_UNAVAILABLE',
+              'DUPLICATE_WEEKDAY',
+              'UNAUTHORIZED_EQUIPMENT_REFERENCE',
+              'UNAUTHORIZED_EXACT_LOAD',
+              'UNAUTHORIZED_EXACT_PACE',
+              'UNAUTHORIZED_EXACT_POWER',
+              'UNAUTHORIZED_EXACT_HEART_RATE',
+              'PUBLIC_IDENTITY_REQUIRED',
+              'PUBLIC_IDENTITY_INCOMPLETE',
+              'WORK_STRUCTURE_INVALID',
               'SUBSTITUTION_FUNCTION_MISMATCH',
               'SESSION_DURATION_EXCEEDED',
             ]);
@@ -370,6 +429,7 @@ export class WorkoutPlanningEngineV2Service {
             reused: false,
           },
           effectiveInput,
+          definition.version >= 10,
         );
       const storedResult: WorkoutPlanningStoredAIJobResult = Object.freeze({
         candidateOutput: response.outputText,
@@ -487,6 +547,7 @@ export class WorkoutPlanningEngineV2Service {
     prepared: PreparedWorkoutPlanningV2,
     generationMetadata: WorkoutPlanV2['generationMetadata'],
     input: GenerateWorkoutPlanV2Input,
+    requireWeekdays = false,
   ): WorkoutPlanV2 {
     if (!prepared.context || !prepared.strategy || !prepared.readiness)
       throw new BadGatewayException('Contexto de treino V2 ausente');
@@ -505,6 +566,9 @@ export class WorkoutPlanningEngineV2Service {
       candidate,
       prepared.context,
       prepared.strategy,
+      requireWeekdays &&
+        input.recognizedContext?.mutation?.kind !== 'EXERCISE_SUBSTITUTION',
+      requireWeekdays,
     );
     if (this.audit)
       void this.audit

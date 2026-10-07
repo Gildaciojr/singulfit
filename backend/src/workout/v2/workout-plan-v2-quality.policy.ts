@@ -90,8 +90,9 @@ export function workoutWeeklyRecoveryIssues(
 ): readonly WorkoutPlanValidationIssue[] {
   const available = context.training.availableTrainingDays;
   if (
-    available.status !== 'CONFIRMED' ||
-    available.value.length < candidate.sessions.length
+    !candidate.sessions.every((session) => session.weekday) &&
+    (available.status !== 'CONFIRMED' ||
+      available.value.length < candidate.sessions.length)
   )
     return [];
   const order = [
@@ -105,7 +106,10 @@ export function workoutWeeklyRecoveryIssues(
   ];
   const sessions = candidate.sessions.map((session, index) => ({
     session,
-    day: order.indexOf(available.value[index]),
+    day: order.indexOf(
+      session.weekday ??
+        (available.status === 'CONFIRMED' ? available.value[index] : ''),
+    ),
   }));
   const issues: WorkoutPlanValidationIssue[] = [];
   for (const current of sessions) {

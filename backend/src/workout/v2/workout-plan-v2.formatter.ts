@@ -1,4 +1,13 @@
 import { Injectable } from '@nestjs/common';
+import {
+  projectWorkoutActivity,
+  projectWorkoutHeading,
+} from './workout-public-projection';
+import {
+  workoutCandidatePublicTextIssues,
+  workoutPublicTextIssues,
+  type WorkoutPublicTextConstraints,
+} from './workout-public-text.policy';
 import { presentWorkoutSeconds } from './workout-duration.presenter';
 import type {
   WorkoutActivityV2,
@@ -23,6 +32,10 @@ export class WorkoutPlanV2Formatter {
       readonly weekdays?: readonly (string | null)[];
     } = {},
   ): readonly string[] {
+    if (workoutCandidatePublicTextIssues(plan, plan.strategy).length)
+      return Object.freeze([
+        'Não consegui apresentar esse treino com segurança. Peça uma nova orientação.',
+      ]);
     const messages: string[] = [];
     const secondary = plan.secondaryObjectives?.length
       ? `\nObjetivos complementares: ${plan.secondaryObjectives.map((objective) => this.objective(objective)).join(', ')}`
@@ -46,7 +59,7 @@ export class WorkoutPlanV2Formatter {
       plan.strategy.environment.status === 'CONFIRMED'
         ? `\n📍 *Ambiente:* ${environments[plan.strategy.environment.value]}`
         : '';
-    const header = `🏋️ *${this.publicText(plan.title)}*\n\n🎯 *Objetivo:* ${this.objective(plan.objective)}\n🏃 *Modalidade:* ${this.modality(plan.modality)}${environment}\n📅 *Frequência:* ${plan.sessions.length}x por semana${secondary}`;
+    const header = `🏋️ *${this.publicHeading(plan.title, 'Sua semana de treino')}*\n\n🎯 *Objetivo:* ${this.objective(plan.objective)}\n🏃 *Modalidade:* ${this.modality(plan.modality)}${environment}\n📅 *Frequência:* ${plan.sessions.length}x por semana${secondary}`;
     if (plan.sessions.length === 0)
       return Object.freeze([this.publicText(header)]);
     const duration =
@@ -73,6 +86,7 @@ export class WorkoutPlanV2Formatter {
           session,
           ' — ',
           days[context.weekdays?.[index] ?? ''],
+          plan.strategy,
         )}`,
       );
     }
@@ -83,7 +97,32 @@ export class WorkoutPlanV2Formatter {
     session: WorkoutSessionV2,
     separator = ': ',
     weekday?: string,
+    constraints?: WorkoutPublicTextConstraints,
   ): string {
+    const boundary = constraints ?? {
+      authorizedEquipment: [
+        ...new Set(
+          session.blocks.flatMap((block) =>
+            block.activities.flatMap((activity) => activity.equipment),
+          ),
+        ),
+      ],
+      intensityPolicy: {
+        exactLoadAllowed: false,
+        exactPaceAllowed: false,
+        exactPowerAllowed: false,
+      },
+    };
+    if (
+      workoutPublicTextIssues(
+        [session.label, ...session.blocks.map((block) => block.title)].join(
+          '\n',
+        ),
+        boundary,
+        session.sessionKey,
+      ).length
+    )
+      return 'Não consegui apresentar essa sessão com segurança.';
     let ordinal = 0;
     const labels: Readonly<Record<string, string>> = {
       WARM_UP: '🔥 *Aquecimento*',
@@ -92,38 +131,83 @@ export class WorkoutPlanV2Formatter {
       ENDURANCE: '🏃 *Condicionamento*',
       CONDITIONING: '🏃 *Condicionamento*',
       TECHNIQUE: '🧩 *Técnica*',
+      GYMNASTICS: '🧩 *Ginástica*',
+      WEIGHTLIFTING: '🏋️ *Levantamento olímpico — técnica*',
       RECOVERY: '🧘 *Recuperação*',
       COOLDOWN: '🧘 *Finalização*',
     };
     return [
       this.publicText(
-        `📅 *${weekday ?? `Sessão ${session.sequence}`}${separator}${this.publicText(session.label)}*\n⏱️ *Duração estimada:* ~${session.estimatedDurationMinutes} min`,
+        `📅 *${weekday ?? `Sessão ${session.sequence}`}${separator}${this.publicHeading(session.label, 'Treino programado', session.sequence)}*\n⏱️ *Duração estimada:* ~${session.estimatedDurationMinutes} min`,
       ),
       ...session.blocks
         .filter((block) => block.activities.length > 0)
         .map((block) =>
           [
             this.publicText(
-              labels[block.type] ?? `💪 *${this.publicText(block.title)}*`,
+              labels[block.type] ??
+                `💪 *${this.publicHeading(block.title, 'Bloco de treino')}*`,
             ),
-            ...block.activities.map((activity) =>
-              this.formatActivity(activity, ++ordinal),
+            ...(block.work
+              ? [
+                  `*${block.work.format.replace('_', ' ')}* · ${presentWorkoutSeconds(block.work.durationSeconds)}${block.work.rounds !== null ? ` · ${block.work.rounds} rodadas` : ''}${block.work.intervalSeconds !== null ? ` · intervalos de ${presentWorkoutSeconds(block.work.intervalSeconds)}` : ''}`,
+                  ...(block.work.format === 'EMOM'
+                    ? ['Alterne os movimentos na ordem abaixo, um por minuto.']
+                    : []),
+                ]
+              : []),
+            ...(block.work
+              ? block.work.movementActivityKeys.flatMap((key) =>
+                  block.activities.filter(
+                    (activity) => activity.activityKey === key,
+                  ),
+                )
+              : block.activities
+            ).map((activity) =>
+              this.formatActivity(activity, ++ordinal, boundary),
             ),
           ].join('\n\n'),
         ),
     ].join('\n\n');
   }
 
-  formatActivity(activity: WorkoutActivityV2, ordinal?: number): string {
+  formatActivity(
+    activity: WorkoutActivityV2,
+    ordinal?: number,
+    constraints?: WorkoutPublicTextConstraints,
+  ): string {
+    const boundary = constraints ?? {
+      authorizedEquipment: activity.equipment,
+      intensityPolicy: {
+        exactLoadAllowed: false,
+        exactPaceAllowed: false,
+        exactPowerAllowed: false,
+      },
+    };
+    if (
+      activity.equipment.some(
+        (equipment) => !boundary.authorizedEquipment.includes(equipment),
+      )
+    )
+      return 'Não consegui apresentar essa atividade com segurança.';
+    const projected = projectWorkoutActivity(activity);
+    const presentationUnsafe = [
+      activity.name,
+      activity.instruction,
+      ...activity.alerts,
+    ].some((text) => this.publicBoundary.projectStructuredText(text) === null);
     return this.publicText(
       [
-        `*${ordinal === undefined ? '' : `${ordinal}. `}${this.publicText(activity.name)}*\n${this.parameters(activity)}`,
-        ...(activity.instruction.trim()
-          ? [`💡 ${this.publicText(activity.instruction)}`]
+        `*${ordinal === undefined ? '' : `${ordinal}. `}${projected.displayName}*\n${this.parameters(activity, projected.repetitions)}`,
+        ...(projected.instruction.trim()
+          ? [`💡 ${projected.instruction}`]
           : []),
-        ...(activity.alerts.length > 0
+        ...(projected.alerts.length > 0
+          ? [`⚠️ ${projected.alerts.join('; ')}`]
+          : []),
+        ...(presentationUnsafe
           ? [
-              `⚠️ ${activity.alerts.map((alert) => this.publicText(alert)).join('; ')}`,
+              'Não consegui apresentar o texto original com segurança; mantive os dados estruturados.',
             ]
           : []),
       ].join('\n\n'),
@@ -135,6 +219,16 @@ export class WorkoutPlanV2Formatter {
       this.publicBoundary.projectStructuredText(text) ??
       'Não consegui apresentar esse trecho do treino com segurança. Tente consultar seu treino novamente.'
     );
+  }
+
+  private publicHeading(
+    text: string,
+    fallback: string,
+    sequence?: number,
+  ): string {
+    return this.publicBoundary.projectStructuredText(text) === null
+      ? 'Não consegui apresentar esse trecho com segurança.'
+      : projectWorkoutHeading(text, fallback, sequence);
   }
 
   private objective(value: WorkoutObjective): string {
@@ -170,7 +264,10 @@ export class WorkoutPlanV2Formatter {
     return labels[value];
   }
 
-  private parameters(activity: WorkoutActivityV2): string {
+  private parameters(
+    activity: WorkoutActivityV2,
+    publicRepetitions: string | null,
+  ): string {
     const common = `• Equipamento: ${this.equipment(activity.equipment)}\n• Intensidade: ${this.intensity('intensity' in activity ? activity.intensity : 'LIGHT')}`;
     const repetitions = (value: string): string => {
       const normalized = value.replace(/(?<=\d)\s*-\s*(?=\d)/gu, '–');
@@ -184,7 +281,7 @@ export class WorkoutPlanV2Formatter {
           );
     };
     if (activity.kind === 'STRENGTH')
-      return `• ${activity.sets} ${activity.sets === 1 ? 'série' : 'séries'} × ${repetitions(activity.repetitions)}\n• Descanso: ${presentWorkoutSeconds(activity.restSeconds)}\n${common}`;
+      return `• ${activity.sets} ${activity.sets === 1 ? 'série' : 'séries'} × ${publicRepetitions ? repetitions(publicRepetitions) : 'repetições não confirmadas'}\n• Descanso: ${presentWorkoutSeconds(activity.restSeconds)}\n${common}`;
     if (activity.kind === 'TIMED')
       return [
         ...(activity.workSeconds !== null
@@ -224,8 +321,8 @@ export class WorkoutPlanV2Formatter {
               `• Sustentação: ${presentWorkoutSeconds(activity.holdSeconds)} por posição`,
             ]
           : []),
-        ...(activity.repetitions !== null
-          ? [`• Repetições: ${repetitions(activity.repetitions)}`]
+        ...(publicRepetitions !== null
+          ? [`• Repetições: ${repetitions(publicRepetitions)}`]
           : []),
       ].join('\n') || 'Movimento controlado.'
     );
@@ -247,7 +344,9 @@ export class WorkoutPlanV2Formatter {
       ROW_ERGOMETER: 'remo ergométrico',
     });
     return values.length > 0
-      ? values.map((value) => labels[value] ?? value).join(' + ')
+      ? values
+          .map((value) => labels[value] ?? 'equipamento não confirmado')
+          .join(' + ')
       : 'nenhum';
   }
 

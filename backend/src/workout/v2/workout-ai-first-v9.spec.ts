@@ -1,4 +1,5 @@
 import { ConfigService } from '@nestjs/config';
+import { createHash } from 'node:crypto';
 import { AIJobStatus, AIJobType, FitnessGoal, Prisma } from '@prisma/client';
 import { WorkoutPlanV2PersistenceService } from './persistence/workout-plan-v2-persistence.service';
 import { WorkoutPlanV2PersistenceValidator } from './persistence/workout-plan-v2-persistence.validator';
@@ -8,6 +9,7 @@ import type {
 } from './persistence/workout-plan-v2.repository';
 import { AIService } from '../../ai/ai.service';
 import { OpenAIGateway } from '../../ai/openai.gateway';
+import { WORKOUT_V10_QUALITY_CORPUS } from './workout-v10-quality-corpus.fixtures';
 import { AIUsageService } from '../../ai/ai-usage.service';
 import type {
   OpenAIResponseResult,
@@ -22,7 +24,10 @@ import { WorkoutPlanningStrategyService } from './workout-planning-strategy.serv
 import { WorkoutPlanningSafetyService } from './workout-planning-safety.service';
 import { WorkoutPlanV2Validator } from './workout-plan-v2.validator';
 import { WorkoutPlanningEngineV2Service } from './workout-planning-engine-v2.service';
-import { WORKOUT_PLANNING_V2_PROMPT } from './workout-planning-v2.prompt.definition';
+import {
+  WORKOUT_PLANNING_V2_PROMPT,
+  WORKOUT_PLANNING_V2_PROMPT_V9,
+} from './workout-planning-v2.prompt.definition';
 import {
   durableTextOperation,
   DurableTextPendingError,
@@ -50,7 +55,9 @@ interface StoredJob {
   type: AIJobType;
   operationKey: string;
   promptVersionId: string;
-  promptVersion: typeof prompt;
+  promptVersion:
+    | typeof prompt
+    | (typeof WORKOUT_PLANNING_V2_PROMPT_V9 & { id: string; prompt: string });
   providerResponseId?: string | null;
   status: AIJobStatus;
   attempts: number;
@@ -130,6 +137,12 @@ function plan(
                       name: 'Prática técnica de agachamento com apoio',
                       source: 'MODEL_GENERATED' as const,
                       movementPattern: 'OTHER' as const,
+                      publicIdentity: {
+                        plane: 'SAGITTAL' as const,
+                        targetRegion: 'HIPS' as const,
+                        bodyPosition: 'STANDING' as const,
+                        jointAction: 'FLEXION' as const,
+                      },
                       equipment: ['BODYWEIGHT' as const],
                       instruction:
                         'Pratique amplitude confortável com pausas e regressão apoiada.',
@@ -153,6 +166,12 @@ function plan(
                       name: 'EMOM de air squats e flexões inclinadas',
                       source: 'MODEL_GENERATED' as const,
                       movementPattern: 'OTHER' as const,
+                      publicIdentity: {
+                        plane: 'SAGITTAL' as const,
+                        targetRegion: 'WHOLE_BODY' as const,
+                        bodyPosition: 'STANDING' as const,
+                        jointAction: 'EXTENSION' as const,
+                      },
                       equipment: ['BODYWEIGHT' as const],
                       instruction:
                         'Alterne os movimentos por minuto, com poucas repetições controladas e descanso restante; reduza a amplitude se necessário.',
@@ -188,6 +207,17 @@ function plan(
             : qualitySession(key, [locomotion]);
       return {
         ...session,
+        weekday: (
+          [
+            'MONDAY',
+            'WEDNESDAY',
+            'FRIDAY',
+            'SUNDAY',
+            'TUESDAY',
+            'THURSDAY',
+            'SATURDAY',
+          ] as const
+        )[index],
         sequence: index + 1,
         label: `${modality} ${index + 1}`,
         blocks: session.blocks.map((block) => ({
@@ -222,6 +252,8 @@ async function subject(
   candidates: readonly GeneratedWorkoutPlanV2Candidate[],
   overrides: Partial<CoachProfileSnapshot['training']> = {},
   limitations: readonly string[] = [],
+  availableDays: readonly string[] = [],
+  requestId: string | null = 'request-id',
 ) {
   const base = routingSnapshot();
   const snapshot: CoachProfileSnapshot = {
@@ -247,6 +279,12 @@ async function subject(
       ...overrides,
     },
     nutrition: { ...base.nutrition, primaryGoal: knownDatum('WEIGHT_LOSS') },
+    routine: {
+      ...base.routine,
+      ...(availableDays.length
+        ? { availableTrainingDays: knownDatum(availableDays) }
+        : {}),
+    },
     restrictions: {
       ...base.restrictions,
       physicalLimitations: knownDatum(
@@ -264,7 +302,7 @@ async function subject(
         profileId: 'owned-profile',
         snapshot,
         currentMessage: text,
-        requestId: 'request-id',
+        requestId: requestId ?? undefined,
         referenceDate: new Date(snapshot.referenceDate),
       },
     )
@@ -292,10 +330,17 @@ async function subject(
   });
   const jobStore = {
     findMany: jest.fn().mockResolvedValue([]),
-    findFirst: jest.fn(() =>
-      Promise.resolve(
-        job && ['PENDING', 'PROCESSING'].includes(job.status) ? job : null,
-      ),
+    findFirst: jest.fn(
+      (query: { where?: { operationKey?: string; type?: AIJobType } }) =>
+        Promise.resolve(
+          job &&
+            (!query.where?.operationKey ||
+              query.where.operationKey === job.operationKey) &&
+            (query.where?.type === AIJobType.WORKOUT ||
+              ['PENDING', 'PROCESSING'].includes(job.status))
+            ? job
+            : null,
+        ),
     ),
     findUnique: jest.fn(() => Promise.resolve(job)),
     findUniqueOrThrow: jest.fn(() => Promise.resolve(job)),
@@ -462,7 +507,9 @@ async function subject(
         const index = gatewayCalls++;
         const candidate = candidates[index];
         if (!candidate) throw new Error('Unexpected provider call');
-        expect(request.instructions).toBe(prompt.instructions);
+        expect(request.instructions).toBe(
+          job?.promptVersion.prompt ?? prompt.instructions,
+        );
         return Promise.resolve({
           outputText: JSON.stringify(candidate),
           responseId: `response-${index}`,
@@ -562,6 +609,467 @@ async function subject(
 }
 
 describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
+  async function seedHistoricalJob(s: Awaited<ReturnType<typeof subject>>) {
+    const prepared = s.engine.prepare({
+      ...s.input,
+      recognizedContext:
+        s.input.legacyV9RecognizedContext ?? s.input.recognizedContext,
+    });
+    function canonical(value: unknown): string {
+      if (value === null || typeof value !== 'object')
+        return JSON.stringify(value);
+      if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+      return `{${Object.entries(value)
+        .filter(([, item]) => item !== undefined)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
+        .join(',')}}`;
+    }
+    const identity = s.input.currentRequest?.requestId
+      ? `request:${s.input.currentRequest.requestId}`
+      : canonical({
+          schemaVersion: 2,
+          currentRequest: s.input.currentRequest ?? { text: '' },
+          context: prepared.context,
+          strategy: prepared.strategy,
+          safetyPolicy: {
+            noDiagnosis: true,
+            noRehabilitation: true,
+            noExactLoad: true,
+            noExactPace: true,
+            noExactPower: true,
+          },
+        });
+    const operationKey = `workout-planning-v2:${createHash('sha256').update(`${s.input.userId}:9:ai-first-v9-bounded-repair-v1:${identity}`).digest('hex')}`;
+    await s.ai.createStandaloneJob({
+      userId: s.input.userId,
+      type: AIJobType.WORKOUT,
+      promptName: WORKOUT_PLANNING_V2_PROMPT_V9.name,
+      operationKey,
+      usageEntitlementCode: 'WORKOUT_PLAN_GENERATION',
+    });
+    const job = s.job();
+    if (!job) throw new Error('Missing historical job');
+    job.promptVersion = {
+      ...WORKOUT_PLANNING_V2_PROMPT_V9,
+      id: 'v9',
+      prompt: WORKOUT_PLANNING_V2_PROMPT_V9.instructions,
+    };
+    return job;
+  }
+  function historicalCandidate() {
+    const candidate = plan('CROSSFIT', 3);
+    return {
+      ...candidate,
+      sessions: candidate.sessions.map((session) => {
+        const legacy = { ...session };
+        delete legacy.weekday;
+        legacy.blocks = legacy.blocks.map((block) => ({
+          ...block,
+          activities: block.activities.map((activity) => {
+            const historical = { ...activity };
+            delete historical.publicIdentity;
+            return historical;
+          }),
+        }));
+        return legacy;
+      }),
+    };
+  }
+  it.each([null, 'request-id'])(
+    'reuses an authentic completed V9 lifecycle with requestId=%s',
+    async (requestId) => {
+      const s = await subject(
+        'Monte Crossfit 3x, segunda, quarta e sexta',
+        [historicalCandidate()],
+        {},
+        [],
+        [],
+        requestId,
+      );
+      const job = await seedHistoricalJob(s);
+      const first = await s.engine.generateCandidate(s.input);
+      expect(first.aiJobId).toBe(job.id);
+      expect(first.operationKey).toBe(job.operationKey);
+      await s.complete(first);
+      const replay = await s.engine.generateCandidate(s.input);
+      expect(replay.status).toBe('ALREADY_COMPLETED');
+      expect(replay.aiJobId).toBe(job.id);
+      expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(1);
+      expect(s.reserved).toHaveBeenCalledTimes(1);
+      expect(s.jobStore.create).toHaveBeenCalledTimes(1);
+      expect(s.confirmed).toHaveBeenCalledTimes(1);
+    },
+  );
+  it('recovers the same PROCESSING V9 job without requestId and retrieves the existing provider response', async () => {
+    const s = await subject(
+      'Monte Crossfit 3x, segunda, quarta e sexta',
+      [historicalCandidate()],
+      {},
+      [],
+      [],
+      null,
+    );
+    const job = await seedHistoricalJob(s);
+    s.gateway.retrieveTextResponse.mockRejectedValueOnce(
+      new Error('Lost poll ACK'),
+    );
+    await expect(s.engine.generateCandidate(s.input)).rejects.toBeInstanceOf(
+      DurableTextPendingError,
+    );
+    expect(s.job()?.status).toBe('PROCESSING');
+    const recovered = await s.engine.generateCandidate(s.input);
+    expect(recovered.aiJobId).toBe(job.id);
+    expect(recovered.operationKey).toBe(job.operationKey);
+    expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(1);
+    expect(s.reserved).toHaveBeenCalledTimes(1);
+  });
+  it('keeps FAILED V9 terminal without requestId', async () => {
+    const s = await subject(
+      'Monte Crossfit 3x, segunda, quarta e sexta',
+      [],
+      {},
+      [],
+      [],
+      null,
+    );
+    const job = await seedHistoricalJob(s);
+    job.status = AIJobStatus.FAILED;
+    await expect(s.engine.generateCandidate(s.input)).rejects.toThrow(
+      'já falhou',
+    );
+    expect(s.gateway.startBackgroundTextResponse).not.toHaveBeenCalled();
+    expect(s.jobStore.create).toHaveBeenCalledTimes(1);
+  });
+  it('uses V10 for a new no-requestId operation when historical V9 is absent', async () => {
+    const s = await subject(
+      'Monte Crossfit 3x, segunda, quarta e sexta',
+      [plan('CROSSFIT', 3)],
+      {},
+      [],
+      [],
+      null,
+    );
+    await s.engine.generateCandidate(s.input);
+    expect(s.job()?.promptVersion).toMatchObject({
+      version: 10,
+      name: 'workout_planning_v2_v10',
+    });
+    expect(s.reserved).toHaveBeenCalledTimes(1);
+  });
+  it.each(['PUBLIC_IDENTITY_REQUIRED', 'PUBLIC_IDENTITY_INCOMPLETE'] as const)(
+    'repairs %s once through the durable provider with accounting once',
+    async (code) => {
+      const valid = plan('CROSSFIT', 3);
+      const invalid = {
+        ...valid,
+        sessions: valid.sessions.map((session) => ({
+          ...session,
+          blocks: session.blocks.map((block) => ({
+            ...block,
+            activities: block.activities.map((activity) =>
+              activity.kind === 'ENDURANCE'
+                ? activity
+                : {
+                    ...activity,
+                    movementPattern: 'OTHER' as const,
+                    publicIdentity:
+                      code === 'PUBLIC_IDENTITY_REQUIRED'
+                        ? null
+                        : {
+                            plane: 'SAGITTAL' as const,
+                            targetRegion: 'HIPS' as const,
+                            bodyPosition: 'STANDING' as const,
+                            jointAction: null,
+                          },
+                  },
+            ),
+          })),
+        })),
+      };
+      const s = await subject('Monte Crossfit 3x', [invalid, valid]);
+      const generated = await s.engine.generateCandidate(s.input);
+      expect(
+        JSON.stringify(s.gateway.createTextResponse.mock.calls[1][0].input),
+      ).toContain(code);
+      await s.complete(generated);
+      expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(2);
+      expect(s.confirmed).toHaveBeenCalledTimes(1);
+      expect(s.reserved).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each([
+    ['UNAUTHORIZED_EQUIPMENT_REFERENCE', 'Use bike e remo'],
+    ['UNAUTHORIZED_EXACT_LOAD', 'Use 20 kg'],
+    ['UNAUTHORIZED_EXACT_PACE', 'Corra a 5:00 min/km'],
+    ['UNAUTHORIZED_EXACT_POWER', 'Pedale a 250 W'],
+    ['UNAUTHORIZED_EXACT_LOAD', 'Use 85% de 1RM'],
+    ['UNAUTHORIZED_EXACT_LOAD', 'Use 70% do seu máximo'],
+    ['UNAUTHORIZED_EXACT_PACE', 'Corra a 4:30/km'],
+    ['UNAUTHORIZED_EXACT_HEART_RATE', 'Mantenha 170 bpm'],
+  ])(
+    'repairs public %s once and charges the entitlement once',
+    async (code, instruction) => {
+      const valid = plan('CROSSFIT', 3);
+      const invalid = {
+        ...valid,
+        sessions: valid.sessions.map((session) => ({
+          ...session,
+          blocks: session.blocks.map((block) => ({
+            ...block,
+            activities: block.activities.map((activity) => ({
+              ...activity,
+              instruction,
+            })),
+          })),
+        })),
+      };
+      const s = await subject('Monte Crossfit 3x', [invalid, valid]);
+      const result = await s.engine.generateCandidate(s.input);
+      expect(
+        JSON.stringify(s.gateway.createTextResponse.mock.calls[1][0].input),
+      ).toContain(code);
+      await s.complete(result);
+      expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(2);
+      expect(s.confirmed).toHaveBeenCalledTimes(1);
+      expect(s.reserved).toHaveBeenCalledTimes(1);
+    },
+  );
+  it('rejects an invalid numeric repair without publishing, persisting or making a third call', async () => {
+    const candidate = plan('CROSSFIT', 3);
+    const invalid = {
+      ...candidate,
+      sessions: candidate.sessions.map((session) => ({
+        ...session,
+        blocks: session.blocks.map((block) => ({
+          ...block,
+          activities: block.activities.map((activity) => ({
+            ...activity,
+            instruction: 'Use 85% de 1RM e mantenha 170 bpm',
+          })),
+        })),
+      })),
+    };
+    const s = await subject('Monte Crossfit 3x', [invalid, invalid]);
+    await expect(s.engine.generateCandidate(s.input)).rejects.toThrow(
+      'Treino V2 reprovado',
+    );
+    expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(2);
+    expect(s.job()?.status).toBe('FAILED');
+    expect(s.confirmed).not.toHaveBeenCalled();
+  });
+  it('replays a completed V9 operation without weekday, a new job, usage or provider call', async () => {
+    const s = await subject('Monte um treino de Crossfit 4x', [
+      plan('CROSSFIT', 4),
+    ]);
+    const generated = await s.engine.generateCandidate(s.input);
+    await s.complete(generated);
+    const job = s.job();
+    if (
+      !job ||
+      !job.result ||
+      typeof job.result !== 'object' ||
+      Array.isArray(job.result)
+    )
+      throw new Error('Missing completed fixture');
+    const legacy = plan('CROSSFIT', 4);
+    const sessions = legacy.sessions.map((session) => {
+      const legacySession = { ...session };
+      delete legacySession.weekday;
+      return legacySession;
+    });
+    job.operationKey = `workout-planning-v2:${createHash('sha256').update(`${s.input.userId}:9:ai-first-v9-bounded-repair-v1:request:request-id`).digest('hex')}`;
+    job.promptVersion = {
+      ...WORKOUT_PLANNING_V2_PROMPT_V9,
+      id: 'v9',
+      prompt: WORKOUT_PLANNING_V2_PROMPT_V9.instructions,
+    };
+    job.result = {
+      ...job.result,
+      candidateOutput: JSON.stringify({ ...legacy, sessions }),
+    };
+    const replay = await s.engine.generateCandidate(s.input);
+    expect(replay.status).toBe('ALREADY_COMPLETED');
+    expect(replay.operationKey).toBe(job.operationKey);
+    expect(
+      replay.output.sessions.every((session) => session.weekday === undefined),
+    ).toBe(true);
+    expect(s.jobStore.create).toHaveBeenCalledTimes(1);
+    expect(s.reserved).toHaveBeenCalledTimes(1);
+    expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(1);
+    expect(s.usageRows).toHaveLength(1);
+  });
+  it('repairs duplicate V10 weekdays once through the durable engine', async () => {
+    const valid = plan('CROSSFIT', 4);
+    const invalid = {
+      ...valid,
+      sessions: valid.sessions.map((session) => ({
+        ...session,
+        weekday: 'MONDAY' as const,
+      })),
+    };
+    const s = await subject('Monte um treino de Crossfit 4x', [invalid, valid]);
+    const result = await s.engine.generateCandidate(s.input);
+    expect(
+      new Set(result.output.sessions.map((session) => session.weekday)).size,
+    ).toBe(4);
+    expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(2);
+    expect(
+      JSON.parse(s.gateway.createTextResponse.mock.calls[1][0].input).repair
+        .validationIssues,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'DUPLICATE_WEEKDAY' }),
+      ]),
+    );
+    await s.complete(result);
+    expect(s.confirmed).toHaveBeenCalledTimes(1);
+    expect(s.usageRows).toHaveLength(1);
+  });
+  it.each(WORKOUT_V10_QUALITY_CORPUS)(
+    'V10 quality corpus $id: $modality',
+    async (entry) => {
+      const base = plan(entry.modality, entry.count);
+      const duration = entry.duration ?? 60;
+      const chosen =
+        entry.id === 'C'
+          ? (['MONDAY', 'TUESDAY', 'THURSDAY', 'FRIDAY'] as const)
+          : base.sessions.map((session) => session.weekday!);
+      const candidate: GeneratedWorkoutPlanV2Candidate = {
+        ...base,
+        objective:
+          entry.id === 'G'
+            ? 'HYPERTROPHY'
+            : entry.id === 'J' || entry.id === 'L'
+              ? 'COMPLETE_DISTANCE'
+              : base.objective,
+        sessions: base.sessions.map((session, index) => ({
+          ...session,
+          weekday: chosen[index],
+          estimatedDurationMinutes: duration,
+          label: `${entry.modality}: ${index % 2 ? 'técnica e recuperação' : 'desenvolvimento e condicionamento'}`,
+          blocks:
+            entry.modality === 'HOME_WORKOUT' ||
+            entry.modality === 'GYM_STRENGTH'
+              ? [
+                  {
+                    blockKey: `${session.sessionKey}-strength`,
+                    type: 'STRENGTH',
+                    title: 'Força com equipamentos disponíveis',
+                    estimatedDurationMinutes: duration,
+                    activities: [
+                      {
+                        ...strength(`${session.sessionKey}-strength-1`),
+                        sets: 3,
+                        restSeconds: 60,
+                        equipment: entry.equipment ?? ['BODYWEIGHT'],
+                      },
+                    ],
+                  },
+                ]
+              : entry.modality === 'RUNNING'
+                ? session.blocks.map((block) => ({
+                    ...block,
+                    type: 'ENDURANCE' as const,
+                  }))
+                : session.blocks,
+        })),
+      };
+      const s = await subject(
+        entry.text,
+        [candidate],
+        {
+          experienceLevel: knownDatum(entry.experience),
+          sessionDurationMinutes: knownDatum(duration),
+          ...(entry.equipment
+            ? { availableEquipment: knownDatum(entry.equipment) }
+            : {}),
+          ...(entry.modality === 'HOME_WORKOUT'
+            ? { environment: knownDatum('HOME') }
+            : {}),
+          ...(entry.modality === 'RUNNING'
+            ? {
+                currentRunningDistanceKm: knownDatum(
+                  entry.experience === 'BEGINNER' ? 1 : 5,
+                ),
+              }
+            : {}),
+          ...(entry.id === 'G'
+            ? { primaryGoal: knownDatum('MUSCLE_GAIN') }
+            : {}),
+        },
+        [],
+        entry.days,
+      );
+      const result = await s.engine.generateCandidate(s.input);
+      const prepared = s.engine.prepare(s.input);
+      expect(result.output.modality).toBe(entry.modality);
+      expect(result.output.sessions).toHaveLength(entry.count);
+      expect(
+        new Set(result.output.sessions.map((session) => session.weekday)).size,
+      ).toBe(entry.count);
+      expect(result.output.sessions.map((session) => session.weekday)).toEqual(
+        chosen,
+      );
+      expect(
+        result.output.validation.issues.filter(
+          (issue) => issue.severity === 'ERROR',
+        ),
+      ).toEqual([]);
+      for (const session of result.output.sessions)
+        for (const block of session.blocks)
+          for (const activity of block.activities) {
+            expect(
+              activity.equipment.every((equipment) =>
+                prepared.strategy?.authorizedEquipment.includes(equipment),
+              ),
+            ).toBe(true);
+            expect(activity.instruction).not.toMatch(
+              /\d+\s*(?:kg|km\/h|bpm)|\d+:\d+\s*min\/km/iu,
+            );
+            if (entry.modality === 'WALKING' && activity.kind === 'ENDURANCE')
+              expect(activity.mode).toBe('WALK');
+          }
+      if (entry.days)
+        expect(chosen.every((day) => entry.days?.includes(day))).toBe(true);
+      if (entry.id === 'C')
+        expect(chosen).not.toEqual(entry.days?.slice(0, entry.count));
+      if (entry.id === 'D') {
+        expect(prepared.context?.training.scheduledTrainingDays).toEqual({
+          status: 'CONFIRMED',
+          value: ['MONDAY', 'WEDNESDAY', 'FRIDAY'],
+        });
+        expect(chosen).toEqual(['MONDAY', 'WEDNESDAY', 'FRIDAY']);
+      }
+      if (entry.id === 'J' || entry.id === 'L')
+        expect(prepared.context?.training.targetDistanceKm).toMatchObject({
+          value: 10,
+        });
+      if (entry.id === 'L')
+        expect(prepared.context?.training.targetEventDate).toMatchObject({
+          value: '2026-12-20',
+        });
+      if (entry.modality === 'CROSSFIT')
+        expect(
+          result.output.sessions.every((session) =>
+            session.blocks.some((block) => block.type === 'CONDITIONING'),
+          ),
+        ).toBe(true);
+      if (entry.modality === 'RUNNING')
+        expect(
+          result.output.sessions.every((session) =>
+            session.blocks.some((block) => block.type === 'ENDURANCE'),
+          ),
+        ).toBe(true);
+      if (entry.modality === 'HOME_WORKOUT')
+        expect(prepared.strategy?.environment).toMatchObject({ value: 'HOME' });
+      if (entry.id === 'G') expect(result.output.objective).toBe('HYPERTROPHY');
+      expect(prepared.strategy?.sessionFocuses).toEqual([]);
+      await s.complete(result);
+      expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(1);
+      expect(s.reserved).toHaveBeenCalledTimes(1);
+    },
+  );
   it('repairs a requested alias with the same provider snapshot through the real background gateway', async () => {
     const s = await subject('Monte um treino de Crossfit 4x', [
       plan('CROSSFIT', 4, true),

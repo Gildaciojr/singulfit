@@ -290,6 +290,17 @@ describe('Hard modality validation before persistence and public formatting', ()
         (_, index) => `Sessão técnica ${index + 1}`,
       ).map((label, index) => ({
         sessionKey: `s${index}`,
+        weekday: (
+          [
+            'MONDAY',
+            'WEDNESDAY',
+            'FRIDAY',
+            'SUNDAY',
+            'TUESDAY',
+            'THURSDAY',
+            'SATURDAY',
+          ] as const
+        )[index],
         sequence: index + 1,
         label,
         estimatedDurationMinutes: 30,

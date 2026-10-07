@@ -272,6 +272,12 @@ describe('Understanding → builder → engine → parser/validator → formatte
           kind: 'MOBILITY',
           name: 'Mobilidade de quadril e ombros',
           movementPattern: 'MOBILITY',
+          publicIdentity: {
+            plane: 'TRANSVERSE',
+            targetRegion: 'HIPS',
+            bodyPosition: 'STANDING',
+            jointAction: 'ROTATION',
+          },
           durationSeconds: minutes * 60,
           holdSeconds: null,
           repetitions: null,
@@ -292,6 +298,12 @@ describe('Understanding → builder → engine → parser/validator → formatte
               ? ['DUMBBELL']
               : ['BARBELL'],
         movementPattern: 'SQUAT',
+        publicIdentity: {
+          plane: 'SAGITTAL',
+          targetRegion: 'HIPS',
+          bodyPosition: 'STANDING',
+          jointAction: null,
+        },
         durationSeconds: minutes * 60,
         workSeconds: null,
         recoverySeconds: null,
@@ -314,6 +326,17 @@ describe('Understanding → builder → engine → parser/validator → formatte
         (_, index) => `Sessão técnica ${index + 1}`,
       ).map((label, index) => ({
         sessionKey: `s${index}`,
+        weekday: (
+          [
+            'MONDAY',
+            'WEDNESDAY',
+            'FRIDAY',
+            'SUNDAY',
+            'TUESDAY',
+            'THURSDAY',
+            'SATURDAY',
+          ] as const
+        )[index],
         sequence: index + 1,
         label,
         estimatedDurationMinutes: duration,
@@ -357,12 +380,13 @@ describe('Understanding → builder → engine → parser/validator → formatte
       const output = new WorkoutPlanV2Formatter()
         .format(result.output)
         .join('\n');
+      expect(output).toMatch(/agachamento.*quadril/iu);
       expect(output).toContain(
         level === 'BEGINNER'
-          ? 'scaling'
+          ? 'peso corporal'
           : level === 'INTERMEDIATE'
-            ? 'Thruster'
-            : 'Clean',
+            ? 'halteres'
+            : 'barra',
       );
       expect(s.strategy.technicalMovementsAllowed).toBe(level !== 'BEGINNER');
       expect(s.events).toEqual(['activate-v9', 'create-job', 'provider']);
@@ -710,6 +734,12 @@ describe('Understanding → builder → engine → parser/validator → formatte
         name: 'Remo ergométrico',
         equipment: ['ROW_ERGOMETER'],
         movementPattern: 'PULL',
+        publicIdentity: {
+          plane: 'HORIZONTAL',
+          targetRegion: 'BACK',
+          bodyPosition: 'SEATED',
+          jointAction: null,
+        },
         durationSeconds: 60,
         workSeconds: null,
         recoverySeconds: null,
@@ -722,6 +752,12 @@ describe('Understanding → builder → engine → parser/validator → formatte
         kind: 'STRENGTH',
         name: 'Agachamento controlado',
         movementPattern: 'SQUAT',
+        publicIdentity: {
+          plane: 'SAGITTAL',
+          targetRegion: 'HIPS',
+          bodyPosition: 'STANDING',
+          jointAction: null,
+        },
         sets: 1,
         repetitions: '8',
         restSeconds: 0,
@@ -733,6 +769,12 @@ describe('Understanding → builder → engine → parser/validator → formatte
         kind: 'TIMED',
         name: 'Apoio ginástico no solo',
         movementPattern: 'PUSH',
+        publicIdentity: {
+          plane: 'HORIZONTAL',
+          targetRegion: 'CHEST',
+          bodyPosition: 'PRONE',
+          jointAction: null,
+        },
         durationSeconds: 60,
         workSeconds: null,
         recoverySeconds: null,
@@ -782,7 +824,7 @@ describe('Understanding → builder → engine → parser/validator → formatte
     expect(s.ai.runTextJob).not.toHaveBeenCalled();
     expect(s.ai.failJob).toHaveBeenCalledTimes(1);
   });
-  it('keeps the latest delivered Walking referent after dinner, CrossFit and Running, and clarifies without a provider', async () => {
+  async function assertDeliveredWalkingReferent(projectedLabels: boolean) {
     const conversationId = 'conversation-id';
     const userId = 'user-id';
     const sourceMessages = [
@@ -819,6 +861,24 @@ describe('Understanding → builder → engine → parser/validator → formatte
       'monte um treino de caminhada para mim, 5 vezes por semana',
     ].entries()) {
       const s = await subject(text);
+      const candidate = projectedLabels
+        ? {
+            ...s.candidate,
+            sessions: s.candidate.sessions.map((session) => ({
+              ...session,
+              label: `Sessão no HyperCable9000 ${session.sequence}`,
+            })),
+          }
+        : s.candidate;
+      if (projectedLabels)
+        s.ai.runTextJob.mockResolvedValue({
+          outputText: JSON.stringify(candidate),
+          responseId: 'r',
+          model: 'structured-provider-double',
+          promptTokens: 10,
+          completionTokens: 10,
+          totalTokens: 20,
+        });
       const generated = await s.engine.generateCandidate(s.input);
       const source = {
         id: `source-${index}`,
@@ -827,6 +887,7 @@ describe('Understanding → builder → engine → parser/validator → formatte
       };
       sourceMessages.push(source);
       const content = new WorkoutPlanV2Formatter().format(generated.output);
+      expect(content.join('\n')).not.toContain('HyperCable9000');
       content.forEach((part, partIndex) =>
         deliveries.push({
           id: `sent-${index}-${partIndex}`,
@@ -846,7 +907,7 @@ describe('Understanding → builder → engine → parser/validator → formatte
       );
       jobs.push({
         userId,
-        result: { candidateOutput: JSON.stringify(s.candidate) },
+        result: { candidateOutput: JSON.stringify(candidate) },
         createdAt: new Date(source.timestamp.getTime() + 1000),
         completedAt: new Date(source.timestamp.getTime() + 60_000),
       });
@@ -960,7 +1021,11 @@ describe('Understanding → builder → engine → parser/validator → formatte
       }),
     ).toBeNull();
     expect(prisma.scheduledMessage.findFirst).toHaveBeenCalledTimes(2);
-  });
+  }
+  it('keeps the latest delivered Walking referent after dinner, CrossFit and Running, and clarifies without a provider', () =>
+    assertDeliveredWalkingReferent(false));
+  it('preserves the delivered Workout referent when unknown labels have been projected safely', () =>
+    assertDeliveredWalkingReferent(true));
   it.each([
     'quero correr na rua 3x',
     'monte um treino de caminhada para mim, 5 vezes por semana',

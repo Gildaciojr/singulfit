@@ -7,9 +7,147 @@ import type {
   WorkoutActivityBase,
   WorkoutPlanV2,
   WorkoutSessionV2,
+  WorkoutPublicExerciseIdentity,
 } from './workout-plan-v2.contract';
 import type { WorkoutEquipment } from './workout-planning-context.contract';
 import { qualityPlan, strength } from './workout-quality.fixtures';
+
+// Authored provider fixture semantics; production never derives identity from a name.
+const liftIdentities: Readonly<Record<string, WorkoutPublicExerciseIdentity>> =
+  {
+    'Supino reto com barra': {
+      plane: 'HORIZONTAL',
+      targetRegion: 'CHEST',
+      bodyPosition: 'LYING',
+      jointAction: null,
+    },
+    'Remada baixa na polia': {
+      plane: 'HORIZONTAL',
+      targetRegion: 'BACK',
+      bodyPosition: 'SEATED',
+      jointAction: null,
+    },
+    'Desenvolvimento sentado com halteres': {
+      plane: 'VERTICAL',
+      targetRegion: 'SHOULDERS',
+      bodyPosition: 'SEATED',
+      jointAction: null,
+    },
+    'Puxada frontal na polia': {
+      plane: 'VERTICAL',
+      targetRegion: 'BACK',
+      bodyPosition: 'SEATED',
+      jointAction: null,
+    },
+    'Rosca alternada com halteres': {
+      plane: 'SAGITTAL',
+      targetRegion: 'ELBOWS',
+      bodyPosition: 'STANDING',
+      jointAction: 'FLEXION',
+    },
+    'Agachamento com barra': {
+      plane: 'SAGITTAL',
+      targetRegion: 'HIPS',
+      bodyPosition: 'STANDING',
+      jointAction: null,
+    },
+    'Levantamento romeno com halteres': {
+      plane: 'SAGITTAL',
+      targetRegion: 'HIPS',
+      bodyPosition: 'STANDING',
+      jointAction: null,
+    },
+    'Leg press': {
+      plane: 'SAGITTAL',
+      targetRegion: 'KNEES',
+      bodyPosition: 'SEATED',
+      jointAction: null,
+    },
+    'Flexão de joelhos na máquina': {
+      plane: 'SAGITTAL',
+      targetRegion: 'KNEES',
+      bodyPosition: 'PRONE',
+      jointAction: 'FLEXION',
+    },
+    'Elevação de panturrilhas em pé': {
+      plane: 'SAGITTAL',
+      targetRegion: 'ANKLES',
+      bodyPosition: 'STANDING',
+      jointAction: 'EXTENSION',
+    },
+    'Agachamento ao banco sem carga': {
+      plane: 'SAGITTAL',
+      targetRegion: 'HIPS',
+      bodyPosition: 'STANDING',
+      jointAction: null,
+    },
+    'Remada leve com elástico': {
+      plane: 'HORIZONTAL',
+      targetRegion: 'BACK',
+      bodyPosition: 'STANDING',
+      jointAction: null,
+    },
+    'Flexão de braços na parede': {
+      plane: 'HORIZONTAL',
+      targetRegion: 'CHEST',
+      bodyPosition: 'STANDING',
+      jointAction: null,
+    },
+    'Supino inclinado com halteres': {
+      plane: 'HORIZONTAL',
+      targetRegion: 'CHEST',
+      bodyPosition: 'INCLINED',
+      jointAction: null,
+    },
+    'Remada apoiada no banco': {
+      plane: 'HORIZONTAL',
+      targetRegion: 'BACK',
+      bodyPosition: 'PRONE',
+      jointAction: null,
+    },
+    'Elevação lateral com halteres': {
+      plane: 'FRONTAL',
+      targetRegion: 'SHOULDERS',
+      bodyPosition: 'STANDING',
+      jointAction: 'ABDUCTION',
+    },
+    'Puxada neutra na polia': {
+      plane: 'VERTICAL',
+      targetRegion: 'BACK',
+      bodyPosition: 'SEATED',
+      jointAction: null,
+    },
+    'Extensão de tríceps na polia': {
+      plane: 'SAGITTAL',
+      targetRegion: 'ELBOWS',
+      bodyPosition: 'STANDING',
+      jointAction: 'EXTENSION',
+    },
+    'Agachamento com halter ao banco': {
+      plane: 'SAGITTAL',
+      targetRegion: 'HIPS',
+      bodyPosition: 'STANDING',
+      jointAction: null,
+    },
+    'Levantamento romeno com barra': {
+      plane: 'SAGITTAL',
+      targetRegion: 'HIPS',
+      bodyPosition: 'STANDING',
+      jointAction: null,
+    },
+    'Extensão de joelhos na máquina': {
+      plane: 'SAGITTAL',
+      targetRegion: 'KNEES',
+      bodyPosition: 'SEATED',
+      jointAction: 'EXTENSION',
+    },
+    'Flexão de joelhos sentada': {
+      plane: 'SAGITTAL',
+      targetRegion: 'KNEES',
+      bodyPosition: 'SEATED',
+      jointAction: 'FLEXION',
+    },
+  };
 
 function activityBase(name: string): WorkoutActivityBase {
   return {
@@ -38,6 +176,7 @@ function lift(
     ...strength(name),
     name,
     movementPattern,
+    publicIdentity: liftIdentities[name],
     equipment,
     sets,
     repetitions,
@@ -72,6 +211,12 @@ export function commercialWorkoutPlan(): WorkoutPlanV2 {
     kind: 'TIMED',
     name: 'Farmer walk com halteres',
     movementPattern: 'CARRY',
+    publicIdentity: {
+      plane: 'SAGITTAL',
+      targetRegion: 'WHOLE_BODY',
+      bodyPosition: 'STANDING',
+      jointAction: null,
+    },
     equipment: ['DUMBBELL'],
     durationSeconds: 340,
     workSeconds: 40,
@@ -86,6 +231,12 @@ export function commercialWorkoutPlan(): WorkoutPlanV2 {
     kind: 'MOBILITY',
     name: 'Mobilidade de quadril e coluna torácica',
     movementPattern: 'MOBILITY',
+    publicIdentity: {
+      plane: 'TRANSVERSE',
+      targetRegion: 'HIPS',
+      bodyPosition: 'STANDING',
+      jointAction: 'ROTATION',
+    },
     equipment: ['BODYWEIGHT'],
     durationSeconds: 300,
     holdSeconds: null,

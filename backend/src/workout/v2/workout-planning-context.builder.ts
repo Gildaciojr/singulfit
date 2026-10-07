@@ -108,6 +108,14 @@ export class WorkoutPlanningContextBuilder {
           : this.optionalArraySnapshotValue(
               input.snapshot.routine.availableTrainingDays,
             ),
+        ...(recognized.scheduledTrainingDays
+          ? {
+              scheduledTrainingDays: Object.freeze({
+                status: 'CONFIRMED' as const,
+                value: Object.freeze([...recognized.scheduledTrainingDays]),
+              }),
+            }
+          : {}),
         dailyTrainingWindows: this.optionalArraySnapshotValue(
           input.snapshot.routine.dailyTrainingWindows,
         ),

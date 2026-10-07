@@ -6,6 +6,9 @@ import type {
 function activity(item: WorkoutActivityV2): WorkoutActivityV2 {
   return Object.freeze({
     ...item,
+    ...(item.publicIdentity
+      ? { publicIdentity: Object.freeze({ ...item.publicIdentity }) }
+      : {}),
     equipment: Object.freeze([...item.equipment]),
     alerts: Object.freeze([...item.alerts]),
     appliedConstraintCodes: Object.freeze([...item.appliedConstraintCodes]),
@@ -46,6 +49,16 @@ export function freezeWorkoutPlanV2(plan: WorkoutPlanV2): WorkoutPlanV2 {
             session.blocks.map((block) =>
               Object.freeze({
                 ...block,
+                ...(block.work
+                  ? {
+                      work: Object.freeze({
+                        ...block.work,
+                        movementActivityKeys: Object.freeze([
+                          ...block.work.movementActivityKeys,
+                        ]),
+                      }),
+                    }
+                  : {}),
                 activities: Object.freeze(block.activities.map(activity)),
               }),
             ),
