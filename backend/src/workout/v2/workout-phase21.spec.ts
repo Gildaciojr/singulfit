@@ -263,7 +263,7 @@ describe('Phase 2.1 objective boundaries', () => {
         maximumMinutes: 10,
       });
       expect(formatter.formatSession(candidate.sessions[0])).toContain(
-        format.replace('_', ' '),
+        format === 'FOR_TIME' ? 'Por tempo' : format,
       );
       expect(
         candidate.sessions[0].blocks[0].work?.movementActivityKeys,

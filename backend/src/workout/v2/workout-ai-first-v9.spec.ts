@@ -835,6 +835,32 @@ describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
       expect(s.reserved).toHaveBeenCalledTimes(1);
     },
   );
+  it('repairs an unpublishable strength repetition once with durable usage and entitlement once', async () => {
+    const valid = plan('GYM_STRENGTH', 3);
+    const invalid = {
+      ...valid,
+      sessions: valid.sessions.map((session) => ({
+        ...session,
+        blocks: session.blocks.map((block) => ({
+          ...block,
+          activities: block.activities.map((activity) =>
+            activity.kind === 'STRENGTH'
+              ? { ...activity, repetitions: 'conforme necessário' }
+              : activity,
+          ),
+        })),
+      })),
+    };
+    const s = await subject('Monte musculação 3x', [invalid, valid]);
+    const generated = await s.engine.generateCandidate(s.input);
+    expect(
+      JSON.stringify(s.gateway.createTextResponse.mock.calls[1][0].input),
+    ).toContain('PUBLIC_REPETITIONS_REQUIRED');
+    await s.complete(generated);
+    expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(2);
+    expect(s.confirmed).toHaveBeenCalledTimes(1);
+    expect(s.reserved).toHaveBeenCalledTimes(1);
+  });
   it('rejects an invalid numeric repair without publishing, persisting or making a third call', async () => {
     const candidate = plan('CROSSFIT', 3);
     const invalid = {

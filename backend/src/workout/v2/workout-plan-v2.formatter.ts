@@ -150,7 +150,7 @@ export class WorkoutPlanV2Formatter {
             ),
             ...(block.work
               ? [
-                  `*${block.work.format.replace('_', ' ')}* · ${presentWorkoutSeconds(block.work.durationSeconds)}${block.work.rounds !== null ? ` · ${block.work.rounds} rodadas` : ''}${block.work.intervalSeconds !== null ? ` · intervalos de ${presentWorkoutSeconds(block.work.intervalSeconds)}` : ''}`,
+                  `*${this.workFormat(block.work.format)}* · ${presentWorkoutSeconds(block.work.durationSeconds)}${block.work.rounds !== null && !(block.work.format === 'CONTINUOUS' && block.work.rounds === 1) ? ` · ${block.work.rounds} ${block.work.rounds === 1 ? 'rodada' : 'rodadas'}` : ''}${block.work.intervalSeconds !== null ? ` · intervalos de ${presentWorkoutSeconds(block.work.intervalSeconds)}` : ''}`,
                   ...(block.work.format === 'EMOM'
                     ? ['Alterne os movimentos na ordem abaixo, um por minuto.']
                     : []),
@@ -272,16 +272,18 @@ export class WorkoutPlanV2Formatter {
     const repetitions = (value: string): string => {
       const normalized = value.replace(/(?<=\d)\s*-\s*(?=\d)/gu, '–');
       return /repetiç|reps/iu.test(normalized) ||
-        !/^\d+(?:\s*[-–a]\s*\d+)?(?:\s*por lado)?$/iu.test(normalized)
+        !/^\d+(?:\s*[-–a]\s*\d+)?(?:\s*por (?:lado|perna|braco))?$/iu.test(
+          normalized,
+        )
         ? normalized
         : normalized.replace(
-            /^(\d+(?:\s*[-–a]\s*\d+)?)(\s*por lado)?$/iu,
+            /^(\d+(?:\s*[-–a]\s*\d+)?)(\s*por (?:lado|perna|braco))?$/iu,
             (_match: string, count: string, side: string | undefined) =>
               `${count} ${count === '1' ? 'repetição' : 'repetições'}${side ?? ''}`,
           );
     };
     if (activity.kind === 'STRENGTH')
-      return `• ${activity.sets} ${activity.sets === 1 ? 'série' : 'séries'} × ${publicRepetitions ? repetitions(publicRepetitions) : 'repetições não confirmadas'}\n• Descanso: ${presentWorkoutSeconds(activity.restSeconds)}\n${common}`;
+      return `• ${activity.sets} ${activity.sets === 1 ? 'série' : 'séries'}${publicRepetitions ? ` × ${repetitions(publicRepetitions)}` : ''}\n• Descanso: ${presentWorkoutSeconds(activity.restSeconds)}\n${common}`;
     if (activity.kind === 'TIMED')
       return [
         ...(activity.workSeconds !== null
@@ -348,6 +350,24 @@ export class WorkoutPlanV2Formatter {
           .map((value) => labels[value] ?? 'equipamento não confirmado')
           .join(' + ')
       : 'nenhum';
+  }
+
+  private workFormat(
+    format: NonNullable<
+      import('./workout-plan-v2.contract').WorkoutBlockV2['work']
+    >['format'],
+  ): string {
+    const labels = {
+      AMRAP: 'AMRAP',
+      EMOM: 'EMOM',
+      FOR_TIME: 'Por tempo',
+      INTERVAL: 'Intervalado',
+      ROUNDS: 'Circuito por rodadas',
+      CHIPPER: 'Circuito em sequência',
+      CONTINUOUS: 'Circuito contínuo',
+      OTHER: 'Bloco de trabalho',
+    } as const;
+    return labels[format];
   }
 
   private intensity(value: string): string {

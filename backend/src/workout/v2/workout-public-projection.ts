@@ -1,5 +1,6 @@
 import type { WorkoutActivityV2 } from './workout-plan-v2.contract';
 import { ConversationPublicAnswerBoundaryService } from '../../conversation/runtime/conversation-public-answer-boundary.service';
+import { workoutPublicTextIssues } from './workout-public-text.policy';
 
 /** Positive presentation vocabulary, never an exercise selector or equipment detector. */
 const normalize = (text: string): string =>
@@ -19,7 +20,7 @@ type CoachingCueKind =
 const cueGrammars: readonly (readonly [CoachingCueKind, RegExp])[] = [
   [
     'POSTURE',
-    /^(?:mantenha|preserve) (?:a |o )?(?:coluna|postura|tronco|corpo) (?:neutra|neutro|relaxada|relaxado|alinhada|alinhado|estavel|ereto)$/u,
+    /^(?:mantenha|preserve) (?:a |o |as |os )?(?:coluna|postura|tronco|corpo|escapulas|ombros|punhos|joelhos|pes|cotovelos|quadril|abdomen) (?:neutra|neutro|relaxada|relaxado|alinhada|alinhado|alinhadas|alinhados|estavel|estaveis|ereto|firme|firmes|apoiadas|apoiados|proximos ao corpo)$/u,
   ],
   ['POSTURE', /^evite (?:compensar|compensacoes)(?: com| na)? (?:a )?lombar$/u],
   [
@@ -29,7 +30,7 @@ const cueGrammars: readonly (readonly [CoachingCueKind, RegExp])[] = [
   ['BREATHING', /^respire (?:com controle|regularmente|livremente)$/u],
   [
     'TEMPO_QUALITATIVE',
-    /^controle (?:a |o )?(?:descida|subida|movimento|execucao)$/u,
+    /^controle (?:a |o )?(?:descida|subida|movimento|execucao)(?: com (?:calma|controle)| sem (?:impulso|balancar o tronco))?$/u,
   ],
   ['TECHNIQUE', /^(?:preserve|mantenha) (?:a )?tecnica$/u],
   ['TECHNIQUE', /^execute com (?:controle|tecnica|cuidado)$/u],
@@ -40,22 +41,77 @@ const cueGrammars: readonly (readonly [CoachingCueKind, RegExp])[] = [
     /^(?:mantenha|use|trabalhe em) (?:a |o )?(?:ritmo|movimento|esforco|carga) (?:confortavel|moderado|moderada|leve|conversacional)$/u,
   ],
   ['EFFORT_QUALITATIVE', /^escolha (?:um )?peso que preserve (?:a )?tecnica$/u],
+  [
+    'TECHNIQUE',
+    /^(?:evite|nao) (?:arquear|balancar|girar) (?:a |o )?(?:lombar|tronco|quadril)$/u,
+  ],
+  [
+    'TECHNIQUE',
+    /^(?:desca|suba|eleve|flexione|estenda) (?:a |o |as |os )?(?:bracos|cotovelos|joelhos|calcanhares|quadril)(?: com controle| sem impulso)?$/u,
+  ],
+  [
+    'TECHNIQUE',
+    /^conduza (?:os )?cotovelos para tras(?: sem balancar o tronco)?$/u,
+  ],
+  ['POSTURE', /^mantenha (?:o )?peito apoiado$/u],
+  [
+    'EFFORT_QUALITATIVE',
+    /^(?:use|mantenha|trabalhe em) rpe (?:[1-9]|10)(?:\s*[-–a]\s*(?:[1-9]|10))?$/u,
+  ],
+  [
+    'EFFORT_QUALITATIVE',
+    /^(?:mantenha|deixe) [1-5](?:\s*[-–a]\s*[1-5])? repeticoes (?:em reserva|na reserva)$/u,
+  ],
 ];
 const publicBoundary = new ConversationPublicAnswerBoundaryService();
+// Compositional vocabulary for technique, not exercise/equipment selection.
+const techniqueWords = new Set(
+  'a o as os ao aos do da dos das de com sem para por e na no nas nos ate uma um que se nem mantenha preserve controle evite execute conduza aproxime leve desloque apoie segure toque desca suba eleve estenda flexione alterne reduza aumente comece termine coluna postura tronco corpo escapulas ombros punhos joelhos pes cotovelos quadril abdomen peito pernas bracos calcanhares tornozelos pescoco respiracao amplitude movimento movimentos tecnica execucao descida subida ritmo impulso alinhamento banco apoio barra halteres pesos neutra neutro relaxada relaxado alinhada alinhado alinhadas alinhados estavel estaveis ereto firme firmes apoiado apoiada apoiadas apoiados proximos proximas controlada controlado controladas controlados suavemente suaves leve levemente confortavel confortaveis moderado moderada gradualmente breve pouca baixa livre solta frente tras junto enquanto mantendo perder balancar arquear girar levantar tirar tensionar elevar encolher bater relaxar travar travalos fim altura alto baixo volta pausa resistencia'.split(
+    ' ',
+  ),
+);
+const techniqueVerb =
+  /^(?:mantenha|preserve|controle|evite|execute|conduza|aproxime|leve|desloque|apoie|segure|toque|desca|suba|eleve|estenda|flexione|alterne|reduza|aumente|comece|termine)\b/u;
+const techniqueSubject =
+  /\b(?:coluna|postura|tronco|escapulas|ombros|punhos|joelhos|pes|cotovelos|quadril|abdomen|peito|pernas|bracos|calcanhares|respiracao|amplitude|movimento|movimentos|tecnica|descida|subida|ritmo)\b/u;
 
-function projectCoachingCue(text: string): string | null {
+function projectCoachingCue(
+  text: string,
+  activity: WorkoutActivityV2,
+): string | null {
   if (publicBoundary.projectStructuredText(text) === null) return null;
   const clauses = text
     .trim()
     .replace(/\bmantendo\s+/giu, '. Mantenha ')
     .split(
-      /[.!?;]+|\s+e\s+(?=(?:mantenha|controle|evite|respire|pare|interrompa|preserve|use|pegue|corra|pedale|execute|trabalhe|escolha)\b)/iu,
+      /[.!?;]+|(?:,\s*|\s+e\s+)(?=(?:mantenha|controle|evite|respire|pare|interrompa|preserve|use|pegue|corra|pedale|execute|trabalhe|escolha|desca|suba|eleve|flexione|estenda|conduza|deixe)\b)/iu,
     )
     .map((clause) => clause.trim())
     .filter(Boolean);
-  const safe = clauses.filter((clause) =>
-    cueGrammars.some(([, grammar]) => grammar.test(normalize(clause))),
-  );
+  const safe = clauses.filter((clause) => {
+    const value = normalize(clause);
+    if (
+      workoutPublicTextIssues(
+        clause,
+        {
+          authorizedEquipment: activity.equipment,
+          intensityPolicy: {
+            exactLoadAllowed: false,
+            exactPaceAllowed: false,
+            exactPowerAllowed: false,
+          },
+        },
+        activity.activityKey,
+      ).length
+    )
+      return false;
+    return (
+      cueGrammars.some(([, grammar]) => grammar.test(value)) ||
+      (techniqueVerb.test(value) &&
+        techniqueSubject.test(value) &&
+        value.split(/[\s,]+/u).every((word) => techniqueWords.has(word)))
+    );
+  });
   if (!safe.length) return null;
   return safe.length === clauses.length && !/\bmantendo\b/iu.test(text)
     ? text.trim()
@@ -65,14 +121,6 @@ function projectCoachingCue(text: string): string | null {
 function structuredIdentity(activity: WorkoutActivityV2): string | null {
   const identity = activity.publicIdentity;
   if (!identity) return null;
-  const planes = {
-    HORIZONTAL: 'horizontal',
-    VERTICAL: 'vertical',
-    SAGITTAL: 'no plano sagital',
-    FRONTAL: 'no plano frontal',
-    TRANSVERSE: 'no plano transversal',
-    NONE: '',
-  } as const;
   const regions = {
     CHEST: 'peitoral',
     SHOULDERS: 'ombros',
@@ -105,7 +153,7 @@ function structuredIdentity(activity: WorkoutActivityV2): string | null {
   } as const;
   const movements = {
     SQUAT: 'Agachamento',
-    HINGE: 'Dobradiça de quadril',
+    HINGE: 'Extensão de quadril',
     PUSH: 'Empurrada',
     PULL: 'Puxada',
     CARRY: 'Transporte de carga',
@@ -115,10 +163,61 @@ function structuredIdentity(activity: WorkoutActivityV2): string | null {
     MOBILITY: 'Mobilidade',
     OTHER: identity.jointAction ? actions[identity.jointAction] : null,
   } as const;
-  const movement = movements[activity.movementPattern];
-  return movement
-    ? `${movement}${planes[identity.plane] ? ` ${planes[identity.plane]}` : ''} para ${regions[identity.targetRegion]}, ${positions[identity.bodyPosition]}`
-    : null;
+  let movement: string | null = movements[activity.movementPattern];
+  let position: string = positions[identity.bodyPosition];
+  if (activity.movementPattern === 'PUSH') {
+    if (identity.targetRegion === 'CHEST' && identity.plane === 'HORIZONTAL') {
+      const loaded = activity.equipment.some((value) =>
+        ['BARBELL', 'DUMBBELL', 'MACHINE'].includes(value),
+      );
+      movement =
+        loaded && ['LYING', 'INCLINED'].includes(identity.bodyPosition)
+          ? 'Supino'
+          : 'Flexão de braços';
+      if (movement === 'Supino' && identity.bodyPosition === 'LYING')
+        position = 'reto';
+    } else if (
+      identity.targetRegion === 'SHOULDERS' &&
+      identity.plane === 'VERTICAL'
+    )
+      movement = 'Desenvolvimento de ombros';
+  } else if (activity.movementPattern === 'PULL') {
+    movement = identity.plane === 'HORIZONTAL' ? 'Remada' : 'Puxada';
+    if (identity.plane === 'HORIZONTAL' && identity.bodyPosition === 'INCLINED')
+      position = 'curvada';
+    if (
+      identity.bodyPosition === 'HANGING' &&
+      activity.equipment.includes('PULL_UP_BAR')
+    ) {
+      movement = 'Barra fixa';
+      position = '';
+    }
+  } else if (activity.movementPattern === 'OTHER') {
+    movement = identity.jointAction
+      ? `${actions[identity.jointAction]} de ${regions[identity.targetRegion]}`
+      : null;
+  } else if (activity.movementPattern === 'CORE') {
+    movement = 'Estabilização do tronco';
+  } else if (activity.movementPattern === 'MOBILITY') {
+    movement = `Mobilidade de ${regions[identity.targetRegion]}`;
+  }
+  if (!movement) return null;
+  const equipmentLabels = {
+    BARBELL: 'com barra',
+    DUMBBELL: 'com halteres',
+    KETTLEBELL: 'com kettlebell',
+    MACHINE: 'na máquina',
+    CABLE: 'no cabo',
+    RESISTANCE_BAND: 'com elástico',
+  } as const;
+  const equipment = activity.equipment
+    .flatMap((value) =>
+      value in equipmentLabels
+        ? [equipmentLabels[value as keyof typeof equipmentLabels]]
+        : [],
+    )
+    .join(' e ');
+  return [movement, position, equipment].filter(Boolean).join(' ');
 }
 const names = new Map([
   ['agachamento', 'Agachamento'],
@@ -212,23 +311,16 @@ export function projectWorkoutActivity(
       : (structuredIdentity(activity) ??
         supportedName ??
         patterns[activity.movementPattern]);
-  const instruction = projectCoachingCue(activity.instruction);
+  const instruction = projectCoachingCue(activity.instruction, activity);
   const alerts = activity.alerts.flatMap((text) => {
-    const safe = projectCoachingCue(text);
+    const safe = projectCoachingCue(text, activity);
     return safe ? [safe] : [];
   });
   const rawReps = 'repetitions' in activity ? activity.repetitions : null;
-  const repetitions =
-    rawReps &&
-    /^\d+(?:\s*[-–a]\s*\d+)?(?:\s*(?:repeticoes|reps))?(?:\s*por lado)?$/u.test(
-      normalize(rawReps),
-    )
-      ? rawReps
-      : null;
+  const repetitions = projectWorkoutRepetitions(rawReps);
   return Object.freeze({
     displayName,
-    instruction:
-      instruction ?? 'Mantenha o movimento confortável e pare se sentir dor.',
+    instruction: instruction ?? '',
     alerts: Object.freeze(alerts),
     repetitions,
     omittedUnverifiedText:
@@ -237,4 +329,14 @@ export function projectWorkoutActivity(
       alerts.length !== activity.alerts.length ||
       (rawReps !== null && repetitions === null),
   });
+}
+
+export function projectWorkoutRepetitions(value: string | null): string | null {
+  if (!value) return null;
+  const match =
+    /^(\d+(?:\s*[-–a]\s*\d+)?)(?:\s*(?:repeticoes|reps))?(?:\s*\(?((?:por|de cada|cada) (?:lado|perna|braco))\)?)?$/u.exec(
+      normalize(value),
+    );
+  if (!match) return null;
+  return `${match[1]}${match[2] ? ` ${match[2].replace(/^(?:de cada|cada)/u, 'por')}` : ''}`;
 }

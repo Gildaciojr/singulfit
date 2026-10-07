@@ -385,6 +385,7 @@ export class WorkoutPlanningEngineV2Service {
               'UNAUTHORIZED_EXACT_HEART_RATE',
               'PUBLIC_IDENTITY_REQUIRED',
               'PUBLIC_IDENTITY_INCOMPLETE',
+              'PUBLIC_REPETITIONS_REQUIRED',
               'WORK_STRUCTURE_INVALID',
               'SUBSTITUTION_FUNCTION_MISMATCH',
               'SESSION_DURATION_EXCEEDED',

@@ -72,10 +72,10 @@ describe('Fail-closed Workout public projection', () => {
       );
     }
     expect(projectWorkoutActivity(bench).displayName).toMatch(
-      /horizontal.*peitoral.*deitado/iu,
+      /supino.*reto.*halteres/iu,
     );
     expect(projectWorkoutActivity(overhead).displayName).toMatch(
-      /vertical.*ombros.*sentado/iu,
+      /desenvolvimento.*sentado.*halteres/iu,
     );
     expect(projectWorkoutActivity(bench).displayName).not.toBe(
       projectWorkoutActivity(overhead).displayName,
@@ -110,7 +110,9 @@ describe('Fail-closed Workout public projection', () => {
     expect(activities).toHaveLength(24);
     for (const activity of activities) {
       expect(activity.publicIdentity).toBeDefined();
-      expect(projectWorkoutActivity(activity).displayName).toContain(' para ');
+      expect(projectWorkoutActivity(activity).displayName).not.toMatch(
+        /plano sagital|plano frontal|plano transversal/u,
+      );
       expect(projectWorkoutActivity(activity).displayName).not.toMatch(
         /Movimento do bloco|Movimento de empurrar/u,
       );
@@ -146,7 +148,7 @@ describe('Fail-closed Workout public projection', () => {
       ],
     });
     expect(easy).toMatch(/Corrida.*|conversacional/su);
-    expect(interval).toContain('INTERVAL');
+    expect(interval).toContain('Intervalado');
     expect(interval).toContain('moderada');
     expect(interval).not.toBe(easy);
     const gym = formatter.formatSession({
@@ -192,7 +194,7 @@ describe('Fail-closed Workout public projection', () => {
       ],
     });
     expect(gym).toMatch(/Ginástica.*Puxada.*suspenso/su);
-    expect(lift).toMatch(/Levantamento olímpico.*Dobradiça.*em pé/su);
+    expect(lift).toMatch(/Levantamento olímpico.*Extensão de quadril.*em pé/su);
     expect(gym).not.toBe(lift);
   });
   it.each([

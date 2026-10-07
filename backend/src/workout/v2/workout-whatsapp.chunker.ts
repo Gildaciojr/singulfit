@@ -72,7 +72,7 @@ export function chunkWorkoutWhatsApp(
     chunks.map((chunk, index) =>
       index === 0
         ? chunk
-        : `➡️ *Continuação do seu treino — ${index + 1}/${chunks.length}*\n\n${chunk}`,
+        : `➡️ *Continuação do seu treino — mensagem ${index + 1} de ${chunks.length}*\n\n${chunk}`,
     ),
   );
 }

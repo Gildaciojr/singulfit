@@ -112,6 +112,33 @@ export function workoutWeeklyRecoveryIssues(
     ),
   }));
   const issues: WorkoutPlanValidationIssue[] = [];
+  // Quality signal only: keep AI-owned weekdays and never reject or repair on it.
+  if (
+    candidate.modality === 'GYM_STRENGTH' &&
+    available.status === 'CONFIRMED' &&
+    available.value.length >= 5 &&
+    sessions.length === 4 &&
+    sessions.every(
+      ({ session, day }) =>
+        day >= 0 &&
+        session.blocks.some((block) =>
+          block.activities.some(
+            (activity) =>
+              activity.kind === 'STRENGTH' && activity.intensity !== 'LIGHT',
+          ),
+        ),
+    ) &&
+    sessions.some(({ day }) =>
+      [1, 2, 3].every((offset) =>
+        sessions.some((item) => item.day === (day + offset) % 7),
+      ),
+    )
+  )
+    issues.push({
+      code: 'CONSECUTIVE_STRENGTH_DAYS',
+      severity: 'WARNING',
+      path: 'sessions',
+    });
   for (const current of sessions) {
     const next = sessions.find((item) => item.day === (current.day + 1) % 7);
     if (current.day < 0 || !next) continue;

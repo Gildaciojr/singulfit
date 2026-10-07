@@ -380,7 +380,7 @@ describe('Understanding → builder → engine → parser/validator → formatte
       const output = new WorkoutPlanV2Formatter()
         .format(result.output)
         .join('\n');
-      expect(output).toMatch(/agachamento.*quadril/iu);
+      expect(output).toMatch(/agachamento em pé/iu);
       expect(output).toContain(
         level === 'BEGINNER'
           ? 'peso corporal'

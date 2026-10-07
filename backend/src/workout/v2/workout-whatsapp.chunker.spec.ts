@@ -3,7 +3,10 @@ import { WorkoutPlanV2Formatter } from './workout-plan-v2.formatter';
 import { commercialWorkoutPlan } from './workout-commercial-quality.fixtures';
 
 const stripContinuation = (text: string) =>
-  text.replace(/^➡️ \*Continuação do seu treino — \d+\/\d+\*\n\n/u, '');
+  text.replace(
+    /^➡️ \*Continuação do seu treino — mensagem \d+ de \d+\*\n\n/u,
+    '',
+  );
 describe('Workout semantic WhatsApp chunks', () => {
   it('rejects an individually oversized prescription instead of orphaning its safety guidance', () => {
     const exercise = `*1. Agachamento*\n• Séries: 4\n\n💡 ${'Controle a execução. '.repeat(200)}\n\n⚠️ Interrompa se sentir dor.`;
@@ -29,7 +32,7 @@ describe('Workout semantic WhatsApp chunks', () => {
       .forEach((chunk, index) =>
         expect(chunk).toMatch(
           new RegExp(
-            `^➡️ \\*Continuação do seu treino — ${index + 2}/${chunks.length}\\*\\n\\n`,
+            `^➡️ \\*Continuação do seu treino — mensagem ${index + 2} de ${chunks.length}\\*\\n\\n`,
             'u',
           ),
         ),

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { WorkoutWeekday } from '@prisma/client';
 import { workoutCandidatePublicTextIssues } from './workout-public-text.policy';
+import { projectWorkoutRepetitions } from './workout-public-projection';
 import { workoutModalityPlanIssues } from './workout-modality-expertise.policy';
 import {
   estimateWorkoutSession,
@@ -179,6 +180,17 @@ export class WorkoutPlanV2Validator {
             block.blockKey,
           );
         for (const activity of block.activities) {
+          if (
+            validatePublicText &&
+            activity.kind === 'STRENGTH' &&
+            projectWorkoutRepetitions(activity.repetitions) === null
+          )
+            this.add(
+              issues,
+              'PUBLIC_REPETITIONS_REQUIRED',
+              'ERROR',
+              activity.activityKey,
+            );
           if (validatePublicText && activity.kind !== 'ENDURANCE') {
             if (!activity.publicIdentity)
               this.add(

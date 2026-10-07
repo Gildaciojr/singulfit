@@ -2783,7 +2783,10 @@ describe('CoachCommandService', () => {
     expect(
       parts
         .map((part) =>
-          part.replace(/^➡️ \*Continuação do seu treino — \d+\/\d+\*\n\n/u, ''),
+          part.replace(
+            /^➡️ \*Continuação do seu treino — mensagem \d+ de \d+\*\n\n/u,
+            '',
+          ),
         )
         .join('\n\n'),
     ).toBe(content);
@@ -2970,7 +2973,10 @@ describe('CoachCommandService', () => {
     expect(
       parts
         .map((part) =>
-          part.replace(/^➡️ \*Continuação do seu treino — \d+\/\d+\*\n\n/u, ''),
+          part.replace(
+            /^➡️ \*Continuação do seu treino — mensagem \d+ de \d+\*\n\n/u,
+            '',
+          ),
         )
         .join('\n\n'),
     ).toBe(content);
@@ -2982,7 +2988,10 @@ describe('CoachCommandService', () => {
     expect(
       longParts
         .map((part) =>
-          part.replace(/^➡️ \*Continuação do seu treino — \d+\/\d+\*\n\n/u, ''),
+          part.replace(
+            /^➡️ \*Continuação do seu treino — mensagem \d+ de \d+\*\n\n/u,
+            '',
+          ),
         )
         .join(' ')
         .replace(/\s+/gu, ' '),
