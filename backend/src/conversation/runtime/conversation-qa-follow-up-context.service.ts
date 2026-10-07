@@ -18,6 +18,7 @@ import {
   WORKOUT_PLANNING_V2_PROMPT,
   WORKOUT_PLANNING_V2_PROMPT_V7,
   WORKOUT_PLANNING_V2_PROMPT_V9,
+  WORKOUT_PLANNING_V2_PROMPT_V10,
 } from '../../workout/v2/workout-planning-v2.prompt.definition';
 import type { ConversationAnswerCandidate } from './conversation-qa.contract';
 import {
@@ -242,6 +243,7 @@ export class ConversationQAFollowUpContextService {
             name: {
               in: [
                 WORKOUT_PLANNING_V2_PROMPT.name,
+                WORKOUT_PLANNING_V2_PROMPT_V10.name,
                 WORKOUT_PLANNING_V2_PROMPT_V9.name,
                 WORKOUT_PLANNING_V2_PROMPT_V7.name,
               ],

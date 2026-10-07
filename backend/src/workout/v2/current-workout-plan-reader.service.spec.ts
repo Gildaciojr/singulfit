@@ -6,6 +6,7 @@ import {
   WORKOUT_PLANNING_V2_PROMPT,
   WORKOUT_PLANNING_V2_PROMPT_V7,
   WORKOUT_PLANNING_V2_PROMPT_V9,
+  WORKOUT_PLANNING_V2_PROMPT_V10,
 } from './workout-planning-v2.prompt.definition';
 
 function activity(key: string, name: string) {
@@ -168,6 +169,36 @@ function legacyRecord(options?: {
 }
 
 describe('CurrentWorkoutPlanReaderService', () => {
+  it.each([
+    WORKOUT_PLANNING_V2_PROMPT.name,
+    WORKOUT_PLANNING_V2_PROMPT_V10.name,
+    WORKOUT_PLANNING_V2_PROMPT_V9.name,
+  ])(
+    'keeps canonical plans from %s readable with the rollout filter and temporal ordering',
+    async (name) => {
+      const value = record();
+      const s = setup();
+      s.findFirst.mockImplementation(
+        (query: {
+          where: { aiJob: { promptVersion: { name: { in: string[] } } } };
+        }) =>
+          Promise.resolve(
+            query.where.aiJob.promptVersion.name.in.includes(name)
+              ? { ...value, aiJob: { ...value.aiJob, promptVersion: { name } } }
+              : null,
+          ),
+      );
+      expect((await s.service.read('user-id', true)).status).toBe('AVAILABLE');
+      expect(
+        await s.service.present(
+          'user-id',
+          'hoje',
+          new Date('2026-08-17T15:00:00Z'),
+          true,
+        ),
+      ).toContain('Agachamento');
+    },
+  );
   it('keeps canonical V7 plans readable after the isolated V8 rollout', async () => {
     const previous = record();
     const s = setup();
@@ -383,6 +414,7 @@ describe('CurrentWorkoutPlanReaderService', () => {
               name: {
                 in: [
                   WORKOUT_PLANNING_V2_PROMPT.name,
+                  WORKOUT_PLANNING_V2_PROMPT_V10.name,
                   WORKOUT_PLANNING_V2_PROMPT_V9.name,
                   WORKOUT_PLANNING_V2_PROMPT_V7.name,
                 ],

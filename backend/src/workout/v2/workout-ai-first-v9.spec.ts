@@ -27,6 +27,7 @@ import { WorkoutPlanningEngineV2Service } from './workout-planning-engine-v2.ser
 import {
   WORKOUT_PLANNING_V2_PROMPT,
   WORKOUT_PLANNING_V2_PROMPT_V9,
+  WORKOUT_PLANNING_V2_PROMPT_V10,
 } from './workout-planning-v2.prompt.definition';
 import {
   durableTextOperation,
@@ -57,7 +58,10 @@ interface StoredJob {
   promptVersionId: string;
   promptVersion:
     | typeof prompt
-    | (typeof WORKOUT_PLANNING_V2_PROMPT_V9 & { id: string; prompt: string });
+    | ((
+        | typeof WORKOUT_PLANNING_V2_PROMPT_V9
+        | typeof WORKOUT_PLANNING_V2_PROMPT_V10
+      ) & { id: string; prompt: string });
   providerResponseId?: string | null;
   status: AIJobStatus;
   attempts: number;
@@ -609,11 +613,20 @@ async function subject(
 }
 
 describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
-  async function seedHistoricalJob(s: Awaited<ReturnType<typeof subject>>) {
+  async function seedHistoricalJob(
+    s: Awaited<ReturnType<typeof subject>>,
+    version: 9 | 10 = 9,
+  ) {
+    const definition =
+      version === 9
+        ? WORKOUT_PLANNING_V2_PROMPT_V9
+        : WORKOUT_PLANNING_V2_PROMPT_V10;
     const prepared = s.engine.prepare({
       ...s.input,
       recognizedContext:
-        s.input.legacyV9RecognizedContext ?? s.input.recognizedContext,
+        version === 9
+          ? (s.input.legacyV9RecognizedContext ?? s.input.recognizedContext)
+          : s.input.recognizedContext,
     });
     function canonical(value: unknown): string {
       if (value === null || typeof value !== 'object')
@@ -640,20 +653,24 @@ describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
             noExactPower: true,
           },
         });
-    const operationKey = `workout-planning-v2:${createHash('sha256').update(`${s.input.userId}:9:ai-first-v9-bounded-repair-v1:${identity}`).digest('hex')}`;
+    const revision =
+      version === 9
+        ? 'ai-first-v9-bounded-repair-v1'
+        : 'ai-first-v10-weekday-v1';
+    const operationKey = `workout-planning-v2:${createHash('sha256').update(`${s.input.userId}:${version}:${revision}:${identity}`).digest('hex')}`;
     await s.ai.createStandaloneJob({
       userId: s.input.userId,
       type: AIJobType.WORKOUT,
-      promptName: WORKOUT_PLANNING_V2_PROMPT_V9.name,
+      promptName: definition.name,
       operationKey,
       usageEntitlementCode: 'WORKOUT_PLAN_GENERATION',
     });
     const job = s.job();
     if (!job) throw new Error('Missing historical job');
     job.promptVersion = {
-      ...WORKOUT_PLANNING_V2_PROMPT_V9,
-      id: 'v9',
-      prompt: WORKOUT_PLANNING_V2_PROMPT_V9.instructions,
+      ...definition,
+      id: `v${version}`,
+      prompt: definition.instructions,
     };
     return job;
   }
@@ -741,7 +758,7 @@ describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
     expect(s.gateway.startBackgroundTextResponse).not.toHaveBeenCalled();
     expect(s.jobStore.create).toHaveBeenCalledTimes(1);
   });
-  it('uses V10 for a new no-requestId operation when historical V9 is absent', async () => {
+  it('uses V11 for a new no-requestId operation when historical V10/V9 are absent', async () => {
     const s = await subject(
       'Monte Crossfit 3x, segunda, quarta e sexta',
       [plan('CROSSFIT', 3)],
@@ -752,10 +769,81 @@ describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
     );
     await s.engine.generateCandidate(s.input);
     expect(s.job()?.promptVersion).toMatchObject({
-      version: 10,
-      name: 'workout_planning_v2_v10',
+      version: 11,
+      name: 'workout_planning_v2_v11',
     });
     expect(s.reserved).toHaveBeenCalledTimes(1);
+  });
+  it.each([null, 'request-id'])(
+    'reuses the authentic V10 operation identity and completed replay with requestId=%s',
+    async (requestId) => {
+      const s = await subject(
+        'Monte musculação 3x',
+        [plan('GYM_STRENGTH', 3)],
+        {},
+        [],
+        [],
+        requestId,
+      );
+      const job = await seedHistoricalJob(s, 10);
+      const generated = await s.engine.generateCandidate(s.input);
+      expect(generated.aiJobId).toBe(job.id);
+      expect(generated.operationKey).toBe(job.operationKey);
+      expect(
+        s.gateway.startBackgroundTextResponse.mock.calls[0][0].instructions,
+      ).toBe(WORKOUT_PLANNING_V2_PROMPT_V10.instructions);
+      await s.complete(generated);
+      const replay = await s.engine.generateCandidate(s.input);
+      expect(replay.status).toBe('ALREADY_COMPLETED');
+      expect(replay.operationKey).toBe(job.operationKey);
+      expect(replay.aiJobId).toBe(job.id);
+      expect(job.promptVersion.name).toBe(WORKOUT_PLANNING_V2_PROMPT_V10.name);
+      expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(1);
+      expect(s.confirmed).toHaveBeenCalledTimes(1);
+      expect(s.reserved).toHaveBeenCalledTimes(1);
+      expect(s.jobStore.create).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each([null, 'request-id'])(
+    'recovers the same PROCESSING V10 provider response without a duplicate call with requestId=%s',
+    async (requestId) => {
+      const s = await subject(
+        'Monte musculação 3x',
+        [plan('GYM_STRENGTH', 3)],
+        {},
+        [],
+        [],
+        requestId,
+      );
+      const job = await seedHistoricalJob(s, 10);
+      s.gateway.retrieveTextResponse.mockRejectedValueOnce(
+        new Error('Lost V10 poll ACK'),
+      );
+      await expect(s.engine.generateCandidate(s.input)).rejects.toBeInstanceOf(
+        DurableTextPendingError,
+      );
+      expect(job.status).toBe('PROCESSING');
+      const recovered = await s.engine.generateCandidate(s.input);
+      expect(recovered.aiJobId).toBe(job.id);
+      expect(recovered.operationKey).toBe(job.operationKey);
+      await s.complete(recovered);
+      expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(1);
+      expect(s.reserved).toHaveBeenCalledTimes(1);
+      expect(s.confirmed).toHaveBeenCalledTimes(1);
+      expect(s.jobStore.create).toHaveBeenCalledTimes(1);
+    },
+  );
+  it('keeps a matching FAILED V10 terminal instead of creating V11', async () => {
+    const s = await subject('Monte musculação 3x', []);
+    const job = await seedHistoricalJob(s, 10);
+    job.status = AIJobStatus.FAILED;
+    await expect(s.engine.generateCandidate(s.input)).rejects.toThrow(
+      'já falhou',
+    );
+    expect(s.gateway.startBackgroundTextResponse).not.toHaveBeenCalled();
+    expect(s.reserved).toHaveBeenCalledTimes(1);
+    expect(s.confirmed).not.toHaveBeenCalled();
+    expect(s.jobStore.create).toHaveBeenCalledTimes(1);
   });
   it.each(['PUBLIC_IDENTITY_REQUIRED', 'PUBLIC_IDENTITY_INCOMPLETE'] as const)(
     'repairs %s once through the durable provider with accounting once',

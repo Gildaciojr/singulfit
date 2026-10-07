@@ -40,6 +40,7 @@ import { WorkoutPlanningStrategyService } from './workout-planning-strategy.serv
 import {
   WORKOUT_PLANNING_V2_PROMPT,
   WORKOUT_PLANNING_V2_PROMPT_V9,
+  WORKOUT_PLANNING_V2_PROMPT_V10,
   workoutSchemaForAuthorizedEquipment,
 } from './workout-planning-v2.prompt.definition';
 
@@ -202,13 +203,20 @@ export class WorkoutPlanningEngineV2Service {
           strategy: legacyPrepared.strategy,
         });
     const legacyKey = `workout-planning-v2:${createHash('sha256').update(`${input.userId}:9:ai-first-v9-bounded-repair-v1:${legacyIdentity}`).digest('hex')}`;
-    const legacy =
+    const v10Key = `workout-planning-v2:${createHash('sha256').update(`${input.userId}:10:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${identity}`).digest('hex')}`;
+    const v10 =
       typeof this.aiService.findWorkoutOperation === 'function'
+        ? await this.aiService.findWorkoutOperation(input.userId, v10Key)
+        : null;
+    const legacy =
+      !v10 && typeof this.aiService.findWorkoutOperation === 'function'
         ? await this.aiService.findWorkoutOperation(input.userId, legacyKey)
         : null;
-    const definition = legacy
-      ? WORKOUT_PLANNING_V2_PROMPT_V9
-      : WORKOUT_PLANNING_V2_PROMPT;
+    const definition = v10
+      ? WORKOUT_PLANNING_V2_PROMPT_V10
+      : legacy
+        ? WORKOUT_PLANNING_V2_PROMPT_V9
+        : WORKOUT_PLANNING_V2_PROMPT;
     if (legacy) {
       prepared = legacyPrepared;
       if (!prepared.context || !prepared.strategy || !prepared.safety)
@@ -227,10 +235,13 @@ export class WorkoutPlanningEngineV2Service {
       };
       canonical = this.canonicalJson(payload);
     }
-    const operationKey = legacy
-      ? legacyKey
-      : `workout-planning-v2:${createHash('sha256').update(`${input.userId}:${definition.version}:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${identity}`).digest('hex')}`;
+    const operationKey = v10
+      ? v10Key
+      : legacy
+        ? legacyKey
+        : `workout-planning-v2:${createHash('sha256').update(`${input.userId}:${definition.version}:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${identity}`).digest('hex')}`;
     const job =
+      v10 ??
       legacy ??
       (await this.aiService.createStandaloneJob({
         userId: input.userId,

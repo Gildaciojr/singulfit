@@ -10,7 +10,7 @@ import {
   qualitySession,
   strength,
 } from './workout-quality.fixtures';
-import { WORKOUT_PLANNING_V2_PROMPT_V10 } from './workout-planning-v2.prompt.definition';
+import { WORKOUT_PLANNING_V2_PROMPT } from './workout-planning-v2.prompt.definition';
 import { chunkWorkoutWhatsApp } from './workout-whatsapp.chunker';
 import type { WorkoutBlockWork } from './workout-plan-v2.contract';
 
@@ -213,10 +213,10 @@ describe('Production GYM commercial presentation hotfix', () => {
       true,
     );
     expect(validation.status).not.toBe('INVALID');
-    expect(WORKOUT_PLANNING_V2_PROMPT_V10.instructions).toContain(
+    expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(
       'quatro dias consecutivos de força exigem justificativa técnica forte',
     );
-    expect(WORKOUT_PLANNING_V2_PROMPT_V10.instructions).toContain(
+    expect(WORKOUT_PLANNING_V2_PROMPT.instructions).toContain(
       'volume semanal coerente',
     );
   });
