@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  Optional,
-  ConflictException,
-} from '@nestjs/common';
+import { Injectable, Logger, ConflictException } from '@nestjs/common';
 import {
   AIJobStatus,
   MealAnalysisStatus,
@@ -17,6 +12,7 @@ import { UsageService } from '../usage/usage.service';
 import {
   durableTextOperation,
   DurableTextPendingError,
+  DURABLE_TEXT_REVISION,
 } from './durable-text-operation.contract';
 import { AIService, AITextOperationError } from './ai.service';
 
@@ -31,7 +27,7 @@ export class AIRecoveryService {
     private readonly prisma: PrismaService,
     private readonly usageService: UsageService,
     private readonly eventService: EventService,
-    @Optional() private readonly aiService: AIService | undefined = undefined,
+    private readonly aiService: AIService,
   ) {}
 
   async recover(at = new Date()): Promise<number> {
@@ -45,6 +41,23 @@ export class AIRecoveryService {
       const jobs = await this.prisma.aIJob.findMany({
         where: {
           OR: [
+            {
+              status: AIJobStatus.PENDING,
+              AND: [
+                {
+                  result: {
+                    path: ['durableTextOperation', 'revision'],
+                    equals: DURABLE_TEXT_REVISION,
+                  },
+                },
+                {
+                  result: {
+                    path: ['durableTextOperation', 'deadlineAt'],
+                    lte: at.toISOString(),
+                  },
+                },
+              ],
+            },
             {
               status: AIJobStatus.PROCESSING,
               leaseExpiresAt: {
@@ -96,10 +109,7 @@ export class AIRecoveryService {
               leaseExpiresAt: null,
             },
           });
-          if (
-            this.aiService &&
-            Date.parse(durable.deadlineAt) <= at.getTime()
-          ) {
+          if (Date.parse(durable.deadlineAt) <= at.getTime()) {
             try {
               const response = await this.aiService.runTextJob(job.id, {
                 input: durable.requestInput,
