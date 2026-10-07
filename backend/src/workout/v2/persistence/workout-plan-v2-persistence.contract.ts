@@ -13,6 +13,7 @@ export interface WorkoutPlanV2Ownership {
 
 export interface WorkoutExecutionContextV2 {
   readonly correlationId: string;
+  readonly sourceMessageId?: string;
   readonly traceId?: string;
 }
 

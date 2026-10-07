@@ -9,6 +9,8 @@ import type {
 } from './workout-application-execution.contract';
 import type { WorkoutPlanningValue } from '../workout-planning-context.contract';
 import type { PreparedWorkoutPlanningV2 } from '../workout-planning-generation.contract';
+import { isRetryableWorkoutPersistenceError } from '../persistence/workout-persistence-retry.policy';
+import { DurableTextPendingError } from '../../../ai/durable-text-operation.contract';
 
 @Injectable()
 export class WorkoutApplicationExecutorService {
@@ -93,6 +95,7 @@ export class WorkoutApplicationExecutorService {
 
   async execute(
     input: WorkoutApplicationExecutionInputV2,
+    options: { readonly pollWindowMs?: number } = {},
   ): Promise<WorkoutApplicationExecutionResultV2> {
     if (input.ownership.userId !== input.generationInput.userId) {
       throw new ConflictException(
@@ -105,6 +108,7 @@ export class WorkoutApplicationExecutorService {
     const generation = await this.engine.generateCandidate(
       input.generationInput,
       prepared,
+      { applicationInput: input, pollWindowMs: options.pollWindowMs },
     );
     const persisted = await this.persistence
       .persist({
@@ -127,6 +131,14 @@ export class WorkoutApplicationExecutorService {
               ),
       })
       .catch(async (error: unknown) => {
+        if (isRetryableWorkoutPersistenceError(error)) {
+          await this.engine.deferCandidatePersistence(generation);
+          // Interactive requests suppress failure; background requests consume
+          // the existing bounded Outbox retry budget instead of polling deferral.
+          if (options.pollWindowMs === undefined)
+            throw new DurableTextPendingError();
+          throw error;
+        }
         await this.engine.failCandidate(generation, error);
         throw error;
       });

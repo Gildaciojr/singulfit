@@ -1,6 +1,8 @@
 import { Injectable, Logger, ConflictException } from '@nestjs/common';
 import {
   AIJobStatus,
+  AIJobType,
+  OutboxStatus,
   MealAnalysisStatus,
   Severity,
   UsageEventStatus,
@@ -15,6 +17,7 @@ import {
   DURABLE_TEXT_REVISION,
 } from './durable-text-operation.contract';
 import { AIService, AITextOperationError } from './ai.service';
+import { workoutDurableContinuation } from '../workout/v2/execution/workout-durable-continuation.contract';
 
 const RECOVERY_BATCH_SIZE = 100;
 
@@ -41,6 +44,14 @@ export class AIRecoveryService {
       const jobs = await this.prisma.aIJob.findMany({
         where: {
           OR: [
+            {
+              status: AIJobStatus.PENDING,
+              type: AIJobType.WORKOUT,
+              result: {
+                path: ['durableTextOperation', 'revision'],
+                equals: DURABLE_TEXT_REVISION,
+              },
+            },
             {
               status: AIJobStatus.PENDING,
               AND: [
@@ -82,6 +93,7 @@ export class AIRecoveryService {
         select: {
           id: true,
           result: true,
+          type: true,
         },
         orderBy: {
           createdAt: 'asc',
@@ -109,6 +121,15 @@ export class AIRecoveryService {
               leaseExpiresAt: null,
             },
           });
+          if (
+            job.type === AIJobType.WORKOUT &&
+            workoutDurableContinuation(job.result)
+          ) {
+            const event = await this.aiService.enqueueWorkoutCompletion(job.id);
+            if (event?.status === OutboxStatus.DEAD_LETTER)
+              await this.failExhaustedWorkout(job.id, event.id);
+            continue;
+          }
           if (Date.parse(durable.deadlineAt) <= at.getTime()) {
             try {
               const response = await this.aiService.runTextJob(job.id, {
@@ -154,6 +175,34 @@ export class AIRecoveryService {
     } finally {
       this.running = false;
     }
+  }
+
+  private async failExhaustedWorkout(
+    aiJobId: string,
+    eventId: string,
+  ): Promise<void> {
+    await this.prisma.$transaction(async (transaction) => {
+      const event = await transaction.outboxEvent.findUnique({
+        where: { id: eventId },
+      });
+      if (event?.status !== OutboxStatus.DEAD_LETTER) return;
+      const changed = await transaction.aIJob.updateMany({
+        where: {
+          id: aiJobId,
+          type: AIJobType.WORKOUT,
+          status: AIJobStatus.PENDING,
+        },
+        data: {
+          status: AIJobStatus.FAILED,
+          startedAt: new Date(),
+          failedAt: new Date(),
+          leaseExpiresAt: null,
+          error: 'Workout continuation exhausted the Outbox retry policy',
+        },
+      });
+      if (changed.count === 1)
+        await this.usageService.reverseInTransaction(transaction, aiJobId);
+    });
   }
 
   private async recoverJob(aiJobId: string, at: Date): Promise<void> {

@@ -1,4 +1,13 @@
 import { ConfigService } from '@nestjs/config';
+import { WorkoutApplicationExecutorService } from './execution/workout-application-executor.service';
+import { WorkoutAsyncCompletionService } from '../../automation/workout-async-completion.service';
+import { CoachPlanningExecutionService } from '../../automation/coach-planning-execution.service';
+import { WorkoutPlanV2Formatter } from './workout-plan-v2.formatter';
+import { EventHandlerRegistry } from '../../event-bus/event-handler.registry';
+import { OutboxDispatcherService } from '../../event-bus/outbox-dispatcher.service';
+import { INTERNAL_EVENT } from '../../event-bus/event-bus.constants';
+import { AIRecoveryService } from '../../ai/ai-recovery.service';
+import { OutboxEvent, OutboxStatus } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { AIJobStatus, AIJobType, FitnessGoal, Prisma } from '@prisma/client';
 import { WorkoutPlanV2PersistenceService } from './persistence/workout-plan-v2-persistence.service';
@@ -372,6 +381,29 @@ async function subject(
         data: Prisma.AIJobUpdateManyMutationInput;
       }) => {
         if (
+          job &&
+          Array.isArray(query.where.OR) &&
+          !query.where.OR.some((branch) => {
+            if (branch.status === AIJobStatus.PENDING)
+              return job?.status === AIJobStatus.PENDING;
+            if (
+              branch.status !== AIJobStatus.PROCESSING ||
+              job?.status !== AIJobStatus.PROCESSING ||
+              !job.leaseExpiresAt
+            )
+              return false;
+            const lease = branch.leaseExpiresAt;
+            return (
+              !!lease &&
+              typeof lease === 'object' &&
+              'lte' in lease &&
+              lease.lte instanceof Date &&
+              job.leaseExpiresAt <= lease.lte
+            );
+          })
+        )
+          return Promise.resolve({ count: 0 });
+        if (
           !job ||
           (query.where.id !== job.id &&
             !(
@@ -561,7 +593,7 @@ async function subject(
       reverseInTransaction: reversed,
     } as never,
     config,
-    { publish: jest.fn() } as never,
+    { publish: jest.fn().mockResolvedValue({}) } as never,
   );
   const engine = new WorkoutPlanningEngineV2Service(
     new WorkoutArtifactResolverService(),
@@ -613,6 +645,369 @@ async function subject(
 }
 
 describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
+  it.each([
+    { repair: false, expired: false, terminal: false },
+    { repair: true, expired: false, terminal: false },
+    { repair: false, expired: true, terminal: false },
+    { repair: false, expired: true, terminal: true },
+    { repair: false, expired: false, terminal: false, transient: true },
+    {
+      repair: false,
+      expired: false,
+      terminal: false,
+      persistenceTerminal: true,
+    },
+    {
+      repair: false,
+      expired: false,
+      terminal: false,
+      transient: true,
+      synchronous: true,
+    },
+  ])(
+    'completes the same asynchronous V11 request and delivers once after restart: %j',
+    async ({
+      repair,
+      expired,
+      terminal,
+      transient = false,
+      synchronous = false,
+      persistenceTerminal = false,
+    }) => {
+      const s = await subject(
+        'Monte um treino de Crossfit 4x',
+        repair
+          ? [plan('CROSSFIT', 4, true), plan('CROSSFIT', 4)]
+          : [plan('CROSSFIT', 4)],
+      );
+      let persisted: PersistedWorkoutPlanRecord | null = null;
+      const create = jest.fn(
+        (
+          _tx: Prisma.TransactionClient,
+          record: CreateWorkoutPlanV2Record,
+        ): Promise<PersistedWorkoutPlanRecord> => {
+          persisted = {
+            ...record,
+            id: 'persisted-plan',
+            createdAt: record.generatedAt,
+            updatedAt: record.generatedAt,
+            days: record.days.map((day) => ({
+              ...day,
+              id: `day-${day.dayNumber}`,
+              workoutPlanId: 'persisted-plan',
+              exercises: day.exercises.map((exercise, index) => ({
+                ...exercise,
+                id: `exercise-${day.dayNumber}-${index}`,
+                workoutDayId: `day-${day.dayNumber}`,
+              })),
+            })),
+          };
+          return Promise.resolve(persisted);
+        },
+      );
+      const persistence = new WorkoutPlanV2PersistenceService(
+        {
+          inTransaction: <T>(
+            operation: (transaction: Prisma.TransactionClient) => Promise<T>,
+          ): Promise<T> =>
+            s.prisma.$transaction((tx) => operation(tx as never)) as Promise<T>,
+          acquireUserLock: () => Promise.resolve(),
+          findOwnership: () =>
+            Promise.resolve({
+              profile: { goal: FitnessGoal.MAINTENANCE },
+              aiJob: s.job(),
+            }),
+          findByAIJobId: () => Promise.resolve(persisted),
+          archiveActive: () => Promise.resolve(),
+          create,
+        },
+        new WorkoutPlanV2PersistenceValidator(),
+        { recordInTransaction: jest.fn() } as never,
+        s.ai,
+      );
+      const executor = new WorkoutApplicationExecutorService(
+        s.engine,
+        persistence,
+      );
+      const failCandidate = jest.spyOn(s.engine, 'failCandidate');
+      const transientError = new Prisma.PrismaClientKnownRequestError(
+        'Database unavailable',
+        { code: 'P1001', clientVersion: '5.22.0' },
+      );
+      if (synchronous)
+        jest
+          .spyOn(persistence, 'persist')
+          .mockRejectedValueOnce(transientError);
+      const applicationInput = {
+        generationInput: s.input,
+        ownership: { userId: s.input.userId, profileId: 'profile' },
+        executionContext: {
+          correlationId: 'correlation-id',
+          sourceMessageId: 'collector-answer-id',
+        },
+      };
+      const retrieve = s.gateway.retrieveTextResponse.getMockImplementation();
+      if (!retrieve) throw new Error('Missing provider GET');
+      if (!synchronous)
+        s.gateway.retrieveTextResponse.mockResolvedValueOnce({
+          responseId: 'response-0',
+          status: 'in_progress',
+        });
+      const enqueue = jest.spyOn(s.ai, 'enqueueWorkoutCompletion');
+      if (synchronous) {
+        const coach = new CoachPlanningExecutionService(
+          {
+            dispatchStructured: () => executor.execute(applicationInput),
+          } as never,
+          { build: () => Promise.resolve(s.input.snapshot) } as never,
+          {
+            adapt: () => ({
+              recognizedIntent: 'WORKOUT_PLAN_REQUEST',
+              planTarget: 'WORKOUT',
+              acquisitionIntent: {},
+            }),
+          } as never,
+          { decide: () => ({ shouldAsk: false }) } as never,
+          { plan: () => s.input.decision } as never,
+        );
+        const response = await coach.executeStructured(
+          s.input.userId,
+          'WORKOUT',
+          {
+            conversationId: 'conversation-id',
+            messageId: 'collector-answer-id',
+            correlationId: 'correlation-id',
+            referenceDate: s.input.referenceDate,
+          },
+        );
+        expect(response.responseRequired).toBe(false);
+        expect(response.content).toBe('');
+        expect(response.dispatch.fallbackApplied).toBe(false);
+      } else {
+        await expect(
+          executor.execute(applicationInput, { pollWindowMs: 0 }),
+        ).rejects.toBeInstanceOf(DurableTextPendingError);
+      }
+      expect(s.job()?.status).toBe(AIJobStatus.PROCESSING);
+      expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(1);
+      expect(enqueue).toHaveBeenCalledWith(s.job()?.id);
+      expect(create).not.toHaveBeenCalled();
+      expect(failCandidate).not.toHaveBeenCalled();
+      const originalJobId = s.job()?.id;
+      if (synchronous) {
+        expect(s.reversed).not.toHaveBeenCalled();
+        const job = s.job();
+        if (!job) throw new Error('Expected job');
+        job.leaseExpiresAt = new Date(0);
+      }
+      if (expired) {
+        const job = s.job();
+        const state = durableTextOperation(job?.result);
+        if (!job || !state) throw new Error('Expected durable state');
+        state.deadlineAt = new Date(Date.now() - 1).toISOString();
+        job.result = JSON.parse(
+          JSON.stringify({ durableTextOperation: state }),
+        ) as Prisma.JsonValue;
+      }
+      const deliveries = new Map<string, string>();
+      const commands = {
+        deliverWorkoutCompletion: jest.fn(
+          (input: { aiJobId: string; content: string }) => {
+            if (!deliveries.has(input.aiJobId))
+              deliveries.set(input.aiJobId, input.content);
+            return Promise.resolve();
+          },
+        ),
+      };
+      const prisma = {
+        ...s.prisma,
+        message: {
+          findFirst: jest.fn().mockResolvedValue({ id: 'request-id' }),
+        },
+        aIJob: {
+          ...s.jobStore,
+          findMany: jest.fn(() => Promise.resolve([s.job()])),
+        },
+      };
+      const now = new Date();
+      const recovery = new AIRecoveryService(
+        prisma as never,
+        {} as never,
+        {} as never,
+        s.ai,
+      );
+      await expect(recovery.recover(now)).resolves.toBe(1);
+      expect(s.gateway.retrieveTextResponse).toHaveBeenCalledTimes(1);
+      const event = {
+        id: 'completion',
+        eventType: INTERNAL_EVENT.WORKOUT_ASYNC_COMPLETION,
+        aggregateType: 'AI_JOB',
+        aggregateId: s.job()!.id,
+        payload: { aiJobId: s.job()!.id },
+        status: OutboxStatus.PROCESSING,
+        attempts: 1,
+        availableAt: now,
+        claimedAt: now,
+        processedAt: null,
+        failedAt: null,
+        lastError: null,
+        createdAt: now,
+        updatedAt: now,
+      } satisfies OutboxEvent;
+      const resume = () =>
+        new WorkoutAsyncCompletionService(
+          prisma as never,
+          executor,
+          new WorkoutPlanV2Formatter(),
+          commands as never,
+          new EventHandlerRegistry(),
+        );
+      if (!synchronous) {
+        s.gateway.retrieveTextResponse.mockResolvedValueOnce({
+          responseId: 'response-0',
+          status: 'in_progress',
+        });
+        await expect(resume().complete(event)).rejects.toBeInstanceOf(
+          DurableTextPendingError,
+        );
+      }
+      expect(deliveries.size).toBe(0);
+      expect(create).not.toHaveBeenCalled();
+      if (terminal) {
+        s.gateway.retrieveTextResponse.mockResolvedValueOnce({
+          responseId: 'response-0',
+          status: 'cancelled',
+        });
+        await resume().complete(event);
+        await resume().complete(event);
+        expect(s.job()?.status).toBe(AIJobStatus.FAILED);
+        expect(create).not.toHaveBeenCalled();
+        expect(deliveries.size).toBe(1);
+        expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(1);
+        expect(s.reserved).toHaveBeenCalledTimes(1);
+        expect(s.reversed).toHaveBeenCalledTimes(1);
+        expect(s.confirmed).not.toHaveBeenCalled();
+        return;
+      }
+      s.gateway.retrieveTextResponse.mockImplementation(retrieve);
+      if (persistenceTerminal) {
+        jest.spyOn(persistence, 'persist').mockRejectedValueOnce(
+          new Prisma.PrismaClientKnownRequestError('Invalid foreign key', {
+            code: 'P2003',
+            clientVersion: '5.22.0',
+          }),
+        );
+        await resume().complete(event);
+        await resume().complete(event);
+        expect(failCandidate).toHaveBeenCalledTimes(1);
+        expect(s.job()?.status).toBe(AIJobStatus.FAILED);
+        expect(s.job()?.startedAt).toBeInstanceOf(Date);
+        expect(s.job()?.leaseExpiresAt).toBeNull();
+        expect(
+          durableTextOperation(s.job()?.result)?.attempts[0].responseId,
+        ).toBe('response-0');
+        expect(create).not.toHaveBeenCalled();
+        expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(1);
+        expect(deliveries.size).toBe(1);
+        expect(s.usageRows).toHaveLength(1);
+        expect(s.reserved).toHaveBeenCalledTimes(1);
+        expect(s.reversed).toHaveBeenCalledTimes(1);
+        expect(s.confirmed).not.toHaveBeenCalled();
+        return;
+      }
+      if (repair) {
+        s.gateway.retrieveTextResponse
+          .mockImplementationOnce(retrieve)
+          .mockResolvedValueOnce({
+            responseId: 'response-1',
+            status: 'in_progress',
+          });
+        await expect(resume().complete(event)).rejects.toBeInstanceOf(
+          DurableTextPendingError,
+        );
+        expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(2);
+        expect(deliveries.size).toBe(0);
+      }
+      if (transient) {
+        const registry = new EventHandlerRegistry();
+        registry.register(INTERNAL_EVENT.WORKOUT_ASYNC_COMPLETION, (e) =>
+          resume().complete(e),
+        );
+        const outbox = {
+          claimBatch: jest.fn().mockResolvedValue([event]),
+          markFailed: jest.fn().mockResolvedValue(true),
+          markProcessed: jest.fn().mockResolvedValue(true),
+          deferWorkoutCompletion: jest.fn(),
+        };
+        const dispatcher = new OutboxDispatcherService(
+          outbox as never,
+          registry,
+        );
+        if (!synchronous) {
+          jest
+            .spyOn(persistence, 'persist')
+            .mockRejectedValueOnce(transientError);
+          await dispatcher.drain();
+          expect(outbox.markFailed).toHaveBeenCalledWith(event, transientError);
+          expect(outbox.markProcessed).not.toHaveBeenCalled();
+          expect(outbox.deferWorkoutCompletion).not.toHaveBeenCalled();
+          expect(failCandidate).not.toHaveBeenCalled();
+          expect(s.job()?.status).toBe(AIJobStatus.PROCESSING);
+          expect(s.reversed).not.toHaveBeenCalled();
+          expect(create).not.toHaveBeenCalled();
+          const job = s.job();
+          if (!job) throw new Error('Expected job');
+          job.leaseExpiresAt = new Date(0);
+        }
+        await dispatcher.drain();
+        expect(outbox.markProcessed).toHaveBeenCalledTimes(1);
+        expect(s.job()?.id).toBe(originalJobId);
+        expect(s.jobStore.create).toHaveBeenCalledTimes(1);
+        expect(s.job()?.providerResponseId).toBe('response-0');
+        expect(deliveries.size).toBe(1);
+      } else {
+        commands.deliverWorkoutCompletion.mockRejectedValueOnce(
+          new Error('Outbound queue unavailable'),
+        );
+        await expect(resume().complete(event)).rejects.toThrow(
+          'Outbound queue unavailable',
+        );
+        expect(s.job()?.status).toBe(AIJobStatus.COMPLETED);
+        expect(create).toHaveBeenCalledTimes(1);
+        expect(deliveries.size).toBe(0);
+      }
+      const concurrent = await Promise.allSettled([
+        resume().complete(event),
+        resume().complete(event),
+      ]);
+      expect(concurrent.some((result) => result.status === 'fulfilled')).toBe(
+        true,
+      );
+      for (const result of concurrent)
+        if (result.status === 'rejected')
+          expect(result.reason).toBeInstanceOf(DurableTextPendingError);
+      await resume().complete(event);
+      expect(s.job()?.status).toBe(AIJobStatus.COMPLETED);
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(deliveries.size).toBe(1);
+      expect(commands.deliverWorkoutCompletion).toHaveBeenLastCalledWith(
+        expect.objectContaining({ messageId: 'collector-answer-id' }),
+      );
+      expect([...deliveries.values()][0]).not.toContain('Tive uma falha');
+      expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(
+        repair ? 2 : 1,
+      );
+      expect(s.gateway.retrieveTextResponse).toHaveBeenCalledWith('response-0');
+      if (repair)
+        expect(s.gateway.retrieveTextResponse).toHaveBeenCalledWith(
+          'response-1',
+        );
+      expect(s.reserved).toHaveBeenCalledTimes(1);
+      expect(s.confirmed).toHaveBeenCalledTimes(1);
+      expect(s.usageRows).toHaveLength(1);
+      expect(s.reversed).not.toHaveBeenCalled();
+    },
+  );
   async function seedHistoricalJob(
     s: Awaited<ReturnType<typeof subject>>,
     version: 9 | 10 = 9,

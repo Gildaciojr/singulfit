@@ -1,4 +1,10 @@
-import { AIJobStatus, MealAnalysisStatus, Prisma } from '@prisma/client';
+import {
+  AIJobStatus,
+  AIJobType,
+  MealAnalysisStatus,
+  Prisma,
+  OutboxStatus,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
 import { EventService } from '../observability/event.service';
@@ -9,6 +15,182 @@ import { Test } from '@nestjs/testing';
 import { DURABLE_TEXT_REVISION } from './durable-text-operation.contract';
 
 describe('AIRecoveryService', () => {
+  it.each([false, true])(
+    'settles exhausted Workout Outbox once without interfering with an active claim=%s',
+    async (concurrentlyClaimed) => {
+      const result = {
+        durableTextOperation: {
+          revision: DURABLE_TEXT_REVISION,
+          requestInput: '{}',
+          executionContext: JSON.stringify({
+            applicationInput: {
+              ownership: { userId: 'user', profileId: 'profile' },
+              generationInput: {
+                userId: 'user',
+                referenceDate: new Date().toISOString(),
+                currentRequest: { requestId: 'message' },
+                snapshot: {},
+                recognizedContext: {},
+                decision: {},
+              },
+            },
+          }),
+          deadlineAt: new Date().toISOString(),
+          attempts: [
+            {
+              attemptKey: 'attempt',
+              phase: 'COMPLETED',
+              responseId: 'response',
+              usageRecorded: true,
+              response: null,
+            },
+          ],
+          initialValidated: true,
+          repairInput: null,
+          accountingIssue: null,
+        },
+      };
+      const before = JSON.stringify(result);
+      const event = { id: 'completion', status: OutboxStatus.DEAD_LETTER };
+      const transaction = {
+        outboxEvent: { findUnique: jest.fn().mockResolvedValue(event) },
+        aIJob: {
+          updateMany: jest
+            .fn()
+            .mockResolvedValueOnce({ count: concurrentlyClaimed ? 0 : 1 })
+            .mockResolvedValue({ count: 0 }),
+        },
+      };
+      const prisma = {
+        aIJob: {
+          findMany: jest
+            .fn()
+            .mockResolvedValue([
+              { id: 'job', type: AIJobType.WORKOUT, result },
+            ]),
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
+        $transaction: (operation: (tx: typeof transaction) => Promise<void>) =>
+          operation(transaction),
+      };
+      const usage = { reverseInTransaction: jest.fn() };
+      const ai = {
+        enqueueWorkoutCompletion: jest.fn().mockResolvedValue(event),
+        runTextJob: jest.fn(),
+        failJob: jest.fn(),
+      };
+      const service = new AIRecoveryService(
+        prisma as never,
+        usage as never,
+        {} as never,
+        ai as never,
+      );
+      await service.recover();
+      await service.recover();
+      expect(transaction.aIJob.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'job',
+          type: AIJobType.WORKOUT,
+          status: AIJobStatus.PENDING,
+        },
+        data: {
+          status: AIJobStatus.FAILED,
+          startedAt: expect.any(Date),
+          failedAt: expect.any(Date),
+          leaseExpiresAt: null,
+          error: 'Workout continuation exhausted the Outbox retry policy',
+        },
+      });
+      expect(usage.reverseInTransaction).toHaveBeenCalledTimes(
+        concurrentlyClaimed ? 0 : 1,
+      );
+      expect(ai.runTextJob).not.toHaveBeenCalled();
+      expect(ai.failJob).not.toHaveBeenCalled();
+      expect(JSON.stringify(result)).toBe(before);
+    },
+  );
+
+  it.each([false, true])(
+    'delegates durable Workout PENDING to the full pipeline before/after deadline=%s',
+    async (expired) => {
+      const now = new Date();
+      const result = {
+        durableTextOperation: {
+          revision: DURABLE_TEXT_REVISION,
+          requestInput: '{}',
+          executionContext: JSON.stringify({
+            applicationInput: {
+              ownership: { userId: 'user-id', profileId: 'profile-id' },
+              generationInput: {
+                userId: 'user-id',
+                currentRequest: { requestId: 'message-id' },
+                referenceDate: now.toISOString(),
+                snapshot: {},
+                recognizedContext: {},
+                decision: {},
+              },
+            },
+          }),
+          deadlineAt: new Date(
+            now.getTime() + (expired ? -1 : 60_000),
+          ).toISOString(),
+          attempts: [
+            {
+              attemptKey: 'attempt-1',
+              phase: 'POLLING',
+              responseId: 'response-1',
+              usageRecorded: false,
+              response: null,
+            },
+          ],
+          repairInput: null,
+          initialValidated: false,
+          accountingIssue: null,
+        },
+      };
+      const prisma = {
+        aIJob: {
+          findMany: jest
+            .fn()
+            .mockResolvedValue([
+              { id: 'job-id', type: AIJobType.WORKOUT, result },
+            ]),
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
+      };
+      const ai = {
+        enqueueWorkoutCompletion: jest.fn().mockResolvedValue({}),
+        runTextJob: jest.fn(),
+        failJob: jest.fn(),
+      };
+      const recovery = new AIRecoveryService(
+        prisma as unknown as PrismaService,
+        {} as UsageService,
+        {} as EventService,
+        ai as unknown as AIService,
+      );
+      await expect(recovery.recover(now)).resolves.toBe(1);
+      expect(prisma.aIJob.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            OR: expect.arrayContaining([
+              {
+                status: AIJobStatus.PENDING,
+                type: AIJobType.WORKOUT,
+                result: {
+                  path: ['durableTextOperation', 'revision'],
+                  equals: DURABLE_TEXT_REVISION,
+                },
+              },
+            ]),
+          },
+        }),
+      );
+      expect(ai.enqueueWorkoutCompletion).toHaveBeenCalledWith('job-id');
+      expect(ai.runTextJob).not.toHaveBeenCalled();
+      expect(ai.failJob).not.toHaveBeenCalled();
+    },
+  );
   it('injects the required AIService in the worker recovery provider', async () => {
     const ai = { runTextJob: jest.fn(), failJob: jest.fn() };
     const module = await Test.createTestingModule({

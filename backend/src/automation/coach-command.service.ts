@@ -85,6 +85,55 @@ export class CoachCommandService {
     private readonly continuations?: ConversationContinuationService,
   ) {}
 
+  async deliverWorkoutCompletion(input: {
+    readonly userId: string;
+    readonly messageId: string;
+    readonly aiJobId: string;
+    readonly content: string;
+  }): Promise<void> {
+    const message = await this.prisma.message.findFirst({
+      where: { id: input.messageId, conversation: { userId: input.userId } },
+      select: { id: true, conversationId: true, timestamp: true },
+    });
+    if (!message)
+      throw new Error('Workout completion source ownership mismatch');
+    await this.prisma.$transaction(async (transaction) => {
+      const response = await transaction.coachMessage.upsert({
+        where: {
+          idempotencyKey: this.idempotencyKey(input.userId, input.messageId),
+        },
+        update: {},
+        create: {
+          userId: input.userId,
+          type: CoachMessageType.FOLLOW_UP,
+          idempotencyKey: this.idempotencyKey(input.userId, input.messageId),
+          content: input.content,
+          context: {
+            source: 'WHATSAPP_COMMAND',
+            messageId: input.messageId,
+            aiJobId: input.aiJobId,
+            intent: 'WORKOUT',
+          },
+          generatedAt: new Date(),
+          scheduledFor: message.timestamp,
+        },
+      });
+      await this.scheduleResponse(
+        {
+          userId: input.userId,
+          conversationId: message.conversationId,
+          messageId: message.id,
+          coachMessageId: response.id,
+          content: response.content,
+          scheduledFor: this.scheduledFor(message.timestamp, message.id),
+          intent: 'WORKOUT',
+          selectionContext: {},
+        },
+        transaction,
+      );
+    });
+  }
+
   async processCanonicalContinuation(
     input: ProcessCoachCommandInput,
   ): Promise<boolean> {

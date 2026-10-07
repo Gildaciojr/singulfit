@@ -2,8 +2,34 @@ import { OutboxEvent, OutboxStatus } from '@prisma/client';
 import { EventHandlerRegistry } from './event-handler.registry';
 import { OutboxDispatcherService } from './outbox-dispatcher.service';
 import { OutboxService } from './outbox.service';
+import { INTERNAL_EVENT } from './event-bus.constants';
+import { DurableTextPendingError } from '../ai/durable-text-operation.contract';
 
 describe('OutboxDispatcherService', () => {
+  it('defers async workout polling without failure or consuming the failure retry budget', async () => {
+    const claimed = {
+      ...event(),
+      eventType: INTERNAL_EVENT.WORKOUT_ASYNC_COMPLETION,
+    };
+    const registry = new EventHandlerRegistry();
+    registry.register(
+      claimed.eventType,
+      jest.fn().mockRejectedValue(new DurableTextPendingError()),
+    );
+    const outbox = {
+      claimBatch: jest.fn().mockResolvedValue([claimed]),
+      markProcessed: jest.fn(),
+      markFailed: jest.fn(),
+      deferWorkoutCompletion: jest.fn().mockResolvedValue(true),
+    };
+    await new OutboxDispatcherService(
+      outbox as unknown as OutboxService,
+      registry,
+    ).drain();
+    expect(outbox.deferWorkoutCompletion).toHaveBeenCalledWith(claimed);
+    expect(outbox.markFailed).not.toHaveBeenCalled();
+    expect(outbox.markProcessed).not.toHaveBeenCalled();
+  });
   function event(): OutboxEvent {
     const claimedAt = new Date('2026-06-10T15:00:00.000Z');
 

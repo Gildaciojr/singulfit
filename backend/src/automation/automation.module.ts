@@ -46,6 +46,7 @@ import { CoachProactiveSchedulePolicy } from './coach-proactive-schedule.policy'
 import { CoachProactiveRealizerService } from './coach-proactive-realizer.service';
 import { CoachProactiveResponseService } from './coach-proactive-response.service';
 import { DietController } from '../diet/diet.controller';
+import { WorkoutAsyncCompletionService } from './workout-async-completion.service';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import { DietController } from '../diet/diet.controller';
   ],
   controllers: [AutomationController, CoachAdminController, DietController],
   providers: [
+    WorkoutAsyncCompletionService,
     AutomationService,
     CoachPlanningExecutionDispatcherService,
     CoachPlanningExecutionService,

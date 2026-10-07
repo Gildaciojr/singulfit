@@ -179,6 +179,28 @@ export class OutboxService {
     return result.count === 1;
   }
 
+  async deferWorkoutCompletion(event: OutboxEvent): Promise<boolean> {
+    const interval = this.integerConfig(
+      'AI_RECOVERY_INTERVAL_MS',
+      30_000,
+      1_000,
+      3_600_000,
+    );
+    const result = await this.prisma.outboxEvent.updateMany({
+      where: { ...this.claimFence(event), attempts: event.attempts },
+      data: {
+        status: OutboxStatus.PENDING,
+        availableAt: new Date(Date.now() + interval),
+        claimedAt: null,
+        failedAt: null,
+        lastError: null,
+        // Waiting for an existing provider response is not a failed attempt.
+        attempts: { decrement: 1 },
+      },
+    });
+    return result.count === 1;
+  }
+
   async markIgnored(event: OutboxEvent): Promise<boolean> {
     return this.prisma.$transaction(async (transaction) => {
       const result = await transaction.outboxEvent.updateMany({

@@ -6,6 +6,33 @@ import { PrismaService } from '../prisma/prisma.service';
 import { OutboxService } from './outbox.service';
 
 describe('OutboxService', () => {
+  it('fences pending workout polling and preserves the existing failure retry budget', async () => {
+    const subject = createSubject();
+    const claimed = event(4);
+    await expect(subject.service.deferWorkoutCompletion(claimed)).resolves.toBe(
+      true,
+    );
+    expect(subject.prisma.outboxEvent.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: claimed.id,
+        status: OutboxStatus.PROCESSING,
+        attempts: claimed.attempts,
+        claimedAt: claimed.claimedAt,
+      },
+      data: {
+        status: OutboxStatus.PENDING,
+        availableAt: expect.any(Date),
+        claimedAt: null,
+        failedAt: null,
+        lastError: null,
+        attempts: { decrement: 1 },
+      },
+    });
+    subject.prisma.outboxEvent.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(subject.service.deferWorkoutCompletion(claimed)).resolves.toBe(
+      false,
+    );
+  });
   function event(attempts: number): OutboxEvent {
     const claimedAt = new Date('2026-06-10T15:00:00.000Z');
 

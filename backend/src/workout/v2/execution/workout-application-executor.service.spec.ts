@@ -2,6 +2,8 @@ import type { WorkoutPlanningEngineV2Service } from '../workout-planning-engine-
 import type { WorkoutPlanV2PersistenceService } from '../persistence/workout-plan-v2-persistence.service';
 import type { WorkoutApplicationExecutionInputV2 } from './workout-application-execution.contract';
 import { WorkoutApplicationExecutorService } from './workout-application-executor.service';
+import { Prisma } from '@prisma/client';
+import { DurableTextPendingError } from '../../../ai/durable-text-operation.contract';
 
 describe('WorkoutApplicationExecutorService', () => {
   function input(days?: readonly string[]): WorkoutApplicationExecutionInputV2 {
@@ -43,6 +45,7 @@ describe('WorkoutApplicationExecutorService', () => {
     const engine = {
       prepare: jest.fn().mockReturnValue(prepared),
       failCandidate: jest.fn().mockResolvedValue(undefined),
+      deferCandidatePersistence: jest.fn().mockResolvedValue(undefined),
       generateCandidate: jest.fn().mockResolvedValue({
         status: 'PENDING_COMPLETION',
         output: { artifactType: 'WEEKLY_PLAN', sessions: [] },
@@ -86,6 +89,12 @@ describe('WorkoutApplicationExecutorService', () => {
     expect(subject.engine.generateCandidate).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-id' }),
       subject.engine.prepare.mock.results[0].value,
+      {
+        applicationInput: expect.objectContaining({
+          ownership: { userId: 'user-id', profileId: 'profile-id' },
+        }),
+        pollWindowMs: undefined,
+      },
     );
     expect(subject.persistence.persist).toHaveBeenCalledTimes(1);
     expect(subject.engine.prepare.mock.invocationCallOrder[0]).toBeLessThan(
@@ -96,9 +105,52 @@ describe('WorkoutApplicationExecutorService', () => {
     ).toBeLessThan(subject.persistence.persist.mock.invocationCallOrder[0]);
   });
 
-  it('terminates the pending AIJob when persistence fails and preserves the error', async () => {
+  it.each(['P1001', 'P1002', 'P1008', 'P1017'])(
+    'keeps transient %s recoverable and propagates it to bounded background retry',
+    async (code) => {
+      const subject = setup();
+      const error = new Prisma.PrismaClientKnownRequestError('Transient', {
+        code,
+        clientVersion: '5.22.0',
+      });
+      subject.persistence.persist.mockRejectedValueOnce(error);
+      await expect(
+        subject.executor.execute(input(), { pollWindowMs: 0 }),
+      ).rejects.toBe(error);
+      expect(subject.engine.failCandidate).not.toHaveBeenCalled();
+      expect(subject.engine.deferCandidatePersistence).toHaveBeenCalledTimes(1);
+      await expect(
+        subject.executor.execute(input(), { pollWindowMs: 0 }),
+      ).resolves.toMatchObject({ kind: 'PLAN' });
+      expect(subject.persistence.persist).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('suppresses interactive transient persistence failure after scheduling continuation', async () => {
     const subject = setup();
-    const error = new Error('Persistence unavailable');
+    subject.persistence.persist.mockRejectedValueOnce(
+      new Prisma.PrismaClientInitializationError(
+        'Unavailable',
+        '5.22.0',
+        'P1001',
+      ),
+    );
+    await expect(subject.executor.execute(input())).rejects.toBeInstanceOf(
+      DurableTextPendingError,
+    );
+    expect(subject.engine.failCandidate).not.toHaveBeenCalled();
+    expect(subject.engine.deferCandidatePersistence).toHaveBeenCalledTimes(1);
+  });
+
+  it('terminates the pending AIJob on a non-transient constraint error and preserves the error', async () => {
+    const subject = setup();
+    const error = new Prisma.PrismaClientKnownRequestError(
+      'Invalid constraint',
+      {
+        code: 'P2003',
+        clientVersion: '5.22.0',
+      },
+    );
     subject.persistence.persist.mockRejectedValueOnce(error);
     await expect(subject.executor.execute(input())).rejects.toBe(error);
     expect(subject.engine.failCandidate).toHaveBeenCalledTimes(1);

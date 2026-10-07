@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OutboxEvent } from '@prisma/client';
 import { EventHandlerRegistry } from './event-handler.registry';
 import { OutboxService } from './outbox.service';
+import { INTERNAL_EVENT } from './event-bus.constants';
+import { DurableTextPendingError } from '../ai/durable-text-operation.contract';
 
 @Injectable()
 export class OutboxDispatcherService {
@@ -39,6 +41,13 @@ export class OutboxDispatcherService {
         this.logger.warn(`Lease perdido ao concluir evento ${event.id}`);
       }
     } catch (error: unknown) {
+      if (
+        event.eventType === INTERNAL_EVENT.WORKOUT_ASYNC_COMPLETION &&
+        error instanceof DurableTextPendingError
+      ) {
+        await this.outboxService.deferWorkoutCompletion(event);
+        return;
+      }
       const persisted = await this.outboxService.markFailed(event, error);
 
       if (!persisted) {

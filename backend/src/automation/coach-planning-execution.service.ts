@@ -80,6 +80,7 @@ import { PendingConversationActionService } from './pending-conversation-action.
 import { isNutritionCurrentPlanRead } from '../diet/nutrition-current-plan-read.policy';
 import { UsageLimitExceededException } from '../entitlements/usage-limit.exception';
 import { isWorkoutCurrentPlanRead } from '../workout/v2/workout-current-plan-read.policy';
+import { DurableTextPendingError } from '../ai/durable-text-operation.contract';
 
 export interface CoachPlanningRuntimeContext {
   readonly planningDecision?: ConversationGoalDecision;
@@ -338,6 +339,7 @@ export class CoachPlanningExecutionService {
                 generationInput: preparation.workoutGenerationInput,
                 profileId: preparation.workoutProfileId,
                 correlationId: runtime.correlationId,
+                sourceMessageId: runtime.messageId,
                 traceId: runtime.traceId,
               }
             : undefined,
@@ -351,6 +353,20 @@ export class CoachPlanningExecutionService {
       }
     } catch (error: unknown) {
       legacySucceeded = false;
+      if (error instanceof DurableTextPendingError && intent !== 'DIET') {
+        if (pendingExecutionClaimToken && runtime) {
+          await this.releasePendingExecution(
+            userId,
+            runtime,
+            pendingExecutionClaimToken,
+          );
+        }
+        return this.suppressedPendingResult(
+          preparation,
+          routeSelection,
+          runtime,
+        );
+      }
       this.logger.warn(
         `Planning route failed: ${JSON.stringify({
           domain: routeSelection.nutrition ? 'NUTRITION' : 'WORKOUT',
@@ -1076,7 +1092,7 @@ export class CoachPlanningExecutionService {
   private suppressedPendingResult(
     preparation: PreparedV2PlanningContext | null,
     routeSelection: PlanningExecutionRouteSelection,
-    runtime: CoachPlanningRuntimeContext,
+    runtime: CoachPlanningRuntimeContext | undefined,
   ): CoachPlanningExecutionResult {
     const dispatch = Object.freeze({
       content: '',
@@ -1103,8 +1119,8 @@ export class CoachPlanningExecutionService {
       }),
       dispatch,
       metadata: Object.freeze({
-        correlationId: runtime.correlationId,
-        operationKey: runtime.messageId,
+        correlationId: runtime?.correlationId ?? null,
+        operationKey: runtime?.messageId ?? null,
         executor: dispatch.executor,
         fallbackApplied: false,
         generationCompleted: false,

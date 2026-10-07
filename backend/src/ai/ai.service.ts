@@ -428,6 +428,15 @@ export class AIService {
     });
   }
 
+  enqueueWorkoutCompletion(aiJobId: string) {
+    return this.eventBus.publish({
+      eventType: INTERNAL_EVENT.WORKOUT_ASYNC_COMPLETION,
+      aggregateType: 'AI_JOB',
+      aggregateId: aiJobId,
+      payload: { aiJobId },
+    });
+  }
+
   private async runDurableTextOperation(
     job: Awaited<ReturnType<AIService['claimJob']>>,
     request: RunTextJobInput,

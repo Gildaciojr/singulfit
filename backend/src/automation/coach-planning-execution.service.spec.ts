@@ -21,8 +21,32 @@ import { UserGoalEngineService } from './user-goal-engine.service';
 import type { GenerateWorkoutPlanV2InputBuilder } from '../workout/v2/generate-workout-plan-v2-input.builder';
 import type { WorkoutPlanMutationResolverService } from '../workout/v2/workout-plan-mutation-resolver.service';
 import { UsageLimitExceededException } from '../entitlements/usage-limit.exception';
+import { DurableTextPendingError } from '../ai/durable-text-operation.contract';
 
 describe('CoachPlanningExecutionService', () => {
+  it('suppresses a durable pending response instead of presenting it as FAILURE_FALLBACK', async () => {
+    const dispatcher = {
+      dispatchStructured: jest
+        .fn()
+        .mockRejectedValue(new DurableTextPendingError()),
+    };
+    const service = new CoachPlanningExecutionService(
+      dispatcher as unknown as CoachPlanningExecutionDispatcherService,
+    );
+    const result = await service.executeStructured('user-id', 'BOTH', {
+      conversationId: 'conversation-id',
+      messageId: 'message-id',
+      correlationId: 'correlation-id',
+      referenceDate: new Date(),
+    });
+    expect(result.responseRequired).toBe(false);
+    expect(result.content).toBe('');
+    expect(result.dispatch).toMatchObject({
+      executor: 'NO_GENERATION',
+      fallbackApplied: false,
+      generationCompleted: false,
+    });
+  });
   it('keeps combined root identity across acquisition turns and isolates independent requests', async () => {
     const dispatcher = {
       dispatchStructured: jest.fn().mockResolvedValue({

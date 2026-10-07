@@ -9,6 +9,7 @@ import {
 import { AIJobStatus, AIJobType, Prisma } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { AIService, AITextOperationError } from '../../ai/ai.service';
+import type { WorkoutApplicationExecutionInputV2 } from './execution/workout-application-execution.contract';
 import {
   durableTextOperation,
   DurableTextPendingError,
@@ -132,6 +133,15 @@ export class WorkoutPlanningEngineV2Service {
     return this.generateCandidate(input);
   }
 
+  async deferCandidatePersistence(
+    generation: WorkoutPlanningGenerationResult,
+  ): Promise<void> {
+    // A failed publish is also recoverable from the persisted durable context.
+    await this.aiService
+      .enqueueWorkoutCompletion(generation.aiJobId)
+      .catch(() => undefined);
+  }
+
   async failCandidate(
     generation: WorkoutPlanningGenerationResult,
     error: unknown,
@@ -149,6 +159,10 @@ export class WorkoutPlanningEngineV2Service {
   async generateCandidate(
     input: GenerateWorkoutPlanV2Input,
     preflightPrepared?: PreparedWorkoutPlanningV2,
+    continuation?: {
+      readonly applicationInput: WorkoutApplicationExecutionInputV2;
+      readonly pollWindowMs?: number;
+    },
   ): Promise<WorkoutPlanningGenerationResult> {
     if (
       preflightPrepared &&
@@ -325,9 +339,11 @@ export class WorkoutPlanningEngineV2Service {
       job.status === AIJobStatus.PROCESSING &&
       (!durable || (job.leaseExpiresAt && job.leaseExpiresAt > new Date()))
     )
-      throw new ServiceUnavailableException(
-        'Operação idempotente do treino V2 em andamento',
-      );
+      throw durable
+        ? new DurableTextPendingError()
+        : new ServiceUnavailableException(
+            'Operação idempotente do treino V2 em andamento',
+          );
     let response: Awaited<ReturnType<AIService['runTextJob']>> | undefined;
     const resolvedStrategy = prepared.strategy;
     if (!resolvedStrategy)
@@ -349,12 +365,14 @@ export class WorkoutPlanningEngineV2Service {
     });
     try {
       response = await this.aiService.runTextJob(job.id, {
+        pollWindowMs: continuation?.pollWindowMs,
         input: canonical,
         initialValidationIssues: () => initialValidation?.issues ?? [],
         executionContext: JSON.stringify({
           prepared,
           recognizedContext: effectiveInput.recognizedContext,
           previousPlan: effectiveInput.previousPlan ?? null,
+          applicationInput: continuation?.applicationInput,
         }),
         jsonSchema: workoutSchemaForAuthorizedEquipment(
           resolvedStrategy.authorizedEquipment,
@@ -497,6 +515,15 @@ export class WorkoutPlanningEngineV2Service {
       });
     } catch (caught: unknown) {
       let error: unknown = caught;
+      if (
+        error instanceof DurableTextPendingError &&
+        continuation?.applicationInput.generationInput.currentRequest?.requestId
+      ) {
+        // Recovery also enqueues from the durable ledger after an interrupted publish.
+        await this.aiService
+          .enqueueWorkoutCompletion(job.id)
+          .catch(() => undefined);
+      }
       // Losing the atomic claim does not authorize failing another worker's job.
       if (
         error instanceof ConflictException ||

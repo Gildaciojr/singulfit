@@ -55,6 +55,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WorkoutGeneratorService } from '../workout/workout-generator.service';
 import { AUTOMATION_RULE_CODES } from './automation.constants';
 import { CoachCommandService } from './coach-command.service';
+import { DurableTextPendingError } from '../ai/durable-text-operation.contract';
 import { ConversationContinuationService } from '../conversation/runtime/conversation-continuation.service';
 import { ConversationContinuationStore } from '../conversation/runtime/conversation-continuation.store';
 import type { ConversationContinuationSemanticsService } from '../conversation/runtime/conversation-continuation-semantics.service';
@@ -222,6 +223,7 @@ describe('CoachCommandService', () => {
       userAutomationPreference: { upsert: jest.fn() },
       $queryRaw: jest.fn(),
       coachMessage: {
+        upsert: jest.fn(),
         findUnique: jest.fn().mockResolvedValue(null),
         create: jest
           .fn()
@@ -1030,6 +1032,57 @@ describe('CoachCommandService', () => {
 
     return { scheduledMessages, outboxEvents, publishedEvents };
   }
+
+  it('enqueues one final workout batch across duplicate asynchronous completions', async () => {
+    const subject = createSubject();
+    const planning = jest.spyOn(subject.planningExecution, 'executeStructured');
+    const effects = installPersistentEffectHarness(subject);
+    let response: { id: string; content: string } | null = null;
+    subject.transaction.coachMessage.upsert.mockImplementation(
+      (input: { create: { content: string } }) => {
+        response ??= { id: 'coach-final', content: input.create.content };
+        return Promise.resolve(response);
+      },
+    );
+    subject.transaction.scheduledMessage.findMany.mockImplementation(() =>
+      Promise.resolve([...effects.scheduledMessages.values()]),
+    );
+    const input = {
+      userId: 'user-id',
+      messageId: 'message-id',
+      aiJobId: 'job-id',
+      content: 'Seu treino personalizado está pronto.',
+    };
+    await subject.service.deliverWorkoutCompletion(input);
+    await subject.service.deliverWorkoutCompletion(input);
+    expect(effects.scheduledMessages.size).toBe(1);
+    expect(effects.outboxEvents.size).toBe(1);
+    expect(subject.transaction.coachMessage.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { idempotencyKey: 'user-id:WHATSAPP_COACH_COMMAND:message-id' },
+        update: {},
+      }),
+    );
+    expect(planning).not.toHaveBeenCalled();
+  });
+
+  it('keeps a WhatsApp Workout pending without creating a fallback response or outbound batch', async () => {
+    const subject = createSubject({
+      content: 'Monte um treino de musculação para mim, 4 vezes por semana.',
+      controlledPlanning: true,
+    });
+    subject.controlledWorkoutExecutor.execute.mockRejectedValueOnce(
+      new DurableTextPendingError(),
+    );
+    await subject.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+    expect(subject.controlledWorkoutExecutor.execute).toHaveBeenCalledTimes(1);
+    expect(subject.prisma.coachMessage.create).not.toHaveBeenCalled();
+    expect(subject.transaction.scheduledMessage.upsert).not.toHaveBeenCalled();
+    expect(subject.eventBus.publish).not.toHaveBeenCalled();
+  });
 
   it.each([
     ['A', 'Quero treinar na academia', 'WORKOUT', 1],

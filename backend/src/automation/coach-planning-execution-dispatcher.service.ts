@@ -54,6 +54,7 @@ export interface CoachPlanningExecutionDispatchInput {
     readonly generationInput: GenerateWorkoutPlanV2Input;
     readonly profileId: string;
     readonly correlationId: string;
+    readonly sourceMessageId?: string;
     readonly traceId?: string;
   };
 }
@@ -354,6 +355,7 @@ export class CoachPlanningExecutionDispatcherService {
       },
       executionContext: {
         correlationId: input.workoutV2.correlationId,
+        sourceMessageId: input.workoutV2.sourceMessageId,
         traceId: input.workoutV2.traceId,
       },
     });
