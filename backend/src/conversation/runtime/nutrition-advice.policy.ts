@@ -415,6 +415,7 @@ export function nutritionAdviceContext(
     ),
     unresolvedOriginalMeal:
       request.intent === 'MEAL_SUBSTITUTION' &&
+      request.substitutionPurpose !== 'OFF_PLAN_ADVICE' &&
       request.meal !== null &&
       request.meal !== 'refeicao' &&
       originalMeals.length === 0,
@@ -468,7 +469,11 @@ export function nutritionAdviceContext(
 export function nutritionSubstitutionAnswer(
   context: NutritionAdviceContext | null,
 ): ConversationAnswerCandidate | null {
-  if (context?.request.intent !== 'MEAL_SUBSTITUTION') return null;
+  if (
+    context?.request.intent !== 'MEAL_SUBSTITUTION' ||
+    context.request.substitutionPurpose === 'OFF_PLAN_ADVICE'
+  )
+    return null;
   const evidence = context.substitutionEvidence;
   const meal = evidence?.meal
     ? (context.originalMeals.find((original) =>
@@ -523,6 +528,7 @@ export function nutritionAdvicePayload(
   if (!context) return null;
   return Object.freeze({
     intent: context.request.intent,
+    substitutionPurpose: context.request.substitutionPurpose ?? null,
     meal: context.substitutionEvidence?.meal ?? context.request.meal,
     immediateConstraints: context.immediateConstraints,
     safetyConstraints: context.safetyConstraints,
@@ -550,16 +556,22 @@ export function nutritionAdvicePayload(
       : null,
     policy: {
       readOnly: true,
-      currentPlanRole: context.substitutionEvidence
-        ? 'SUBSTITUTION_EVIDENCE'
-        : 'CONTEXT_NOT_ANSWER',
+      decisionIsAuthoritativeRealizationIsFlexible: true,
+      personalizedEstimates:
+        'Use metas, objetivo, estratégia, porções e estimativas dos itens disponíveis em trustedContext.activeNutritionPlan. O plano contextualiza, não limita os ingredientes. Estimativas de conhecimento geral devem ser identificadas como aproximadas, nunca como meta, consumo observado ou equivalência comprovada. Sem fundamento para uma quantidade individual, dê uma orientação proporcional ou pergunte somente o dado essencial. Consumo registrado inclui apenas refeições analisadas e seu período, não o total real. Nas trocas oficiais, realize os fatos em linguagem natural e variada, sem alterar a decisão ou acrescentar doses. NOT_REGISTERED nunca é aprovação; UNRESOLVED pede só o dado ausente.',
+      currentPlanRole:
+        context.substitutionEvidence &&
+        context.request.substitutionPurpose !== 'OFF_PLAN_ADVICE'
+          ? 'SUBSTITUTION_EVIDENCE'
+          : 'CONTEXT_NOT_ANSWER',
       preserveApproximateNutritionalFunction:
         context.request.intent === 'MEAL_SUBSTITUTION',
       instructions:
-        (context.substitutionEvidence
+        (context.substitutionEvidence &&
+        context.request.substitutionPurpose !== 'OFF_PLAN_ADVICE'
           ? 'Responda primeiro se o par perguntado está cadastrado no plano verdadeiro, mantendo a refeição e o alimento original. Não trate esta consulta como pedido de uma nova receita nem de alteração permanente. '
           : 'Entregue uma ideia concreta nova, plausível e compatível com o objetivo, perfil, horário local, rotina e preferências. O plano orienta a estratégia; não copie a composição da refeição de originalMeals. Ingredientes isolados podem ser reutilizados em uma combinação diferente. ') +
-        'Combine todas as immediateConstraints: QUICK significa pouco preparo, HIGH_PROTEIN significa incluir fonte compatível de proteína, LOW_COST significa acessível, PORTABLE significa fácil de transportar; LACTOSE/GLUTEN são exclusões obrigatórias. Não invente alergias nem preferências. Em MEAL_SUBSTITUTION, entenda a refeição original e preserve aproximadamente sua função nutricional, sem prometer equivalência exata de calorias/macros; apresente como alternativa para essa refeição, sem afirmar alteração do plano. Nas consultas de troca, preserve os fatos do plano e do histórico; somente nas recomendações novas varie em relação às recentSuggestions quando houver alternativas compatíveis. Responda em um ou dois parágrafos curtos, com uma opção principal e no máximo uma alternativa útil, sem menu numerado ou preâmbulo genérico. Se faltar contexto essencial de segurança ou da refeição a substituir, faça apenas uma pergunta útil. Conhecimento geral não clínico é permitido. Para substituição, responda separadamente se a troca está cadastrada: use substitutionEvidence e os registros reais, nunca a presença da alternativa em outra refeição. Source é o alimento original e requestedAlternative é a alternativa perguntada, não os inverta. Preserve o almoço/horário e a resposta anterior, inclusive ausência de troca cadastrada, sem perguntar novamente por um alvo já informado. Se UNRESOLVED, esclareça apenas a informação essencial que falta. Se NOT_REGISTERED, não atribua a troca à dieta: qualquer sugestão deve ser explicitamente uma orientação aproximada fora do plano. Não invente porções da alternativa nem equivalência de calorias/macros. Uma porção do alimento original ou de outra refeição não comprova a porção da alternativa. Ser REGISTERED comprova somente o par descrito no registro; não comprova doses ausentes. Use a compreensão semântica do histórico e da mensagem, sem inferir fatos faltantes.',
+        'Combine todas as immediateConstraints: QUICK significa pouco preparo, HIGH_PROTEIN significa incluir fonte compatível de proteína, LOW_COST significa acessível, PORTABLE significa fácil de transportar; LACTOSE/GLUTEN são exclusões obrigatórias. Não invente alergias nem preferências. Em MEAL_SUBSTITUTION, entenda a refeição original e preserve aproximadamente sua função nutricional, sem prometer equivalência exata de calorias/macros; apresente como alternativa para essa refeição, sem afirmar alteração do plano. Nas consultas de troca, preserve os fatos do plano e do histórico; somente nas recomendações novas varie em relação às recentSuggestions quando houver alternativas compatíveis. Responda em um ou dois parágrafos curtos, com uma opção principal e no máximo uma alternativa útil, sem menu numerado ou preâmbulo genérico. Se faltar contexto essencial de segurança ou da refeição a substituir, faça apenas uma pergunta útil. Conhecimento geral não clínico é permitido. Somente em PLAN_INQUIRY, responda separadamente se a troca está cadastrada: use substitutionEvidence e os registros reais, nunca a presença da alternativa em outra refeição. Source é o alimento original e requestedAlternative é a alternativa perguntada, não os inverta. Preserve o almoço/horário e a resposta anterior, inclusive ausência de troca cadastrada, sem perguntar novamente por um alvo já informado. Em PLAN_INQUIRY com UNRESOLVED, esclareça apenas a informação essencial que falta. OFF_PLAN_ADVICE pede uma sugestão aproximada fora do plano, não uma checagem de cadastro; a falta de alternativa cadastrada não impede sugerir alimentos seguros, sem porção equivalente inventada. Se NOT_REGISTERED, não atribua a troca à dieta: qualquer sugestão deve ser explicitamente uma orientação aproximada fora do plano. Não invente porções da alternativa nem equivalência de calorias/macros. Uma porção do alimento original ou de outra refeição não comprova a porção da alternativa. Ser REGISTERED comprova somente o par descrito no registro; não comprova doses ausentes. Use a compreensão semântica do histórico e da mensagem, sem inferir fatos faltantes.',
     },
   });
 }
@@ -568,6 +580,7 @@ export function nutritionAdvicePayload(
 export function nutritionAdviceViolation(
   context: NutritionAdviceContext | null,
   candidate: ConversationAnswerCandidate,
+  decisionVerified = false,
 ): string | null {
   if (!context) return null;
   if (candidate.disposition === 'ANSWER' && context.unresolvedSafety)
@@ -621,32 +634,76 @@ export function nutritionAdviceViolation(
   }
   if (context.excludedFoods.some((food) => matchesFoodTerm(text, food)))
     return 'NUTRITION_ADVICE_REJECTED_FOOD';
+  // Read-only and unsupported equivalence are public boundaries, including CLARIFY.
+  if (
+    /\b(?:atualizei|alterei|mudei|salvei|substitui)\b.*\b(?:plano|dieta)\b/u.test(
+      text,
+    )
+  )
+    return 'NUTRITION_ADVICE_FALSE_MUTATION';
+  if (
+    /(?<!nao )\b(?:e|sao|tem|possuem|fornecem|oferecem)\s+(?:exatamente\s+)?(?:a\s+|o\s+)?(?:mesma\s+(?:proteina|quantidade\s+de\s+(?:proteina|calorias))|mesmas\s+calorias|equivalentes?\s+exat[ao]s?)\b/u.test(
+      text,
+    )
+  )
+    return 'NUTRITION_SUBSTITUTION_UNSUPPORTED_EQUIVALENCE';
+  const planInquiry =
+    context.request.intent === 'MEAL_SUBSTITUTION' &&
+    context.request.substitutionPurpose !== 'OFF_PLAN_ADVICE';
   if (
     context.request.intent === 'MEAL_SUBSTITUTION' &&
     !context.substitutionEvidence
   )
     return 'NUTRITION_SUBSTITUTION_MISSING_EVIDENCE';
-  if (context.substitutionEvidence) {
+  const asserted = text.replace(
+    /\bnao (?:esta|e) (?:previst\w*|cadastrad\w*)\b/gu,
+    '',
+  );
+  if (
+    context.substitutionEvidence?.status !== 'REGISTERED' &&
+    /\b(?:esta|e) (?:previst\w*|cadastrad\w*)\b|\b(?:seu plano|minha dieta|sua dieta) (?:permite|autoriza|registra|preve)\b/u.test(
+      asserted,
+    )
+  )
+    return 'NUTRITION_SUBSTITUTION_UNSUPPORTED_PLAN_CLAIM';
+  if (planInquiry && context.substitutionEvidence) {
+    const evidence = context.substitutionEvidence;
+    // Verification can approve phrasing, never override a contradictory domain fact.
+    // Evaluate affirmative authorization of the substitution in its own clause;
+    // a preceding denial of registration does not authorize a later assertion.
+    const unauthorizedConfirmation = text
+      .split(/[.!?;]|\b(?:mas|porem|contudo)\b/u)
+      .some(
+        (clause) =>
+          [
+            ...clause.matchAll(
+              /(?<!nao )\b(?:pode(?:m)?|podemos|da(?:\s+sim)?\s+(?:para|pra)|permite|autoriza)\b.*?\b(?:trocar|substituir|usar|comer)\b/gu,
+            ),
+          ].some((assertion) => !/\bnao\b/u.test(assertion[0])) &&
+          !/\b(?:fora (?:do|de seu|da sua) plano|(?:orientacao|sugestao|ideia) (?:geral|aproximada))\b/u.test(
+            clause,
+          ),
+      );
+    if (evidence.status !== 'REGISTERED' && unauthorizedConfirmation)
+      return 'NUTRITION_SUBSTITUTION_UNSUPPORTED_PLAN_CLAIM';
+  }
+  // Free advice uses the plan as context, not as a registry of permitted recipes.
+  if (planInquiry && context.substitutionEvidence) {
     const evidence = context.substitutionEvidence;
     const deniesRegistration =
       /\b(?:nao (?:esta|e) (?:previst\w*|cadastrad\w*)|nao (?:ha|existe|consta))\b/u.test(
         text,
       );
-    const asserted = text.replace(
-      /\bnao (?:esta|e) (?:previst\w*|cadastrad\w*)\b/gu,
-      '',
-    );
     if (
+      !decisionVerified &&
       evidence.status !== 'REGISTERED' &&
-      (/\b(?:esta|e) (?:previst\w*|cadastrad\w*)\b|\b(?:seu plano|minha dieta|sua dieta) (?:permite|autoriza|registra|preve)\b/u.test(
-        asserted,
-      ) ||
-        (candidate.disposition === 'ANSWER' &&
-          candidate.grounding === 'CURRENT_PLAN' &&
-          !(evidence.status === 'NOT_REGISTERED' && deniesRegistration)))
+      candidate.disposition === 'ANSWER' &&
+      candidate.grounding === 'CURRENT_PLAN' &&
+      !(evidence.status === 'NOT_REGISTERED' && deniesRegistration)
     )
       return 'NUTRITION_SUBSTITUTION_UNSUPPORTED_PLAN_CLAIM';
     if (
+      !decisionVerified &&
       candidate.disposition === 'ANSWER' &&
       evidence.status !== 'REGISTERED' &&
       !/\b(?:fora (?:do|de seu|da sua) plano|nao (?:esta|e) (?:previst\w*|cadastrad\w*)|nao (?:ha|existe|consta)|orientacao (?:geral|aproximada)|sugestao (?:geral|aproximada))\b/u.test(
@@ -655,6 +712,7 @@ export function nutritionAdviceViolation(
     )
       return 'NUTRITION_SUBSTITUTION_MISSING_GROUNDING';
     if (
+      !decisionVerified &&
       evidence.status !== 'REGISTERED' &&
       /\b(?:pode|experimente|sugiro|recomendo)\b/u.test(text) &&
       !/\b(?:fora (?:do|de seu|da sua) plano|orientacao (?:geral|aproximada)|sugestao (?:geral|aproximada))\b/u.test(
@@ -662,12 +720,6 @@ export function nutritionAdviceViolation(
       )
     )
       return 'NUTRITION_SUBSTITUTION_MISSING_GROUNDING';
-    if (
-      /(?<!nao )\b(?:e|sao|tem|possuem|fornecem|oferecem)\s+(?:exatamente\s+)?(?:a\s+|o\s+)?(?:mesma\s+(?:proteina|quantidade\s+de\s+(?:proteina|calorias))|mesmas\s+calorias|equivalentes?\s+exat[ao]s?)\b/u.test(
-        text,
-      )
-    )
-      return 'NUTRITION_SUBSTITUTION_UNSUPPORTED_EQUIVALENCE';
     const portions = [
       ...(text.match(
         /\b(?:\d+(?:[.,]\d+)?|um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez)\s*(?:g|kg|gramas?|unidades?|ovos?|colheres?|fatias?|kcal|calorias?)\b/gu,
@@ -689,8 +741,7 @@ export function nutritionAdviceViolation(
       (candidate.disposition !== factual.disposition ||
         candidate.domain !== factual.domain ||
         candidate.grounding !== factual.grounding ||
-        candidate.answer !== factual.answer ||
-        candidate.followUpQuestion !== factual.followUpQuestion)
+        !decisionVerified)
     )
       return 'NUTRITION_SUBSTITUTION_DOMAIN_DECISION_REQUIRED';
   }
@@ -722,11 +773,5 @@ export function nutritionAdviceViolation(
     });
     if (copied) return 'NUTRITION_ADVICE_REPEATS_CURRENT_MEAL';
   }
-  if (
-    /\b(?:atualizei|alterei|mudei|salvei|substitui)\b.*\b(?:plano|dieta)\b/u.test(
-      text,
-    )
-  )
-    return 'NUTRITION_ADVICE_FALSE_MUTATION';
   return null;
 }

@@ -11,6 +11,8 @@ import { ConversationQAFollowUpContextService } from './conversation-qa-follow-u
 import type { ConversationQAFollowUpContext } from './conversation-qa-follow-up-context.service';
 import { CurrentWorkoutPlanReaderService } from '../../workout/v2/current-workout-plan-reader.service';
 import { ConversationDailyQueryService } from './conversation-daily-query.service';
+import { isWorkoutCurrentPlanRead } from '../../workout/v2/workout-current-plan-read.policy';
+import { explicitContinuationDomain } from '../understanding/explicit-continuation-domain.policy';
 import {
   readOnlyFollowUp,
   referentCompatibility,
@@ -73,7 +75,16 @@ export class ConversationExecutionBridgeService {
         content: `Você quer uma alternativa para qual sessão do treino de ${labels[referent.workoutModality]}?`,
       });
     }
-    if (this.dailyQueries && humanContext && executionContext) {
+    if (
+      this.dailyQueries &&
+      humanContext &&
+      executionContext &&
+      [
+        'ANSWER_MESSAGE',
+        'NUTRITION_GUIDANCE',
+        'CURRENT_PLAN_PRESENTATION',
+      ].includes(route.kind)
+    ) {
       const content = await this.dailyQueries.answer({
         ...executionContext,
         text: humanContext.currentMessage,
@@ -87,8 +98,14 @@ export class ConversationExecutionBridgeService {
         });
     }
     if (
-      route.kind === 'CURRENT_PLAN_PRESENTATION' &&
-      route.targetPlan === 'WORKOUT' &&
+      ((route.kind === 'CURRENT_PLAN_PRESENTATION' &&
+        route.targetPlan === 'WORKOUT') ||
+        (route.kind === 'ANSWER_MESSAGE' &&
+          decision.understanding.domain === 'WORKOUT' &&
+          humanContext &&
+          explicitContinuationDomain(humanContext.currentMessage) ===
+            'WORKOUT' &&
+          isWorkoutCurrentPlanRead(humanContext.currentMessage))) &&
       executionContext &&
       this.currentWorkout
     ) {

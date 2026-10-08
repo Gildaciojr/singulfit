@@ -10,6 +10,7 @@ export interface NutritionRequest {
   readonly intent: NutritionRequestIntent;
   readonly meal: string | null;
   readonly constraints: readonly string[];
+  readonly substitutionPurpose?: 'PLAN_INQUIRY' | 'OFF_PLAN_ADVICE';
 }
 
 /** Meal advice is read-only unless the user explicitly asks to persist a change. */
@@ -72,11 +73,10 @@ export function nutritionRequest(value: string): NutritionRequest | null {
       .map(([, code]) => code),
   );
   const substitution =
-    /\b(?:no lugar|em vez|alternativa|outra opcao|nao tenho|tro(?:c|qu)\w*|substitu\w*)\b/u.test(
-      text,
-    );
+    /\b(?:no lugar|em vez|nao tenho|tro(?:c|qu)\w*|substitu\w*)\b/u.test(text);
   const advice =
-    /\b(?:dica|ideia|sugest\w*|sug(?:er|ir)\w*|recomend\w*|indi(?:c|qu)\w*|opcao|bom .*comer|comer .*bom|algo diferente)\b/u.test(
+    (substitution && /\b(?:o que|qual alimento|qual opcao)\b/u.test(text)) ||
+    /\b(?:dica|ideia|sugest\w*|sug(?:er|ir)\w*|recomend\w*|indi(?:c|qu)\w*|opcao|alternativa|bom .*comer|comer .*bom|algo diferente)\b/u.test(
       text,
     ) ||
     (/\b(?:mont\w*|cri\w*)\b/u.test(text) && meal !== null) ||
@@ -97,7 +97,21 @@ export function nutritionRequest(value: string): NutritionRequest | null {
           ? 'PLAN_LOOKUP'
           : null;
   return intent
-    ? Object.freeze({ intent, meal, constraints: requested })
+    ? Object.freeze({
+        intent,
+        meal,
+        constraints: requested,
+        ...(intent === 'MEAL_SUBSTITUTION'
+          ? {
+              substitutionPurpose:
+                !substitutionInquiry &&
+                (advice || /\bnao tenho\b/u.test(text)) &&
+                !/\b(?:plano|dieta|previst\w*|cadastrad\w*)\b/u.test(text)
+                  ? ('OFF_PLAN_ADVICE' as const)
+                  : ('PLAN_INQUIRY' as const),
+            }
+          : {}),
+      })
     : null;
 }
 

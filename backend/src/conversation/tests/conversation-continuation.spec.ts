@@ -31,6 +31,67 @@ describe('Canonical conversation continuation', () => {
     hydrationGoal: false,
     reference: 'PENDING',
   };
+  it.each([
+    'Qual minha meta de calorias para a semana?',
+    'Qual minha meta calórica diária?',
+    'Quanto de proteína consta como meta diária?',
+    'Qual meu consumo de calorias nesta semana?',
+    'Me dê uma dica alternativa de jantar para hoje?',
+  ])(
+    'does not authorize stale WORKOUT/NEXT for an independent nutrition request: %s',
+    async (content) => {
+      const s = subject('WORKOUT_DAY_QUERY', {
+        action: 'WORKOUT_QUERY',
+        day: 'NEXT',
+      });
+      s.prisma.message.findFirst.mockResolvedValue({
+        id: 'message',
+        content,
+        timestamp: at,
+        conversationId: 'conversation',
+        replyToExternalMessageId: null,
+        conversation: { userId: 'user' },
+      });
+      expect(await s.service.resolve('user', 'message')).toBeNull();
+      expect(s.workout.presentCanonicalDay).not.toHaveBeenCalled();
+      expect(s.semantics.interpret).not.toHaveBeenCalled();
+      expect(s.prisma.scheduledMessage.updateMany).not.toHaveBeenCalled();
+    },
+  );
+  it('vetoes an incompatible semantic capability even when an independent nutrition question quotes the old workout', async () => {
+    const s = subject('WORKOUT_DAY_QUERY');
+    const provider = {
+      execute: jest.fn().mockResolvedValue({
+        status: 'COMPLETED',
+        structuredOutput: {
+          ...base,
+          action: 'WORKOUT_QUERY',
+          day: 'NEXT',
+          reference: 'PENDING',
+          workoutEffect: 'NONE',
+          response: null,
+        },
+      }),
+    };
+    const semantics = new ConversationContinuationSemanticsService(
+      provider as unknown as ConversationAIService,
+      new ConversationPublicAnswerBoundaryService(),
+    );
+    s.semantics.interpret.mockImplementation((text, pending) =>
+      semantics.interpret(text, pending),
+    );
+    s.prisma.message.findFirst.mockResolvedValue({
+      id: 'message',
+      content: 'Quantas calorias faltam para minha meta amanhã?',
+      timestamp: at,
+      conversationId: 'conversation',
+      replyToExternalMessageId: 'old-workout',
+      conversation: { userId: 'user' },
+    });
+    expect(await s.service.resolve('user', 'message')).toBeNull();
+    expect(provider.execute).toHaveBeenCalledTimes(1);
+    expect(s.workout.presentCanonicalDay).not.toHaveBeenCalled();
+  });
   function subject(
     kind:
       | 'WORKOUT_COMPLETION_CHECK'
@@ -163,6 +224,7 @@ describe('Canonical conversation continuation', () => {
     );
     return {
       service,
+      store,
       prisma,
       semantics,
       config,
@@ -175,6 +237,36 @@ describe('Canonical conversation continuation', () => {
       },
     };
   }
+  it.each([
+    ['Qual minha meta de calorias para a semana?', false],
+    ['e depois?', true],
+  ] as const)(
+    'rechecks the current domain when replaying an old workout receipt: %s',
+    async (content, allowed) => {
+      const s = subject('WORKOUT_DAY_QUERY');
+      s.prisma.message.findFirst.mockResolvedValue({
+        id: 'message',
+        content,
+        timestamp: at,
+        conversationId: 'conversation',
+        replyToExternalMessageId: null,
+        conversation: { userId: 'user' },
+      });
+      jest.spyOn(s.store, 'resolveOnce').mockResolvedValue({
+        content: 'Sessão anteriormente armazenada',
+        domain: 'WORKOUT',
+        pending: null,
+        next: continuation('WORKOUT_DAY_QUERY', at),
+        outcome: 'UNKNOWN',
+        evidence: { day: 'NEXT' },
+      });
+      const reply = await s.service.resolve('user', 'message');
+      if (allowed) expect(reply?.domain).toBe('WORKOUT');
+      else expect(reply).toBeNull();
+      expect(s.semantics.interpret).not.toHaveBeenCalled();
+      expect(s.workout.presentCanonicalDay).not.toHaveBeenCalled();
+    },
+  );
   it.each([
     ['INDEPENDENT', 'EXPLICIT'],
     ['WORKOUT_REPLY', 'EXPLICIT'],

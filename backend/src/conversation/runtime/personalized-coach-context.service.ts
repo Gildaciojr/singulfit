@@ -165,12 +165,20 @@ export class PersonalizedCoachContextService {
         ? clock.timezone(snapshot.conversation.timezone.value)
         : clock.timezone();
     const week = clock.localWeekRange(at, timezone);
-    const consumption = await this.consumption.summarize({
-      userId: input.userId,
-      period: 'THIS_WEEK',
-      referenceDate: at,
-      timezone,
-    });
+    const [consumption, todayConsumption] = await Promise.all([
+      this.consumption.summarize({
+        userId: input.userId,
+        period: 'THIS_WEEK',
+        referenceDate: at,
+        timezone,
+      }),
+      this.consumption.summarize({
+        userId: input.userId,
+        period: 'TODAY',
+        referenceDate: at,
+        timezone,
+      }),
+    ]);
     const previous =
       workout.status === 'AVAILABLE' && workout.plan.userId === input.userId
         ? await this.workout.readPrevious(
@@ -201,9 +209,18 @@ export class PersonalizedCoachContextService {
             ? {
                 title: nutrition.title,
                 objective: nutrition.document.objectiveSummary,
+                strategy: nutrition.document.strategy,
                 days: nutrition.document.days,
               }
-            : { title: nutrition.title, meals: nutrition.meals }
+            : {
+                title: nutrition.title,
+                objective: nutrition.objective,
+                dailyCaloriesTarget: nutrition.dailyCaloriesTarget,
+                proteinTarget: nutrition.proteinTarget,
+                carbsTarget: nutrition.carbsTarget,
+                fatTarget: nutrition.fatTarget,
+                meals: nutrition.meals,
+              }
           : null,
       activeWorkoutPlan:
         workout.plan?.userId === input.userId && workout.status === 'AVAILABLE'
@@ -224,6 +241,15 @@ export class PersonalizedCoachContextService {
             }
           : null,
       relevantProgress: {
+        recordedMealConsumptionToday: {
+          calories: todayConsumption.calories,
+          protein: todayConsumption.protein,
+          carbs: todayConsumption.carbs,
+          fat: todayConsumption.fat,
+          analyzedMealCount: todayConsumption.mealCount,
+          periodStart: todayConsumption.periodStart.toISOString(),
+          periodEnd: todayConsumption.periodEnd.toISOString(),
+        },
         recordedMealConsumption: {
           calories: consumption.calories,
           protein: consumption.protein,

@@ -34,7 +34,14 @@ export class ConversationNutritionDeterministicAnswerService {
     )
       return null;
     // Consumption and expenditure belong to the daily query service, never targets.
-    if (dailyQuery(request) || isWeeklyFollowUp(request)) return null;
+    const query = dailyQuery(request);
+    // Daily targets can also be read from the public projection when QA is
+    // called directly. Calendar/consumption reads stay with the owned reader.
+    if (
+      (query && (query.kind !== 'TARGET' || query.period !== 'TODAY')) ||
+      isWeeklyFollowUp(request)
+    )
+      return null;
     if (!this.nutritionRequest(input.route, request)) return null;
     const planRequest = this.referencesPlan(input.route, request);
     if (input.current.status !== 'AVAILABLE') {

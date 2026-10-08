@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { isNutritionAdvice } from './nutrition-request.policy';
+import { dailyQuery, isNutritionMetricTopic } from './daily-query.policy';
 import type { ConversationUnderstandingInput } from '../contracts/conversation-understanding.contract';
 import type { ConversationReference } from '../contracts/conversation-entity.contract';
 import type {
@@ -137,8 +138,10 @@ export class ConversationReferenceResolverService {
   }
 
   private explicitDomain(text: string): ReferenceDomain | null {
+    if (dailyQuery(text)) return 'NUTRITION';
     const nutrition =
       isNutritionAdvice(text) ||
+      isNutritionMetricTopic(text) ||
       this.includesAny(text, [
         'dieta',
         'plano alimentar',

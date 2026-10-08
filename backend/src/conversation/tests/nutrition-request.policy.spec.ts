@@ -7,6 +7,36 @@ import { explicitContinuationDomain } from '../understanding/explicit-continuati
 
 describe('nutrition meal request semantics', () => {
   it.each([
+    ['O que posso comer no lugar do frango no almoço?', 'OFF_PLAN_ADVICE'],
+    ['Não tenho frango, o que uso no lugar?', 'OFF_PLAN_ADVICE'],
+    ['Posso comer ovo no lugar do frango no almoço?', 'PLAN_INQUIRY'],
+    [
+      'Posso substituir frango por ovos? Isso está previsto na minha dieta?',
+      'PLAN_INQUIRY',
+    ],
+  ] as const)(
+    'distinguishes recommendation from a plan decision: %s',
+    (text, substitutionPurpose) => {
+      expect(nutritionRequest(text)).toMatchObject({
+        intent: 'MEAL_SUBSTITUTION',
+        substitutionPurpose,
+      });
+    },
+  );
+  it.each([
+    'Me dê uma dica alternativa de jantar para hoje?',
+    'Sugira uma alternativa para o almoço',
+    'Quero outra opção de jantar',
+    'Uma ideia diferente para comer à noite?',
+  ])(
+    'keeps independent alternatives out of registered substitution queries: %s',
+    (text) => {
+      expect(nutritionRequest(text)?.intent).toBe('NUTRITION_ADVICE');
+      expect(selfContainedNutritionRequest(text)).not.toBeNull();
+    },
+  );
+
+  it.each([
     'Me dê uma dica para lanche da tarde',
     'Me dá uma dica de lanche da tarde',
     'Quero uma dica para o lanche da tarde',

@@ -134,6 +134,14 @@ export class ConversationContinuationService {
       () => this.resolveUncached(userId, messageId),
       fallback,
     );
+    // Durable receipts may predate this policy. They do not authorize a reader
+    // whose domain contradicts the owned inbound's independent current intent.
+    if (result?.next?.kind === 'WORKOUT_DAY_QUERY') {
+      const message = await this.source(userId, messageId, MessageType.TEXT);
+      if (!message) return null;
+      const domain = explicitContinuationDomain(message.content);
+      if (domain && domain !== 'WORKOUT') return null;
+    }
     return result ? this.publicReply(result) : null;
   }
   publicText(content: string, structured = false): string {
@@ -240,6 +248,16 @@ export class ConversationContinuationService {
       message.content,
       pending,
     );
+    // A semantic capability is not authorized by the previous topic. Enforce
+    // the current domain even for a quoted reminder and an uncertain model.
+    if (
+      interpreted &&
+      explicitDomain &&
+      ((interpreted.action === 'WORKOUT_QUERY' &&
+        explicitDomain !== 'WORKOUT') ||
+        (interpreted.action === 'MEAL_REPLY' && explicitDomain !== 'NUTRITION'))
+    )
+      return null;
     const safe = (): ContinuationReply => ({
       content: SAFE_CONTEXT,
       domain: 'GENERAL',

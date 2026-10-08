@@ -15,6 +15,7 @@ import {
 import type { WorkoutPlanV2 } from '../workout/v2/workout-plan-v2.contract';
 import { AIJobStatus, AIJobType } from '@prisma/client';
 import { AIService } from '../ai/ai.service';
+import { OpenAIGateway } from '../ai/openai.gateway';
 import { ConversationModule } from '../conversation/conversation.module';
 import { CoachConversationHumanContextBuilder } from '../context/coach-conversation-human-context.builder';
 import {
@@ -2264,7 +2265,12 @@ describe('CoachCommandService', () => {
   });
 
   it.each([
+    'Não tenho frango, o que uso no lugar?',
+    'O que posso comer no lugar do frango no almoço?',
+    'Me sugere um jantar diferente hoje?',
     'O que posso comer no jantar hoje?',
+    'Me dê uma dica alternativa de jantar para hoje?',
+    'Sugira uma alternativa para o almoço',
     'Qual meu jantar de hoje',
     'Monte meu jantar de hoje',
     'Monte uma refeição para meu jantar de hoje',
@@ -2277,6 +2283,20 @@ describe('CoachCommandService', () => {
       disposition: 'ANSWER',
       registered: false,
       expectedRegistered: false,
+    },
+    {
+      content: 'Posso trocar frango por ovos? Essa troca está cadastrada?',
+      disposition: 'ANSWER',
+      registered: false,
+      expectedRegistered: false,
+      adversarialVerified: true,
+    },
+    {
+      content: 'Posso trocar frango por ovos? Essa troca está cadastrada?',
+      disposition: 'CLARIFY',
+      registered: false,
+      expectedRegistered: false,
+      adversarialVerified: true,
     },
     {
       content: 'uai no almoço kkk, posso trocar o frango por ovo ou não?',
@@ -2296,16 +2316,30 @@ describe('CoachCommandService', () => {
       registered: true,
       expectedRegistered: false,
     },
+    {
+      content: 'Posso comer ovo no lugar do frango no almoço?',
+      disposition: 'ANSWER',
+      registered: false,
+      expectedRegistered: false,
+      naturalAnswer:
+        'Conferi seu almoço: essa combinação não consta nas trocas do plano. Posso ajudar com uma ideia aproximada fora da dieta, sem confirmar uma porção equivalente.',
+    },
   ])(
     'routes meal QA through real command/runtime/QA with no plan usage: %s',
     async (testInput) => {
       const content =
         typeof testInput === 'string' ? testInput : testInput.content;
       const contradictory = typeof testInput !== 'string';
+      const natural =
+        contradictory && 'naturalAnswer' in testInput
+          ? testInput.naturalAnswer
+          : null;
       const disposition = contradictory ? testInput.disposition : 'ANSWER';
-      const answer = contradictory
-        ? 'Não está cadastrada no seu plano, mas dá sim pra trocar o frango por ovos.'
-        : 'Como orientação aproximada fora do plano, para essa refeição combine arroz, feijão, legumes e uma fonte de proteína conforme suas preferências.';
+      const answer =
+        natural ??
+        (contradictory
+          ? 'Não está cadastrada no seu plano, mas dá sim pra trocar o frango por ovos.'
+          : 'Como orientação aproximada fora do plano, para essa refeição combine arroz, feijão, legumes e uma fonte de proteína conforme suas preferências.');
       const subject = createSubject({ content, runtimeContent: 'enabled' });
       const effects = installPersistentEffectHarness(subject);
       const planning = jest.spyOn(subject.planningExecution, 'execute');
@@ -2329,10 +2363,15 @@ describe('CoachCommandService', () => {
             domain: 'NUTRITION',
             answer,
             followUpQuestion: null,
-            grounding: 'GENERAL_KNOWLEDGE',
+            grounding:
+              natural || (contradictory && 'adversarialVerified' in testInput)
+                ? 'CURRENT_PLAN'
+                : 'GENERAL_KNOWLEDGE',
             confidence: 'HIGH',
           }),
           model: 'fake',
+          promptTokens: 0,
+          completionTokens: 0,
           totalTokens: 0,
         }),
         completeJobInTransaction: jest.fn(),
@@ -2379,6 +2418,20 @@ describe('CoachCommandService', () => {
           },
           { provide: ConversationRuntimeAuditService, useValue: audit },
           { provide: AIService, useValue: ai },
+          {
+            provide: OpenAIGateway,
+            useValue: {
+              createTextResponse: jest.fn().mockResolvedValue({
+                outputText: JSON.stringify({
+                  status: 'NOT_REGISTERED',
+                  meaningPreserved: true,
+                }),
+                promptTokens: 8,
+                completionTokens: 2,
+                totalTokens: 10,
+              }),
+            },
+          },
           { provide: PrismaService, useValue: subject.prisma },
           {
             provide: ConversationCurrentNutritionContextService,
@@ -2490,7 +2543,12 @@ describe('CoachCommandService', () => {
           ...effects.scheduledMessages.values(),
         ]);
         if (contradictory) {
-          if (testInput.expectedRegistered) {
+          if (natural) {
+            expect(delivered).toContain(natural);
+            await expect(bridge.mock.results[0]?.value).resolves.toMatchObject({
+              observability: { answerSource: 'AI' },
+            });
+          } else if (testInput.expectedRegistered) {
             expect(delivered).toContain(
               'o plano registra a troca de Filé de frango por Ovos mexidos',
             );
@@ -2505,86 +2563,7 @@ describe('CoachCommandService', () => {
             expect(delivered).not.toContain('o plano registra a troca');
           }
           expect(delivered).not.toContain('dá sim');
-          expect(delivered).not.toContain(answer);
-          const publicMessage = [...effects.scheduledMessages.values()][0];
-          if (!publicMessage) throw new Error('Missing scheduled answer');
-          let delivery = {
-            ...publicMessage,
-            userId: 'user-id',
-            automationRuleId: 'rule-id',
-            status: ScheduledMessageStatus.PENDING as ScheduledMessageStatus,
-            leaseExpiresAt: null as Date | null,
-            automationRule: {
-              id: 'rule-id',
-              code: AUTOMATION_RULE_CODES.DAILY_COACH,
-              enabled: true,
-            },
-            user: {
-              isActive: true,
-              phone: 'local-test-only',
-              phoneE164: null,
-              preferences: null,
-            },
-          };
-          const store = {
-            findUnique: jest.fn(() => Promise.resolve(delivery)),
-            findUniqueOrThrow: jest.fn(() => Promise.resolve(delivery)),
-            update: jest.fn(({ data }: { data: Partial<typeof delivery> }) => {
-              delivery = { ...delivery, ...data };
-              return Promise.resolve(delivery);
-            }),
-            updateMany: jest.fn(
-              ({ data }: { data: Partial<typeof delivery> }) => {
-                delivery = { ...delivery, ...data };
-                return Promise.resolve({ count: 1 });
-              },
-            ),
-          };
-          const transaction = {
-            message: subject.prisma.message,
-            $queryRaw: jest.fn(),
-            scheduledMessage: store,
-            userAutomationPreference: {
-              findUnique: jest.fn().mockResolvedValue({
-                remindersEnabled: false,
-                progressReminderEnabled: false,
-              }),
-            },
-          };
-          const sendPrisma = {
-            scheduledMessage: store,
-            $transaction: (run: (tx: typeof transaction) => Promise<unknown>) =>
-              run(transaction),
-          };
-          const gateway = {
-            sendText: jest
-              .fn()
-              .mockResolvedValue({ externalMessageId: 'local-send-id' }),
-          };
-          const automation = new AutomationService(
-            sendPrisma as unknown as PrismaService,
-            {} as never,
-            {} as never,
-            gateway as never,
-            {
-              requireAccessInTransaction: jest
-                .fn()
-                .mockResolvedValue(undefined),
-            } as never,
-            subject.eventBus as never,
-            {} as never,
-            {} as never,
-            {} as never,
-          );
-          const at = new Date(publicMessage.scheduledFor.getTime() + 1000);
-          await automation.sendScheduledMessage(publicMessage.id, at);
-          await automation.sendScheduledMessage(publicMessage.id, at);
-          expect(gateway.sendText).toHaveBeenCalledTimes(1);
-          expect(gateway.sendText).toHaveBeenCalledWith({
-            number: 'local-test-only',
-            text: publicMessage.content,
-          });
-          expect(delivery.status).toBe(ScheduledMessageStatus.SENT);
+          if (!natural) expect(delivered).not.toContain(answer);
         } else if (content === 'Posso trocar o arroz hoje só nessa refeição?') {
           expect(delivered).toContain(
             'qual é o original e qual é a alternativa',
@@ -2593,6 +2572,84 @@ describe('CoachCommandService', () => {
         } else {
           expect(delivered).toContain(answer);
         }
+
+        const publicMessage = [...effects.scheduledMessages.values()][0];
+        if (!publicMessage) throw new Error('Missing scheduled answer');
+        let delivery = {
+          ...publicMessage,
+          userId: 'user-id',
+          automationRuleId: 'rule-id',
+          status: ScheduledMessageStatus.PENDING as ScheduledMessageStatus,
+          leaseExpiresAt: null as Date | null,
+          automationRule: {
+            id: 'rule-id',
+            code: AUTOMATION_RULE_CODES.DAILY_COACH,
+            enabled: true,
+          },
+          user: {
+            isActive: true,
+            phone: 'local-test-only',
+            phoneE164: null,
+            preferences: null,
+          },
+        };
+        const store = {
+          findUnique: jest.fn(() => Promise.resolve(delivery)),
+          findUniqueOrThrow: jest.fn(() => Promise.resolve(delivery)),
+          update: jest.fn(({ data }: { data: Partial<typeof delivery> }) => {
+            delivery = { ...delivery, ...data };
+            return Promise.resolve(delivery);
+          }),
+          updateMany: jest.fn(
+            ({ data }: { data: Partial<typeof delivery> }) => {
+              delivery = { ...delivery, ...data };
+              return Promise.resolve({ count: 1 });
+            },
+          ),
+        };
+        const transaction = {
+          message: subject.prisma.message,
+          $queryRaw: jest.fn(),
+          scheduledMessage: store,
+          userAutomationPreference: {
+            findUnique: jest.fn().mockResolvedValue({
+              remindersEnabled: false,
+              progressReminderEnabled: false,
+            }),
+          },
+        };
+        const sendPrisma = {
+          scheduledMessage: store,
+          $transaction: (run: (tx: typeof transaction) => Promise<unknown>) =>
+            run(transaction),
+        };
+        const gateway = {
+          sendText: jest
+            .fn()
+            .mockResolvedValue({ externalMessageId: 'local-send-id' }),
+        };
+        const automation = new AutomationService(
+          sendPrisma as unknown as PrismaService,
+          {} as never,
+          {} as never,
+          gateway as never,
+          {
+            requireAccessInTransaction: jest.fn().mockResolvedValue(undefined),
+          } as never,
+          subject.eventBus as never,
+          {} as never,
+          {} as never,
+          {} as never,
+        );
+        const at = new Date(publicMessage.scheduledFor.getTime() + 1000);
+        await automation.sendScheduledMessage(publicMessage.id, at);
+        await automation.sendScheduledMessage(publicMessage.id, at);
+        expect(gateway.sendText).toHaveBeenCalledTimes(1);
+        expect(gateway.sendText).toHaveBeenCalledWith({
+          number: 'local-test-only',
+          text: publicMessage.content,
+        });
+        expect(delivery.status).toBe(ScheduledMessageStatus.SENT);
       } finally {
         await module.close();
       }

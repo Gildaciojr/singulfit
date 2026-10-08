@@ -1,8 +1,11 @@
 import { Injectable } from '@nestjs/common';
+import { ConversationSafetyDetectorService } from '../understanding/conversation-safety-detector.service';
+import { ConversationMessageNormalizerService } from '../understanding/conversation-message-normalizer.service';
 import { MessageDirection, MessageType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CurrentNutritionPlanReaderService } from '../../diet/current-nutrition-plan-reader.service';
 import type { NutritionPlanMeal } from '../../diet/v2/nutrition-plan-v2.contract';
+import type { CurrentNutritionPlan } from '../../diet/current-nutrition-plan-reader.contract';
 import { CoachProactiveSchedulePolicy } from '../../automation/coach-proactive-schedule.policy';
 import { NutritionConsumptionSummaryService } from '../../nutrition/nutrition-consumption-summary.service';
 import {
@@ -11,6 +14,7 @@ import {
   isDailyMealRequest,
   isWeeklyFollowUp,
   metricFollowUp,
+  type DailyQuery,
 } from '../understanding/daily-query.policy';
 
 const DAY_LABELS = [
@@ -48,6 +52,12 @@ export class ConversationDailyQueryService {
     text: string;
     referenceDate: Date;
   }): Promise<string | null> {
+    if (
+      new ConversationSafetyDetectorService().detect(
+        new ConversationMessageNormalizerService().normalize(input.text),
+      ).safety.requiresSafeResponse
+    )
+      return null;
     const text = foldDailyText(input.text);
     let query = dailyQuery(text);
     const metric = metricFollowUp(text);
@@ -79,7 +89,7 @@ export class ConversationDailyQueryService {
         return metric
           ? 'Você quer consultar essa quantidade consumida hoje ou nesta semana?'
           : 'Você quer consultar esta semana sobre qual informação: alimentação registrada ou outra coisa?';
-      if (metric && antecedent.kind !== 'CONSUMPTION')
+      if (metric && antecedent.kind === 'EXPENDITURE')
         return 'Você quer consultar essa quantidade na alimentação registrada hoje ou nesta semana?';
       query = {
         ...antecedent,
@@ -102,6 +112,8 @@ export class ConversationDailyQueryService {
       )
         throw new Error('Preferences ownership mismatch');
       const timezone = this.clock.timezone(preferences?.timezone);
+      if (query?.kind === 'TARGET' || query?.kind === 'COMPARISON')
+        return await this.target(input, query, timezone);
       if (query) {
         const summary = await this.consumption.summarize({
           userId: input.userId,
@@ -131,6 +143,114 @@ export class ConversationDailyQueryService {
     } catch {
       return 'Não consegui consultar essas informações com segurança agora. Tente novamente em instantes.';
     }
+  }
+
+  /** Targets are stored strategy values; item estimates and observed intake
+   * cannot create a missing target or an unconfirmed weekly calendar. */
+  private async target(
+    input: { userId: string; referenceDate: Date },
+    query: DailyQuery,
+    timezone: string,
+  ): Promise<string> {
+    const current = await this.nutrition.getCurrent(input.userId);
+    if (!current)
+      return 'Você ainda não tem uma meta registrada em um plano alimentar ativo.';
+    if (current.userId !== input.userId)
+      throw new Error('Plan ownership mismatch');
+    const values = this.targetValues(current);
+    const selected =
+      query.metric === 'PROTEIN'
+        ? values.protein
+        : query.metric === 'CARBS'
+          ? values.carbs
+          : query.metric === 'FAT'
+            ? values.fat
+            : values.calories;
+    if (selected === null || !Number.isFinite(selected) || selected <= 0)
+      return 'Essa meta não está disponível no seu plano atual. Não vou estimá-la como se estivesse registrada.';
+    const label =
+      query.metric === 'PROTEIN'
+        ? 'proteína'
+        : query.metric === 'CARBS'
+          ? 'carboidratos'
+          : query.metric === 'FAT'
+            ? 'gorduras'
+            : 'calorias';
+    const unit =
+      query.metric === 'CALORIES' || query.metric === 'ALL' ? 'kcal' : 'g';
+    const number = (value: number) =>
+      new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 }).format(
+        value,
+      );
+    let multiplier = 1;
+    if (query.period === 'THIS_WEEK') {
+      if (
+        current.implementation !== 'V2' ||
+        current.document.artifactType !== 'WEEKLY_PLAN'
+      )
+        return `Sua meta diária de ${label} é ${number(selected)} ${unit}. O plano não confirma um calendário semanal; não posso multiplicá-la por sete como uma meta semanal registrada.`;
+      const labels = current.document.days.map((day) =>
+        foldDailyText(day.label).replace(/ feira$/u, ''),
+      );
+      if (
+        labels.length !== 7 ||
+        new Set(labels).size !== 7 ||
+        !DAY_LABELS.every((day) => labels.includes(day)) ||
+        current.document.strategy.dayCount !== 7
+      )
+        return `Sua meta diária de ${label} é ${number(selected)} ${unit}. O plano não identifica os sete dias desta semana; não há uma meta semanal completa confirmada.`;
+      multiplier = labels.length;
+    }
+    const target = selected * multiplier;
+    const all =
+      query.metric === 'ALL'
+        ? ` Proteína: ${values.protein === null ? 'não disponível' : `${number(values.protein * multiplier)} g`}; carboidratos: ${values.carbs === null ? 'não disponíveis' : `${number(values.carbs * multiplier)} g`}; gorduras: ${values.fat === null ? 'não disponíveis' : `${number(values.fat * multiplier)} g`}.`
+        : '';
+    const provenance =
+      current.implementation === 'V2'
+        ? ' (estimativa da estratégia do plano)'
+        : '';
+    const answer = `Sua meta ${multiplier === 1 ? 'diária' : 'para os sete dias da semana'} de ${label} no plano atual é ${number(target)} ${unit}${multiplier > 1 ? ` (${number(selected)} ${unit} por dia)` : ''}${provenance}.${all}`;
+    if (query.kind !== 'COMPARISON') return answer;
+    const summary = await this.consumption.summarize({
+      userId: input.userId,
+      referenceDate: input.referenceDate,
+      period: query.period,
+      timezone,
+    });
+    const consumed =
+      query.metric === 'PROTEIN'
+        ? summary.protein
+        : query.metric === 'CARBS'
+          ? summary.carbs
+          : query.metric === 'FAT'
+            ? summary.fat
+            : summary.calories;
+    if (!summary.mealCount || consumed === null)
+      return `${answer} O consumo analisado está ausente ou incompleto; não dá para compará-lo com a meta.`;
+    return `${answer} Nas ${summary.mealCount} refeições registradas e analisadas ${query.period === 'TODAY' ? 'hoje' : 'nesta semana'}, constam ${number(consumed)} ${unit}, cerca de ${number((100 * consumed) / target)}% da meta. Isso não comprova seu consumo total nem indica quanto você deve compensar.`;
+  }
+
+  private targetValues(current: CurrentNutritionPlan) {
+    if (current.implementation === 'LEGACY')
+      return {
+        calories: current.dailyCaloriesTarget,
+        protein: current.proteinTarget,
+        carbs: current.carbsTarget,
+        fat: current.fatTarget,
+      };
+    const strategy = current.document.strategy;
+    const macros =
+      'value' in strategy.macroTargets ? strategy.macroTargets.value : null;
+    return {
+      calories:
+        'value' in strategy.energyTargetKcal
+          ? strategy.energyTargetKcal.value
+          : null,
+      protein: macros?.proteinGrams ?? null,
+      carbs: macros?.carbohydrateGrams ?? null,
+      fat: macros?.fatGrams ?? null,
+    };
   }
 
   private async meal(

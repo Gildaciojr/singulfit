@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { isNutritionAdvice } from './nutrition-request.policy';
+import { dailyQuery, isNutritionMetricTopic } from './daily-query.policy';
 import type { ConversationUnderstandingInput } from '../contracts/conversation-understanding.contract';
 import type { ConversationReference } from '../contracts/conversation-entity.contract';
 import {
@@ -23,9 +24,16 @@ export class ConversationDomainResolverService {
   ): ConversationDomainResolution {
     const candidates = new Set<ConversationDomain>();
     const text = message.folded;
+    if (dailyQuery(text))
+      return Object.freeze({
+        domain: CONVERSATION_DOMAIN.NUTRITION,
+        candidates: Object.freeze([CONVERSATION_DOMAIN.NUTRITION]),
+        contextual: false,
+      });
     const nutritionAdvice = isNutritionAdvice(text);
     if (
       nutritionAdvice ||
+      isNutritionMetricTopic(text) ||
       /\b(dieta|alimentacao|alimentar|refeicao|comida|alimento|cardapio|whey|creatina|frango|arroz|banana)\b/u.test(
         text,
       )

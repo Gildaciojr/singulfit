@@ -78,6 +78,168 @@ describe('ConversationDailyQueryService', () => {
     return { service, prisma, consumption, nutrition, current, input };
   }
 
+  function targets(
+    implementation: 'V2' | 'LEGACY',
+    days = [
+      'Segunda-feira',
+      'Terça-feira',
+      'Quarta-feira',
+      'Quinta-feira',
+      'Sexta-feira',
+      'Sábado',
+      'Domingo',
+    ],
+  ) {
+    return implementation === 'LEGACY'
+      ? {
+          userId: 'user',
+          implementation,
+          dailyCaloriesTarget: 2200,
+          proteinTarget: 130,
+          carbsTarget: 270,
+          fatTarget: 65,
+        }
+      : {
+          userId: 'user',
+          implementation,
+          document: {
+            artifactType: 'WEEKLY_PLAN',
+            days: days.map((label) => ({ label })),
+            strategy: {
+              dayCount: days.length,
+              energyTargetKcal: { status: 'ESTIMATED', value: 2200 },
+              macroTargets: {
+                status: 'ESTIMATED',
+                value: {
+                  proteinGrams: 130,
+                  carbohydrateGrams: 270,
+                  fatGrams: 65,
+                },
+              },
+            },
+          },
+        };
+  }
+  it.each(['V2', 'LEGACY'] as const)(
+    'reads daily targets from the owned %s plan, not previous workout or intake',
+    async (implementation) => {
+      const s = subject();
+      s.nutrition.getCurrent.mockResolvedValue(targets(implementation));
+      for (const [text, expected] of [
+        ['Qual minha meta calórica diária?', '2.200 kcal'],
+        ['Quanto de proteína consta como meta diária?', '130 g'],
+        ['Qual a meta de carboidratos?', '270 g'],
+        ['Qual minha meta de gorduras?', '65 g'],
+        ['Quais minhas metas de macronutrientes?', '130 g'],
+        ['Quais minhas metas de calorias e proteína?', '2.200 kcal'],
+      ]) {
+        expect(s.service.accepts(text)).toBe(true);
+        expect(await s.service.answer({ ...s.input, text })).toContain(
+          expected,
+        );
+      }
+      expect(s.consumption.summarize).not.toHaveBeenCalled();
+      expect(s.prisma.message.findFirst).not.toHaveBeenCalled();
+    },
+  );
+  it('keeps clinical safety ahead of daily targets', async () => {
+    const s = subject();
+    expect(
+      await s.service.answer({
+        ...s.input,
+        text: 'Qual minha meta de calorias? Desmaiei e tenho dor no peito.',
+      }),
+    ).toBeNull();
+    expect(s.nutrition.getCurrent).not.toHaveBeenCalled();
+    expect(s.consumption.summarize).not.toHaveBeenCalled();
+  });
+  it('uses all seven explicit weekdays for the weekly target and compares only analyzed intake', async () => {
+    const s = subject();
+    s.nutrition.getCurrent.mockResolvedValue(targets('V2'));
+    expect(
+      await s.service.answer({
+        ...s.input,
+        text: 'Qual minha meta de calorias para a semana?',
+      }),
+    ).toContain('15.400 kcal');
+    const answer = await s.service.answer({
+      ...s.input,
+      text: 'Quanto consumi em relação à meta de calorias nesta semana?',
+    });
+    expect(answer).toContain('500 kcal');
+    expect(answer).toContain('15.400 kcal');
+    expect(answer).toContain('não comprova seu consumo total');
+    expect(s.consumption.summarize).toHaveBeenCalledWith({
+      userId: 'user',
+      period: 'THIS_WEEK',
+      referenceDate: s.input.referenceDate,
+      timezone: 'America/Sao_Paulo',
+    });
+  });
+  it.each([
+    targets('LEGACY'),
+    targets('V2', ['Dia 1', 'Dia 2']),
+    targets('V2', [
+      'Segunda-feira',
+      'Segunda-feira',
+      'Quarta-feira',
+      'Quinta-feira',
+      'Sexta-feira',
+      'Sábado',
+      'Domingo',
+    ]),
+  ])(
+    'does not invent a seven-day target without an unambiguous weekly calendar',
+    async (plan) => {
+      const s = subject();
+      s.nutrition.getCurrent.mockResolvedValue(plan);
+      const answer = await s.service.answer({
+        ...s.input,
+        text: 'Qual minha meta de calorias para a semana?',
+      });
+      expect(answer).toContain('2.200 kcal');
+      expect(answer).not.toContain('15.400');
+      expect(s.consumption.summarize).not.toHaveBeenCalled();
+    },
+  );
+  it("does not disclose another user's target or fabricate an absent target", async () => {
+    const s = subject();
+    s.nutrition.getCurrent.mockResolvedValue({
+      ...targets('LEGACY'),
+      userId: 'someone-else',
+    });
+    expect(
+      await s.service.answer({
+        ...s.input,
+        text: 'Qual minha meta de proteína?',
+      }),
+    ).not.toContain('130');
+    s.nutrition.getCurrent.mockResolvedValue({
+      ...targets('LEGACY'),
+      proteinTarget: null,
+    });
+    expect(
+      await s.service.answer({
+        ...s.input,
+        text: 'Qual minha meta de proteína?',
+      }),
+    ).toContain('não está disponível');
+    s.nutrition.getCurrent.mockResolvedValue(targets('V2'));
+    s.consumption.summarize.mockResolvedValue({
+      calories: null,
+      protein: null,
+      carbs: null,
+      fat: null,
+      mealCount: 0,
+    });
+    expect(
+      await s.service.answer({
+        ...s.input,
+        text: 'Quanto consumi em relação à meta de calorias hoje?',
+      }),
+    ).toContain('ausente ou incompleto');
+  });
+
   it('selects the named afternoon snack even when a morning snack also exists', async () => {
     const s = subject();
     s.current.document.days[0].meals.push(
@@ -372,10 +534,9 @@ describe('ConversationDailyQueryService', () => {
     'troque meu almoço de hoje',
     'troque o frango',
     'troque o primeiro exercício',
-    'qual minha meta de calorias?',
     'quantas calorias devo consumir?',
   ])(
-    'leaves the existing mutation and target routes intact for %s',
+    'leaves persistent mutations and requests to prescribe a new target intact for %s',
     async (text) => {
       const s = subject();
       expect(await s.service.answer({ ...s.input, text })).toBeNull();

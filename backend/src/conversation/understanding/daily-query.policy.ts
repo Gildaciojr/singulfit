@@ -11,6 +11,12 @@ export function foldDailyText(value: string): string {
     .trim();
 }
 export type DailyMetric = 'CALORIES' | 'PROTEIN' | 'CARBS' | 'FAT' | 'ALL';
+/** A nutrition metric owns its domain even when its date/operation needs QA. */
+export function isNutritionMetricTopic(value: string): boolean {
+  return /\b(?:calorias?|caloric[ao]s?|proteinas?|carboidratos?|gorduras?|macros|macronutrientes)\b/u.test(
+    foldDailyText(value),
+  );
+}
 export function isDailyMealRequest(value: string): boolean {
   if (isNutritionAdvice(value)) return false;
   const text = foldDailyText(value);
@@ -28,7 +34,7 @@ export function isDailyMealRequest(value: string): boolean {
   );
 }
 export type DailyQuery = Readonly<{
-  kind: 'CONSUMPTION' | 'EXPENDITURE';
+  kind: 'CONSUMPTION' | 'EXPENDITURE' | 'TARGET' | 'COMPARISON';
   period: ConsumptionPeriod;
   metric: DailyMetric;
 }>;
@@ -47,25 +53,49 @@ export function dailyQuery(value: string): DailyQuery | null {
     )
   )
     return null;
-  const period = /\b(?:essa|esta|nessa|nesta) semana\b/u.test(text)
-    ? 'THIS_WEEK'
-    : 'TODAY';
-  const metric = /\bproteina\b/u.test(text)
-    ? 'PROTEIN'
-    : /\bcarboidratos?\b/u.test(text)
-      ? 'CARBS'
-      : /\b(?:gordura|gorduras|lipidios)\b/u.test(text)
-        ? 'FAT'
-        : /\bcalorias?\b/u.test(text)
-          ? 'CALORIES'
-          : 'ALL';
+  const period = /\b(?:semana|semanal)\b/u.test(text) ? 'THIS_WEEK' : 'TODAY';
+  const metric =
+    /\b(?:macros|macronutrientes)\b/u.test(text) ||
+    [
+      /\bproteinas?\b/u,
+      /\bcarboidratos?\b/u,
+      /\b(?:gorduras?|lipidios)\b/u,
+      /\b(?:calorias?|caloric[ao]s?)\b/u,
+    ].filter((pattern) => pattern.test(text)).length > 1
+      ? 'ALL'
+      : /\bproteinas?\b/u.test(text)
+        ? 'PROTEIN'
+        : /\bcarboidratos?\b/u.test(text)
+          ? 'CARBS'
+          : /\b(?:gordura|gorduras|lipidios)\b/u.test(text)
+            ? 'FAT'
+            : /\b(?:calorias?|caloric[ao]s?)\b/u.test(text)
+              ? 'CALORIES'
+              : 'ALL';
   if (
     /\b(gastei|queimei|gasto calorico|calorias gastas|calorias queimadas)\b/u.test(
       text,
     )
   )
     return { kind: 'EXPENDITURE', period, metric };
-  if (/\b(consumi|comi|ingeri|consumido|consumidas|ingeridas)\b/u.test(text))
+  const target =
+    /\b(?:metas?|objetivo calorico)\b/u.test(text) &&
+    isNutritionMetricTopic(text);
+  if (target)
+    return {
+      kind: /\b(?:consumi|comi|ingeri|consumo|consumido|consumidas|ingeridas)\b/u.test(
+        text,
+      )
+        ? 'COMPARISON'
+        : 'TARGET',
+      period,
+      metric,
+    };
+  if (
+    /\b(consumi|comi|ingeri|consumo|consumido|consumidas|ingeridas)\b/u.test(
+      text,
+    )
+  )
     return { kind: 'CONSUMPTION', period, metric };
   return null;
 }

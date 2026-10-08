@@ -122,6 +122,61 @@ describe('PersonalizedCoachContextService', () => {
     });
   });
   it.each([
+    ['WEIGHT_LOSS', 1800, 110],
+    ['MUSCLE_GAIN', 2600, 150],
+  ] as const)(
+    'projects the actual %s nutrition strategy and separates today from the week',
+    async (goal, calories, protein) => {
+      const s = setup();
+      s.snapshots.build.mockResolvedValue({
+        ...s.snapshot,
+        nutrition: { ...s.snapshot.nutrition, primaryGoal: known(goal) },
+      } as unknown as CoachProfileSnapshot);
+      s.nutrition.getCurrent.mockResolvedValue({
+        userId: 'user',
+        implementation: 'LEGACY',
+        title: 'Plano alimentar',
+        objective: goal,
+        dailyCaloriesTarget: calories,
+        proteinTarget: protein,
+        carbsTarget: 220,
+        fatTarget: 60,
+        meals: [],
+      });
+      s.consumption.summarize.mockImplementation(
+        (request: { period: string }) =>
+          Promise.resolve({
+            calories: request.period === 'TODAY' ? 400 : 1200,
+            protein: request.period === 'TODAY' ? 30 : 90,
+            carbs: 50,
+            fat: 10,
+            mealCount: request.period === 'TODAY' ? 1 : 3,
+            periodStart: at,
+            periodEnd: at,
+          }),
+      );
+      const context = await s.service.build(s.input);
+      expect(context).toMatchObject({
+        goals: { nutrition: { status: 'KNOWN', value: goal } },
+        activeNutritionPlan: {
+          objective: goal,
+          dailyCaloriesTarget: calories,
+          proteinTarget: protein,
+        },
+        relevantProgress: {
+          recordedMealConsumptionToday: { calories: 400, analyzedMealCount: 1 },
+          recordedMealConsumption: { calories: 1200, analyzedMealCount: 3 },
+        },
+      });
+      expect(s.consumption.summarize).toHaveBeenCalledWith({
+        userId: 'user',
+        period: 'TODAY',
+        referenceDate: at,
+        timezone: 'America/Sao_Paulo',
+      });
+    },
+  );
+  it.each([
     ['qual é meu objetivo?', 'emagrecimento'],
     ['onde eu disse que treino?', 'em casa'],
     ['quais equipamentos eu tenho?', 'halteres'],
