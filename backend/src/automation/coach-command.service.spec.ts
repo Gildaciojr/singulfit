@@ -2429,6 +2429,202 @@ describe('CoachCommandService', () => {
     },
   );
 
+  it.each([
+    'Acabei de terminar meu treino de superiores na academia e já tomei aproximadamente 1 litro de água hoje. Como você acha que estou indo?',
+    'Terminei meu treino de musculação. Como você acha que estou indo?',
+    'Hoje fiz CrossFit e bebi água. Como você acha que estou indo?',
+  ])(
+    'routes workout guidance through real command/runtime/QA without plan effects: %s',
+    async (content) => {
+      const answer =
+        'Concluir o treino é um avanço na sua consistência. Como você se sentiu durante a sessão?';
+      const subject = createSubject({ content, runtimeContent: 'enabled' });
+      const effects = installPersistentEffectHarness(subject);
+      const planning = jest.spyOn(subject.planningExecution, 'execute');
+      const base = goalPreparationInput({} as never);
+      const human = new CoachConversationHumanContextBuilder().build(
+        base.snapshot,
+        {
+          currentMessage: content,
+        },
+      );
+      const ai = {
+        createJob: jest
+          .fn()
+          .mockResolvedValue({ id: 'fake-qa', status: AIJobStatus.PENDING }),
+        runTextJob: jest.fn().mockResolvedValue({
+          outputText: JSON.stringify({
+            disposition: 'ANSWER',
+            domain: 'WORKOUT',
+            answer,
+            followUpQuestion: null,
+            grounding: 'GENERAL_KNOWLEDGE',
+            confidence: 'HIGH',
+          }),
+          model: 'fake',
+          totalTokens: 0,
+        }),
+        completeJobInTransaction: jest.fn(),
+        failJob: jest.fn(),
+      };
+      const config = {
+        get: () => ({
+          valid: true,
+          mode: 'PRIMARY',
+          killSwitch: false,
+          timeoutMs: 25000,
+        }),
+        isOfficiallyEligible: () => true,
+      };
+      const audit = { record: jest.fn() };
+      const module = await Test.createTestingModule({
+        imports: [ConversationModule],
+        providers: [
+          ConversationRuntimeIntegrationService,
+          ConversationRuntimeService,
+          {
+            provide: ConversationExecutionBridgeService,
+            inject: [ConversationQAExecutorService],
+            useFactory: (qa: ConversationQAExecutorService) =>
+              new ConversationExecutionBridgeService(
+                new ConversationResponsePayloadBuilder(),
+                new ConversationLanguageRealizerService(),
+                new ConversationResponseFormatterService(),
+                new ConversationResponseValidatorService(),
+                qa,
+              ),
+          },
+          ConversationResponsePayloadBuilder,
+          ConversationLanguageRealizerService,
+          ConversationResponseFormatterService,
+          ConversationResponseValidatorService,
+          ConversationOfficialSelectionService,
+          ConversationShadowComparatorService,
+          ConversationQAExecutorService,
+          ConversationPublicAnswerBoundaryService,
+          {
+            provide: ConversationRuntimeOperationalConfigService,
+            useValue: config,
+          },
+          { provide: ConversationRuntimeAuditService, useValue: audit },
+          { provide: AIService, useValue: ai },
+          { provide: PrismaService, useValue: subject.prisma },
+          {
+            provide: ConversationCurrentNutritionContextService,
+            useValue: {
+              read: jest
+                .fn()
+                .mockResolvedValue({ status: 'NO_PLAN', plan: null }),
+            },
+          },
+          {
+            provide: ConversationTurnContextBuilderService,
+            useValue: {
+              build: jest.fn().mockResolvedValue({
+                understandingInput: understandingInput(content),
+                snapshot: base.snapshot,
+                adaptiveDecision: base.adaptiveDecision,
+                humanContext: human,
+                preparationBase: {
+                  snapshot: base.snapshot,
+                  adaptiveDecision: base.adaptiveDecision,
+                  progressContextAvailable: base.progressContextAvailable,
+                  confirmationPending: base.confirmationPending,
+                  recentHistory: base.recentHistory,
+                  continuity: base.continuity,
+                  referenceDate: base.referenceDate,
+                },
+              }),
+            },
+          },
+        ],
+      }).compile();
+      try {
+        const runtime = module.get(ConversationRuntimeIntegrationService);
+        const qa = jest.spyOn(
+          module.get(ConversationQAExecutorService),
+          'execute',
+        );
+        const evaluate = jest.spyOn(
+          module.get(ConversationRuntimeService),
+          'evaluate',
+        );
+        const bridge = jest.spyOn(
+          module.get(ConversationExecutionBridgeService),
+          'execute',
+        );
+        subject.conversationRuntime.decide.mockImplementation(
+          (request: ConversationRuntimeInput) => runtime.decide(request),
+        );
+        const request = {
+          userId: 'user-id',
+          messageId: 'message-id',
+          proactiveReply: true,
+        };
+        await subject.service.processTextMessage(request);
+        await subject.service.processTextMessage(request);
+        expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+        expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+        expect(planning).not.toHaveBeenCalled();
+        await expect(evaluate.mock.results[0]?.value).resolves.toMatchObject({
+          summary: {
+            recognizedIntent: 'GENERAL_GUIDANCE_REQUEST',
+            goal: 'GENERAL_GUIDANCE',
+            routeKind: 'ANSWER_MESSAGE',
+          },
+          decision: { understanding: { domain: 'WORKOUT' } },
+        });
+        await expect(bridge.mock.results[0]?.value).resolves.toMatchObject({
+          status: 'COMPLETED',
+        });
+        expect(qa).toHaveBeenCalledTimes(1);
+        expect(qa).toHaveBeenCalledWith(
+          expect.objectContaining({
+            userId: 'user-id',
+            messageId: 'message-id',
+            humanContext: human,
+            route: expect.objectContaining({ kind: 'ANSWER_MESSAGE' }),
+          }),
+        );
+        await expect(
+          subject.conversationRuntime.decide.mock.results[0]?.value,
+        ).resolves.toMatchObject({
+          source: 'CONVERSATION_RUNTIME',
+          content: answer,
+        });
+        expect(ai.createJob).toHaveBeenCalledTimes(1);
+        expect(ai.createJob).toHaveBeenCalledWith(
+          expect.objectContaining({ type: AIJobType.TEXT }),
+        );
+        expect(JSON.stringify(ai.createJob.mock.calls)).not.toMatch(
+          /DIET_PLAN_GENERATION|WORKOUT_PLAN_GENERATION/,
+        );
+        expect(ai.runTextJob).toHaveBeenCalledTimes(1);
+        expect(JSON.stringify(ai.runTextJob.mock.calls)).toContain(content);
+        const providerInput = JSON.parse(
+          ai.runTextJob.mock.calls[0][1].input as string,
+        ) as {
+          policy: { readOnly: boolean; mutationsMustBeDeferred: boolean };
+          trustedContext: { goal: string | null };
+        };
+        expect(providerInput.policy).toMatchObject({
+          readOnly: true,
+          mutationsMustBeDeferred: true,
+        });
+        expect(providerInput.trustedContext.goal).toBe(
+          human.goal?.value ?? null,
+        );
+        expect(effects.scheduledMessages.size).toBe(1);
+        expect(effects.outboxEvents.size).toBe(1);
+        expect(
+          JSON.stringify([...effects.scheduledMessages.values()]),
+        ).toContain(answer);
+      } finally {
+        await module.close();
+      }
+    },
+  );
+
   it('fails closed after the runtime decides fallback without legacy generation', async () => {
     const subject = createSubject({
       content: 'quero uma dieta',

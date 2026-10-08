@@ -177,7 +177,13 @@ export class ConversationExecutionRouterService {
         references: this.references(input),
       });
     }
-    if (input.understanding.domain === 'GENERAL') {
+    // Guidance is read-only; workout effect authorization belongs to generation
+    // and mutation routes, not to answering an individual's current question.
+    if (
+      input.understanding.domain === 'GENERAL' ||
+      input.understanding.domain === 'WORKOUT' ||
+      input.understanding.domain === 'COMBINED'
+    ) {
       return Object.freeze({
         ...this.envelope(input),
         kind: 'ANSWER_MESSAGE',

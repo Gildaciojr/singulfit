@@ -210,9 +210,26 @@ describe('ConversationExecutionRouterService', () => {
         ),
       }),
     ).toMatchObject({
-      kind: 'LEGACY_FALLBACK',
-      fallbackReason: 'UNSUPPORTED_GUIDANCE_DOMAIN',
+      kind: 'ANSWER_MESSAGE',
+      operation: 'PROVIDE_GUIDANCE',
+      reasonCodes: ['PLANNER_GOAL_ROUTED'],
     });
+  });
+
+  it('routes combined read-only guidance without selecting a plan effect', () => {
+    expect(
+      router.route({
+        understanding: understanding(
+          'GENERAL_GUIDANCE_REQUEST',
+          'PROVIDE_GUIDANCE',
+          'COMBINED',
+        ),
+        goalDecision: goalDecision(
+          'GENERAL_GUIDANCE',
+          'GENERAL_GUIDANCE_REQUEST',
+        ),
+      }),
+    ).toMatchObject({ kind: 'ANSWER_MESSAGE', operation: 'PROVIDE_GUIDANCE' });
   });
 
   it.each([
