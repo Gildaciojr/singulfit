@@ -14,6 +14,7 @@ import {
   hasInvalidWorkoutActivityName,
   workoutWeeklyRecoveryIssues,
   workoutStructuralActivityIssue,
+  isExecutableWorkoutTimedLocomotion,
 } from './workout-plan-v2-quality.policy';
 import { WORKOUT_MODALITY } from './workout-planning-artifact.contract';
 import type {
@@ -213,7 +214,14 @@ export class WorkoutPlanV2Validator {
               'ERROR',
               activity.activityKey,
             );
-          if (validatePublicText && activity.kind !== 'ENDURANCE') {
+          if (
+            validatePublicText &&
+            activity.kind !== 'ENDURANCE' &&
+            !(
+              requireTypedExecution &&
+              isExecutableWorkoutTimedLocomotion(activity)
+            )
+          ) {
             if (!activity.publicIdentity)
               this.add(
                 issues,

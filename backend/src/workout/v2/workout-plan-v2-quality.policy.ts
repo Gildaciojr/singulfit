@@ -4,6 +4,44 @@ import type {
   WorkoutActivityV2,
 } from './workout-plan-v2.contract';
 import type { WorkoutPlanningContext } from './workout-planning-context.contract';
+import { ConversationPublicAnswerBoundaryService } from '../../conversation/runtime/conversation-public-answer-boundary.service';
+import { workoutPublicTextIssues } from './workout-public-text.policy';
+import { workoutPrescriptionTextConstraints } from './workout-prescription.policy';
+
+const publicBoundary = new ConversationPublicAnswerBoundaryService();
+
+/** Executable timed locomotion needs no anatomical identity or exercise-name catalog. */
+export function isExecutableWorkoutTimedLocomotion(
+  activity: WorkoutActivityV2,
+): boolean {
+  if (
+    activity.kind !== 'TIMED' ||
+    activity.movementPattern !== 'LOCOMOTION' ||
+    !Number.isSafeInteger(activity.durationSeconds) ||
+    activity.durationSeconds <= 0 ||
+    activity.durationSeconds > 7200 ||
+    workoutStructuralActivityIssue(activity)?.severity === 'ERROR' ||
+    hasInvalidWorkoutActivityName(activity.name)
+  )
+    return false;
+  const text = [activity.name, activity.instruction, ...activity.alerts].join(
+    '\n',
+  );
+  if (
+    [activity.name, activity.instruction, ...activity.alerts].some(
+      (value) => publicBoundary.projectStructuredText(value) === null,
+    ) ||
+    workoutPublicTextIssues(
+      text,
+      workoutPrescriptionTextConstraints(activity),
+      activity.activityKey,
+    ).length
+  )
+    return false;
+  return (
+    activity.name.trim().length > 0 && activity.instruction.trim().length > 0
+  );
+}
 
 export function workoutStructuralActivityIssue(
   activity: WorkoutActivityV2,
@@ -41,6 +79,29 @@ export function workoutStructuralActivityIssue(
       };
   }
   if (activity.kind === 'TIMED') {
+    if (activity.movementPattern === 'LOCOMOTION') {
+      const name = activity.name
+        .normalize('NFD')
+        .replace(/\p{Diacritic}/gu, '')
+        .toLowerCase();
+      // Detect contradictory representations; these terms are not an acceptance vocabulary.
+      const foot =
+        /\b(?:caminhada|caminhar|walking|walk|corrida|correr|trote|jogging|run)\b/u.test(
+          name,
+        );
+      const cycling = /\b(?:ciclismo|pedalada|bike|bicicleta|cycling)\b/u.test(
+        name,
+      );
+      if (
+        (foot && (cycling || activity.equipment.includes('BIKE'))) ||
+        (cycling && activity.equipment.includes('TREADMILL'))
+      )
+        return {
+          code: 'ENDURANCE_MODE_CONFLICT',
+          severity: 'ERROR',
+          path: activity.activityKey,
+        };
+    }
     const minimum =
       (activity.workSeconds ?? 0) * activity.rounds +
       (activity.recoverySeconds ?? 0) * Math.max(0, activity.rounds - 1);

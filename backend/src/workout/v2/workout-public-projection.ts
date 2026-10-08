@@ -14,7 +14,10 @@ import {
   type WorkoutPublicTextConstraints,
 } from './workout-public-text.policy';
 import { projectWorkoutHumanName } from './workout-human-name.policy';
-import { hasInvalidWorkoutActivityName } from './workout-plan-v2-quality.policy';
+import {
+  hasInvalidWorkoutActivityName,
+  isExecutableWorkoutTimedLocomotion,
+} from './workout-plan-v2-quality.policy';
 
 /** Positive presentation vocabulary, never an exercise selector or equipment detector. */
 const normalize = (text: string): string =>
@@ -134,6 +137,7 @@ function projectCoachingCue(
         clause,
         {
           authorizedEquipment: activity.equipment,
+          equipmentReferenceText: activity.name,
           intensityPolicy: {
             exactLoadAllowed: false,
             exactPaceAllowed: false,
@@ -320,7 +324,11 @@ export interface WorkoutPublicActivityProjection {
 export function projectWorkoutActivity(
   activity: WorkoutActivityV2,
 ): WorkoutPublicActivityProjection {
+  const timedLocomotion = isExecutableWorkoutTimedLocomotion(activity);
   const supportedName =
+    (timedLocomotion
+      ? publicBoundary.projectStructuredText(activity.name)
+      : null) ??
     projectWorkoutHumanName(activity) ??
     (activity.prescription &&
     !hasInvalidWorkoutActivityName(activity.name) &&
@@ -341,7 +349,7 @@ export function projectWorkoutActivity(
         structuredIdentity(activity) ??
         patterns[activity.movementPattern]);
   const presentCue = (text: string): string | null =>
-    activity.prescription
+    activity.prescription || timedLocomotion
       ? workoutPublicTextIssues(
           text,
           workoutPrescriptionTextConstraints(activity),

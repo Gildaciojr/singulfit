@@ -3,6 +3,8 @@ import { WorkoutApplicationExecutorService } from './execution/workout-applicati
 import { WorkoutAsyncCompletionService } from '../../automation/workout-async-completion.service';
 import { CoachPlanningExecutionService } from '../../automation/coach-planning-execution.service';
 import { WorkoutPlanV2Formatter } from './workout-plan-v2.formatter';
+import { CurrentWorkoutPlanReaderService } from './current-workout-plan-reader.service';
+import { WorkoutPlanV2StoredDocumentParser } from './workout-plan-v2-stored-document.parser';
 import { EventHandlerRegistry } from '../../event-bus/event-handler.registry';
 import { OutboxDispatcherService } from '../../event-bus/outbox-dispatcher.service';
 import { INTERNAL_EVENT } from '../../event-bus/event-bus.constants';
@@ -1386,6 +1388,226 @@ describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
       expect(s.reserved).toHaveBeenCalledTimes(1);
     },
   );
+  it.each(['CROSSFIT', 'GYM_STRENGTH'] as const)(
+    'reconciles real V12 null prescriptions in %s 4x, then replays without another provider call',
+    async (modality) => {
+      const base = plan(modality, 4);
+      const candidate = {
+        ...base,
+        sessions: base.sessions.map((session, index) => ({
+          ...session,
+          blocks: session.blocks.map((block, blockIndex) => ({
+            ...block,
+            activities:
+              blockIndex === 0
+                ? [
+                    {
+                      activityKey: `${session.sessionKey}-real-walk`,
+                      kind: 'TIMED' as const,
+                      name:
+                        index % 2
+                          ? 'Corrida ao ar livre'
+                          : 'Caminhada progressiva na esteira',
+                      source: 'MODEL_GENERATED' as const,
+                      movementPattern: 'LOCOMOTION' as const,
+                      equipment: index % 2 ? [] : ['TREADMILL' as const],
+                      publicIdentity: null,
+                      instruction:
+                        'Ajuste o ritmo gradualmente e mantenha passadas confortáveis.',
+                      alerts: [],
+                      appliedConstraintCodes: [],
+                      durationSeconds: modality === 'CROSSFIT' ? 360 : 600,
+                      workSeconds: null,
+                      recoverySeconds: null,
+                      rounds: 1,
+                      intensity: 'LIGHT' as const,
+                      prescription: {
+                        execution: {
+                          kind: 'COUNT' as const,
+                          minimum: null,
+                          maximum: null,
+                          perSide: false,
+                          alternating: false,
+                        },
+                        load: null,
+                        effort: null,
+                        enduranceMetrics: [],
+                      },
+                    },
+                  ]
+                : blockIndex === 1
+                  ? [
+                      {
+                        ...strength(`${session.sessionKey}-real-strength`),
+                        name:
+                          index % 2
+                            ? 'Barra fixa strict ou remo invertido na barra'
+                            : 'Barra fixa com pausa no topo',
+                        equipment: [
+                          'PULL_UP_BAR' as const,
+                          'BODYWEIGHT' as const,
+                        ],
+                        movementPattern: 'PULL' as const,
+                        publicIdentity: {
+                          plane: 'VERTICAL' as const,
+                          targetRegion: 'BACK' as const,
+                          bodyPosition: 'HANGING' as const,
+                          jointAction: null,
+                        },
+                        repetitions: index % 2 ? '6' : '3-5',
+                        prescription: {
+                          execution: {
+                            kind: 'COUNT' as const,
+                            minimum: null,
+                            maximum: null,
+                            perSide: false,
+                            alternating: false,
+                          },
+                          load: null,
+                          effort: null,
+                          enduranceMetrics: [],
+                        },
+                      },
+                    ]
+                  : block.activities.map((activity) => ({
+                      ...activity,
+                      prescription: {
+                        execution: {
+                          kind: 'SECONDS' as const,
+                          minimum: null,
+                          maximum: null,
+                          perSide: false,
+                          alternating: false,
+                        },
+                        load: null,
+                        effort: null,
+                        enduranceMetrics: [],
+                      },
+                    })),
+          })),
+        })),
+      };
+      const s = await subject(
+        modality === 'CROSSFIT'
+          ? 'Monte Crossfit 4 vezes por semana'
+          : 'Monte musculação 4 vezes por semana',
+        [candidate],
+        { availableEquipment: knownDatum(['PULL_UP_BAR', 'TREADMILL']) },
+      );
+      const output = await s.engine.generateCandidate(s.input);
+      expect(output.output.sessions).toHaveLength(4);
+      expect(
+        output.output.validation.issues.filter(
+          (issue) => issue.severity === 'ERROR',
+        ),
+      ).toEqual([]);
+      expect(
+        output.output.sessions[0].blocks[1].activities[0].prescription
+          ?.execution,
+      ).toMatchObject({ minimum: 3, maximum: 5 });
+      expect(
+        output.output.sessions[1].blocks[1].activities[0].prescription
+          ?.execution,
+      ).toMatchObject({ minimum: 6, maximum: 6 });
+      expect(
+        output.output.sessions[0].blocks[0].activities[0].prescription
+          ?.execution,
+      ).toBeNull();
+      expect(
+        new WorkoutPlanV2Formatter().format(output.output).join('\n'),
+      ).toContain('Caminhada progressiva na esteira');
+      const presentation = new WorkoutPlanV2Formatter()
+        .format(output.output)
+        .join('\n');
+      expect(presentation).toContain('Corrida ao ar livre');
+      expect(presentation).toContain(
+        'Ajuste o ritmo gradualmente e mantenha passadas confortáveis.',
+      );
+      await s.complete(output);
+      const reader = new CurrentWorkoutPlanReaderService(
+        {
+          workoutPlan: {
+            findFirst: jest.fn().mockResolvedValue({
+              id: 'persisted-v12',
+              userId: s.input.userId,
+              title: output.output.title,
+              user: { preferences: { timezone: 'America/Sao_Paulo' } },
+              days: output.output.sessions.map((session) => ({
+                dayNumber: session.sequence,
+                weekday: session.weekday,
+                title: session.label,
+                exercises: [],
+              })),
+              aiJob: {
+                id: output.aiJobId,
+                userId: s.input.userId,
+                type: AIJobType.WORKOUT,
+                status: AIJobStatus.COMPLETED,
+                promptVersion: { name: WORKOUT_PLANNING_V2_PROMPT.name },
+                result: { acceptedOutput: output.output },
+              },
+            }),
+          },
+        } as never,
+        new WorkoutPlanV2StoredDocumentParser(),
+      );
+      expect((await reader.read(s.input.userId, true)).status).toBe(
+        'AVAILABLE',
+      );
+      expect(
+        await reader.present(
+          s.input.userId,
+          'sessão 1',
+          s.input.referenceDate,
+          true,
+        ),
+      ).toContain('Caminhada');
+      const replay = await s.engine.generateCandidate(s.input);
+      expect(replay.status).toBe('ALREADY_COMPLETED');
+      expect(replay.output.sessions).toEqual(output.output.sessions);
+      expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(1);
+      expect(s.reserved).toHaveBeenCalledTimes(1);
+      expect(s.confirmed).toHaveBeenCalledTimes(1);
+    },
+  );
+  it('keeps a genuine prescription conflict terminal instead of repairing generic INVALID_PARAMETER', async () => {
+    const base = plan('GYM_STRENGTH', 3);
+    const candidate = {
+      ...base,
+      sessions: base.sessions.map((session) => ({
+        ...session,
+        blocks: session.blocks.map((block) => ({
+          ...block,
+          activities: block.activities.map((activity) =>
+            activity.kind === 'STRENGTH'
+              ? {
+                  ...activity,
+                  repetitions: '3-5',
+                  prescription: {
+                    execution: {
+                      kind: 'COUNT' as const,
+                      minimum: 6,
+                      maximum: 6,
+                      perSide: false,
+                      alternating: false,
+                    },
+                    load: null,
+                    effort: null,
+                    enduranceMetrics: [],
+                  },
+                }
+              : activity,
+          ),
+        })),
+      })),
+    };
+    const s = await subject('Monte musculação 3x', [candidate]);
+    await expect(s.engine.generateCandidate(s.input)).rejects.toThrow(
+      'INVALID_PARAMETER',
+    );
+    expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(1);
+    expect(s.confirmed).not.toHaveBeenCalled();
+  });
   it.each([
     ['UNAUTHORIZED_EQUIPMENT_REFERENCE', 'Use bike e remo'],
     ['UNAUTHORIZED_EXACT_LOAD', 'Use 20 kg'],

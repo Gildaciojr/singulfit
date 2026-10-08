@@ -4,10 +4,126 @@ import type {
   WorkoutExecutionPrescription,
   WorkoutMetricPrescription,
   WorkoutPlanValidationIssue,
+  GeneratedWorkoutPlanV2Candidate,
 } from './workout-plan-v2.contract';
 import type { WorkoutPlanningContext } from './workout-planning-context.contract';
 import type { WorkoutPlanningStrategy } from './workout-planning-strategy.contract';
 import type { WorkoutPublicTextConstraints } from './workout-public-text.policy';
+
+function executionFromText(
+  activity: WorkoutActivityV2,
+): WorkoutExecutionPrescription | null {
+  if (!('repetitions' in activity) || !activity.repetitions) return null;
+  const dose =
+    /^(\d+(?:[.,]\d+)?)(?:\s*[-–a]\s*(\d+(?:[.,]\d+)?))?(?:\s+(reps|repeticoes|toques?|s|segundos?|m))?(?:\s+(por lado|por perna|por braco))?(?:\s+(alternando lados))?$/u.exec(
+      normalizeWorkoutExecutionText(activity.repetitions, activity) ??
+        normalize(activity.repetitions),
+    );
+  if (!dose) return null;
+  const kind =
+    dose[3] === 'm'
+      ? 'METERS'
+      : ['s', 'segundo', 'segundos'].includes(dose[3])
+        ? 'SECONDS'
+        : 'COUNT';
+  const minimum = Number(dose[1].replace(',', '.'));
+  const maximum = Number((dose[2] ?? dose[1]).replace(',', '.'));
+  if (
+    !Number.isFinite(minimum) ||
+    !Number.isFinite(maximum) ||
+    minimum <= 0 ||
+    maximum < minimum ||
+    (kind === 'COUNT' &&
+      (!Number.isSafeInteger(minimum) || !Number.isSafeInteger(maximum)))
+  )
+    return null;
+  return {
+    kind,
+    minimum,
+    maximum,
+    perSide: Boolean(dose[4]),
+    alternating: Boolean(dose[5]),
+  };
+}
+
+/** V12 only: recover missing redundant values, never create a dose or overwrite a conflict. */
+export function reconcileWorkoutPrescriptions(
+  candidate: GeneratedWorkoutPlanV2Candidate,
+): GeneratedWorkoutPlanV2Candidate {
+  const sessions = candidate.sessions.map((session) => {
+    const blocks = session.blocks.map((block) => {
+      const activities = block.activities.map((activity) => {
+        const prescription = activity.prescription;
+        const execution = prescription?.execution;
+        if (!prescription || !execution) return activity;
+        let reconciled: WorkoutExecutionPrescription | null = execution;
+        if (activity.kind === 'STRENGTH' || activity.kind === 'MOBILITY') {
+          const dose = executionFromText(activity);
+          const missingDose =
+            execution.minimum === null && execution.maximum === null;
+          if (
+            dose &&
+            execution.kind === dose.kind &&
+            (missingDose ||
+              (execution.perSide === dose.perSide &&
+                execution.alternating === dose.alternating)) &&
+            (execution.minimum === null ||
+              execution.minimum === dose.minimum) &&
+            (execution.maximum === null ||
+              execution.maximum === dose.maximum) &&
+            (execution.minimum === null || execution.maximum === null)
+          ) {
+            reconciled = {
+              ...execution,
+              minimum: dose.minimum,
+              maximum: dose.maximum,
+              perSide: execution.perSide || dose.perSide,
+              alternating: execution.alternating || dose.alternating,
+            };
+          }
+        } else if (!execution.perSide && !execution.alternating) {
+          const seconds =
+            activity.kind === 'TIMED'
+              ? activity.durationSeconds
+              : activity.durationMinutes * 60;
+          if (
+            Number.isSafeInteger(seconds) &&
+            seconds > 0 &&
+            ((execution.minimum === null &&
+              execution.maximum === null &&
+              ['COUNT', 'SECONDS'].includes(execution.kind)) ||
+              (execution.kind === 'SECONDS' &&
+                (execution.minimum === null || execution.minimum === seconds) &&
+                (execution.maximum === null || execution.maximum === seconds)))
+          )
+            reconciled = null;
+        }
+        return reconciled === execution
+          ? activity
+          : Object.freeze({
+              ...activity,
+              prescription: Object.freeze({
+                ...prescription,
+                execution: reconciled,
+              }),
+            });
+      });
+      return activities.some(
+        (activity, index) => activity !== block.activities[index],
+      )
+        ? Object.freeze({ ...block, activities: Object.freeze(activities) })
+        : block;
+    });
+    return blocks.some((block, index) => block !== session.blocks[index])
+      ? Object.freeze({ ...session, blocks: Object.freeze(blocks) })
+      : session;
+  });
+  return sessions.some(
+    (session, index) => session !== candidate.sessions[index],
+  )
+    ? Object.freeze({ ...candidate, sessions: Object.freeze(sessions) })
+    : candidate;
+}
 
 /** Structural semantics only. No exercise selection or programming tables. */
 export function workoutPrescriptionIssues(
@@ -30,25 +146,14 @@ export function workoutPrescriptionIssues(
   if (execution) {
     // Compare redundant, unambiguous doses; unfamiliar historical text is not rejected.
     if ('repetitions' in activity && activity.repetitions) {
-      const dose =
-        /^(\d+(?:[.,]\d+)?)(?:\s*[-–a]\s*(\d+(?:[.,]\d+)?))?(?:\s+(reps|repeticoes|toques?|s|segundos?|m))?(?:\s+(por lado|por perna|por braco))?(?:\s+(alternando lados))?$/u.exec(
-          normalizeWorkoutExecutionText(activity.repetitions, activity) ??
-            normalize(activity.repetitions),
-        );
+      const dose = executionFromText(activity);
       if (dose) {
-        const kind =
-          dose[3] === 'm'
-            ? 'METERS'
-            : ['s', 'segundo', 'segundos'].includes(dose[3])
-              ? 'SECONDS'
-              : 'COUNT';
         if (
-          execution.kind !== kind ||
-          execution.minimum !== Number(dose[1].replace(',', '.')) ||
-          (execution.maximum ?? execution.minimum) !==
-            Number((dose[2] ?? dose[1]).replace(',', '.')) ||
-          execution.perSide !== Boolean(dose[4]?.startsWith('por ')) ||
-          execution.alternating !== Boolean(dose[5])
+          execution.kind !== dose.kind ||
+          execution.minimum !== dose.minimum ||
+          (execution.maximum ?? execution.minimum) !== dose.maximum ||
+          execution.perSide !== dose.perSide ||
+          execution.alternating !== dose.alternating
         )
           invalid();
       }
@@ -287,6 +392,7 @@ export function workoutPrescriptionTextConstraints(
     ...(activity.prescription?.enduranceMetrics ?? []),
   ];
   return {
+    equipmentReferenceText: activity.name,
     authorizedEquipment: activity.equipment,
     intensityPolicy: {
       exactLoadAllowed: metrics.some((m) =>

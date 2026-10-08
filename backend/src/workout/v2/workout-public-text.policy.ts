@@ -8,7 +8,14 @@ import { workoutPrescriptionTextConstraints } from './workout-prescription.polic
 
 /** Equipment vocabulary only: this policy never selects movements or programming. */
 const aliases: Readonly<Record<WorkoutEquipment, readonly string[]>> = {
-  BARBELL: ['barra', 'barras', 'barra olimpica', 'barbell'],
+  BARBELL: [
+    'barra',
+    'barras',
+    'barra olimpica',
+    'barra com anilhas',
+    'barra de musculacao',
+    'barbell',
+  ],
   DUMBBELL: ['halter', 'halteres', 'dumbbell', 'dumbbells'],
   KETTLEBELL: ['kettlebell', 'kettlebells', 'kb'],
   MACHINE: ['maquina', 'maquinas', 'machine'],
@@ -54,6 +61,8 @@ const normalize = (text: string): string =>
     .toLowerCase();
 
 export interface WorkoutPublicTextConstraints {
+  /** Activity name disambiguates anaphoric equipment references in its cues. */
+  readonly equipmentReferenceText?: string;
   readonly authorizedEquipment: readonly WorkoutEquipment[];
   readonly intensityPolicy: {
     readonly exactLoadAllowed: boolean;
@@ -69,11 +78,31 @@ export function workoutPublicTextIssues(
   path: string,
 ): readonly WorkoutPlanValidationIssue[] {
   const value = normalize(text);
+  const referenceContext = normalize(
+    `${strategy.equipmentReferenceText ?? ''}\n${text}`,
+  );
   const codes = new Set<WorkoutPlanValidationIssue['code']>();
   for (const match of value.matchAll(equipmentPattern)) {
     const reference = vocabulary.find(
       ({ word }) => word === match[0].replace(/\s+/gu, ' '),
     );
+    // Resolve an anaphoric "a/na barra" only after an explicit pull-up reference.
+    // Qualified Olympic/loaded bars retain their own BARBELL token and permission.
+    if (
+      reference?.equipment === 'BARBELL' &&
+      ['barra', 'barras'].includes(reference.word) &&
+      strategy.authorizedEquipment.includes('PULL_UP_BAR') &&
+      /\bbarras? fixas?\b/u.test(referenceContext) &&
+      /\b(?:a|as|na|nas|da|das)\s+$/u.test(value.slice(0, match.index))
+    )
+      continue;
+    // An inverted bodyweight row names a movement, not a rowing ergometer.
+    if (
+      reference?.equipment === 'ROW_ERGOMETER' &&
+      reference.word === 'remo' &&
+      /^\s+invertido\b/u.test(value.slice(match.index + match[0].length))
+    )
+      continue;
     if (
       reference &&
       !strategy.authorizedEquipment?.includes(reference.equipment)

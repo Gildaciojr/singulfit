@@ -2,7 +2,11 @@ import { WorkoutPlanV2Validator } from './workout-plan-v2.validator';
 import { WorkoutPlanV2Parser } from './workout-plan-v2.parser';
 import { WorkoutPlanV2Formatter } from './workout-plan-v2.formatter';
 import { WorkoutPlanningStrategyService } from './workout-planning-strategy.service';
-import { workoutPrescriptionIssues } from './workout-prescription.policy';
+import {
+  workoutPrescriptionIssues,
+  reconcileWorkoutPrescriptions,
+} from './workout-prescription.policy';
+import { workoutPublicTextIssues } from './workout-public-text.policy';
 import {
   qualityContext,
   qualitySession,
@@ -14,6 +18,7 @@ import type {
   WorkoutPrescription,
   WorkoutMetricPrescription,
   StrengthActivity,
+  WorkoutExecutionPrescription,
 } from './workout-plan-v2.contract';
 import type { WorkoutPlanningContext } from './workout-planning-context.contract';
 import { mandatoryWorkoutMinutes } from './workout-duration-estimator';
@@ -55,6 +60,443 @@ const activity = (
   repetitions: '8-10',
   equipment: ['DUMBBELL'],
   prescription: prescription(changes),
+});
+
+function nativeActivity(
+  kind: 'TIMED' | 'ENDURANCE',
+  executionKind: WorkoutExecutionPrescription['kind'],
+): WorkoutActivityV2 {
+  const base = {
+    activityKey: 'native',
+    name: 'Caminhada na esteira',
+    source: 'MODEL_GENERATED' as const,
+    movementPattern: 'LOCOMOTION' as const,
+    publicIdentity: null,
+    equipment: ['TREADMILL'] as const,
+    instruction: 'Mantenha ritmo confortável.',
+    alerts: [],
+    appliedConstraintCodes: [],
+    prescription: prescription({
+      load: null,
+      effort: null,
+      execution: {
+        kind: executionKind,
+        minimum: null,
+        maximum: null,
+        perSide: false,
+        alternating: false,
+      },
+    }),
+  };
+  return kind === 'TIMED'
+    ? {
+        ...base,
+        kind,
+        durationSeconds: 360,
+        workSeconds: null,
+        recoverySeconds: null,
+        rounds: 1,
+        intensity: 'LIGHT',
+      }
+    : {
+        ...base,
+        kind,
+        mode: 'WALK',
+        durationMinutes: 6,
+        distanceKm: null,
+        intensity: 'LIGHT',
+      };
+}
+
+describe('production V12 compatibility: jobs 20756ef4 and 98456476 prescription excerpts', () => {
+  it('retains an authorized pull-up cue but does not authorize a loaded bar in that cue', () => {
+    const value = {
+      ...activity({ load: null }),
+      name: 'Barra fixa com pausa no topo',
+      equipment: ['PULL_UP_BAR'] as const,
+      movementPattern: 'PULL' as const,
+      instruction: 'Segure a barra com controle.',
+      publicIdentity: {
+        plane: 'VERTICAL' as const,
+        targetRegion: 'BACK' as const,
+        bodyPosition: 'HANGING' as const,
+        jointAction: null,
+      },
+    };
+    expect(new WorkoutPlanV2Formatter().formatActivity(value)).toContain(
+      value.instruction,
+    );
+    expect(
+      new WorkoutPlanV2Formatter().formatActivity({
+        ...value,
+        instruction: 'Segure a barra olímpica.',
+      }),
+    ).not.toContain('barra olímpica');
+  });
+  const available = {
+    ...strategy,
+    authorizedEquipment: [
+      'BODYWEIGHT',
+      'DUMBBELL',
+      'PULL_UP_BAR',
+      'TREADMILL',
+    ] as const,
+  };
+  const candidateFor = (value: WorkoutActivityV2) =>
+    qualityCandidate([
+      { ...qualitySession('real', [value]), weekday: 'MONDAY' as const },
+    ]);
+  const normalized = (value: WorkoutActivityV2) =>
+    reconcileWorkoutPrescriptions(
+      new WorkoutPlanV2Parser().parse(JSON.stringify(candidateFor(value))),
+    );
+  it.each([
+    ['3-5', 'COUNT', 3, 5, false, false],
+    ['6', 'COUNT', 6, 6, false, false],
+    ['6 por lado', 'COUNT', 6, 6, true, false],
+    ['30-40 s', 'SECONDS', 30, 40, false, false],
+    ['30-40 s por lado', 'SECONDS', 30, 40, true, false],
+    ['8-10 alternando lados', 'COUNT', 8, 10, false, true],
+  ] as const)(
+    'recovers %s exclusively from the existing redundant dose',
+    (repetitions, kind, minimum, maximum, perSide, alternating) => {
+      const value = {
+        ...activity({
+          load: null,
+          effort: null,
+          execution: {
+            kind,
+            minimum: null,
+            maximum: null,
+            perSide: false,
+            alternating: false,
+          },
+        }),
+        repetitions,
+      };
+      const before = JSON.stringify(value);
+      const result = normalized(value);
+      expect(
+        result.sessions[0].blocks[0].activities[0].prescription?.execution,
+      ).toEqual({ kind, minimum, maximum, perSide, alternating });
+      expect(
+        new WorkoutPlanV2Validator()
+          .validate(result, context, available, true, true, true)
+          .issues.filter((issue) => issue.severity === 'ERROR'),
+      ).toEqual([]);
+      expect(JSON.stringify(value)).toBe(before);
+      expect(reconcileWorkoutPrescriptions(result)).toBe(result);
+      const output = new WorkoutPlanV2Formatter().formatActivity(
+        result.sessions[0].blocks[0].activities[0],
+      );
+      if (perSide) expect(output).toContain('por lado');
+      if (alternating) expect(output).toContain('alternando lados');
+    },
+  );
+  it.each([
+    {
+      ...activity({
+        load: null,
+        execution: { ...execution, minimum: 4, maximum: null },
+      }),
+      repetitions: '3-5',
+    },
+    {
+      ...activity({
+        load: null,
+        execution: {
+          ...execution,
+          kind: 'SECONDS',
+          minimum: null,
+          maximum: null,
+        },
+      }),
+      repetitions: '6',
+    },
+    {
+      ...activity({
+        load: null,
+        execution: { ...execution, minimum: 6, maximum: 6 },
+      }),
+      repetitions: '6 por lado',
+    },
+    {
+      ...activity({
+        load: null,
+        execution: { ...execution, minimum: null, maximum: null },
+      }),
+      repetitions: 'até falhar',
+    },
+  ])('keeps ambiguous or conflicting dose invalid: %j', (value) => {
+    expect(reconcileWorkoutPrescriptions(candidateFor(value))).toEqual(
+      candidateFor(value),
+    );
+    expect(
+      new WorkoutPlanV2Validator().validate(
+        normalized(value),
+        context,
+        available,
+        true,
+        true,
+        true,
+      ).issues,
+    ).toContainEqual(
+      expect.objectContaining({ code: 'INVALID_PARAMETER', severity: 'ERROR' }),
+    );
+  });
+  it.each([
+    ['TIMED', 'COUNT'],
+    ['TIMED', 'SECONDS'],
+    ['ENDURANCE', 'COUNT'],
+    ['ENDURANCE', 'SECONDS'],
+  ] as const)(
+    'uses the native %s clock instead of a null %s execution',
+    (kind, executionKind) => {
+      const value = nativeActivity(kind, executionKind);
+      const result = normalized(value);
+      const projected = result.sessions[0].blocks[0].activities[0];
+      expect(projected.prescription?.execution).toBeNull();
+      expect(
+        new WorkoutPlanV2Validator()
+          .validate(result, context, available, true, true, true)
+          .issues.filter((issue) => issue.severity === 'ERROR'),
+      ).toEqual([]);
+      expect(new WorkoutPlanV2Formatter().formatActivity(projected)).toContain(
+        'Caminhada',
+      );
+      expect(new WorkoutPlanV2Formatter().formatActivity(projected)).toContain(
+        '6 min',
+      );
+    },
+  );
+  it.each(['TIMED', 'ENDURANCE'] as const)(
+    'rejects an explicit conflicting second %s clock',
+    (kind) => {
+      const value = nativeActivity(kind, 'SECONDS');
+      const different = {
+        ...value,
+        prescription: prescription({
+          load: null,
+          execution: {
+            ...execution,
+            kind: 'SECONDS',
+            minimum: 30,
+            maximum: 40,
+          },
+        }),
+      };
+      expect(
+        new WorkoutPlanV2Validator().validate(
+          normalized(different),
+          context,
+          available,
+          true,
+          true,
+          true,
+        ).issues,
+      ).toContainEqual(expect.objectContaining({ code: 'INVALID_PARAMETER' }));
+      const same = {
+        ...value,
+        prescription: prescription({
+          load: null,
+          execution: {
+            ...execution,
+            kind: 'SECONDS',
+            minimum: 360,
+            maximum: 360,
+          },
+        }),
+      };
+      expect(
+        normalized(same).sessions[0].blocks[0].activities[0].prescription
+          ?.execution,
+      ).toBeNull();
+    },
+  );
+  it('does not invent a missing native TIMED clock or waive identity for ambiguous activities', () => {
+    const value = nativeActivity('TIMED', 'SECONDS');
+    if (value.kind !== 'TIMED') throw new Error('Expected TIMED');
+    const invalid = { ...value, durationSeconds: 0 };
+    expect(() =>
+      new WorkoutPlanV2Parser().parse(JSON.stringify(candidateFor(invalid))),
+    ).toThrow();
+    expect(reconcileWorkoutPrescriptions(candidateFor(invalid))).toEqual(
+      candidateFor(invalid),
+    );
+    expect(() => normalized({ ...value, instruction: '' })).toThrow();
+    for (const ambiguous of [
+      { ...value, name: 'Atividade a definir' },
+      { ...value, name: 'Caminhada na bike', equipment: ['BIKE' as const] },
+      { ...activity({ load: null }), publicIdentity: null },
+    ]) {
+      expect(
+        new WorkoutPlanV2Validator().validate(
+          normalized(ambiguous),
+          context,
+          available,
+          true,
+          true,
+          true,
+        ).issues,
+      ).toContainEqual(
+        expect.objectContaining({ code: 'PUBLIC_IDENTITY_REQUIRED' }),
+      );
+    }
+  });
+  it.each([
+    ['Caminhada progressiva na esteira', ['TREADMILL']],
+    ['Caminhada ao ar livre', []],
+    ['Corrida ao ar livre', []],
+    ['Deslocamento contínuo ao ar livre', []],
+  ] as const)(
+    'preserves executable model-authored locomotion without an anatomical identity: %s',
+    (name, equipment) => {
+      const value = {
+        ...nativeActivity('TIMED', 'SECONDS'),
+        name,
+        equipment,
+        instruction:
+          'Ajuste o ritmo gradualmente e mantenha passadas confortáveis.',
+        alerts: ['Interrompa se sentir dor.'],
+      };
+      const result = normalized(value);
+      expect(
+        new WorkoutPlanV2Validator()
+          .validate(result, context, available, true, true, true)
+          .issues.filter((issue) => issue.severity === 'ERROR'),
+      ).toEqual([]);
+      const projected = result.sessions[0].blocks[0].activities[0];
+      for (const presented of [
+        projected,
+        { ...projected, prescription: null },
+      ]) {
+        const output = new WorkoutPlanV2Formatter().formatActivity(presented);
+        expect(output).toContain(name);
+        expect(output).toContain(value.instruction);
+        expect(output).toContain(value.alerts[0]);
+        expect(output).toContain('6 min');
+      }
+    },
+  );
+  it('retains locomotion conflicts even when an anatomical identity is present', () => {
+    const value = nativeActivity('TIMED', 'SECONDS');
+    const contradictory = {
+      ...value,
+      name: 'Caminhada na bicicleta',
+      equipment: ['BIKE'] as const,
+      publicIdentity: strength().publicIdentity,
+    };
+    expect(
+      new WorkoutPlanV2Validator().validate(
+        normalized(contradictory),
+        context,
+        {
+          ...available,
+          authorizedEquipment: [...available.authorizedEquipment, 'BIKE'],
+        },
+        true,
+        true,
+        true,
+      ).issues,
+    ).toContainEqual(
+      expect.objectContaining({
+        code: 'ENDURANCE_MODE_CONFLICT',
+        severity: 'ERROR',
+      }),
+    );
+    const unavailable = {
+      ...value,
+      name: 'Caminhada progressiva na esteira',
+    };
+    expect(
+      new WorkoutPlanV2Validator().validate(
+        normalized(unavailable),
+        context,
+        { ...available, authorizedEquipment: ['BODYWEIGHT'] },
+        true,
+        true,
+        true,
+      ).issues,
+    ).toContainEqual(
+      expect.objectContaining({
+        code: 'EQUIPMENT_UNAVAILABLE',
+        severity: 'ERROR',
+      }),
+    );
+    const impossible = { ...value, durationSeconds: 60, workSeconds: 120 };
+    if (value.kind !== 'TIMED') throw new Error('Expected TIMED');
+    expect(
+      new WorkoutPlanV2Validator().validate(
+        normalized(impossible),
+        context,
+        available,
+        true,
+        true,
+        true,
+      ).issues,
+    ).toContainEqual(
+      expect.objectContaining({
+        code: 'TIMED_DURATION_IMPOSSIBLE',
+        severity: 'ERROR',
+      }),
+    );
+  });
+  it.each(['name', 'instruction', 'alerts'] as const)(
+    'resolves authorized pull-up equipment in %s while preserving Olympic bar errors',
+    (field) => {
+      const positive = [
+        'Barra fixa com pausa no topo',
+        'Barra fixa strict ou remo invertido na barra',
+      ];
+      for (const text of positive) {
+        expect(workoutPublicTextIssues(text, available, 'real')).toEqual([]);
+        const value = {
+          ...activity({ load: null }),
+          equipment: ['PULL_UP_BAR', 'BODYWEIGHT'] as const,
+          movementPattern: 'PULL' as const,
+          publicIdentity: {
+            plane: 'VERTICAL' as const,
+            targetRegion: 'BACK' as const,
+            bodyPosition: 'HANGING' as const,
+            jointAction: null,
+          },
+          ...(field === 'alerts' ? { alerts: [text] } : { [field]: text }),
+        };
+        expect(
+          new WorkoutPlanV2Validator()
+            .validate(normalized(value), context, available, true, true, true)
+            .issues.filter((issue) => issue.severity === 'ERROR'),
+        ).toEqual([]);
+      }
+      for (const text of [
+        'Barra olímpica',
+        'Barra fixa; segure a barra olímpica',
+        'Barra fixa; segure a barra com anilhas',
+        'Agachamento com barra',
+        'Use ergômetro de remo',
+      ]) {
+        expect(workoutPublicTextIssues(text, available, 'real')).toContainEqual(
+          expect.objectContaining({ code: 'UNAUTHORIZED_EQUIPMENT_REFERENCE' }),
+        );
+      }
+      const unavailable = {
+        ...activity({ load: null }),
+        equipment: ['BARBELL'] as const,
+      };
+      expect(
+        new WorkoutPlanV2Validator().validate(
+          normalized(unavailable),
+          context,
+          available,
+          true,
+          true,
+          true,
+        ).issues,
+      ).toContainEqual(
+        expect.objectContaining({ code: 'EQUIPMENT_UNAVAILABLE' }),
+      );
+    },
+  );
 });
 function validate(
   value: WorkoutActivityV2,

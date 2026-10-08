@@ -22,6 +22,7 @@ import { freezeWorkoutPlanV2 } from './workout-plan-v2.freeze';
 import { WorkoutPlanV2Parser } from './workout-plan-v2.parser';
 import { applyWorkoutTargetedMutation } from './workout-targeted-mutation.policy';
 import { canonicalizeWorkoutTimedDurations } from './workout-timed-duration.canonicalizer';
+import { reconcileWorkoutPrescriptions } from './workout-prescription.policy';
 import { WorkoutPlanV2Validator } from './workout-plan-v2.validator';
 import type {
   GeneratedWorkoutPlanV2Candidate,
@@ -657,6 +658,8 @@ export class WorkoutPlanningEngineV2Service {
         input.recognizedContext.mutation.sourceActivityKey,
       );
     candidate = canonicalizeWorkoutTimedDurations(candidate);
+    if (requireTypedExecution)
+      candidate = reconcileWorkoutPrescriptions(candidate);
     const validation = this.validator.validate(
       candidate,
       prepared.context,
