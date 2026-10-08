@@ -239,6 +239,11 @@ export class CoachCommandService {
       });
       reply = {
         ...reply,
+        evidence: {
+          ...reply.evidence,
+          responseSource: decision.source,
+          responseSelectionReason: decision.reason,
+        },
         content:
           decision.source === 'CONVERSATION_RUNTIME' ||
           decision.source === 'SAFE_RESPONSE'

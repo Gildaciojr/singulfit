@@ -296,11 +296,24 @@ export class ConversationContinuationService {
         },
       };
     }
+    // Interpretation selects a capability; it cannot answer independent guidance
+    // with only text/pending. Keep genuinely referential reminder replies below.
+    if (
+      interpreted.workoutEffect === 'NONE' &&
+      (interpreted.action === 'INDEPENDENT' ||
+        ((interpreted.reference !== 'PENDING' || !pending) &&
+          this.normalizer.normalize(message.content).question &&
+          (interpreted.action === 'HYDRATION_REPLY' ||
+            interpreted.action === 'WORKOUT_REPLY')))
+    )
+      return {
+        ...safe(),
+        evidence: { delegateRuntime: true, workoutEffect: 'NONE' },
+      };
     if (
       interpreted.workoutEffect === 'NONE' &&
       interpreted.response &&
-      (interpreted.action === 'INDEPENDENT' ||
-        interpreted.action === 'HYDRATION_REPLY' ||
+      (interpreted.action === 'HYDRATION_REPLY' ||
         interpreted.action === 'WORKOUT_REPLY')
     ) {
       const domain = pending?.continuation.domain ?? 'GENERAL';

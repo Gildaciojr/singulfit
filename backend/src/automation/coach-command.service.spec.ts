@@ -1,3 +1,4 @@
+import type { ConversationAIService } from '../ai/conversation-ai.service';
 import { chunkWorkoutWhatsApp } from '../workout/v2/workout-whatsapp.chunker';
 import { explicitContinuationDomain } from '../conversation/understanding/explicit-continuation-domain.policy';
 import { isWorkoutCurrentPlanRead } from '../workout/v2/workout-current-plan-read.policy';
@@ -63,7 +64,7 @@ import { CoachCommandService } from './coach-command.service';
 import { DurableTextPendingError } from '../ai/durable-text-operation.contract';
 import { ConversationContinuationService } from '../conversation/runtime/conversation-continuation.service';
 import { ConversationContinuationStore } from '../conversation/runtime/conversation-continuation.store';
-import type { ConversationContinuationSemanticsService } from '../conversation/runtime/conversation-continuation-semantics.service';
+import { ConversationContinuationSemanticsService } from '../conversation/runtime/conversation-continuation-semantics.service';
 import { ConversationSafetyDetectorService } from '../conversation/understanding/conversation-safety-detector.service';
 import { ConversationMessageNormalizerService } from '../conversation/understanding/conversation-message-normalizer.service';
 import type { ConversationQAFollowUpContextService } from '../conversation/runtime/conversation-qa-follow-up-context.service';
@@ -2476,6 +2477,61 @@ describe('CoachCommandService', () => {
         }),
         isOfficiallyEligible: () => true,
       };
+      const interpretationProvider = {
+        execute: jest.fn().mockResolvedValue({
+          status: 'COMPLETED',
+          structuredOutput: {
+            action: 'INDEPENDENT',
+            reference: 'EXPLICIT',
+            workoutEffect: 'NONE',
+            day: 'UNRESOLVED',
+            meal: 'UNKNOWN',
+            consumption: 'UNKNOWN',
+            description: null,
+            hydrationGoal: false,
+            response: 'Resposta genérica sem contexto individual.',
+          },
+        }),
+      };
+      const interpreter = new ConversationContinuationSemanticsService(
+        interpretationProvider as unknown as ConversationAIService,
+        new ConversationPublicAnswerBoundaryService(),
+      );
+      const interpret = jest.spyOn(interpreter, 'interpret');
+      const store = new ConversationContinuationStore(
+        subject.prisma as unknown as PrismaService,
+        config as unknown as ConversationRuntimeOperationalConfigService,
+      );
+      const source = await subject.prisma.message.findFirst();
+      subject.prisma.message.findFirst.mockResolvedValue({
+        ...source,
+        conversation: { ...source.conversation, userId: 'user-id' },
+      });
+      Object.assign(subject.transaction, {
+        message: subject.prisma.message,
+        coachMessage: subject.prisma.coachMessage,
+      });
+      jest.spyOn(store, 'pending').mockResolvedValue(null);
+      jest
+        .spyOn(store, 'resolveOnce')
+        .mockImplementation((_userId, _messageId, _type, execute) => execute());
+      subject.prisma.coachProfileAcquisitionCycle.findFirst.mockResolvedValue(
+        null,
+      );
+      const continuations = new ConversationContinuationService(
+        subject.prisma as unknown as PrismaService,
+        interpreter as unknown as ConversationContinuationSemanticsService,
+        subject.currentWorkoutPlanReader as unknown as CurrentWorkoutPlanReaderService,
+        {} as ConversationCurrentNutritionContextService,
+        new ConversationPublicAnswerBoundaryService(),
+        new ConversationSafetyDetectorService(),
+        new ConversationMessageNormalizerService(),
+        {} as ConversationQAFollowUpContextService,
+        store,
+      );
+      Object.defineProperty(subject.service, 'continuations', {
+        value: continuations,
+      });
       const audit = { record: jest.fn() };
       const module = await Test.createTestingModule({
         imports: [ConversationModule],
@@ -2561,8 +2617,14 @@ describe('CoachCommandService', () => {
           messageId: 'message-id',
           proactiveReply: true,
         };
-        await subject.service.processTextMessage(request);
-        await subject.service.processTextMessage(request);
+        expect(
+          await subject.service.processCanonicalContinuation(request),
+        ).toBe(true);
+        expect(
+          await subject.service.processCanonicalContinuation(request),
+        ).toBe(true);
+        expect(interpret).toHaveBeenCalledTimes(1);
+        expect(audit.record).toHaveBeenCalledTimes(1);
         expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
         expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
         expect(planning).not.toHaveBeenCalled();
@@ -2616,6 +2678,17 @@ describe('CoachCommandService', () => {
         );
         expect(effects.scheduledMessages.size).toBe(1);
         expect(effects.outboxEvents.size).toBe(1);
+        expect(
+          JSON.stringify([...effects.scheduledMessages.values()]),
+        ).not.toContain('Resposta genérica sem contexto individual.');
+        expect(
+          subject.prisma.coachMessage.create.mock.calls[0][0].data.context,
+        ).toMatchObject({
+          continuationEvidence: {
+            responseSource: 'CONVERSATION_RUNTIME',
+            responseSelectionReason: 'RUNTIME_SELECTED',
+          },
+        });
         expect(
           JSON.stringify([...effects.scheduledMessages.values()]),
         ).toContain(answer);

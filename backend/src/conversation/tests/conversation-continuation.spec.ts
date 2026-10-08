@@ -175,6 +175,36 @@ describe('Canonical conversation continuation', () => {
       },
     };
   }
+  it.each([
+    ['INDEPENDENT', 'EXPLICIT'],
+    ['WORKOUT_REPLY', 'EXPLICIT'],
+    ['HYDRATION_REPLY', 'EXPLICIT'],
+    ['WORKOUT_REPLY', 'PENDING'],
+    ['HYDRATION_REPLY', 'PENDING'],
+  ] as const)(
+    'delegates an independent guidance question instead of publishing interpreter prose: %s',
+    async (action, reference) => {
+      const s = subject(null, {
+        action,
+        reference,
+        workoutEffect: 'NONE',
+        response: 'Resposta genérica do interpretador sem perfil.',
+      });
+      s.prisma.message.findFirst.mockResolvedValue({
+        ...(await s.prisma.message.findFirst()),
+        content:
+          'Acabei de terminar meu treino de superiores na academia e já tomei aproximadamente 1 litro de água hoje. Como você acha que estou indo?',
+      });
+      const result = await s.service.resolve('user', 'message');
+      expect(result).toMatchObject({
+        pending: null,
+        evidence: { delegateRuntime: true },
+      });
+      expect(result?.content).not.toBe(
+        'Resposta genérica do interpretador sem perfil.',
+      );
+    },
+  );
   it('keeps the real hydration + completed workout report in its quoted reminder and preserves the AI response', async () => {
     const content =
       'Bom dia. Já tomei 1 litro de água pela manhã e já realizei meu treino de superiores na academia.';
