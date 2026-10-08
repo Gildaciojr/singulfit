@@ -22,8 +22,333 @@ import type { GenerateWorkoutPlanV2InputBuilder } from '../workout/v2/generate-w
 import type { WorkoutPlanMutationResolverService } from '../workout/v2/workout-plan-mutation-resolver.service';
 import { UsageLimitExceededException } from '../entitlements/usage-limit.exception';
 import { DurableTextPendingError } from '../ai/durable-text-operation.contract';
+import type { CoachPlanningRuntimeContext } from './coach-planning-execution.service';
+import type { PendingGoalConfirmationContext } from './pending-conversation-action.contract';
+import { isWorkoutEffectAuthorized } from '../workout/v2/workout-generation-authorization.policy';
 
 describe('CoachPlanningExecutionService', () => {
+  it.each([
+    'Já concluí meu treino de musculação na academia.',
+    'Hoje fiz CrossFit.',
+    'Quero uma dica sobre musculação.',
+    'Quero academia.',
+    'CrossFit',
+  ])('a literal quote of %s is not authorization', (text) => {
+    expect(
+      isWorkoutEffectAuthorized(text, {
+        effect: 'GENERATE',
+        requestQuote: text,
+      }),
+    ).toBe(false);
+  });
+  it('requires owned inbound and owned original request for a legitimately resolved pending confirmation', async () => {
+    const service = new CoachPlanningExecutionService({} as never);
+    const originalMessage = 'Monte um treino de musculação para mim.';
+    const resolution = new UserGoalEngineService().resolveCurrentMessage(
+      'Quero emagrecer',
+    );
+    if (resolution.status !== 'RESOLVED')
+      throw new Error('Invalid goal fixture');
+    const context: PendingGoalConfirmationContext = {
+      actionId: 'action',
+      operationKey: 'pending-goal-confirmation:original',
+      originalIntent: 'WORKOUT',
+      continuation: true,
+      resolution,
+      payload: {
+        schemaVersion: 1,
+        declaredOutcome: null,
+        allowedGoals: [FitnessGoal.WEIGHT_LOSS],
+        originalIntent: 'WORKOUT',
+        targetPlan: 'WORKOUT',
+        originalMessage,
+        originalReferenceDate: '2026-08-18T12:00:00Z',
+        desiredMealCount: null,
+        resolvedGoal: FitnessGoal.WEIGHT_LOSS,
+        selectedRoute: null,
+      },
+    };
+    const findFirst = jest.fn(
+      ({
+        where,
+      }: {
+        where: {
+          id: string;
+          conversationId: string;
+          conversation: { userId: string };
+        };
+      }) =>
+        Promise.resolve(
+          where.conversationId === 'conversation-id' &&
+            where.conversation.userId === 'user-id' &&
+            ['original', 'consumer'].includes(where.id)
+            ? {
+                content:
+                  where.id === 'original' ? originalMessage : 'Quero emagrecer',
+                timestamp: new Date('2026-08-18T12:00:00Z'),
+              }
+            : null,
+        ),
+    );
+    const pending = {
+      findPendingForInbound: jest
+        .fn()
+        .mockResolvedValue({ status: 'ACTIONABLE', context }),
+    };
+    Object.defineProperty(service, 'prisma', {
+      configurable: true,
+      value: { message: { findFirst } },
+    });
+    Object.defineProperty(service, 'pendingActions', { value: pending });
+    const runtime: CoachPlanningRuntimeContext = {
+      conversationId: 'conversation-id',
+      messageId: 'consumer',
+      correlationId: 'consumer',
+      referenceDate: new Date(),
+      currentMessage: originalMessage,
+      pendingGoalConfirmation: context,
+    };
+    const boundary = service as unknown as {
+      authorizeWorkoutEffect(
+        userId: string,
+        runtime?: CoachPlanningRuntimeContext,
+      ): Promise<boolean>;
+    };
+    const evaluate = (userId: string, input?: CoachPlanningRuntimeContext) =>
+      boundary.authorizeWorkoutEffect(userId, input);
+    expect(await evaluate('user-id', runtime)).toBe(true);
+    findFirst.mockResolvedValueOnce({
+      content: 'Não gere um treino. Quero emagrecer.',
+      timestamp: new Date('2026-08-18T12:00:00Z'),
+    });
+    expect(await evaluate('user-id', runtime)).toBe(false);
+    for (const content of [
+      'Evite criar um novo plano de treino.',
+      'Quero que você evite criar um novo treino.',
+      'Por favor, pare de montar planos para mim.',
+    ]) {
+      findFirst.mockResolvedValueOnce({
+        content,
+        timestamp: new Date('2026-08-18T12:00:00Z'),
+      });
+      expect(await evaluate('user-id', runtime)).toBe(false);
+    }
+    expect(await evaluate('other-user', runtime)).toBe(false);
+    expect(
+      await evaluate('user-id', {
+        ...runtime,
+        messageId: 'different-consumer',
+      }),
+    ).toBe(false);
+    expect(
+      await evaluate('user-id', {
+        ...runtime,
+        conversationId: 'other-conversation',
+      }),
+    ).toBe(false);
+    expect(
+      await evaluate('user-id', { ...runtime, currentMessage: undefined }),
+    ).toBe(false);
+    expect(
+      await evaluate('user-id', {
+        ...runtime,
+        pendingGoalConfirmation: { ...context, actionId: 'forged' },
+      }),
+    ).toBe(false);
+    findFirst.mockResolvedValueOnce({
+      content: 'Quero emagrecer',
+      timestamp: new Date(),
+    });
+    findFirst.mockResolvedValueOnce(null);
+    expect(await evaluate('user-id', runtime)).toBe(false);
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'original',
+          conversation: { userId: 'user-id' },
+          direction: 'INBOUND',
+          type: 'TEXT',
+        }),
+      }),
+    );
+    findFirst.mockImplementation(({ where }) =>
+      Promise.resolve(
+        where.conversation.userId === 'user-id'
+          ? {
+              content:
+                where.id === 'original'
+                  ? `Já bebi água. ${originalMessage}`
+                  : 'Quero emagrecer',
+              timestamp: new Date('2026-08-18T12:00:00Z'),
+            }
+          : null,
+      ),
+    );
+    expect(await evaluate('user-id', runtime)).toBe(true);
+    const profileContext = {
+      ...context,
+      operationKey: 'pending-goal-confirmation:profile-answer',
+    };
+    pending.findPendingForInbound.mockResolvedValue({
+      status: 'ACTIONABLE',
+      context: profileContext,
+    });
+    const cycles = {
+      findFirst: jest.fn().mockResolvedValue({ origin: 'WORKOUT_V2:original' }),
+    };
+    Object.defineProperty(service, 'prisma', {
+      configurable: true,
+      value: { message: { findFirst }, coachProfileAcquisitionCycle: cycles },
+    });
+    findFirst.mockImplementation(({ where }) =>
+      Promise.resolve(
+        where.conversation.userId === 'user-id'
+          ? {
+              content:
+                where.id === 'original'
+                  ? originalMessage
+                  : where.id === 'profile-answer'
+                    ? 'Academia'
+                    : 'Quero emagrecer',
+              timestamp: new Date('2026-08-18T12:00:00Z'),
+            }
+          : null,
+      ),
+    );
+    expect(
+      await evaluate('user-id', {
+        ...runtime,
+        pendingGoalConfirmation: profileContext,
+      }),
+    ).toBe(true);
+    cycles.findFirst.mockResolvedValueOnce(null);
+    expect(
+      await evaluate('user-id', {
+        ...runtime,
+        pendingGoalConfirmation: profileContext,
+      }),
+    ).toBe(false);
+  });
+  it('cannot authorize an original request ID without a stored acquisition response binding', async () => {
+    const service = new CoachPlanningExecutionService({} as never);
+    const currentMessage = 'Monte um treino de CrossFit 4 vezes por semana';
+    const findFirst = jest.fn(
+      ({
+        where,
+      }: {
+        where: { id: string; conversation: { userId: string } };
+      }) =>
+        Promise.resolve(
+          where.conversation.userId === 'user-id' &&
+            ['root', 'answer'].includes(where.id)
+            ? {
+                content: where.id === 'root' ? currentMessage : 'Academia',
+                timestamp: new Date('2026-08-18T12:00:00Z'),
+              }
+            : null,
+        ),
+    );
+    const cycle = { findFirst: jest.fn().mockResolvedValue(null) };
+    Object.defineProperty(service, 'prisma', {
+      value: { message: { findFirst }, coachProfileAcquisitionCycle: cycle },
+    });
+    const boundary = service as unknown as {
+      authorizeWorkoutEffect(
+        userId: string,
+        runtime: CoachPlanningRuntimeContext,
+      ): Promise<boolean>;
+    };
+    const runtime = {
+      currentMessage,
+      originalRequestMessageId: 'root',
+      conversationId: 'conversation-id',
+      messageId: 'answer',
+      correlationId: 'answer',
+      referenceDate: new Date(),
+    };
+    expect(await boundary.authorizeWorkoutEffect('user-id', runtime)).toBe(
+      false,
+    );
+    cycle.findFirst.mockResolvedValue({ id: 'owned-completed-cycle' });
+    expect(await boundary.authorizeWorkoutEffect('user-id', runtime)).toBe(
+      true,
+    );
+    expect(cycle.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          userId: 'user-id',
+          active: false,
+          origin: { endsWith: ':root' },
+          OR: expect.arrayContaining([
+            expect.objectContaining({ status: 'ANSWERED' }),
+            expect.objectContaining({ status: 'COMPLETED' }),
+          ]),
+        }),
+      }),
+    );
+    expect(await boundary.authorizeWorkoutEffect('other-user', runtime)).toBe(
+      false,
+    );
+    expect(
+      await boundary.authorizeWorkoutEffect('user-id', {
+        ...runtime,
+        originalRequestMessageId: 'foreign-root',
+      }),
+    ).toBe(false);
+  });
+  it('does not authorize a request quote stripped from a negated full turn', () => {
+    expect(
+      isWorkoutEffectAuthorized('Não quero um novo treino de CrossFit', {
+        effect: 'GENERATE',
+        requestQuote: 'quero um novo treino de CrossFit',
+      }),
+    ).toBe(false);
+  });
+  function ownedInbound(
+    service: CoachPlanningExecutionService,
+    content: string,
+    messageId = 'message-id',
+  ) {
+    const findFirst = jest.fn(
+      ({
+        where,
+      }: {
+        where: {
+          id: string;
+          conversationId: string;
+          conversation: { userId: string };
+        };
+      }) =>
+        Promise.resolve(
+          where.id === messageId &&
+            where.conversationId === 'conversation-id' &&
+            where.conversation.userId === 'user-id'
+            ? { content, timestamp: new Date('2026-08-18T12:00:00Z') }
+            : null,
+        ),
+    );
+    Object.defineProperty(service, 'prisma', {
+      value: { message: { findFirst } },
+    });
+    return findFirst;
+  }
+  it('fences an inferred WORKOUT intent for the real retrospective report before dispatcher or persistence effects', async () => {
+    const dispatcher = { dispatchStructured: jest.fn() };
+    const service = new CoachPlanningExecutionService(
+      dispatcher as unknown as CoachPlanningExecutionDispatcherService,
+    );
+    const result = await service.executeStructured('user-id', 'WORKOUT', {
+      conversationId: 'conversation-id',
+      messageId: 'message-id',
+      correlationId: 'correlation-id',
+      referenceDate: new Date(),
+      currentMessage:
+        'Bom dia. Já tomei 1 litro de água pela manhã e já realizei meu treino de superiores na academia.',
+    });
+    expect(result.dispatch?.generationCompleted).toBe(false);
+    expect(result.dispatch?.workoutDisposition).toBe('BLOCKED');
+    expect(dispatcher.dispatchStructured).not.toHaveBeenCalled();
+  });
   it('suppresses a durable pending response instead of presenting it as FAILURE_FALLBACK', async () => {
     const dispatcher = {
       dispatchStructured: jest
@@ -191,6 +516,7 @@ describe('CoachPlanningExecutionService', () => {
         { plan: jest.fn() } as unknown as ConversationGoalPlannerService,
       );
 
+      ownedInbound(service, currentMessage);
       const result = await service.executeStructured('user-id', 'WORKOUT', {
         conversationId: 'conversation-id',
         messageId: 'message-id',
@@ -582,6 +908,11 @@ describe('CoachPlanningExecutionService', () => {
         workoutBuilder as unknown as GenerateWorkoutPlanV2InputBuilder,
       );
 
+      ownedInbound(
+        service,
+        currentMessage,
+        `running-${objective.toLowerCase()}`,
+      );
       const result = await service.executeStructured('user-id', 'WORKOUT', {
         conversationId: 'conversation-id',
         messageId: `running-${objective.toLowerCase()}`,
@@ -733,6 +1064,7 @@ describe('CoachPlanningExecutionService', () => {
         mutationResolver as unknown as WorkoutPlanMutationResolverService,
       );
 
+      ownedInbound(service, message);
       const result = await service.executeStructured('user-id', 'WORKOUT', {
         conversationId: 'conversation-id',
         messageId: 'message-id',
@@ -742,6 +1074,11 @@ describe('CoachPlanningExecutionService', () => {
         referenceDate: new Date('2026-08-19T12:00:00.000Z'),
       });
 
+      if (message === 'Vou treinar só 3 vezes esta semana') {
+        expect(result.dispatch?.workoutDisposition).toBe('BLOCKED');
+        expect(dispatcher.dispatchStructured).not.toHaveBeenCalled();
+        return;
+      }
       expect(result).toMatchObject({
         selectedSource: 'WORKOUT_V2',
         dispatch: { executor: 'WORKOUT_V2', generationCompleted: true },
@@ -1030,10 +1367,13 @@ describe('CoachPlanningExecutionService', () => {
       workoutReasoning as unknown as WorkoutReasoningEngineService,
     );
 
+    const currentMessage = 'Monte um plano de dieta e treino para mim.';
+    ownedInbound(service, currentMessage);
     const result = await service.executeStructured('user-id', 'BOTH', {
       conversationId: 'conversation-id',
       messageId: 'message-id',
       correlationId: 'correlation-id',
+      currentMessage,
       referenceDate: new Date('2026-08-02T12:00:00.000Z'),
     });
 

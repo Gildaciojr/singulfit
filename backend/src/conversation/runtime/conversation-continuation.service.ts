@@ -148,6 +148,12 @@ export class ConversationContinuationService {
         ? this.boundary.projectStructuredText(reply.content)
         : this.boundary.projectText(reply.content);
     if (!content)
+      if (
+        reply.evidence.workoutEffect === 'GENERATE' ||
+        reply.evidence.workoutEffect === 'UPDATE'
+      )
+        return { ...reply, content: '' };
+    if (!content)
       return {
         content: this.publicText(SAFE_CONTEXT),
         domain: 'GENERAL',
@@ -219,7 +225,8 @@ export class ConversationContinuationService {
     if (
       pending &&
       explicitDomain &&
-      explicitDomain !== pending.continuation.domain
+      explicitDomain !== pending.continuation.domain &&
+      !message.replyToExternalMessageId
     ) {
       // Workout reads use this service's owned reader, but never the old pending.
       if (
@@ -269,6 +276,48 @@ export class ConversationContinuationService {
     )
       return { ...safe(), evidence: { delegateRuntime: true } };
     if (!interpreted) return safe();
+    if (interpreted.workoutEffect && interpreted.workoutEffect !== 'NONE') {
+      return {
+        ...safe(),
+        content: interpreted.response ?? '',
+        pending:
+          (interpreted.action === 'HYDRATION_REPLY' &&
+            pending?.continuation.domain === 'HYDRATION') ||
+          (interpreted.action === 'WORKOUT_REPLY' &&
+            pending?.continuation.domain === 'WORKOUT')
+            ? pending
+            : null,
+        outcome:
+          interpreted.consumption === 'CONFIRMED' ? 'COMPLETED' : 'UNKNOWN',
+        evidence: {
+          workoutEffect: interpreted.workoutEffect,
+          workoutRequestQuote: interpreted.workoutRequestQuote ?? null,
+          consumption: interpreted.consumption,
+        },
+      };
+    }
+    if (
+      interpreted.workoutEffect === 'NONE' &&
+      interpreted.response &&
+      (interpreted.action === 'INDEPENDENT' ||
+        interpreted.action === 'HYDRATION_REPLY' ||
+        interpreted.action === 'WORKOUT_REPLY')
+    ) {
+      const domain = pending?.continuation.domain ?? 'GENERAL';
+      return {
+        content: interpreted.response,
+        domain,
+        pending,
+        next: null,
+        outcome:
+          interpreted.consumption === 'CONFIRMED' ? 'COMPLETED' : 'UNKNOWN',
+        evidence: {
+          workoutEffect: 'NONE',
+          consumption: interpreted.consumption,
+          hydrationGoal: false,
+        },
+      };
+    }
     if (interpreted.action === 'DECLINE')
       return {
         ...safe(),
@@ -277,7 +326,14 @@ export class ConversationContinuationService {
         evidence: { declined: true },
       };
     if (interpreted.action === 'INDEPENDENT')
-      return isWorkoutCurrentPlanRead(message.content) ? safe() : null;
+      return interpreted.workoutEffect === 'NONE'
+        ? {
+            ...safe(),
+            evidence: { delegateRuntime: true, workoutEffect: 'NONE' },
+          }
+        : isWorkoutCurrentPlanRead(message.content)
+          ? safe()
+          : null;
     if (interpreted.action === 'UNRESOLVED') return safe();
     if (
       interpreted.reference === 'UNRESOLVED' ||
@@ -498,7 +554,7 @@ export class ConversationContinuationService {
     const content =
       result?.content ??
       (current.status === 'AVAILABLE'
-        ? 'Ainda não consigo comparar essa refeição com segurança. Quais alimentos e quantidades você consumiu?'
+        ? 'Recebi seu relato, mas não consegui comparar a refeição com o plano agora. Não precisa reenviar os alimentos ou as quantidades.'
         : 'Não encontrei um plano alimentar ativo disponível para comparar essa refeição. Não vou presumir o que ele contém.');
     const adherence = result?.adherence ?? 'INSUFFICIENT_INFORMATION';
     return {
@@ -507,7 +563,7 @@ export class ConversationContinuationService {
       pending,
       next:
         current.status === 'AVAILABLE' &&
-        adherence === 'INSUFFICIENT_INFORMATION'
+        result?.report?.status === 'MISSING_QUANTITIES'
           ? continuation('MEAL_CONTENT_REQUEST', at, meal)
           : null,
       outcome: consumption === 'CONFIRMED' ? 'COMPLETED' : 'UNKNOWN',
@@ -516,6 +572,15 @@ export class ConversationContinuationService {
         contentKnown: true,
         estimated,
         adherence,
+        mealReportStatus: result?.report?.status ?? 'UNKNOWN',
+        mealComparisonStatus:
+          result?.comparison ??
+          (current.status === 'AVAILABLE'
+            ? 'TECHNICAL_FAILURE'
+            : 'PLAN_UNAVAILABLE'),
+        missingQuantityFoods: result?.report?.missingQuantityFoods
+          ? [...result.report.missingQuantityFoods]
+          : [],
         reportedContent: description,
       },
     };

@@ -681,6 +681,24 @@ export class AutomationService {
               at,
             )
           : true;
+        const requestedResponse =
+          current.automationRule.code === AUTOMATION_RULE_CODES.DAILY_COACH &&
+          current.context !== null &&
+          typeof current.context === 'object' &&
+          !Array.isArray(current.context) &&
+          current.context.source === 'WHATSAPP_COACH_COMMAND' &&
+          typeof current.context.sourceMessageId === 'string' &&
+          !!current.conversationId &&
+          !!(await transaction.message.findFirst({
+            where: {
+              id: current.context.sourceMessageId,
+              conversationId: current.conversationId,
+              direction: 'INBOUND',
+              type: 'TEXT',
+              conversation: { userId: current.userId, status: 'ACTIVE' },
+            },
+            select: { id: true },
+          }));
 
         if (
           !current.user.isActive ||
@@ -688,6 +706,7 @@ export class AutomationService {
           !preferences ||
           !lifecycleNoticeIsCurrent ||
           (!subscriptionLifecycleNotice &&
+            !requestedResponse &&
             !this.isRuleEnabled(
               current.automationRule.code as AutomationRuleCode,
               preferences,

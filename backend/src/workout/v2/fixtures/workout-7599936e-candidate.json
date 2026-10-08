@@ -1,0 +1,1709 @@
+{
+  "title": "Treino semanal de CrossFit para emagrecimento",
+  "modality": "CROSSFIT",
+  "sessions": [
+    {
+      "label": "Sessão 1",
+      "blocks": [
+        {
+          "type": "WARM_UP",
+          "work": {
+            "format": "CONTINUOUS",
+            "rounds": 1,
+            "durationSeconds": 10,
+            "intervalSeconds": null,
+            "movementActivityKeys": [
+              "CF_W1_WU_1",
+              "CF_W1_WU_2"
+            ]
+          },
+          "title": "Aquecimento",
+          "blockKey": "CF_W1_WARM_UP",
+          "activities": [
+            {
+              "kind": "TIMED",
+              "name": "Bike leve",
+              "alerts": [],
+              "rounds": 1,
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "MACHINE"
+              ],
+              "intensity": "LIGHT",
+              "activityKey": "CF_W1_WU_1",
+              "instruction": "Aumente a respiração e o ritmo aos poucos na bike, sem chegar ofegante.",
+              "workSeconds": null,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 3
+                },
+                "execution": {
+                  "kind": "SECONDS",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": null,
+              "durationSeconds": 4,
+              "movementPattern": "LOCOMOTION",
+              "recoverySeconds": null,
+              "appliedConstraintCodes": []
+            },
+            {
+              "kind": "STRENGTH",
+              "name": "Mobilidade dinâmica geral",
+              "sets": 1,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BODYWEIGHT"
+              ],
+              "intensity": "LIGHT",
+              "activityKey": "CF_W1_WU_2",
+              "instruction": "Mobilize quadris, tornozelos, coluna torácica e ombros com amplitude confortável.",
+              "repetitions": "8-10",
+              "restSeconds": 0,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 3
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "NONE",
+                "jointAction": "STABILIZATION",
+                "bodyPosition": "STANDING",
+                "targetRegion": "WHOLE_BODY"
+              },
+              "movementPattern": "MOBILITY",
+              "appliedConstraintCodes": []
+            }
+          ],
+          "estimatedDurationMinutes": 10
+        },
+        {
+          "type": "WEIGHTLIFTING",
+          "work": null,
+          "title": "Força + técnica",
+          "blockKey": "CF_W1_STRENGTH",
+          "activities": [
+            {
+              "kind": "STRENGTH",
+              "name": "Agachamento frontal",
+              "sets": 4,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BARBELL"
+              ],
+              "intensity": "MODERATE",
+              "activityKey": "CF_W1_STR_1",
+              "instruction": "Agache com tronco firme, joelhos acompanhando os pés e subida estável. Pare com técnica limpa e 2 reps em reserva.",
+              "repetitions": "4-5",
+              "restSeconds": 90,
+              "prescription": {
+                "load": {
+                  "kind": "PERCENT_1RM",
+                  "basis": "ADJUSTABLE_START",
+                  "value": 65,
+                  "referenceId": null
+                },
+                "effort": {
+                  "kind": "RPE",
+                  "value": 6
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "SAGITTAL",
+                "jointAction": "EXTENSION",
+                "bodyPosition": "STANDING",
+                "targetRegion": "KNEES"
+              },
+              "movementPattern": "SQUAT",
+              "appliedConstraintCodes": [
+                "KNEE_LOAD",
+                "SPINAL_LOAD"
+              ]
+            },
+            {
+              "kind": "STRENGTH",
+              "name": "Push press",
+              "sets": 4,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BARBELL"
+              ],
+              "intensity": "MODERATE",
+              "activityKey": "CF_W1_STR_2",
+              "instruction": "Empurre a barra acima da cabeça sem compensar na lombar. Mantenha o tronco travado e termine estável.",
+              "repetitions": "3-5",
+              "restSeconds": 75,
+              "prescription": {
+                "load": {
+                  "kind": "PERCENT_1RM",
+                  "basis": "ADJUSTABLE_START",
+                  "value": 60,
+                  "referenceId": null
+                },
+                "effort": {
+                  "kind": "RPE",
+                  "value": 6
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "VERTICAL",
+                "jointAction": "EXTENSION",
+                "bodyPosition": "STANDING",
+                "targetRegion": "SHOULDERS"
+              },
+              "movementPattern": "OTHER",
+              "appliedConstraintCodes": [
+                "OVERHEAD"
+              ]
+            }
+          ],
+          "estimatedDurationMinutes": 20
+        },
+        {
+          "type": "CONDITIONING",
+          "work": {
+            "format": "AMRAP",
+            "rounds": 1,
+            "durationSeconds": 12,
+            "intervalSeconds": null,
+            "movementActivityKeys": [
+              "CF_W1_COND_1",
+              "CF_W1_COND_2",
+              "CF_W1_COND_3"
+            ]
+          },
+          "title": "Metcon",
+          "blockKey": "CF_W1_CONDITIONING",
+          "activities": [
+            {
+              "kind": "STRENGTH",
+              "name": "Pull-up kipping controlado ou assistido",
+              "sets": 1,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "PULL_UP_BAR",
+                "BODYWEIGHT"
+              ],
+              "intensity": "HIGH",
+              "activityKey": "CF_W1_COND_1",
+              "instruction": "Faça queixo acima da barra com controle. Se perder ritmo, reduza para a variação assistida.",
+              "repetitions": "6-10",
+              "restSeconds": 0,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 7
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "VERTICAL",
+                "jointAction": "FLEXION",
+                "bodyPosition": "HANGING",
+                "targetRegion": "BACK"
+              },
+              "movementPattern": "PULL",
+              "appliedConstraintCodes": []
+            },
+            {
+              "kind": "STRENGTH",
+              "name": "Thruster com halteres leves",
+              "sets": 1,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "DUMBBELL"
+              ],
+              "intensity": "HIGH",
+              "activityKey": "CF_W1_COND_2",
+              "instruction": "Agache até amplitude consistente e suba com ritmo constante. Mantenha o abdômen firme.",
+              "repetitions": "10",
+              "restSeconds": 0,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 7
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "SAGITTAL",
+                "jointAction": "EXTENSION",
+                "bodyPosition": "STANDING",
+                "targetRegion": "KNEES"
+              },
+              "movementPattern": "SQUAT",
+              "appliedConstraintCodes": [
+                "IMPACT"
+              ]
+            },
+            {
+              "kind": "STRENGTH",
+              "name": "Elevação de joelhos na barra",
+              "sets": 1,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "PULL_UP_BAR"
+              ],
+              "intensity": "HIGH",
+              "activityKey": "CF_W1_COND_3",
+              "instruction": "Eleve os joelhos sem balançar. Priorize controle do tronco e cadência limpa.",
+              "repetitions": "10-12",
+              "restSeconds": 0,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 7
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "NONE",
+                "jointAction": "FLEXION",
+                "bodyPosition": "HANGING",
+                "targetRegion": "TRUNK"
+              },
+              "movementPattern": "CORE",
+              "appliedConstraintCodes": []
+            }
+          ],
+          "estimatedDurationMinutes": 18
+        },
+        {
+          "type": "COOLDOWN",
+          "work": {
+            "format": "CONTINUOUS",
+            "rounds": 1,
+            "durationSeconds": 8,
+            "intervalSeconds": null,
+            "movementActivityKeys": [
+              "CF_W1_CD_1",
+              "CF_W1_CD_2"
+            ]
+          },
+          "title": "Desaceleração",
+          "blockKey": "CF_W1_COOLDOWN",
+          "activities": [
+            {
+              "kind": "ENDURANCE",
+              "mode": "WALK",
+              "name": "Desaceleração leve",
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BODYWEIGHT"
+              ],
+              "intensity": "LIGHT",
+              "distanceKm": null,
+              "activityKey": "CF_W1_CD_1",
+              "instruction": "Caminhe ou pedale bem leve até a respiração baixar.",
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 2
+                },
+                "execution": {
+                  "kind": "SECONDS",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": null,
+              "durationMinutes": 4,
+              "movementPattern": "LOCOMOTION",
+              "appliedConstraintCodes": []
+            },
+            {
+              "kind": "STRENGTH",
+              "name": "Mobilidade final",
+              "sets": 1,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BODYWEIGHT"
+              ],
+              "intensity": "LIGHT",
+              "activityKey": "CF_W1_CD_2",
+              "instruction": "Mobilidade suave de quadris, peitoral e coluna torácica, sem forçar amplitude.",
+              "repetitions": "6-8",
+              "restSeconds": 0,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 2
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "NONE",
+                "jointAction": "STABILIZATION",
+                "bodyPosition": "STANDING",
+                "targetRegion": "WHOLE_BODY"
+              },
+              "movementPattern": "MOBILITY",
+              "appliedConstraintCodes": []
+            }
+          ],
+          "estimatedDurationMinutes": 12
+        }
+      ],
+      "weekday": "MONDAY",
+      "sequence": 1,
+      "sessionKey": "MONDAY",
+      "estimatedDurationMinutes": 60
+    },
+    {
+      "label": "Sessão 2",
+      "blocks": [
+        {
+          "type": "WARM_UP",
+          "work": {
+            "format": "CONTINUOUS",
+            "rounds": 1,
+            "durationSeconds": 10,
+            "intervalSeconds": null,
+            "movementActivityKeys": [
+              "CF_W2_WU_1",
+              "CF_W2_WU_2"
+            ]
+          },
+          "title": "Aquecimento",
+          "blockKey": "CF_W2_WARM_UP",
+          "activities": [
+            {
+              "kind": "ENDURANCE",
+              "mode": "WALK",
+              "name": "Aquecimento geral",
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BODYWEIGHT"
+              ],
+              "intensity": "LIGHT",
+              "distanceKm": null,
+              "activityKey": "CF_W2_WU_1",
+              "instruction": "Suba a temperatura com corrida no lugar, corda imaginária ou bike leve, sem cansar.",
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 3
+                },
+                "execution": {
+                  "kind": "SECONDS",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": null,
+              "durationMinutes": 4,
+              "movementPattern": "LOCOMOTION",
+              "appliedConstraintCodes": []
+            },
+            {
+              "kind": "STRENGTH",
+              "name": "Mobilidade dinâmica geral",
+              "sets": 1,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BODYWEIGHT"
+              ],
+              "intensity": "LIGHT",
+              "activityKey": "CF_W2_WU_2",
+              "instruction": "Ative ombros, quadris e tornozelos com controle, preparando o padrão de agachar e empurrar.",
+              "repetitions": "8-10",
+              "restSeconds": 0,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 3
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "NONE",
+                "jointAction": "STABILIZATION",
+                "bodyPosition": "STANDING",
+                "targetRegion": "WHOLE_BODY"
+              },
+              "movementPattern": "MOBILITY",
+              "appliedConstraintCodes": []
+            }
+          ],
+          "estimatedDurationMinutes": 10
+        },
+        {
+          "type": "GYMNASTICS",
+          "work": null,
+          "title": "Skill + força",
+          "blockKey": "CF_W2_SKILL_STRENGTH",
+          "activities": [
+            {
+              "kind": "STRENGTH",
+              "name": "Progressão de toes-to-bar / knee raise",
+              "sets": 4,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "PULL_UP_BAR",
+                "BODYWEIGHT"
+              ],
+              "intensity": "MODERATE",
+              "activityKey": "CF_W2_SKILL_1",
+              "instruction": "Faça a progressão com controle escapular. Se necessário, use banda para manter técnica consistente.",
+              "repetitions": "6-8",
+              "restSeconds": 60,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 6
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "VERTICAL",
+                "jointAction": "FLEXION",
+                "bodyPosition": "HANGING",
+                "targetRegion": "BACK"
+              },
+              "movementPattern": "PULL",
+              "appliedConstraintCodes": []
+            },
+            {
+              "kind": "STRENGTH",
+              "name": "Deadlift técnico",
+              "sets": 4,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BARBELL"
+              ],
+              "intensity": "MODERATE",
+              "activityKey": "CF_W2_STR_1",
+              "instruction": "Empurre o chão, mantenha a barra próxima e pare antes de perder posição lombar.",
+              "repetitions": "3-4",
+              "restSeconds": 90,
+              "prescription": {
+                "load": {
+                  "kind": "PERCENT_1RM",
+                  "basis": "ADJUSTABLE_START",
+                  "value": 50,
+                  "referenceId": null
+                },
+                "effort": {
+                  "kind": "RPE",
+                  "value": 6
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "SAGITTAL",
+                "jointAction": "EXTENSION",
+                "bodyPosition": "STANDING",
+                "targetRegion": "HIPS"
+              },
+              "movementPattern": "HINGE",
+              "appliedConstraintCodes": [
+                "HIP_HINGE",
+                "SPINAL_LOAD"
+              ]
+            }
+          ],
+          "estimatedDurationMinutes": 22
+        },
+        {
+          "type": "CONDITIONING",
+          "work": {
+            "format": "FOR_TIME",
+            "rounds": 1,
+            "durationSeconds": 14,
+            "intervalSeconds": null,
+            "movementActivityKeys": [
+              "CF_W2_COND_1",
+              "CF_W2_COND_2",
+              "CF_W2_COND_3"
+            ]
+          },
+          "title": "Metcon",
+          "blockKey": "CF_W2_CONDITIONING",
+          "activities": [
+            {
+              "kind": "STRENGTH",
+              "name": "Push press com barra",
+              "sets": 1,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BARBELL"
+              ],
+              "intensity": "HIGH",
+              "activityKey": "CF_W2_COND_1",
+              "instruction": "Faça o arremesso com tronco firme e trajetória eficiente. Escale a carga para manter séries consistentes.",
+              "repetitions": "9",
+              "restSeconds": 0,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 8
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "VERTICAL",
+                "jointAction": "EXTENSION",
+                "bodyPosition": "STANDING",
+                "targetRegion": "SHOULDERS"
+              },
+              "movementPattern": "PUSH",
+              "appliedConstraintCodes": [
+                "OVERHEAD"
+              ]
+            },
+            {
+              "kind": "STRENGTH",
+              "name": "Avanço alternado com halteres",
+              "sets": 1,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "DUMBBELL"
+              ],
+              "intensity": "HIGH",
+              "activityKey": "CF_W2_COND_2",
+              "instruction": "Faça o avanço com passada estável e retorno controlado, sem afundar o tronco.",
+              "repetitions": "12 por perna",
+              "restSeconds": 0,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 8
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "SAGITTAL",
+                "jointAction": "EXTENSION",
+                "bodyPosition": "STANDING",
+                "targetRegion": "KNEES"
+              },
+              "movementPattern": "SQUAT",
+              "appliedConstraintCodes": [
+                "IMPACT",
+                "KNEE_LOAD"
+              ]
+            },
+            {
+              "kind": "STRENGTH",
+              "name": "Prancha com toque no ombro",
+              "sets": 1,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BODYWEIGHT"
+              ],
+              "intensity": "HIGH",
+              "activityKey": "CF_W2_COND_3",
+              "instruction": "Mantenha a prancha forte e sem oscilar o quadril.",
+              "repetitions": "16 toques",
+              "restSeconds": 0,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 8
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "NONE",
+                "jointAction": "STABILIZATION",
+                "bodyPosition": "QUADRUPED",
+                "targetRegion": "TRUNK"
+              },
+              "movementPattern": "CORE",
+              "appliedConstraintCodes": []
+            }
+          ],
+          "estimatedDurationMinutes": 18
+        },
+        {
+          "type": "COOLDOWN",
+          "work": {
+            "format": "CONTINUOUS",
+            "rounds": 1,
+            "durationSeconds": 8,
+            "intervalSeconds": null,
+            "movementActivityKeys": [
+              "CF_W2_CD_1",
+              "CF_W2_CD_2"
+            ]
+          },
+          "title": "Desaceleração",
+          "blockKey": "CF_W2_COOLDOWN",
+          "activities": [
+            {
+              "kind": "ENDURANCE",
+              "mode": "WALK",
+              "name": "Caminhada leve final",
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BODYWEIGHT"
+              ],
+              "intensity": "LIGHT",
+              "distanceKm": null,
+              "activityKey": "CF_W2_CD_1",
+              "instruction": "Caminhe leve até a respiração ficar tranquila.",
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 2
+                },
+                "execution": {
+                  "kind": "SECONDS",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": null,
+              "durationMinutes": 4,
+              "movementPattern": "LOCOMOTION",
+              "appliedConstraintCodes": []
+            },
+            {
+              "kind": "STRENGTH",
+              "name": "Mobilidade final",
+              "sets": 1,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BODYWEIGHT"
+              ],
+              "intensity": "LIGHT",
+              "activityKey": "CF_W2_CD_2",
+              "instruction": "Solte quadris, dorsais e peitoral com amplitude confortável.",
+              "repetitions": "6-8",
+              "restSeconds": 0,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 2
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "NONE",
+                "jointAction": "STABILIZATION",
+                "bodyPosition": "STANDING",
+                "targetRegion": "WHOLE_BODY"
+              },
+              "movementPattern": "MOBILITY",
+              "appliedConstraintCodes": []
+            }
+          ],
+          "estimatedDurationMinutes": 10
+        }
+      ],
+      "weekday": "WEDNESDAY",
+      "sequence": 2,
+      "sessionKey": "WEDNESDAY",
+      "estimatedDurationMinutes": 60
+    },
+    {
+      "label": "Sessão 3",
+      "blocks": [
+        {
+          "type": "WARM_UP",
+          "work": {
+            "format": "CONTINUOUS",
+            "rounds": 1,
+            "durationSeconds": 10,
+            "intervalSeconds": null,
+            "movementActivityKeys": [
+              "CF_W3_WU_1",
+              "CF_W3_WU_2"
+            ]
+          },
+          "title": "Aquecimento",
+          "blockKey": "CF_W3_WARM_UP",
+          "activities": [
+            {
+              "kind": "ENDURANCE",
+              "mode": "WALK",
+              "name": "Aquecimento geral",
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BODYWEIGHT"
+              ],
+              "intensity": "LIGHT",
+              "distanceKm": null,
+              "activityKey": "CF_W3_WU_1",
+              "instruction": "Use bike ou caminhada leve para subir a temperatura sem fadiga.",
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 3
+                },
+                "execution": {
+                  "kind": "SECONDS",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": null,
+              "durationMinutes": 4,
+              "movementPattern": "LOCOMOTION",
+              "appliedConstraintCodes": []
+            },
+            {
+              "kind": "STRENGTH",
+              "name": "Mobilidade dinâmica geral",
+              "sets": 1,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BODYWEIGHT"
+              ],
+              "intensity": "LIGHT",
+              "activityKey": "CF_W3_WU_2",
+              "instruction": "Faça mobilidade de ombros, coluna torácica e quadril em ritmo calmo.",
+              "repetitions": "8-10",
+              "restSeconds": 0,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 3
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "NONE",
+                "jointAction": "STABILIZATION",
+                "bodyPosition": "STANDING",
+                "targetRegion": "WHOLE_BODY"
+              },
+              "movementPattern": "MOBILITY",
+              "appliedConstraintCodes": []
+            }
+          ],
+          "estimatedDurationMinutes": 10
+        },
+        {
+          "type": "STRENGTH",
+          "work": null,
+          "title": "Força base",
+          "blockKey": "CF_W3_STRENGTH",
+          "activities": [
+            {
+              "kind": "STRENGTH",
+              "name": "Desenvolvimento com halteres em banco inclinado",
+              "sets": 4,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "DUMBBELL",
+                "BENCH"
+              ],
+              "intensity": "MODERATE",
+              "activityKey": "CF_W3_STR_1",
+              "instruction": "Pressione sem compensar com a lombar. Controle a descida e mantenha o tronco firme.",
+              "repetitions": "6-8",
+              "restSeconds": 75,
+              "prescription": {
+                "load": {
+                  "kind": "PERCENT_1RM",
+                  "basis": "ADJUSTABLE_START",
+                  "value": 60,
+                  "referenceId": null
+                },
+                "effort": {
+                  "kind": "RPE",
+                  "value": 6
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "VERTICAL",
+                "jointAction": "EXTENSION",
+                "bodyPosition": "INCLINED",
+                "targetRegion": "SHOULDERS"
+              },
+              "movementPattern": "PUSH",
+              "appliedConstraintCodes": [
+                "OVERHEAD"
+              ]
+            },
+            {
+              "kind": "STRENGTH",
+              "name": "Remada curvada com barra",
+              "sets": 4,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BARBELL"
+              ],
+              "intensity": "MODERATE",
+              "activityKey": "CF_W3_STR_2",
+              "instruction": "Puxe com escápulas ativas e sem roubar com o quadril.",
+              "repetitions": "6-8",
+              "restSeconds": 75,
+              "prescription": {
+                "load": {
+                  "kind": "PERCENT_1RM",
+                  "basis": "ADJUSTABLE_START",
+                  "value": 65,
+                  "referenceId": null
+                },
+                "effort": {
+                  "kind": "RPE",
+                  "value": 6
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "HORIZONTAL",
+                "jointAction": "FLEXION",
+                "bodyPosition": "INCLINED",
+                "targetRegion": "BACK"
+              },
+              "movementPattern": "PULL",
+              "appliedConstraintCodes": []
+            }
+          ],
+          "estimatedDurationMinutes": 22
+        },
+        {
+          "type": "CONDITIONING",
+          "work": {
+            "format": "INTERVAL",
+            "rounds": 6,
+            "durationSeconds": 540,
+            "intervalSeconds": 90,
+            "movementActivityKeys": [
+              "CF_W3_COND_1",
+              "CF_W3_COND_2"
+            ]
+          },
+          "title": "Metcon",
+          "blockKey": "CF_W3_CONDITIONING",
+          "activities": [
+            {
+              "kind": "STRENGTH",
+              "name": "Dumbbell thruster",
+              "sets": 1,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "DUMBBELL"
+              ],
+              "intensity": "HIGH",
+              "activityKey": "CF_W3_COND_1",
+              "instruction": "Faça o agachamento com ritmo forte e tronco organizado. Escolha uma carga que permita consistência em todas as rodadas.",
+              "repetitions": "10",
+              "restSeconds": 0,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 8
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "SAGITTAL",
+                "jointAction": "EXTENSION",
+                "bodyPosition": "STANDING",
+                "targetRegion": "KNEES"
+              },
+              "movementPattern": "SQUAT",
+              "appliedConstraintCodes": [
+                "IMPACT"
+              ]
+            },
+            {
+              "kind": "STRENGTH",
+              "name": "Burpee com passo para trás",
+              "sets": 1,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BODYWEIGHT"
+              ],
+              "intensity": "HIGH",
+              "activityKey": "CF_W3_COND_2",
+              "instruction": "Mantenha corpo alinhado, sem perder tensão lombar.",
+              "repetitions": "8",
+              "restSeconds": 0,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 8
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "NONE",
+                "jointAction": "STABILIZATION",
+                "bodyPosition": "PRONE",
+                "targetRegion": "TRUNK"
+              },
+              "movementPattern": "CORE",
+              "appliedConstraintCodes": []
+            }
+          ],
+          "estimatedDurationMinutes": 18
+        },
+        {
+          "type": "COOLDOWN",
+          "work": {
+            "format": "CONTINUOUS",
+            "rounds": 1,
+            "durationSeconds": 8,
+            "intervalSeconds": null,
+            "movementActivityKeys": [
+              "CF_W3_CD_1",
+              "CF_W3_CD_2"
+            ]
+          },
+          "title": "Desaceleração",
+          "blockKey": "CF_W3_COOLDOWN",
+          "activities": [
+            {
+              "kind": "ENDURANCE",
+              "mode": "WALK",
+              "name": "Desaceleração leve",
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BODYWEIGHT"
+              ],
+              "intensity": "LIGHT",
+              "distanceKm": null,
+              "activityKey": "CF_W3_CD_1",
+              "instruction": "Caminhe leve ou pedale soltando o corpo.",
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 2
+                },
+                "execution": {
+                  "kind": "SECONDS",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": null,
+              "durationMinutes": 4,
+              "movementPattern": "LOCOMOTION",
+              "appliedConstraintCodes": []
+            },
+            {
+              "kind": "STRENGTH",
+              "name": "Mobilidade final",
+              "sets": 1,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BODYWEIGHT"
+              ],
+              "intensity": "LIGHT",
+              "activityKey": "CF_W3_CD_2",
+              "instruction": "Alongue com suavidade quadris, costas e ombros.",
+              "repetitions": "6-8",
+              "restSeconds": 0,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 2
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "NONE",
+                "jointAction": "STABILIZATION",
+                "bodyPosition": "STANDING",
+                "targetRegion": "WHOLE_BODY"
+              },
+              "movementPattern": "MOBILITY",
+              "appliedConstraintCodes": []
+            }
+          ],
+          "estimatedDurationMinutes": 10
+        }
+      ],
+      "weekday": "THURSDAY",
+      "sequence": 3,
+      "sessionKey": "THURSDAY",
+      "estimatedDurationMinutes": 60
+    },
+    {
+      "label": "Sessão 4",
+      "blocks": [
+        {
+          "type": "WARM_UP",
+          "work": {
+            "format": "CONTINUOUS",
+            "rounds": 1,
+            "durationSeconds": 10,
+            "intervalSeconds": null,
+            "movementActivityKeys": [
+              "CF_W4_WU_1",
+              "CF_W4_WU_2"
+            ]
+          },
+          "title": "Aquecimento",
+          "blockKey": "CF_W4_WARM_UP",
+          "activities": [
+            {
+              "kind": "ENDURANCE",
+              "mode": "WALK",
+              "name": "Aquecimento geral",
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BODYWEIGHT"
+              ],
+              "intensity": "LIGHT",
+              "distanceKm": null,
+              "activityKey": "CF_W4_WU_1",
+              "instruction": "Suba o ritmo aos poucos e preserve energia para o bloco principal.",
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 3
+                },
+                "execution": {
+                  "kind": "SECONDS",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": null,
+              "durationMinutes": 4,
+              "movementPattern": "LOCOMOTION",
+              "appliedConstraintCodes": []
+            },
+            {
+              "kind": "STRENGTH",
+              "name": "Mobilidade dinâmica geral",
+              "sets": 1,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BODYWEIGHT"
+              ],
+              "intensity": "LIGHT",
+              "activityKey": "CF_W4_WU_2",
+              "instruction": "Mobilize quadril, tornozelos, ombros e coluna torácica com conforto.",
+              "repetitions": "8-10",
+              "restSeconds": 0,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 3
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "NONE",
+                "jointAction": "STABILIZATION",
+                "bodyPosition": "STANDING",
+                "targetRegion": "WHOLE_BODY"
+              },
+              "movementPattern": "MOBILITY",
+              "appliedConstraintCodes": []
+            }
+          ],
+          "estimatedDurationMinutes": 10
+        },
+        {
+          "type": "STRENGTH",
+          "work": null,
+          "title": "Força + core",
+          "blockKey": "CF_W4_STRENGTH",
+          "activities": [
+            {
+              "kind": "STRENGTH",
+              "name": "Agachamento traseiro",
+              "sets": 4,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BARBELL"
+              ],
+              "intensity": "MODERATE",
+              "activityKey": "CF_W4_STR_1",
+              "instruction": "Agache com controle e postura forte. Não deixe a lombar assumir o trabalho.",
+              "repetitions": "4-5",
+              "restSeconds": 90,
+              "prescription": {
+                "load": {
+                  "kind": "PERCENT_1RM",
+                  "basis": "ADJUSTABLE_START",
+                  "value": 65,
+                  "referenceId": null
+                },
+                "effort": {
+                  "kind": "RPE",
+                  "value": 6
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "SAGITTAL",
+                "jointAction": "EXTENSION",
+                "bodyPosition": "STANDING",
+                "targetRegion": "KNEES"
+              },
+              "movementPattern": "SQUAT",
+              "appliedConstraintCodes": [
+                "KNEE_LOAD",
+                "SPINAL_LOAD"
+              ]
+            },
+            {
+              "kind": "STRENGTH",
+              "name": "Hollow hold",
+              "sets": 4,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BODYWEIGHT"
+              ],
+              "intensity": "MODERATE",
+              "activityKey": "CF_W4_STR_2",
+              "instruction": "Mantenha a linha do corpo firme, sem relaxar o abdômen.",
+              "repetitions": "20-30 s",
+              "restSeconds": 45,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 6
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "NONE",
+                "jointAction": "STABILIZATION",
+                "bodyPosition": "LYING",
+                "targetRegion": "TRUNK"
+              },
+              "movementPattern": "CORE",
+              "appliedConstraintCodes": []
+            }
+          ],
+          "estimatedDurationMinutes": 18
+        },
+        {
+          "type": "CONDITIONING",
+          "work": {
+            "format": "ROUNDS",
+            "rounds": 5,
+            "durationSeconds": 15,
+            "intervalSeconds": null,
+            "movementActivityKeys": [
+              "CF_W4_COND_1",
+              "CF_W4_COND_2",
+              "CF_W4_COND_3"
+            ]
+          },
+          "title": "Metcon final",
+          "blockKey": "CF_W4_CONDITIONING",
+          "activities": [
+            {
+              "kind": "STRENGTH",
+              "name": "Ring row / remada invertida no pull-up bar",
+              "sets": 1,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "PULL_UP_BAR",
+                "BODYWEIGHT"
+              ],
+              "intensity": "HIGH",
+              "activityKey": "CF_W4_COND_1",
+              "instruction": "Faça a puxada com técnica estável. Se necessário, reduza a complexidade e preserve ritmo.",
+              "repetitions": "8-12",
+              "restSeconds": 0,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 8
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "VERTICAL",
+                "jointAction": "FLEXION",
+                "bodyPosition": "HANGING",
+                "targetRegion": "BACK"
+              },
+              "movementPattern": "PULL",
+              "appliedConstraintCodes": []
+            },
+            {
+              "kind": "STRENGTH",
+              "name": "Step-up com halteres",
+              "sets": 1,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "DUMBBELL",
+                "BENCH"
+              ],
+              "intensity": "HIGH",
+              "activityKey": "CF_W4_COND_2",
+              "instruction": "Faça o step-up com controle de joelho e tronco. Mantenha as passadas consistentes.",
+              "repetitions": "10 por perna",
+              "restSeconds": 0,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 8
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "SAGITTAL",
+                "jointAction": "EXTENSION",
+                "bodyPosition": "STANDING",
+                "targetRegion": "KNEES"
+              },
+              "movementPattern": "SQUAT",
+              "appliedConstraintCodes": [
+                "KNEE_LOAD"
+              ]
+            },
+            {
+              "kind": "STRENGTH",
+              "name": "Dead bug alternado",
+              "sets": 1,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BODYWEIGHT"
+              ],
+              "intensity": "HIGH",
+              "activityKey": "CF_W4_COND_3",
+              "instruction": "Alterne o braço sem girar o quadril. Respire curto e mantenha tensão.",
+              "repetitions": "10 por lado",
+              "restSeconds": 0,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 8
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "NONE",
+                "jointAction": "STABILIZATION",
+                "bodyPosition": "QUADRUPED",
+                "targetRegion": "TRUNK"
+              },
+              "movementPattern": "CORE",
+              "appliedConstraintCodes": []
+            }
+          ],
+          "estimatedDurationMinutes": 22
+        },
+        {
+          "type": "COOLDOWN",
+          "work": {
+            "format": "CONTINUOUS",
+            "rounds": 1,
+            "durationSeconds": 8,
+            "intervalSeconds": null,
+            "movementActivityKeys": [
+              "CF_W4_CD_1",
+              "CF_W4_CD_2"
+            ]
+          },
+          "title": "Desaceleração",
+          "blockKey": "CF_W4_COOLDOWN",
+          "activities": [
+            {
+              "kind": "ENDURANCE",
+              "mode": "WALK",
+              "name": "Caminhada leve final",
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BODYWEIGHT"
+              ],
+              "intensity": "LIGHT",
+              "distanceKm": null,
+              "activityKey": "CF_W4_CD_1",
+              "instruction": "Caminhe leve para reduzir a frequência respiratória.",
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 2
+                },
+                "execution": {
+                  "kind": "SECONDS",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": null,
+              "durationMinutes": 4,
+              "movementPattern": "LOCOMOTION",
+              "appliedConstraintCodes": []
+            },
+            {
+              "kind": "STRENGTH",
+              "name": "Mobilidade final",
+              "sets": 1,
+              "alerts": [],
+              "source": "MODEL_GENERATED",
+              "equipment": [
+                "BODYWEIGHT"
+              ],
+              "intensity": "LIGHT",
+              "activityKey": "CF_W4_CD_2",
+              "instruction": "Faça mobilidade leve de coluna, peitoral e quadril.",
+              "repetitions": "6-8",
+              "restSeconds": 0,
+              "prescription": {
+                "load": null,
+                "effort": {
+                  "kind": "RPE",
+                  "value": 2
+                },
+                "execution": {
+                  "kind": "COUNT",
+                  "maximum": null,
+                  "minimum": null,
+                  "perSide": false,
+                  "alternating": false
+                },
+                "enduranceMetrics": []
+              },
+              "publicIdentity": {
+                "plane": "NONE",
+                "jointAction": "STABILIZATION",
+                "bodyPosition": "STANDING",
+                "targetRegion": "WHOLE_BODY"
+              },
+              "movementPattern": "MOBILITY",
+              "appliedConstraintCodes": []
+            }
+          ],
+          "estimatedDurationMinutes": 10
+        }
+      ],
+      "weekday": "SATURDAY",
+      "sequence": 4,
+      "sessionKey": "SATURDAY",
+      "estimatedDurationMinutes": 60
+    }
+  ],
+  "objective": "WEIGHT_LOSS",
+  "progression": [
+    {
+      "state": "PROGRESS",
+      "ruleKey": "FORCA_BASE",
+      "actionCode": "AUMENTAR_CARGA_QUALITATIVA_OU_REPS",
+      "conditionCode": "COMPLETOU_SEM_PERDA_TECNICA",
+      "maximumChangePercent": 5
+    },
+    {
+      "state": "PROGRESS",
+      "ruleKey": "METCON",
+      "actionCode": "AUMENTAR_1_RODADA_OU_1_2_REPS_POR_MOVIMENTO",
+      "conditionCode": "COMPLETOU_TODAS_AS_RODADAS_COM_RITMO_ESTAVEL",
+      "maximumChangePercent": 10
+    },
+    {
+      "state": "MAINTAIN",
+      "ruleKey": "VOLUME_SEMANAL",
+      "actionCode": "MANTER_SE_ESTA_FORTE_OU_RECUPERACAO_RUIM",
+      "conditionCode": "FADIGA_ACUMULADA_OU_QUEDA_DE_RENDIMENTO",
+      "maximumChangePercent": 0
+    }
+  ],
+  "safetyFlags": [],
+  "artifactType": "WEEKLY_PLAN",
+  "substitutions": [
+    {
+      "reason": "LIMITATION",
+      "substitutionKey": "SUB_CF_W1_PULLUP_ASSISTIDO",
+      "functionPreserved": true,
+      "sourceActivityKey": "CF_W1_COND_1",
+      "confirmationRequired": false,
+      "alternativeActivityKey": "CF_W1_COND_1"
+    },
+    {
+      "reason": "PREFERENCE",
+      "substitutionKey": "SUB_CF_W2_PASSADA_SUSTENTADA",
+      "functionPreserved": true,
+      "sourceActivityKey": "CF_W2_COND_2",
+      "confirmationRequired": false,
+      "alternativeActivityKey": "CF_W2_COND_2"
+    },
+    {
+      "reason": "EQUIPMENT",
+      "substitutionKey": "SUB_CF_W4_REMADA_INVERTIDA",
+      "functionPreserved": true,
+      "sourceActivityKey": "CF_W4_COND_1",
+      "confirmationRequired": false,
+      "alternativeActivityKey": "CF_W4_COND_1"
+    }
+  ],
+  "adaptationRules": [
+    "Comece na faixa moderada e deixe 1 a 2 repetições em reserva nos blocos de força.",
+    "Se completar as 4 sessões com boa técnica e recuperação, progrida apenas uma variável na semana seguinte: carga, repetições ou uma rodada a mais no metcon.",
+    "Se o metcon quebrar a técnica cedo, mantenha a carga ou reduza ligeiramente antes de aumentar volume.",
+    "Se houver fadiga acumulada, mantenha a sessão 4 como dia mais controlado e não aumente intensidade nas quatro sessões ao mesmo tempo."
+  ],
+  "secondaryObjectives": [
+    "GENERAL_HEALTH",
+    "CONDITIONING"
+  ]
+}

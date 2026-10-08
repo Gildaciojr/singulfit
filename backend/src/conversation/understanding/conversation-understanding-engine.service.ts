@@ -22,6 +22,7 @@ import { ConversationOperationResolverService } from './conversation-operation-r
 import { ConversationReferenceResolverService } from './conversation-reference-resolver.service';
 import { ConversationSafetyDetectorService } from './conversation-safety-detector.service';
 import { ConversationTokenizerService } from './conversation-tokenizer.service';
+import { affirmativePlanningText } from './planning-request-polarity.policy';
 
 @Injectable()
 export class ConversationUnderstandingEngineService {
@@ -62,10 +63,18 @@ export class ConversationUnderstandingEngineService {
       normalized,
       entities,
     );
+    const effectRequest = [
+      CONVERSATION_OPERATION.GENERATE_PLAN,
+      CONVERSATION_OPERATION.UPDATE_PLAN,
+      CONVERSATION_OPERATION.SUBSTITUTE_ITEM,
+    ].some((candidate) => candidate === operation.operation);
+    const domainMessage = effectRequest
+      ? this.normalizer.normalize(affirmativePlanningText(input.text))
+      : normalized;
     const domain = this.domainResolver.resolve(
       input,
-      normalized,
-      entities,
+      domainMessage,
+      effectRequest ? this.entityRecognizer.recognize(domainMessage) : entities,
       references,
     );
     const intent = this.intentResolver.resolve(input, operation, domain);

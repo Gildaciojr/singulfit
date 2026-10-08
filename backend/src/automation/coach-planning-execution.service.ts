@@ -1,9 +1,18 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { isExplicitWorkoutPlanAdjustment } from '../workout/v2/workout-plan-adjustment-request.policy';
-import { canGenerateWorkout } from '../workout/v2/workout-generation-authorization.policy';
+import {
+  canGenerateWorkout,
+  isWorkoutEffectAuthorized,
+  type WorkoutEffectAuthorization,
+} from '../workout/v2/workout-generation-authorization.policy';
+import { hasWorkoutEffectRefusal } from '../conversation/understanding/planning-request-polarity.policy';
 import { productiveWorkoutProfileFacts } from '../context/profile-acquisition/productive-profile-facts';
 import { type NutritionArtifactType } from '@prisma/client';
 import { performance } from 'node:perf_hooks';
+import { createHash } from 'node:crypto';
+import { ConversationMessageNormalizerService } from '../conversation/understanding/conversation-message-normalizer.service';
+import { ConversationSafetyDetectorService } from '../conversation/understanding/conversation-safety-detector.service';
+import { evaluateConversationSafety } from '../conversation/routing/conversation-safety-routing.policy';
 import type {
   CoachAdaptiveProfileCollectorInput,
   ProfileAcquisitionContextValue,
@@ -93,6 +102,7 @@ export interface CoachPlanningRuntimeContext {
   readonly referenceDate: Date;
   readonly profileId?: string;
   readonly currentMessage?: string;
+  readonly workoutEffectAuthorization?: WorkoutEffectAuthorization;
   readonly pendingGoalConfirmation?: PendingGoalConfirmationContext;
   readonly suppressCurrentGoalResolution?: boolean;
 }
@@ -241,6 +251,19 @@ export class CoachPlanningExecutionService {
       );
     }
 
+    // Fence the actual effect, including a handoff whose caller intent differs.
+    // Read-only and profile acquisition do not create a Workout plan.
+    if (
+      canGenerateWorkout(
+        preparation?.decision,
+        preparation?.workoutMutationReady,
+      ) &&
+      !(await this.authorizeWorkoutEffect(userId, runtime))
+    )
+      return this.workoutPreparationFailureResult(
+        new Error('WORKOUT_EFFECT_NOT_AUTHORIZED'),
+        runtime,
+      );
     const reasoningEnabled = runtime !== undefined;
     const nutrition = reasoningEnabled
       ? this.produceNutritionReasoning(preparation)
@@ -951,6 +974,145 @@ export class CoachPlanningExecutionService {
     message: string | undefined,
   ): boolean {
     return intent === 'WORKOUT' && isWorkoutCurrentPlanRead(message);
+  }
+
+  private async authorizeWorkoutEffect(
+    userId: string,
+    runtime: CoachPlanningRuntimeContext | undefined,
+  ): Promise<boolean> {
+    if (
+      !this.prisma ||
+      !runtime?.currentMessage?.trim() ||
+      !userId ||
+      !runtime.messageId ||
+      !runtime.conversationId
+    )
+      return false;
+    const ownedMessage = (id: string) =>
+      this.prisma!.message.findFirst({
+        where: {
+          id,
+          conversationId: runtime.conversationId,
+          direction: 'INBOUND',
+          type: 'TEXT',
+          conversation: { userId },
+        },
+        select: { content: true, timestamp: true },
+      });
+    const inbound = await ownedMessage(runtime.messageId);
+    if (!inbound) return false;
+    // A current refusal also revokes the effect of a legitimately bound old request.
+    if (
+      hasWorkoutEffectRefusal(inbound.content) &&
+      !isWorkoutEffectAuthorized(inbound.content)
+    )
+      return false;
+    // A model's shorter request span must never erase safety in the full turn.
+    const requiresSafetyResponse = (text: string) =>
+      evaluateConversationSafety(
+        new ConversationSafetyDetectorService().detect(
+          new ConversationMessageNormalizerService().normalize(text),
+        ).safety,
+      ).routeRequired;
+    if (requiresSafetyResponse(inbound.content)) return false;
+    if (runtime.pendingGoalConfirmation) {
+      if (!this.pendingActions) return false;
+      const resolved = await this.pendingActions.findPendingForInbound({
+        userId,
+        conversationId: runtime.conversationId,
+        messageId: runtime.messageId,
+        text: inbound.content,
+        receivedAt: inbound.timestamp,
+      });
+      if (
+        resolved.status !== 'ACTIONABLE' ||
+        resolved.context.actionId !==
+          runtime.pendingGoalConfirmation.actionId ||
+        resolved.context.operationKey !==
+          runtime.pendingGoalConfirmation.operationKey ||
+        resolved.context.resolution.status !== 'RESOLVED' ||
+        runtime.pendingGoalConfirmation.resolution.status !== 'RESOLVED' ||
+        resolved.context.resolution.primaryGoal !==
+          runtime.pendingGoalConfirmation.resolution.primaryGoal ||
+        resolved.context.originalIntent !==
+          runtime.pendingGoalConfirmation.originalIntent ||
+        resolved.context.payload.targetPlan !==
+          runtime.pendingGoalConfirmation.payload.targetPlan ||
+        resolved.context.payload.originalMessage !== runtime.currentMessage
+      )
+        return false;
+      const prefix = 'pending-goal-confirmation:';
+      if (!resolved.context.operationKey.startsWith(prefix)) return false;
+      const sourceId = resolved.context.operationKey.slice(prefix.length);
+      let original = await ownedMessage(sourceId);
+      if (original && requiresSafetyResponse(original.content)) return false;
+      const requestQuote = resolved.context.payload.originalMessage;
+      // Goal clarification can follow a captured profile answer. Resolve its
+      // stored acquisition binding instead of trusting a caller's root ID.
+      if (original && !original.content.includes(requestQuote)) {
+        const token = createHash('sha256')
+          .update(sourceId.trim())
+          .digest('hex');
+        const cycle = await this.prisma.coachProfileAcquisitionCycle.findFirst({
+          where: {
+            userId,
+            active: false,
+            completedAt: { lte: original.timestamp },
+            OR: [
+              { status: 'ANSWERED', resultCode: `ANSWERED:${token}` },
+              { status: 'COMPLETED', resultCode: `CONFIRMED:${token}` },
+            ],
+          },
+          select: { origin: true },
+        });
+        const rootId = cycle?.origin.slice(cycle.origin.lastIndexOf(':') + 1);
+        const root = rootId ? await ownedMessage(rootId) : null;
+        original = root && root.timestamp <= original.timestamp ? root : null;
+      }
+      return (
+        !!original &&
+        original.timestamp <= inbound.timestamp &&
+        !requiresSafetyResponse(original.content) &&
+        isWorkoutEffectAuthorized(original.content, {
+          effect: 'GENERATE',
+          requestQuote,
+        })
+      );
+    }
+    if (runtime.originalRequestMessageId) {
+      const original = await ownedMessage(runtime.originalRequestMessageId);
+      if (
+        !original ||
+        original.timestamp > inbound.timestamp ||
+        original.content !== runtime.currentMessage ||
+        requiresSafetyResponse(original.content) ||
+        !isWorkoutEffectAuthorized(original.content)
+      )
+        return false;
+      const token = createHash('sha256')
+        .update(runtime.messageId.trim())
+        .digest('hex');
+      const cycle = await this.prisma.coachProfileAcquisitionCycle.findFirst({
+        where: {
+          userId,
+          active: false,
+          completedAt: { lte: inbound.timestamp },
+          origin: { endsWith: `:${runtime.originalRequestMessageId}` },
+          OR: [
+            { status: 'ANSWERED', resultCode: `ANSWERED:${token}` },
+            { status: 'COMPLETED', resultCode: `CONFIRMED:${token}` },
+          ],
+        },
+        select: { id: true },
+      });
+      return !!cycle;
+    }
+    const quote = runtime.workoutEffectAuthorization;
+    return (
+      (runtime.currentMessage === inbound.content ||
+        (!!quote && runtime.currentMessage === quote.requestQuote)) &&
+      isWorkoutEffectAuthorized(inbound.content, quote)
+    );
   }
 
   private workoutMutationRequested(

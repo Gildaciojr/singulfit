@@ -43,6 +43,7 @@ describe('AutomationService', () => {
     );
   });
   function createSubject(options?: {
+    dailyCoach?: boolean;
     remindersEnabled?: boolean;
     workoutReminderEnabled?: boolean;
     gatewayFailure?: boolean;
@@ -71,7 +72,9 @@ describe('AutomationService', () => {
       id: 'rule-id',
       code: options?.subscriptionLifecycleNotice
         ? AUTOMATION_RULE_CODES.SUBSCRIPTION_LIFECYCLE
-        : AUTOMATION_RULE_CODES.DAILY_WORKOUT,
+        : options?.dailyCoach
+          ? AUTOMATION_RULE_CODES.DAILY_COACH
+          : AUTOMATION_RULE_CODES.DAILY_WORKOUT,
       name: 'Treino do dia',
       enabled: true,
     };
@@ -79,6 +82,7 @@ describe('AutomationService', () => {
       id: 'scheduled-id',
       userId: 'user-id',
       automationRuleId: rule.id,
+      conversationId: 'conversation-id',
       scheduledFor: new Date('2026-06-10T12:00:00.000Z'),
       status: ScheduledMessageStatus.PENDING,
       content: 'Treino personalizado',
@@ -93,6 +97,7 @@ describe('AutomationService', () => {
       automationRule: rule,
     };
     const transaction = {
+      message: { findFirst: jest.fn().mockResolvedValue({ id: 'source-id' }) },
       $queryRaw: jest.fn().mockResolvedValue([{ locked: true }]),
       conversation: {
         findFirst: jest.fn().mockResolvedValue({ id: 'conversation-id' }),
@@ -609,6 +614,90 @@ describe('AutomationService', () => {
         }),
       }),
     );
+  });
+  it.each([true, false])(
+    'sends an owned inbound response with reminders disabled=%s',
+    async (disabled) => {
+      const s = createSubject();
+      s.rule.code = AUTOMATION_RULE_CODES.DAILY_COACH;
+      s.preferences.remindersEnabled = !disabled;
+      s.preferences.progressReminderEnabled = !disabled;
+      s.transaction.scheduledMessage.findUnique.mockResolvedValue({
+        ...s.scheduledMessage,
+        conversationId: 'conversation-id',
+        context: {
+          source: 'WHATSAPP_COACH_COMMAND',
+          sourceMessageId: 'source-id',
+        },
+        user: {
+          isActive: true,
+          phone: '11999999999',
+          phoneE164: '+5511999999999',
+          preferences: {
+            timezone: 'America/Sao_Paulo',
+            preferredWakeUpTime: '08:00',
+            preferredSleepTime: '23:00',
+          },
+        },
+      });
+      await s.service.sendScheduledMessage(
+        'scheduled-id',
+        new Date('2026-06-10T13:00:00Z'),
+      );
+      expect(s.evolutionGateway.sendText).toHaveBeenCalledTimes(1);
+      expect(
+        s.subscriptionAccessService.requireAccessInTransaction,
+      ).toHaveBeenCalled();
+      expect(s.transaction.message.findFirst).toHaveBeenCalledWith({
+        where: {
+          id: 'source-id',
+          conversationId: 'conversation-id',
+          direction: 'INBOUND',
+          type: 'TEXT',
+          conversation: { userId: 'user-id', status: 'ACTIVE' },
+        },
+        select: { id: true },
+      });
+    },
+  );
+  it('keeps automatic DAILY_COACH canceled when progress reminders are disabled', async () => {
+    const s = createSubject();
+    s.rule.code = AUTOMATION_RULE_CODES.DAILY_COACH;
+    s.preferences.progressReminderEnabled = false;
+    await s.service.sendScheduledMessage(
+      'scheduled-id',
+      new Date('2026-06-10T13:00:00Z'),
+    );
+    expect(s.evolutionGateway.sendText).not.toHaveBeenCalled();
+  });
+  it('does not bypass reminder preferences for a foreign or missing inbound', async () => {
+    const s = createSubject();
+    s.rule.code = AUTOMATION_RULE_CODES.DAILY_COACH;
+    s.preferences.progressReminderEnabled = false;
+    s.transaction.message.findFirst.mockResolvedValue(null);
+    s.transaction.scheduledMessage.findUnique.mockResolvedValue({
+      ...s.scheduledMessage,
+      conversationId: 'conversation-id',
+      context: {
+        source: 'WHATSAPP_COACH_COMMAND',
+        sourceMessageId: 'source-id',
+      },
+      user: {
+        isActive: true,
+        phone: '11999999999',
+        phoneE164: '+5511999999999',
+        preferences: {
+          timezone: 'America/Sao_Paulo',
+          preferredWakeUpTime: '08:00',
+          preferredSleepTime: '23:00',
+        },
+      },
+    });
+    await s.service.sendScheduledMessage(
+      'scheduled-id',
+      new Date('2026-06-10T13:00:00Z'),
+    );
+    expect(s.evolutionGateway.sendText).not.toHaveBeenCalled();
   });
 
   it.each([

@@ -2,6 +2,11 @@ import { chunkWorkoutWhatsApp } from '../workout/v2/workout-whatsapp.chunker';
 import { explicitContinuationDomain } from '../conversation/understanding/explicit-continuation-domain.policy';
 import { isWorkoutCurrentPlanRead } from '../workout/v2/workout-current-plan-read.policy';
 import { Test } from '@nestjs/testing';
+import { IntegrationEventHandlersService } from '../event-bus/integration-event-handlers.service';
+import { EventHandlerRegistry } from '../event-bus/event-handler.registry';
+import { INTERNAL_EVENT } from '../event-bus/event-bus.constants';
+import { AutomationService } from './automation.service';
+import type { OutboxEvent } from '@prisma/client';
 import {
   historicalWorkoutPlan,
   longitudinalWorkoutSnapshot,
@@ -486,7 +491,7 @@ describe('CoachCommandService', () => {
           } as never)
         : undefined,
       undefined,
-      undefined,
+      prisma as unknown as PrismaService,
       undefined,
       undefined,
       options?.controlledPlanning
@@ -606,6 +611,441 @@ describe('CoachCommandService', () => {
     };
   }
 
+  it('does not lose a read-only response when canonical continuation returns null', async () => {
+    const content =
+      'Bom dia. Já tomei 1 litro de água pela manhã e já realizei meu treino de superiores na academia.';
+    const continuations = {
+      enabled: () => true,
+      source: jest.fn().mockResolvedValue({
+        id: 'message-id',
+        conversationId: 'conversation-id',
+        content,
+        timestamp: new Date(),
+      }),
+      resolve: jest.fn().mockResolvedValue(null),
+    };
+    const s = createSubject({
+      content,
+      continuations:
+        continuations as unknown as ConversationContinuationService,
+      runtimeContent:
+        'Bom dia! Você já se hidratou e concluiu o treino. Como ficou sua energia?',
+    });
+    expect(
+      await s.service.processCanonicalContinuation({
+        userId: 'user-id',
+        messageId: 'message-id',
+      }),
+    ).toBe(false);
+    const result = await s.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+    expect(result.handled).toBe(true);
+    expect(s.prisma.coachMessage.create).toHaveBeenCalledTimes(1);
+    expect(s.workoutGenerator.generate).not.toHaveBeenCalled();
+    expect(s.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
+    expect(s.dietGenerator.generate).not.toHaveBeenCalled();
+    const row = {
+      id: 'coach-id',
+      ...s.prisma.coachMessage.create.mock.calls[0][0].data,
+    };
+    s.prisma.coachMessage.findUnique.mockResolvedValue(row);
+    await s.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+    });
+    expect(s.prisma.coachMessage.create).toHaveBeenCalledTimes(1);
+    expect(s.conversationRuntime.decide).toHaveBeenCalledTimes(1);
+  });
+  it('cannot generate from a retrospective report plus caller-provided planning metadata or quote', async () => {
+    const content =
+      'Já tomei água e concluí meu treino de musculação na academia.';
+    const s = createSubject({
+      content,
+      controlledPlanning: true,
+      runtimeHandoff: true,
+      runtimePlanningDecision: goalDecision(
+        'GENERATE_WORKOUT_PLAN',
+        'WORKOUT_PLAN_REQUEST',
+        { targetPlan: 'WORKOUT' },
+      ),
+    });
+    await s.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+      workoutEffectAuthorization: { effect: 'GENERATE', requestQuote: content },
+    });
+    expect(s.controlledWorkoutExecutor.execute).not.toHaveBeenCalled();
+    expect(s.workoutGenerator.generate).not.toHaveBeenCalled();
+    expect(s.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
+    const result = await s.planningExecution.executeStructured(
+      'user-id',
+      'WORKOUT',
+      {
+        messageId: 'message-id',
+        conversationId: 'conversation-id',
+        correlationId: 'message-id',
+        referenceDate: new Date(),
+        planningDecision: goalDecision(
+          'GENERATE_WORKOUT_PLAN',
+          'WORKOUT_PLAN_REQUEST',
+          { targetPlan: 'WORKOUT' },
+        ),
+      },
+    );
+    expect(result.dispatch.workoutDisposition).toBe('BLOCKED');
+    expect(s.controlledWorkoutExecutor.execute).not.toHaveBeenCalled();
+  });
+  it('does not let a shortened model request span erase current-turn safety', async () => {
+    const requestQuote = 'Monte um treino de CrossFit para mim';
+    const s = createSubject({
+      content: `Senti dor no peito. ${requestQuote}`,
+      controlledPlanning: true,
+    });
+    await s.service.processTextMessage({
+      userId: 'user-id',
+      messageId: 'message-id',
+      workoutEffectAuthorization: { effect: 'GENERATE', requestQuote },
+    });
+    expect(s.controlledWorkoutExecutor.execute).not.toHaveBeenCalled();
+    expect(s.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
+  });
+  it('delivers one report response through the real onboarding event, completed/null receipt, scheduling retry and automation send', async () => {
+    const content =
+      'Bom dia. Já tomei 1 litro de água pela manhã e já realizei meu treino de superiores na academia.';
+    const answer =
+      'Bom dia! Você já se hidratou e concluiu o treino. Como ficou sua energia?';
+    const s = createSubject({ content, runtimeContent: answer });
+    const forbiddenWrites = {
+      aiJob: { create: jest.fn() },
+      workoutPlan: {
+        create: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn(),
+      },
+    };
+    Object.assign(s.prisma, forbiddenWrites);
+    const source = await s.prisma.message.findFirst();
+    s.prisma.message.findFirst.mockResolvedValue({
+      ...source,
+      conversation: {
+        ...source.conversation,
+        userId: 'user-id',
+        user: {
+          ...source.conversation.user,
+          preferences: { timezone: 'America/Sao_Paulo' },
+        },
+      },
+    });
+    const receipt = {
+      id: 'receipt',
+      createdAt: source.timestamp,
+      payload: {
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        sourceMessageId: 'message-id',
+        state: 'COMPLETED',
+        result: null,
+      },
+    };
+    const receiptBefore = JSON.stringify(receipt);
+    const events = new Map<string, OutboxEvent>();
+    const outbox = {
+      findUnique: jest.fn(
+        ({
+          where,
+        }: {
+          where: {
+            eventType_aggregateType_aggregateId: {
+              eventType: string;
+              aggregateId: string;
+            };
+          };
+        }) => {
+          const key = where.eventType_aggregateType_aggregateId;
+          return Promise.resolve(
+            key.eventType === 'CONTINUATION_SEMANTIC_RECEIPT'
+              ? receipt
+              : (events.get(key.aggregateId) ?? null),
+          );
+        },
+      ),
+      create: jest.fn(
+        ({
+          data,
+        }: {
+          data: Pick<
+            OutboxEvent,
+            | 'eventType'
+            | 'aggregateType'
+            | 'aggregateId'
+            | 'payload'
+            | 'availableAt'
+          >;
+        }) => {
+          const row: OutboxEvent = {
+            ...data,
+            id: 'outbound-event',
+            status: 'PENDING',
+            attempts: 0,
+            claimedAt: null,
+            processedAt: null,
+            failedAt: null,
+            lastError: null,
+            createdAt: source.timestamp,
+            updatedAt: source.timestamp,
+          };
+          events.set(data.aggregateId, row);
+          return Promise.resolve(row);
+        },
+      ),
+      update: jest.fn(),
+      updateMany: jest.fn(),
+    };
+    Object.assign(s.transaction, { outboxEvent: outbox });
+    const config = {
+      get: () => ({ valid: true, killSwitch: false }),
+      isOfficiallyEligible: () => true,
+    };
+    const store = new ConversationContinuationStore(
+      s.prisma as unknown as PrismaService,
+      config as unknown as ConversationRuntimeOperationalConfigService,
+    );
+    const semantics = { interpret: jest.fn() };
+    const continuations = new ConversationContinuationService(
+      s.prisma as unknown as PrismaService,
+      semantics as unknown as ConversationContinuationSemanticsService,
+      {} as never,
+      {} as never,
+      new ConversationPublicAnswerBoundaryService(),
+      new ConversationSafetyDetectorService(),
+      new ConversationMessageNormalizerService(),
+      {} as never,
+      store,
+    );
+    Object.defineProperty(s.service, 'continuations', { value: continuations });
+    let coach: {
+      id: string;
+      content: string;
+      context: Prisma.JsonValue;
+    } | null = null;
+    s.prisma.coachMessage.create.mockImplementation(({ data }) => {
+      coach = { id: 'coach-id', content: data.content, context: data.context };
+      return Promise.resolve(coach);
+    });
+    s.prisma.coachMessage.findUnique.mockImplementation(() =>
+      Promise.resolve(coach),
+    );
+    type Scheduled = Prisma.ScheduledMessageGetPayload<{
+      include: { automationRule: true; user: true };
+    }>;
+    let scheduled: Scheduled | null = null;
+    s.transaction.scheduledMessage.findMany.mockImplementation(() =>
+      Promise.resolve(scheduled ? [scheduled] : []),
+    );
+    s.transaction.scheduledMessage.upsert.mockRejectedValueOnce(
+      new Error('transient scheduling failure'),
+    );
+    s.transaction.scheduledMessage.upsert.mockImplementation(({ create }) => {
+      scheduled = {
+        ...create,
+        id: 'scheduled-id',
+        attempts: 0,
+        leaseExpiresAt: null,
+        automationRule: {
+          id: 'rule-id',
+          code: AUTOMATION_RULE_CODES.DAILY_COACH,
+          enabled: true,
+        },
+        user: {
+          isActive: true,
+          phone: 'local-test-only',
+          phoneE164: null,
+          preferences: null,
+        },
+      } as unknown as Scheduled;
+      return Promise.resolve(scheduled);
+    });
+    const bus = new EventBusService(s.prisma as unknown as PrismaService);
+    s.eventBus.publish.mockImplementation((input, client) =>
+      bus.publish(input, client),
+    );
+    const scheduledStore = {
+      findUnique: jest.fn(() => Promise.resolve(scheduled)),
+      findUniqueOrThrow: jest.fn(() => Promise.resolve(scheduled)),
+      update: jest.fn(
+        ({
+          data,
+        }: {
+          data: { status: ScheduledMessageStatus; leaseExpiresAt?: Date };
+        }) => {
+          if (!scheduled) throw new Error('Missing scheduled row');
+          scheduled = { ...scheduled, ...data };
+          return Promise.resolve(scheduled);
+        },
+      ),
+      updateMany: jest.fn(({ data }: { data: Partial<Scheduled> }) => {
+        if (!scheduled) throw new Error('Missing scheduled row');
+        scheduled = { ...scheduled, ...data };
+        return Promise.resolve({ count: 1 });
+      }),
+    };
+    const sendTransaction = {
+      message: s.prisma.message,
+      $queryRaw: jest.fn(),
+      scheduledMessage: scheduledStore,
+      userAutomationPreference: {
+        findUnique: jest.fn().mockResolvedValue({
+          remindersEnabled: false,
+          progressReminderEnabled: false,
+        }),
+      },
+    };
+    const sendPrisma = {
+      scheduledMessage: scheduledStore,
+      $transaction: (run: (tx: typeof sendTransaction) => Promise<unknown>) =>
+        run(sendTransaction),
+    };
+    const gateway = {
+      sendText: jest
+        .fn()
+        .mockResolvedValue({ externalMessageId: 'local-send-id' }),
+    };
+    const automation = new AutomationService(
+      sendPrisma as unknown as PrismaService,
+      {} as never,
+      {} as never,
+      gateway as never,
+      {
+        requireAccessInTransaction: jest.fn().mockResolvedValue(undefined),
+      } as never,
+      bus,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const registry = new EventHandlerRegistry();
+    const acquisition = {
+      captureActiveResponse: jest.fn().mockResolvedValue({ handled: false }),
+      afterCoachResponseSent: jest.fn(),
+    };
+    const onboarding = {
+      processTextMessage: jest.fn().mockResolvedValue({ handled: false }),
+    };
+    const handlerService = new IntegrationEventHandlersService(
+      registry,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      s.service,
+      automation,
+      {} as never,
+      onboarding as never,
+      acquisition as never,
+      { authorizeOrNotify: jest.fn().mockResolvedValue(true) } as never,
+      undefined,
+      continuations,
+    );
+    handlerService.onModuleInit();
+    const inbound = registry.get(INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED);
+    const delivery = registry.get(INTERNAL_EVENT.AUTOMATION_TRIGGERED);
+    if (!inbound || !delivery) throw new Error('Missing registered handlers');
+    const event: OutboxEvent = {
+      id: 'inbound-event',
+      eventType: INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED,
+      aggregateType: 'MESSAGE',
+      aggregateId: 'message-id',
+      payload: { userId: 'user-id', messageId: 'message-id' },
+      status: 'PROCESSING',
+      attempts: 1,
+      availableAt: source.timestamp,
+      claimedAt: source.timestamp,
+      processedAt: null,
+      failedAt: null,
+      lastError: null,
+      createdAt: source.timestamp,
+      updatedAt: source.timestamp,
+    };
+    await expect(inbound(event)).rejects.toThrow(
+      'transient scheduling failure',
+    );
+    await inbound(event);
+    await inbound(event);
+    expect(events.size).toBe(1);
+    const outbound = events.get('scheduled-id');
+    if (!outbound) throw new Error('Missing public delivery');
+    await delivery(outbound);
+    await delivery(outbound);
+    await inbound(event);
+    expect(gateway.sendText).toHaveBeenCalledTimes(1);
+    expect(gateway.sendText).toHaveBeenCalledWith(
+      expect.objectContaining({ text: answer }),
+    );
+    expect(s.prisma.coachMessage.create).toHaveBeenCalledTimes(1);
+    expect(s.conversationRuntime.decide).toHaveBeenCalledTimes(1);
+    expect(semantics.interpret).not.toHaveBeenCalled();
+    expect(outbox.update).not.toHaveBeenCalled();
+    expect(outbox.updateMany).not.toHaveBeenCalled();
+    expect(JSON.stringify(receipt)).toBe(receiptBefore);
+    expect(s.controlledWorkoutExecutor.execute).not.toHaveBeenCalled();
+    expect(s.workoutGenerator.generate).not.toHaveBeenCalled();
+    expect(s.workoutGenerator.generateCandidate).not.toHaveBeenCalled();
+    expect(s.dietGenerator.generate).not.toHaveBeenCalled();
+    expect(forbiddenWrites.aiJob.create).not.toHaveBeenCalled();
+    expect(forbiddenWrites.workoutPlan.create).not.toHaveBeenCalled();
+    expect(forbiddenWrites.workoutPlan.update).not.toHaveBeenCalled();
+    expect(forbiddenWrites.workoutPlan.updateMany).not.toHaveBeenCalled();
+  });
+  it('preserves the report acknowledgment and the authorized plan request in one mixed response', async () => {
+    const requestQuote =
+      'Monte um treino de CrossFit para mim, 4 vezes por semana';
+    const content = `Já tomei água e concluí meu treino na academia. ${requestQuote}`;
+    const acknowledgement =
+      'Você já se hidratou e concluiu o treino; vou considerar seu pedido de CrossFit.';
+    const continuations = {
+      enabled: () => true,
+      source: jest.fn().mockResolvedValue({
+        id: 'message-id',
+        conversationId: 'conversation-id',
+        content,
+        timestamp: new Date('2026-06-10T12:00:00Z'),
+      }),
+      resolve: jest.fn().mockResolvedValue({
+        content: acknowledgement,
+        domain: 'GENERAL',
+        next: null,
+        pending: { scheduledMessageId: 'hydration' },
+        outcome: 'COMPLETED',
+        evidence: {
+          workoutEffect: 'GENERATE',
+          workoutRequestQuote: requestQuote,
+        },
+      }),
+      claim: jest.fn().mockResolvedValue(true),
+    };
+    const s = createSubject({
+      content,
+      controlledPlanning: true,
+      continuations:
+        continuations as unknown as ConversationContinuationService,
+    });
+    expect(
+      await s.service.processCanonicalContinuation({
+        userId: 'user-id',
+        messageId: 'message-id',
+      }),
+    ).toBe(true);
+    expect(s.controlledWorkoutExecutor.execute).toHaveBeenCalledTimes(1);
+    expect(s.prisma.coachMessage.create).toHaveBeenCalledTimes(1);
+    expect(
+      s.prisma.coachMessage.create.mock.calls[0][0].data.content,
+    ).toContain(acknowledgement);
+    expect(continuations.claim).toHaveBeenCalledTimes(1);
+  });
   it.each([
     'Qual minha próxima refeição?',
     'Não mandei sobre treino. Perguntei QUAL A MINHA PRÓXIMA REFEIÇÃO DE HOJE',
@@ -1141,8 +1581,9 @@ describe('CoachCommandService', () => {
   it.each([
     ['Refaça meu treino', 5, 'FULL_GYM', 1],
     ['Quero um treino completamente diferente', 5, 'FULL_GYM', 1],
-    ['Agora só posso treinar em casa 3x', 3, 'HOME', 1],
-    ['Agora quero treinar 4x', 4, 'FULL_GYM', 1],
+    ['Agora só posso treinar em casa 3x', 3, 'HOME', 0],
+    ['Agora quero treinar 4x', 4, 'FULL_GYM', 0],
+    ['Adapte meu treino para casa, 3 vezes por semana', 3, 'HOME', 1],
     ['Troque supino por outro exercício', 5, 'FULL_GYM', 1],
     ['Qual é meu treino atual?', 5, 'FULL_GYM', 0],
     ['Qual é meu treino de hoje?', 5, 'FULL_GYM', 0],
@@ -2465,17 +2906,19 @@ describe('CoachCommandService', () => {
       );
       expect(planning).toHaveBeenCalledTimes(1);
       const planned = await planning.mock.results[0].value;
+      if (targetPlan !== 'DIET') {
+        expect(planned.dispatch.workoutDisposition).toBe('BLOCKED');
+        expect(
+          subject.controlledWorkoutExecutor.execute,
+        ).not.toHaveBeenCalled();
+        return;
+      }
       expect(planned.decision).toMatchObject({
         recognizedIntent,
         targetPlan,
         goal,
       });
-      if (targetPlan === 'WORKOUT') {
-        expect(planned.dispatch.executor).toBe('WORKOUT_V2');
-        expect(subject.controlledWorkoutExecutor.execute).toHaveBeenCalledTimes(
-          1,
-        );
-      }
+      expect(subject.controlledWorkoutExecutor.execute).not.toHaveBeenCalled();
     },
   );
 

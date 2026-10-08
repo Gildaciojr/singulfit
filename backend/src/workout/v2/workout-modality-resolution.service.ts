@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { affirmativePlanningText } from '../../conversation/understanding/planning-request-polarity.policy';
 import type { WorkoutModality } from './workout-planning-artifact.contract';
 
 export type RunningTransitionPermission = 'ALLOW' | 'DENY' | 'UNSPECIFIED';
@@ -62,8 +63,8 @@ const concepts: readonly [WorkoutModality, RegExp][] = [
 export function currentWorkoutModality(
   text: string,
 ): WorkoutModalityResolution {
-  let value = normalize(text);
-  const permission = runningTransitionPermission(value);
+  let value = normalize(affirmativePlanningText(text));
+  const permission = runningTransitionPermission(text);
   const preference = [...value.matchAll(/\b(?:agora|na verdade|prefiro)\b/gu)]
     .filter((anchor) => {
       const tail = value.slice(anchor.index);
@@ -116,10 +117,9 @@ export function currentWorkoutModality(
     else if (/\bacademia\b/u.test(value)) modality = 'GYM_STRENGTH';
   }
   const requested =
-    /\b(?:quero|preciso|gostaria|mont\w*|cri\w*|faz\w*|programa|planejamento|treino|treinar|preparacao|prefiro|na verdade)\b/u.test(
-      value,
-    ) ||
-    (/\bfaco\b/u.test(value) && /\b\d+\s*(?:x|vezes)\b/u.test(value));
+    /\b(?:quero|preciso|gostaria|mont\w*|cri\w*|faz(?:er)?|prefiro|na verdade)\b/u.test(
+      normalize(affirmativePlanningText(text)),
+    );
   if (ambiguous) modality = null;
   const action: WorkoutModalityResolution['action'] = ambiguous
     ? 'AMBIGUOUS'

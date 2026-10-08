@@ -3,6 +3,7 @@ import { ConversationEntityRecognizerService } from './conversation-entity-recog
 import { ConversationOperationResolverService } from './conversation-operation-resolver.service';
 import { ConversationDomainResolverService } from './conversation-domain-resolver.service';
 import { ConversationIntentResolverService } from './conversation-intent-resolver.service';
+import { affirmativePlanningText } from './planning-request-polarity.policy';
 
 const normalizer = new ConversationMessageNormalizerService();
 const entities = new ConversationEntityRecognizerService();
@@ -20,7 +21,10 @@ export function explicitPlanningIntent(text: string) {
       targetPlan: null,
     },
   } as const;
-  const message = normalizer.normalize(text);
+  const message = {
+    ...normalizer.normalize(affirmativePlanningText(text)),
+    question: normalizer.normalize(text).question,
+  };
   const operation = operations.resolve(input, message);
   const domain = domains.resolve(input, message, entities.recognize(message), {
     references: [],

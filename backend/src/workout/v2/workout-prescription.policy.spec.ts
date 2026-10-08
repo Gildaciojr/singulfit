@@ -193,6 +193,133 @@ describe('production V12 compatibility: jobs 20756ef4 and 98456476 prescription 
       if (alternating) expect(output).toContain('alternando lados');
     },
   );
+  it('recovers the reported Hollow hold seconds only when COUNT contains no numeric dose', () => {
+    const value = {
+      ...activity({
+        load: null,
+        effort: null,
+        execution: { ...execution, minimum: null, maximum: null },
+      }),
+      name: 'Hollow hold',
+      equipment: ['BODYWEIGHT'] as const,
+      repetitions: '20-30 s',
+    };
+    const result = normalized(value);
+    expect(
+      result.sessions[0].blocks[0].activities[0].prescription?.execution,
+    ).toMatchObject({ kind: 'SECONDS', minimum: 20, maximum: 30 });
+    expect(
+      new WorkoutPlanV2Validator()
+        .validate(result, context, available, true, true, true)
+        .issues.filter((issue) => issue.severity === 'ERROR'),
+    ).toEqual([]);
+    const conflict = {
+      ...value,
+      prescription: prescription({
+        load: null,
+        execution: { ...execution, minimum: 20, maximum: 30 },
+      }),
+    };
+    expect(reconcileWorkoutPrescriptions(candidateFor(conflict))).toEqual(
+      candidateFor(conflict),
+    );
+    expect(
+      new WorkoutPlanV2Validator().validate(
+        normalized(conflict),
+        context,
+        available,
+        true,
+        true,
+        true,
+      ).issues,
+    ).toContainEqual(
+      expect.objectContaining({ code: 'INVALID_PARAMETER', severity: 'ERROR' }),
+    );
+  });
+  it.each([
+    ['Agachamento frontal', '4-5', ['BARBELL']],
+    ['Push press', '3-5', ['BARBELL']],
+    ['Deadlift técnico', '3-4', ['BARBELL']],
+    [
+      'Desenvolvimento com halteres em banco inclinado',
+      '6-8',
+      ['DUMBBELL', 'BENCH'],
+    ],
+    ['Remada curvada com barra', '6-8', ['BARBELL']],
+    ['Agachamento traseiro', '4-5', ['BARBELL']],
+  ] as const)(
+    'reconciles the supplied 7599936e dose excerpt for %s (remaining fixture fields are synthetic)',
+    (name, repetitions, equipment) => {
+      const value = {
+        ...activity({
+          load: null,
+          effort: null,
+          execution: { ...execution, minimum: null, maximum: null },
+        }),
+        name,
+        repetitions,
+        equipment,
+      };
+      const result = normalized(value);
+      expect(
+        new WorkoutPlanV2Validator()
+          .validate(
+            result,
+            context,
+            {
+              ...available,
+              authorizedEquipment: [
+                ...available.authorizedEquipment,
+                'BARBELL',
+                'BENCH',
+              ],
+            },
+            true,
+            true,
+            true,
+          )
+          .issues.filter((issue) => issue.severity === 'ERROR'),
+      ).toEqual([]);
+      expect(result.sessions[0].blocks[0].activities[0].name).toBe(name);
+      expect(result.sessions[0].blocks[0].activities[0].instruction).toBe(
+        value.instruction,
+      );
+    },
+  );
+  it('does not invent BIKE authorization from MACHINE for the supplied Bike leve excerpt', () => {
+    const value = {
+      ...nativeActivity('TIMED', 'COUNT'),
+      name: 'Bike leve',
+      equipment: ['MACHINE'] as const,
+    };
+    const result = normalized(value);
+    expect(result.sessions[0].blocks[0].activities[0].equipment).toEqual([
+      'MACHINE',
+    ]);
+    const issues = new WorkoutPlanV2Validator().validate(
+      result,
+      context,
+      {
+        ...available,
+        authorizedEquipment: [...available.authorizedEquipment, 'MACHINE'],
+      },
+      true,
+      true,
+      true,
+    ).issues;
+    expect(issues).toContainEqual(
+      expect.objectContaining({
+        code: 'UNAUTHORIZED_EQUIPMENT_REFERENCE',
+        severity: 'ERROR',
+      }),
+    );
+    expect(issues).toContainEqual(
+      expect.objectContaining({
+        code: 'PUBLIC_IDENTITY_REQUIRED',
+        severity: 'ERROR',
+      }),
+    );
+  });
   it.each([
     {
       ...activity({
@@ -1063,7 +1190,10 @@ describe('AI-first contextual capabilities, without a coaching catalog', () => {
       load: { ...metric('PERCENT_1RM', 80), referenceId: 'one-rm' },
     });
     expect(validate(value)).toContainEqual(
-      expect.objectContaining({ code: 'INVALID_PARAMETER' }),
+      expect.objectContaining({
+        code: 'UNAUTHORIZED_EXACT_LOAD',
+        severity: 'ERROR',
+      }),
     );
     expect(
       validate(value, {

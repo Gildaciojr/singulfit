@@ -11,6 +11,9 @@ import { INTERNAL_EVENT } from '../../event-bus/event-bus.constants';
 import { AIRecoveryService } from '../../ai/ai-recovery.service';
 import { OutboxEvent, OutboxStatus } from '@prisma/client';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { WorkoutPlanV2Parser } from './workout-plan-v2.parser';
 import { AIJobStatus, AIJobType, FitnessGoal, Prisma } from '@prisma/client';
 import { WorkoutPlanV2PersistenceService } from './persistence/workout-plan-v2-persistence.service';
 import { WorkoutPlanV2PersistenceValidator } from './persistence/workout-plan-v2-persistence.validator';
@@ -790,6 +793,29 @@ describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
           { decide: () => ({ shouldAsk: false }) } as never,
           { plan: () => s.input.decision } as never,
         );
+        const currentMessage = s.input.currentRequest?.text;
+        if (!currentMessage)
+          throw new Error('Missing explicit fixture request');
+        Object.defineProperty(coach, 'prisma', {
+          value: {
+            message: {
+              findFirst: ({
+                where,
+              }: {
+                where: { id: string; conversation: { userId: string } };
+              }) =>
+                Promise.resolve(
+                  where.id === 'collector-answer-id' &&
+                    where.conversation.userId === s.input.userId
+                    ? {
+                        content: currentMessage,
+                        timestamp: s.input.referenceDate,
+                      }
+                    : null,
+                ),
+            },
+          },
+        });
         const response = await coach.executeStructured(
           s.input.userId,
           'WORKOUT',
@@ -797,6 +823,7 @@ describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
             conversationId: 'conversation-id',
             messageId: 'collector-answer-id',
             correlationId: 'correlation-id',
+            currentMessage,
             referenceDate: s.input.referenceDate,
           },
         );
@@ -1765,6 +1792,231 @@ describe('Workout AI-first V9: real engine, AIJob claim and usage', () => {
     await s.complete(result);
     expect(s.confirmed).toHaveBeenCalledTimes(1);
     expect(s.usageRows).toHaveLength(1);
+  });
+  it('repairs the complete 7599936e production candidate once without authorizing unknown 1RM, bike or Saturday', async () => {
+    const raw = new WorkoutPlanV2Parser().parse(
+      readFileSync(
+        join(__dirname, 'fixtures/workout-7599936e-candidate.json'),
+        'utf8',
+      ),
+    );
+    // Controlled repair response, not an observed production completion.
+    // Keep the model's other names, doses, instructions and equipment intact.
+    const repaired: GeneratedWorkoutPlanV2Candidate = {
+      ...raw,
+      sessions: raw.sessions.map((session) => ({
+        ...session,
+        weekday: session.weekday === 'SATURDAY' ? 'FRIDAY' : session.weekday,
+        sessionKey:
+          session.weekday === 'SATURDAY' ? 'FRIDAY' : session.sessionKey,
+        blocks: session.blocks.map((block) => ({
+          ...block,
+          activities: block.activities.map((activity) => {
+            if (activity.activityKey === 'CF_W1_WU_1')
+              return {
+                ...activity,
+                name: 'Caminhada progressiva na esteira',
+                equipment: ['TREADMILL'],
+                instruction:
+                  'Aumente o ritmo aos poucos na esteira, sem chegar ofegante.',
+              };
+            if (
+              activity.activityKey === 'CF_W2_WU_1' ||
+              activity.activityKey === 'CF_W3_WU_1'
+            )
+              return {
+                ...activity,
+                instruction:
+                  'Caminhe leve para subir a temperatura sem fadiga.',
+              };
+            return activity.prescription?.load?.kind === 'PERCENT_1RM'
+              ? {
+                  ...activity,
+                  prescription: { ...activity.prescription, load: null },
+                }
+              : activity;
+          }),
+        })),
+      })),
+    };
+    const s = await subject(
+      'Monte um treino de CrossFit 4 vezes por semana',
+      [raw, repaired],
+      { weeklyFrequency: knownDatum(4) },
+      [],
+      ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'],
+    );
+    const result = await s.engine.generateCandidate(s.input);
+    const repairPayload: {
+      repair: {
+        validationIssues: { code: string; path: string; severity: string }[];
+      };
+    } = JSON.parse(s.gateway.createTextResponse.mock.calls[1][0].input);
+    const errors: { code: string; path: string; severity: string }[] =
+      repairPayload.repair.validationIssues.filter(
+        (issue: { severity: string }) => issue.severity === 'ERROR',
+      );
+    expect(
+      errors
+        .filter((issue) => issue.code === 'UNAUTHORIZED_EXACT_LOAD')
+        .map((issue) => issue.path),
+    ).toEqual([
+      'CF_W1_STR_1.prescription.load.referenceId',
+      'CF_W1_STR_2.prescription.load.referenceId',
+      'CF_W2_STR_1.prescription.load.referenceId',
+      'CF_W3_STR_1.prescription.load.referenceId',
+      'CF_W3_STR_2.prescription.load.referenceId',
+      'CF_W4_STR_1.prescription.load.referenceId',
+    ]);
+    expect(
+      errors
+        .filter((issue) => issue.code === 'UNAUTHORIZED_EQUIPMENT_REFERENCE')
+        .map((issue) => issue.path),
+    ).toEqual(['CF_W1_WU_1', 'CF_W2_WU_1', 'CF_W3_WU_1']);
+    expect(errors).toContainEqual(
+      expect.objectContaining({
+        code: 'WEEKDAY_UNAVAILABLE',
+        path: 'SATURDAY',
+      }),
+    );
+    expect(errors).toContainEqual(
+      expect.objectContaining({
+        code: 'PUBLIC_IDENTITY_REQUIRED',
+        path: 'CF_W1_WU_1',
+      }),
+    );
+    expect(errors.some((issue) => issue.code === 'INVALID_PARAMETER')).toBe(
+      false,
+    );
+    const activities = result.output.sessions.flatMap((session) =>
+      session.blocks.flatMap((block) => block.activities),
+    );
+    expect(
+      result.output.sessions.map(({ weekday, sessionKey, sequence }) => ({
+        weekday,
+        sessionKey,
+        sequence,
+      })),
+    ).toEqual([
+      { weekday: 'MONDAY', sessionKey: 'MONDAY', sequence: 1 },
+      { weekday: 'WEDNESDAY', sessionKey: 'WEDNESDAY', sequence: 2 },
+      { weekday: 'THURSDAY', sessionKey: 'THURSDAY', sequence: 3 },
+      { weekday: 'FRIDAY', sessionKey: 'FRIDAY', sequence: 4 },
+    ]);
+    expect(activities.map((activity) => activity.activityKey)).toEqual(
+      raw.sessions.flatMap((session) =>
+        session.blocks.flatMap((block) =>
+          block.activities.map((activity) => activity.activityKey),
+        ),
+      ),
+    );
+    expect(result.output.substitutions).toEqual(raw.substitutions);
+    expect(
+      activities.find((activity) => activity.activityKey === 'CF_W4_STR_2')
+        ?.prescription?.execution,
+    ).toEqual({
+      kind: 'SECONDS',
+      minimum: 20,
+      maximum: 30,
+      perSide: false,
+      alternating: false,
+    });
+    expect(
+      result.output.validation.issues.filter(
+        (issue) => issue.severity === 'ERROR',
+      ),
+    ).toEqual([]);
+    expect(
+      new WorkoutPlanV2Formatter().format(result.output).join('\n'),
+    ).toContain('Caminhada progressiva na esteira');
+    await s.complete(result);
+    expect((await s.engine.generateCandidate(s.input)).status).toBe(
+      'ALREADY_COMPLETED',
+    );
+    expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(2);
+    expect(s.confirmed).toHaveBeenCalledTimes(1);
+  });
+  it('repairs the supplied Bike/MACHINE representation and unavailable Saturday once using confirmed synthetic context', async () => {
+    // Only Bike leve/MACHINE and the weekday sequence are supplied incident excerpts.
+    // The rest of the candidate and profile are local synthetic fixtures, not production snapshots.
+    const days = ['MONDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'] as const;
+    const base = plan('CROSSFIT', 4);
+    const valid = {
+      ...base,
+      sessions: base.sessions.map((session, index) => ({
+        ...session,
+        weekday: days[index],
+      })),
+    };
+    const invalid = {
+      ...valid,
+      sessions: valid.sessions.map((session, index) => ({
+        ...session,
+        weekday: index === 3 ? ('SATURDAY' as const) : session.weekday,
+        blocks: session.blocks.map((block, blockIndex) =>
+          index === 0 && blockIndex === 0
+            ? {
+                ...block,
+                activities: [
+                  {
+                    activityKey: 'CF_W1_WU_1',
+                    kind: 'TIMED' as const,
+                    name: 'Bike leve',
+                    source: 'MODEL_GENERATED' as const,
+                    movementPattern: 'LOCOMOTION' as const,
+                    equipment: ['MACHINE' as const],
+                    publicIdentity: null,
+                    instruction: 'Mantenha esforço confortável.',
+                    alerts: [],
+                    appliedConstraintCodes: [],
+                    durationSeconds: 360,
+                    workSeconds: null,
+                    recoverySeconds: null,
+                    rounds: 1,
+                    intensity: 'LIGHT' as const,
+                  },
+                ],
+              }
+            : block,
+        ),
+      })),
+    };
+    const s = await subject(
+      'Monte um treino de CrossFit 4 vezes por semana',
+      [invalid, valid],
+      {},
+      [],
+      days,
+    );
+    const output = await s.engine.generateCandidate(s.input);
+    expect(output.output.sessions.map((session) => session.weekday)).toEqual(
+      days,
+    );
+    expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(2);
+    const repair = JSON.parse(
+      s.gateway.createTextResponse.mock.calls[1][0].input,
+    ).repair;
+    expect(repair.validationIssues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'WEEKDAY_UNAVAILABLE',
+          severity: 'ERROR',
+        }),
+        expect.objectContaining({
+          code: 'UNAUTHORIZED_EQUIPMENT_REFERENCE',
+          severity: 'ERROR',
+        }),
+        expect.objectContaining({
+          code: 'PUBLIC_IDENTITY_REQUIRED',
+          severity: 'ERROR',
+        }),
+      ]),
+    );
+    await s.complete(output);
+    expect((await s.engine.generateCandidate(s.input)).status).toBe(
+      'ALREADY_COMPLETED',
+    );
+    expect(s.gateway.startBackgroundTextResponse).toHaveBeenCalledTimes(2);
   });
   it.each(WORKOUT_V10_QUALITY_CORPUS)(
     'V10 quality corpus $id: $modality',

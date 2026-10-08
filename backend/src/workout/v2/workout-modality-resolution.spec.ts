@@ -383,8 +383,6 @@ describe('Current-turn Understanding is the Workout modality source of truth', (
     ['monte um treino de caminhada para mim 5x', 'WALKING'],
     ['quero caminhar 4x por semana', 'WALKING'],
     ['faz um programa só de caminhada', 'WALKING'],
-    ['treino pra caminhar na esteira', 'WALKING'],
-    ['treino d caminhada', 'WALKING'],
     ['quero um treino só caminhando', 'WALKING'],
     ['quero andar 5 dias por semana', 'WALKING'],
     ['quero começar fazendo caminhadas', 'WALKING'],
@@ -392,12 +390,8 @@ describe('Current-turn Understanding is the Workout modality source of truth', (
     ['monte treino de corrida na rua', 'RUNNING'],
     ['quero começar a correr', 'RUNNING'],
     ['quero correr meus primeiros 5km', 'RUNNING'],
-    ['treino pra 10k', 'RUNNING'],
-    ['treino pra primeiros 5km', 'RUNNING'],
     ['qro corre na rua 3x', 'RUNNING'],
-    ['preparação para uma prova de rua', 'RUNNING'],
     ['monte um treino de crossfit', 'CROSSFIT'],
-    ['faço crossfit 4 vezes por semana', 'CROSSFIT'],
     ['quero começar no cross', 'CROSSFIT'],
     ['monta uns WODs pra mim', 'CROSSFIT'],
     ['qro fazer crossfit 4x', 'CROSSFIT'],
@@ -416,6 +410,31 @@ describe('Current-turn Understanding is the Workout modality source of truth', (
     ['quero calistenia', 'CALISTHENICS'],
     ['quero treino funcional', 'FUNCTIONAL'],
   ];
+  it.each([
+    'Bom dia. Já tomei 1 litro de água pela manhã e já realizei meu treino de superiores na academia.',
+    'Já fiz meu treino de musculação',
+    'Eu fazia musculação na academia',
+    'faço crossfit 4 vezes por semana',
+    'treino pra caminhar na esteira',
+    'treino d caminhada',
+    'treino pra 10k',
+    'treino pra primeiros 5km',
+    'preparação para uma prova de rua',
+  ])(
+    'does not turn reports or an unconfirmed workout subject into plan authorization: %s',
+    async (text) => {
+      const result = await module
+        .get(ConversationUnderstandingService)
+        .understand(understandingInput(text));
+      expect(result.operation).toBe('ANSWER');
+      expect(result.intent).toBe('COMMON_MESSAGE');
+      const routed = module
+        .get(ConversationRoutingDecisionService)
+        .decide(goalPreparationInput(result));
+      expect(routed.goalDecision.goal).not.toBe('GENERATE_WORKOUT_PLAN');
+      expect(provider).not.toHaveBeenCalled();
+    },
+  );
   it.each(matrix)(
     'propagates %s as %s without a provider or builder reclassification',
     async (text, modality) => {

@@ -11,6 +11,8 @@ import type { ConversationOperation } from '../contracts/conversation-intent.con
 import { isNutritionCurrentPlanRead } from '../../diet/nutrition-current-plan-read.policy';
 import { isFullPlanReplacementRequest } from './full-plan-replacement.policy';
 import { isNutritionAdvice } from './nutrition-request.policy';
+import { affirmativePlanningText } from './planning-request-polarity.policy';
+import { ConversationMessageNormalizerService } from './conversation-message-normalizer.service';
 
 @Injectable()
 export class ConversationOperationResolverService {
@@ -19,6 +21,12 @@ export class ConversationOperationResolverService {
     message: NormalizedConversationMessage,
     recognized?: ConversationEntityRecognition,
   ): ConversationOperationResolution {
+    message = {
+      ...new ConversationMessageNormalizerService().normalize(
+        affirmativePlanningText(message.original),
+      ),
+      question: message.question,
+    };
     const text = message.folded;
     if (isNutritionAdvice(text)) {
       return Object.freeze({

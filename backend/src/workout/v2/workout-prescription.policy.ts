@@ -63,7 +63,10 @@ export function reconcileWorkoutPrescriptions(
             execution.minimum === null && execution.maximum === null;
           if (
             dose &&
-            execution.kind === dose.kind &&
+            (execution.kind === dose.kind ||
+              (missingDose &&
+                execution.kind === 'COUNT' &&
+                dose.kind === 'SECONDS')) &&
             (missingDose ||
               (execution.perSide === dose.perSide &&
                 execution.alternating === dose.alternating)) &&
@@ -75,6 +78,7 @@ export function reconcileWorkoutPrescriptions(
           ) {
             reconciled = {
               ...execution,
+              kind: dose.kind,
               minimum: dose.minimum,
               maximum: dose.maximum,
               perSide: execution.perSide || dose.perSide,
@@ -313,11 +317,22 @@ export function workoutPrescriptionIssues(
         metric.value > 100 ||
         metric.basis !== 'ADJUSTABLE_START' ||
         !effort ||
-        !['RPE', 'RIR'].includes(effort.kind) ||
-        evidence?.kind !== 'ONE_REP_MAX_KG' ||
-        evidence.value <= 0
+        !['RPE', 'RIR'].includes(effort.kind)
       )
         invalid();
+      // A percentage without a known 1RM is an unauthorized exact load,
+      // not a malformed dose. Keep it blocking, but allow the existing bounded
+      // repair to correct the recommendation without inventing capacity.
+      if (
+        evidence?.kind !== 'ONE_REP_MAX_KG' ||
+        !Number.isFinite(evidence.value) ||
+        evidence.value <= 0
+      )
+        issues.push({
+          code: 'UNAUTHORIZED_EXACT_LOAD',
+          severity: 'ERROR',
+          path: `${activity.activityKey}.prescription.load.referenceId`,
+        });
     } else if (metric.basis === 'ADJUSTABLE_START') {
       if (
         !effort ||

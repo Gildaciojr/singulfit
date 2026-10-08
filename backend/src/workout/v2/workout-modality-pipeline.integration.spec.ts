@@ -367,7 +367,12 @@ describe('Understanding → builder → engine → parser/validator → formatte
   }
   it.each([
     ['quero começar no crossfit 3x por semana', 'BEGINNER', 'LOW', 3],
-    ['faço crossfit 4x por semana', 'INTERMEDIATE', 'MODERATE', 4],
+    [
+      'faço crossfit 4x por semana; monte meu treino',
+      'INTERMEDIATE',
+      'MODERATE',
+      4,
+    ],
     ['quero crossfit 5x por semana', 'ADVANCED', 'HIGH', 5],
   ] as const)(
     'validates and formats %s for %s/%s',
@@ -705,7 +710,7 @@ describe('Understanding → builder → engine → parser/validator → formatte
   });
   it('accepts run, walk, bike, row, strength and gymnastics as coherent CrossFit conditioning components', async () => {
     const s = await subject(
-      'faço crossfit 4x por semana',
+      'faço crossfit 4x por semana; monte meu treino',
       'INTERMEDIATE',
       'MODERATE',
     );

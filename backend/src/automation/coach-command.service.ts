@@ -1,6 +1,10 @@
 import { chunkWorkoutWhatsApp } from '../workout/v2/workout-whatsapp.chunker';
 import { Injectable, Optional } from '@nestjs/common';
 import { explicitPlanningIntent } from '../conversation/understanding/explicit-planning-intent';
+import {
+  isWorkoutEffectAuthorized,
+  type WorkoutEffectAuthorization,
+} from '../workout/v2/workout-generation-authorization.policy';
 import { explicitContinuationDomain } from '../conversation/understanding/explicit-continuation-domain.policy';
 import type { ConversationGoalDecision } from '../context/conversation-goal-planner.contract';
 import { CoachPlanningExecutionService } from './coach-planning-execution.service';
@@ -45,6 +49,8 @@ export type CoachCommandIntent = 'DIET' | 'WORKOUT' | 'BOTH' | 'UNKNOWN';
 
 export interface ProcessCoachCommandInput {
   readonly proactiveReply?: boolean;
+  readonly workoutEffectAuthorization?: WorkoutEffectAuthorization;
+  readonly workoutEffectAcknowledgement?: string;
   userId: string;
   messageId: string;
   planningContinuation?: Readonly<{
@@ -153,11 +159,74 @@ export class CoachCommandService {
       existing &&
       (!this.isRecord(existing.context) ||
         existing.context.canonicalContinuation !== true)
-    )
+    ) {
+      // A retry may arrive after CoachMessage committed but scheduling failed.
+      // Reuse the existing public answer; never reinterpret or generate again.
+      const savedIntent = this.isRecord(existing.context)
+        ? existing.context.intent
+        : null;
+      const savedSelection = this.isRecord(existing.context)
+        ? (Object.fromEntries(
+            Object.entries(existing.context).filter(
+              ([key]) => !['source', 'messageId', 'intent'].includes(key),
+            ),
+          ) as Prisma.InputJsonObject)
+        : {};
+      await this.scheduleResponse({
+        userId: input.userId,
+        conversationId: message.conversationId,
+        messageId: message.id,
+        coachMessageId: existing.id,
+        content: existing.content,
+        scheduledFor: this.scheduledFor(message.timestamp, message.id),
+        intent:
+          savedIntent === 'WORKOUT' ||
+          savedIntent === 'DIET' ||
+          savedIntent === 'BOTH' ||
+          savedIntent === 'UNKNOWN'
+            ? savedIntent
+            : this.classify(message.content),
+        selectionContext: savedSelection,
+      });
       return true;
+    }
     let reply = existing
       ? null
       : await this.continuations.resolve(input.userId, input.messageId);
+    if (
+      reply &&
+      (reply.evidence.workoutEffect === 'GENERATE' ||
+        reply.evidence.workoutEffect === 'UPDATE') &&
+      typeof reply.evidence.workoutRequestQuote === 'string' &&
+      reply.evidence.workoutRequestQuote.trim() &&
+      isWorkoutEffectAuthorized(message.content, {
+        effect: reply.evidence.workoutEffect,
+        requestQuote: reply.evidence.workoutRequestQuote,
+      })
+    ) {
+      const result = await this.processTextMessage({
+        ...input,
+        workoutEffectAuthorization: {
+          effect: reply.evidence.workoutEffect,
+          requestQuote: reply.evidence.workoutRequestQuote,
+        },
+        workoutEffectAcknowledgement: reply.content,
+      });
+      if (result.handled && reply.pending) {
+        const captured = reply;
+        await this.prisma.$transaction((transaction) =>
+          this.continuations!.claim(
+            transaction,
+            input.userId,
+            message.conversationId,
+            message.id,
+            captured,
+            message.timestamp,
+          ),
+        );
+      }
+      return result.handled;
+    }
     if (reply?.evidence.delegateRuntime) {
       const decision = await this.decideOfficialExecution({
         userId: input.userId,
@@ -408,6 +477,20 @@ export class CoachCommandService {
       };
     }
     if (
+      input.workoutEffectAuthorization &&
+      !isWorkoutEffectAuthorized(
+        message.content,
+        input.workoutEffectAuthorization,
+      )
+    ) {
+      // Caller/model metadata cannot replace the owned inbound's intention.
+      input = {
+        ...input,
+        workoutEffectAuthorization: undefined,
+        workoutEffectAcknowledgement: undefined,
+      };
+    }
+    if (
       !input.planningContinuation &&
       this.continuations?.enabled(input.userId) &&
       this.isExclusiveWorkoutRead(message.content) &&
@@ -418,6 +501,10 @@ export class CoachCommandService {
       ? await this.prisma.message.findFirst({
           where: {
             id: input.planningContinuation.originalRequestMessageId,
+            conversationId: message.conversation.id,
+            direction: 'INBOUND',
+            type: 'TEXT',
+            timestamp: { lte: message.timestamp },
             conversation: { userId: input.userId },
           },
           select: { content: true },
@@ -433,6 +520,7 @@ export class CoachCommandService {
           replyToExternalMessageId: message.replyToExternalMessageId,
         });
     const commandText =
+      input.workoutEffectAuthorization?.requestQuote ??
       planningOriginal?.content ??
       (workoutContinuation
         ? `sessão ${workoutContinuation.sequence}`
@@ -471,7 +559,12 @@ export class CoachCommandService {
               ? input.planningContinuation.intent
               : workoutContinuation
                 ? 'WORKOUT'
-                : this.classify(commandText);
+                : input.workoutEffectAuthorization
+                  ? explicitPlanningIntent(commandText) ===
+                    'COMBINED_PLAN_REQUEST'
+                    ? 'BOTH'
+                    : 'WORKOUT'
+                  : this.classify(commandText);
 
     const selectionContext = await this.workoutSelectionContext(
       input.userId,
@@ -547,6 +640,7 @@ export class CoachCommandService {
       isIsolatedReminderReply(commandText);
     const exclusiveWorkoutRead = this.isExclusiveWorkoutRead(commandText);
     const bypassRuntime =
+      Boolean(input.workoutEffectAuthorization) ||
       profileContent !== null ||
       dailyContent !== null ||
       isolatedReply ||
@@ -611,6 +705,8 @@ export class CoachCommandService {
                       userId: input.userId,
                       intent,
                       planningDecision: runtimeDecision.planningDecision,
+                      workoutEffectAuthorization:
+                        input.workoutEffectAuthorization,
                       conversationId: message.conversation.id,
                       messageId: message.id,
                       text: commandText,
@@ -626,6 +722,8 @@ export class CoachCommandService {
                         input.planningContinuation?.originalRequestMessageId,
                     })
                 : await this.executePlanning({
+                    workoutEffectAuthorization:
+                      input.workoutEffectAuthorization,
                     userId: input.userId,
                     intent,
                     conversationId: message.conversation.id,
@@ -650,6 +748,12 @@ export class CoachCommandService {
       };
     }
     let content = planningResult.content;
+    if (
+      input.workoutEffectAuthorization &&
+      input.workoutEffectAcknowledgement
+    ) {
+      content = `${input.workoutEffectAcknowledgement}\n\n${content}`;
+    }
     if (
       pending.status === 'ACTIONABLE' &&
       pending.context.resolution.status === 'RESOLVED' &&
@@ -760,6 +864,7 @@ export class CoachCommandService {
     readonly suppressCurrentGoalResolution: boolean;
     readonly originalRequestMessageId?: string;
     readonly planningDecision?: ConversationGoalDecision;
+    readonly workoutEffectAuthorization?: WorkoutEffectAuthorization;
   }): Promise<{
     readonly content: string;
     readonly responseRequired: boolean;
@@ -768,6 +873,7 @@ export class CoachCommandService {
   }> {
     const runtime = {
       planningDecision: input.planningDecision,
+      workoutEffectAuthorization: input.workoutEffectAuthorization,
       conversationId: input.conversationId,
       messageId: input.messageId,
       correlationId: input.messageId,

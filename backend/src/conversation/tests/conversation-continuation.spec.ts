@@ -175,6 +175,118 @@ describe('Canonical conversation continuation', () => {
       },
     };
   }
+  it('keeps the real hydration + completed workout report in its quoted reminder and preserves the AI response', async () => {
+    const content =
+      'Bom dia. Já tomei 1 litro de água pela manhã e já realizei meu treino de superiores na academia.';
+    const response =
+      'Bom dia! Você já começou a manhã se hidratando e concluiu o treino de superiores. Continue distribuindo a água ao longo do dia. Como ficou sua energia?';
+    const s = subject('HYDRATION_CHECK', {
+      action: 'HYDRATION_REPLY',
+      consumption: 'CONFIRMED',
+      reference: 'PENDING',
+      workoutEffect: 'NONE',
+      workoutRequestQuote: null,
+      response,
+    });
+    s.prisma.message.findFirst.mockResolvedValue({
+      ...(await s.prisma.message.findFirst()),
+      content,
+      replyToExternalMessageId: 'quoted-hydration',
+    });
+    const result = await s.service.resolve('user', 'message');
+    expect(result).toMatchObject({
+      content: response,
+      domain: 'HYDRATION',
+      outcome: 'COMPLETED',
+      pending: { scheduledMessageId: 'scheduled' },
+      evidence: { workoutEffect: 'NONE', hydrationGoal: false },
+    });
+    expect(s.semantics.interpret).toHaveBeenCalledWith(
+      content,
+      expect.objectContaining({
+        continuation: expect.objectContaining({ kind: 'HYDRATION_CHECK' }),
+      }),
+    );
+    expect(s.workout.present).not.toHaveBeenCalled();
+    expect(s.workout.presentCanonicalDay).not.toHaveBeenCalled();
+  });
+  it('preserves a historical COMPLETED/null receipt without repeating its semantic attempt', async () => {
+    const execute = jest.fn();
+    const row = {
+      id: 'receipt',
+      payload: {
+        userId: 'user',
+        conversationId: 'conversation',
+        sourceMessageId: 'message',
+        state: 'COMPLETED',
+        result: null,
+      },
+    };
+    const prisma = {
+      message: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'message',
+          conversationId: 'conversation',
+          conversation: { userId: 'user' },
+          timestamp: at,
+        }),
+      },
+      outboxEvent: {
+        findUnique: jest.fn().mockResolvedValue(row),
+        update: jest.fn(),
+        create: jest.fn(),
+      },
+      $queryRaw: jest.fn(),
+      $transaction: jest.fn(),
+    };
+    prisma.$transaction.mockImplementation((fn: (tx: unknown) => unknown) =>
+      fn(prisma),
+    );
+    const config = {
+      get: () => ({ valid: true, killSwitch: false }),
+      isOfficiallyEligible: () => true,
+    };
+    const store = new ConversationContinuationStore(
+      prisma as unknown as PrismaService,
+      config as unknown as ConversationRuntimeOperationalConfigService,
+    );
+    const fallback = {
+      content: 'Pode esclarecer o contexto?',
+      domain: 'GENERAL' as const,
+      pending: null,
+      next: null,
+      outcome: 'UNKNOWN' as const,
+      evidence: {},
+    };
+    expect(
+      await store.resolveOnce('user', 'message', 'TEXT', execute, fallback),
+    ).toBeNull();
+    expect(execute).not.toHaveBeenCalled();
+    expect(prisma.outboxEvent.update).not.toHaveBeenCalled();
+    expect(prisma.outboxEvent.create).not.toHaveBeenCalled();
+    expect(row.payload.result).toBeNull();
+  });
+  it('hands off only the current explicit request in a mixed report', async () => {
+    const requestQuote =
+      'Monte um novo treino de CrossFit para mim, 4x por semana';
+    const s = subject('HYDRATION_CHECK', {
+      action: 'INDEPENDENT',
+      workoutEffect: 'GENERATE',
+      workoutRequestQuote: requestQuote,
+    });
+    s.prisma.message.findFirst.mockResolvedValue({
+      ...(await s.prisma.message.findFirst()),
+      content: `Já tomei água e treinei na academia. ${requestQuote}`,
+      replyToExternalMessageId: 'quoted-hydration',
+    });
+    expect(
+      (await s.service.resolve('user', 'message'))?.evidence,
+    ).toMatchObject({
+      workoutEffect: 'GENERATE',
+      workoutRequestQuote: requestQuote,
+    });
+    expect(s.prisma.scheduledMessage.updateMany).not.toHaveBeenCalled();
+  });
   it.each([
     [null, null],
     [null, 'UNRESOLVED'],
@@ -585,6 +697,121 @@ describe('Canonical conversation continuation', () => {
     expect(result?.evidence.adherence).toBe('NOT_ALIGNED');
     expect(result?.content).not.toContain('Continue seguindo');
     expect(result?.content).not.toContain('culpa');
+  });
+  it('keeps the real lunch report across a three-hour quantity follow-up without repeating the question', async () => {
+    const foods = 'arroz, linguiça cozida e batata grelhada';
+    const quantities =
+      '2 conchas médias de arroz, dois gomos de linguiça cozida e uma porção pequena de batata cozida';
+    const s = subject('MEAL_COMPLETION_CHECK', {
+      action: 'MEAL_REPLY',
+      description: foods,
+      consumption: 'CONFIRMED',
+      meal: 'LUNCH',
+      reference: 'PENDING',
+    });
+    const provider = {
+      execute: jest
+        .fn()
+        .mockResolvedValueOnce({
+          status: 'COMPLETED',
+          structuredOutput: {
+            adherence: 'INSUFFICIENT_INFORMATION',
+            content: 'Qual foi a porção de arroz, linguiça e batata?',
+            dayIndex: 0,
+            mealIndex: 0,
+            matches: [],
+            unmatchedFoodQuotes: [],
+            reportedFoods: ['arroz', 'linguiça cozida', 'batata grelhada'].map(
+              (foodQuote) => ({ foodQuote, quantityQuote: null }),
+            ),
+          },
+        })
+        .mockResolvedValueOnce({
+          status: 'COMPLETED',
+          structuredOutput: {
+            adherence: 'INSUFFICIENT_INFORMATION',
+            content:
+              'Recebi as porções. Você descreveu a batata como cozida neste último relato; ainda não consigo confirmar a comparação com o plano.',
+            dayIndex: null,
+            mealIndex: null,
+            matches: [],
+            unmatchedFoodQuotes: [],
+            reportedFoods: [
+              { foodQuote: 'arroz', quantityQuote: '2 conchas médias' },
+              { foodQuote: 'linguiça cozida', quantityQuote: 'dois gomos' },
+              {
+                foodQuote: 'batata cozida',
+                quantityQuote: 'uma porção pequena',
+              },
+            ],
+          },
+        }),
+    };
+    const real = new ConversationContinuationSemanticsService(
+      provider as unknown as ConversationAIService,
+      new ConversationPublicAnswerBoundaryService(),
+    );
+    s.semantics.evaluate.mockImplementation(
+      (...args: Parameters<typeof real.evaluate>) => real.evaluate(...args),
+    );
+    const first = await s.service.resolve('user', 'message');
+    expect(first?.next?.kind).toBe('MEAL_CONTENT_REQUEST');
+    expect(first?.evidence.reportedContent).toBe(foods);
+    const prior = s.row();
+    if (!prior || !first?.next) throw new Error('Missing meal follow-up');
+    const followUp = {
+      ...prior,
+      id: 'quantity-question',
+      responseMessageId: null,
+      content: first.content,
+      context: {
+        continuation: first.next,
+        continuationEvidence: first.evidence,
+      },
+    };
+    s.setRow(followUp);
+    s.prisma.message.findFirst.mockResolvedValue({
+      ...(await s.prisma.message.findFirst()),
+      id: 'second-message',
+      content: quantities,
+      timestamp: new Date(at.getTime() + 3 * 60 * 60 * 1000),
+    });
+    s.semantics.interpret.mockResolvedValue({
+      ...base,
+      action: 'MEAL_REPLY',
+      description: quantities,
+      meal: 'LUNCH',
+      reference: 'PENDING',
+      consumption: 'CONFIRMED',
+    });
+    const second = await s.service.resolve('user', 'second-message');
+    expect(provider.execute.mock.calls[1][0].payload.description).toBe(
+      `${foods}; ${quantities}`,
+    );
+    expect(second?.content).toBe(
+      'Recebi as porções. Você descreveu a batata como cozida neste último relato; ainda não consigo confirmar a comparação com o plano.',
+    );
+    expect(second?.next).toBeNull();
+    expect(second?.evidence).toMatchObject({
+      mealReportStatus: 'COMPLETE',
+      mealComparisonStatus: 'INCONCLUSIVE',
+      adherence: 'INSUFFICIENT_INFORMATION',
+    });
+  });
+  it('does not ask for received foods again when meal comparison fails technically', async () => {
+    const s = subject('MEAL_CONTENT_REQUEST', {
+      action: 'MEAL_REPLY',
+      description: '2 conchas médias de arroz',
+      consumption: 'CONFIRMED',
+    });
+    s.semantics.evaluate.mockResolvedValue(null);
+    const reply = await s.service.resolve('user', 'message');
+    expect(reply?.next).toBeNull();
+    expect(reply?.evidence).toMatchObject({
+      mealComparisonStatus: 'TECHNICAL_FAILURE',
+      reportedContent: '2 conchas médias de arroz',
+    });
+    expect(reply?.content).toContain('Não precisa reenviar');
   });
   it('compares an explicit independent food report to the active plan without inventing a reminder', async () => {
     const s = subject(null, {
@@ -1210,6 +1437,91 @@ describe('Continuation semantic provider boundary', () => {
       ),
     ).toMatchObject({ adherence: 'ALIGNED' });
   });
+  it('recognizes household portions independently of textual equivalence with the plan', async () => {
+    const output = {
+      ...complete,
+      adherence: 'INSUFFICIENT_INFORMATION',
+      content:
+        'Recebi as porções em medidas caseiras; não tenho equivalência segura para confirmar a comparação.',
+      dayIndex: null,
+      mealIndex: null,
+      matches: [],
+      reportedFoods: [
+        { foodQuote: 'arroz', quantityQuote: '2 conchas médias' },
+      ],
+    };
+    const result = await subject(output).service.evaluate(
+      '2 conchas médias de arroz',
+      'LUNCH',
+      plan,
+      false,
+    );
+    expect(result).toMatchObject({
+      adherence: 'INSUFFICIENT_INFORMATION',
+      report: { status: 'COMPLETE', missingQuantityFoods: [] },
+      comparison: 'INCONCLUSIVE',
+      content: output.content,
+    });
+  });
+  it('asks only for a genuinely missing portion, preserving the other received quantity', async () => {
+    const result = await subject({
+      ...complete,
+      adherence: 'INSUFFICIENT_INFORMATION',
+      content: 'Quais alimentos e quantidades você comeu?',
+      dayIndex: null,
+      mealIndex: null,
+      matches: [],
+      reportedFoods: [
+        { foodQuote: 'arroz', quantityQuote: '2 conchas médias' },
+        { foodQuote: 'frango', quantityQuote: null },
+      ],
+    }).service.evaluate(
+      '2 conchas médias de arroz e frango',
+      'LUNCH',
+      plan,
+      false,
+    );
+    expect(result?.content).toBe(
+      'Recebi os alimentos que você relatou. Qual foi a porção de frango?',
+    );
+    expect(result?.report).toEqual({
+      status: 'MISSING_QUANTITIES',
+      missingQuantityFoods: ['frango'],
+    });
+  });
+  it('does not accept invented quantities as recognized information', async () => {
+    const result = await subject({
+      ...complete,
+      adherence: 'INSUFFICIENT_INFORMATION',
+      content: 'Quais alimentos e quantidades?',
+      reportedFoods: [{ foodQuote: 'arroz', quantityQuote: '200 g' }],
+    }).service.evaluate('arroz', 'LUNCH', plan, false);
+    expect(result?.report.status).toBe('UNKNOWN');
+    expect(result?.content).not.toContain('200 g');
+  });
+  it.each([
+    'Você consumiu 900 calorias nessa refeição.',
+    'Recebi seus 900 g de arroz.',
+    'Recebi seus 2 g de arroz.',
+    'Troque o arroz por outro alimento.',
+    'Você seguiu o plano.',
+  ])(
+    'does not humanize into ungrounded facts or unsolicited prescriptions: %s',
+    async (content) => {
+      const result = await subject({
+        ...complete,
+        adherence: 'INSUFFICIENT_INFORMATION',
+        dayIndex: null,
+        mealIndex: null,
+        content,
+        reportedFoods: [
+          { foodQuote: 'arroz', quantityQuote: '2 conchas médias' },
+        ],
+      }).service.evaluate('2 conchas médias de arroz', 'LUNCH', plan, false);
+      expect(result?.content).not.toBe(content);
+      expect(result?.adherence).toBe('INSUFFICIENT_INFORMATION');
+    },
+  );
   it.each([
     { ...complete, matches: [complete.matches[0]] },
     {
