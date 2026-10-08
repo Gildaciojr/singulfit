@@ -2272,11 +2272,40 @@ describe('CoachCommandService', () => {
     'O que você sugere para o almoço?',
     'Tenho treino à noite, o que posso jantar?',
     'Posso trocar o arroz hoje só nessa refeição?',
+    {
+      content: 'uai no almoço kkk, posso trocar o frango por ovo ou não?',
+      disposition: 'ANSWER',
+      registered: false,
+      expectedRegistered: false,
+    },
+    {
+      content: 'uai no almoço kkk, posso trocar o frango por ovo ou não?',
+      disposition: 'CLARIFY',
+      registered: false,
+      expectedRegistered: false,
+    },
+    {
+      content: 'Posso comer ovo no lugar do frango no almoço?',
+      disposition: 'ANSWER',
+      registered: true,
+      expectedRegistered: true,
+    },
+    {
+      content: 'Posso comer ovo e bacon no lugar do frango no almoço?',
+      disposition: 'ANSWER',
+      registered: true,
+      expectedRegistered: false,
+    },
   ])(
     'routes meal QA through real command/runtime/QA with no plan usage: %s',
-    async (content) => {
-      const answer =
-        'Para essa refeição, combine arroz, feijão, legumes e uma fonte de proteína conforme suas preferências.';
+    async (testInput) => {
+      const content =
+        typeof testInput === 'string' ? testInput : testInput.content;
+      const contradictory = typeof testInput !== 'string';
+      const disposition = contradictory ? testInput.disposition : 'ANSWER';
+      const answer = contradictory
+        ? 'Não está cadastrada no seu plano, mas dá sim pra trocar o frango por ovos.'
+        : 'Como orientação aproximada fora do plano, para essa refeição combine arroz, feijão, legumes e uma fonte de proteína conforme suas preferências.';
       const subject = createSubject({ content, runtimeContent: 'enabled' });
       const effects = installPersistentEffectHarness(subject);
       const planning = jest.spyOn(subject.planningExecution, 'execute');
@@ -2296,7 +2325,7 @@ describe('CoachCommandService', () => {
           .mockResolvedValue({ id: 'fake-qa', status: AIJobStatus.PENDING }),
         runTextJob: jest.fn().mockResolvedValue({
           outputText: JSON.stringify({
-            disposition: 'ANSWER',
+            disposition,
             domain: 'NUTRITION',
             answer,
             followUpQuestion: null,
@@ -2354,9 +2383,45 @@ describe('CoachCommandService', () => {
           {
             provide: ConversationCurrentNutritionContextService,
             useValue: {
-              read: jest
-                .fn()
-                .mockResolvedValue({ status: 'NO_PLAN', plan: null }),
+              read: jest.fn().mockResolvedValue(
+                contradictory
+                  ? {
+                      status: 'AVAILABLE',
+                      plan: {
+                        title: 'Plano atual',
+                        summary: 'Plano alimentar',
+                        days: [
+                          {
+                            meals: [
+                              {
+                                name: 'Almoço',
+                                time: '12:00',
+                                items: [
+                                  { name: 'Filé de frango', quantity: '120 g' },
+                                  { name: 'Arroz', quantity: '4 colheres' },
+                                  { name: 'Feijão', quantity: '1 concha' },
+                                  { name: 'Salada', quantity: '1 prato' },
+                                ],
+                              },
+                            ],
+                          },
+                        ],
+                        substitutions: testInput.registered
+                          ? [
+                              {
+                                source: 'Filé de frango',
+                                alternative: 'Ovos mexidos',
+                              },
+                            ]
+                          : [],
+                        hydrationGuidance: [],
+                        generalGuidance: [],
+                        adaptationGuidance: [],
+                        safetyGuidance: [],
+                      },
+                    }
+                  : { status: 'NO_PLAN', plan: null },
+              ),
             },
           },
           {
@@ -2421,9 +2486,113 @@ describe('CoachCommandService', () => {
         expect(JSON.stringify(ai.runTextJob.mock.calls)).toContain(content);
         expect(effects.scheduledMessages.size).toBe(1);
         expect(effects.outboxEvents.size).toBe(1);
-        expect(
-          JSON.stringify([...effects.scheduledMessages.values()]),
-        ).toContain(answer);
+        const delivered = JSON.stringify([
+          ...effects.scheduledMessages.values(),
+        ]);
+        if (contradictory) {
+          if (testInput.expectedRegistered) {
+            expect(delivered).toContain(
+              'o plano registra a troca de Filé de frango por Ovos mexidos',
+            );
+            expect(delivered).not.toContain('qual é o original');
+          } else {
+            expect(delivered).toContain(
+              'Não há essa troca cadastrada para Filé de frango em Almoço',
+            );
+            expect(delivered).toContain(
+              'Não posso confirmar essa substituição como parte da sua dieta',
+            );
+            expect(delivered).not.toContain('o plano registra a troca');
+          }
+          expect(delivered).not.toContain('dá sim');
+          expect(delivered).not.toContain(answer);
+          const publicMessage = [...effects.scheduledMessages.values()][0];
+          if (!publicMessage) throw new Error('Missing scheduled answer');
+          let delivery = {
+            ...publicMessage,
+            userId: 'user-id',
+            automationRuleId: 'rule-id',
+            status: ScheduledMessageStatus.PENDING as ScheduledMessageStatus,
+            leaseExpiresAt: null as Date | null,
+            automationRule: {
+              id: 'rule-id',
+              code: AUTOMATION_RULE_CODES.DAILY_COACH,
+              enabled: true,
+            },
+            user: {
+              isActive: true,
+              phone: 'local-test-only',
+              phoneE164: null,
+              preferences: null,
+            },
+          };
+          const store = {
+            findUnique: jest.fn(() => Promise.resolve(delivery)),
+            findUniqueOrThrow: jest.fn(() => Promise.resolve(delivery)),
+            update: jest.fn(({ data }: { data: Partial<typeof delivery> }) => {
+              delivery = { ...delivery, ...data };
+              return Promise.resolve(delivery);
+            }),
+            updateMany: jest.fn(
+              ({ data }: { data: Partial<typeof delivery> }) => {
+                delivery = { ...delivery, ...data };
+                return Promise.resolve({ count: 1 });
+              },
+            ),
+          };
+          const transaction = {
+            message: subject.prisma.message,
+            $queryRaw: jest.fn(),
+            scheduledMessage: store,
+            userAutomationPreference: {
+              findUnique: jest.fn().mockResolvedValue({
+                remindersEnabled: false,
+                progressReminderEnabled: false,
+              }),
+            },
+          };
+          const sendPrisma = {
+            scheduledMessage: store,
+            $transaction: (run: (tx: typeof transaction) => Promise<unknown>) =>
+              run(transaction),
+          };
+          const gateway = {
+            sendText: jest
+              .fn()
+              .mockResolvedValue({ externalMessageId: 'local-send-id' }),
+          };
+          const automation = new AutomationService(
+            sendPrisma as unknown as PrismaService,
+            {} as never,
+            {} as never,
+            gateway as never,
+            {
+              requireAccessInTransaction: jest
+                .fn()
+                .mockResolvedValue(undefined),
+            } as never,
+            subject.eventBus as never,
+            {} as never,
+            {} as never,
+            {} as never,
+          );
+          const at = new Date(publicMessage.scheduledFor.getTime() + 1000);
+          await automation.sendScheduledMessage(publicMessage.id, at);
+          await automation.sendScheduledMessage(publicMessage.id, at);
+          expect(gateway.sendText).toHaveBeenCalledTimes(1);
+          expect(gateway.sendText).toHaveBeenCalledWith({
+            number: 'local-test-only',
+            text: publicMessage.content,
+          });
+          expect(delivery.status).toBe(ScheduledMessageStatus.SENT);
+        } else if (content === 'Posso trocar o arroz hoje só nessa refeição?') {
+          expect(delivered).toContain(
+            'qual é o original e qual é a alternativa',
+          );
+          expect(delivered).not.toContain(answer);
+        } else {
+          expect(delivered).toContain(answer);
+        }
       } finally {
         await module.close();
       }

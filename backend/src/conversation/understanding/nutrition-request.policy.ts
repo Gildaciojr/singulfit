@@ -28,12 +28,16 @@ export function nutritionRequest(value: string): NutritionRequest | null {
       text,
     );
   if (!foodContext) return null;
+  const substitutionInquiry =
+    /\b(?:posso|pode|podemos|previst\w*|cadastrad\w*)\b/u.test(text) &&
+    /\b(?:tro(?:c|qu)\w*|substitu\w*)\b/u.test(text);
   // Keep explicit persistent mutations, full plans and their existing handoff.
   if (
     /\b(?:daqui para frente|permanentemente|definitivamente|atualiz\w*|persist\w*)\b/u.test(
       text,
     ) ||
-    (/\b(?:no meu plano|na minha dieta)\b/u.test(text) &&
+    (!substitutionInquiry &&
+      /\b(?:no meu plano|na minha dieta)\b/u.test(text) &&
       /\b(?:tro(?:c|qu)\w*|substitu\w*|mud\w*|alter\w*|adapte|inclua|crie|gere|monte)\b/u.test(
         text,
       )) ||

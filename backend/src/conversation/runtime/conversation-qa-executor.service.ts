@@ -17,6 +17,7 @@ import {
   nutritionAdviceContext,
   nutritionAdvicePayload,
   nutritionAdviceViolation,
+  nutritionSubstitutionAnswer,
   type NutritionAdviceContext,
 } from './nutrition-advice.policy';
 import { PersonalizedCoachContextService } from './personalized-coach-context.service';
@@ -194,7 +195,9 @@ export class ConversationQAExecutorService {
     if (job.userId !== undefined && job.userId !== input.userId)
       return this.failed('AI_JOB_OWNERSHIP_MISMATCH');
     if (job.status === AIJobStatus.COMPLETED) {
-      const stored = this.parseCandidate(job.result);
+      let stored = this.parseCandidate(job.result);
+      if (stored)
+        stored = nutritionSubstitutionAnswer(nutritionAdvice) ?? stored;
       const violation =
         stored && nutritionAdviceViolation(nutritionAdvice, stored);
       if (violation) return this.failed(violation);
@@ -208,7 +211,13 @@ export class ConversationQAExecutorService {
       )
         return this.failed('UNSUPPORTED_PERSONAL_ASSERTION');
       return stored
-        ? this.candidateResult(stored, 'AI_REUSED', 0)
+        ? this.candidateResult(
+            stored,
+            'AI_REUSED',
+            0,
+            undefined,
+            nutritionAdvice,
+          )
         : this.failed('STORED_ANSWER_INVALID');
     }
     if (job.status === AIJobStatus.PROCESSING) {
@@ -327,6 +336,7 @@ export class ConversationQAExecutorService {
       await this.ai.failJob(job.id, new Error('INVALID_QA_RESPONSE'), response);
       return this.failed('INVALID_AI_RESPONSE', providerDurationMs, response);
     }
+    candidate = nutritionSubstitutionAnswer(nutritionAdvice) ?? candidate;
     let violation = nutritionAdviceViolation(nutritionAdvice, candidate);
     if (
       (violation === 'NUTRITION_ADVICE_REPEATS_CURRENT_MEAL' ||
@@ -404,6 +414,7 @@ export class ConversationQAExecutorService {
         );
         return safeNutritionFallback('INVALID_AI_RESPONSE');
       }
+      candidate = nutritionSubstitutionAnswer(nutritionAdvice) ?? candidate;
       violation = nutritionAdviceViolation(nutritionAdvice, candidate);
       if (violation) {
         await this.ai.failJob(job.id, new Error(violation), response);
@@ -481,7 +492,13 @@ export class ConversationQAExecutorService {
     }
 
     return finish(
-      this.candidateResult(candidate, 'AI', providerDurationMs, response),
+      this.candidateResult(
+        candidate,
+        'AI',
+        providerDurationMs,
+        response,
+        nutritionAdvice,
+      ),
     );
   }
 
@@ -498,7 +515,9 @@ export class ConversationQAExecutorService {
       if (job.userId !== undefined && job.userId !== userId)
         return this.failed('AI_JOB_OWNERSHIP_MISMATCH');
       if (job.status === AIJobStatus.COMPLETED) {
-        const stored = this.parseCandidate(job.result);
+        let stored = this.parseCandidate(job.result);
+        if (stored)
+          stored = nutritionSubstitutionAnswer(nutritionAdvice) ?? stored;
         const violation =
           stored && nutritionAdviceViolation(nutritionAdvice, stored);
         if (violation) return this.failed(violation);
@@ -512,7 +531,13 @@ export class ConversationQAExecutorService {
         )
           return this.failed('UNSUPPORTED_PERSONAL_ASSERTION');
         return stored
-          ? this.candidateResult(stored, 'AI_REUSED', 0)
+          ? this.candidateResult(
+              stored,
+              'AI_REUSED',
+              0,
+              undefined,
+              nutritionAdvice,
+            )
           : this.failed('STORED_ANSWER_INVALID');
       }
       if (job.status === AIJobStatus.FAILED) {
@@ -534,7 +559,15 @@ export class ConversationQAExecutorService {
       completionTokens: number;
       totalTokens: number;
     },
+    nutritionAdvice: NutritionAdviceContext | null = null,
   ): ConversationQAExecutionResult {
+    const factual = nutritionSubstitutionAnswer(nutritionAdvice);
+    if (factual) {
+      const violation = nutritionAdviceViolation(nutritionAdvice, factual);
+      if (violation) return this.failed(violation, providerDurationMs, usage);
+      candidate = factual;
+      source = 'DETERMINISTIC_FALLBACK';
+    }
     const observation = this.observability(
       providerDurationMs,
       candidate,

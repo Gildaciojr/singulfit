@@ -136,6 +136,32 @@ describe('ConversationNutritionDeterministicAnswerService', () => {
     },
   );
 
+  it('delegates a source/alternative question instead of selecting eggs from another meal', () => {
+    expect(
+      service.answer({
+        request:
+          'Nesse almoço das 12h que você acabou de me mostrar, posso substituir o peito de frango por ovos? Essa substituição está prevista na minha dieta atual? Não quero alterar meu plano, apenas saber.',
+        route,
+        current: { status: 'AVAILABLE', plan },
+      }),
+    ).toBeNull();
+  });
+  it('scopes quantity references to the named meal and respects food word boundaries', () => {
+    expect(
+      service.answer({
+        request: 'Quanto de ovos no almoço?',
+        route,
+        current: { status: 'AVAILABLE', plan },
+      })?.content,
+    ).toContain('Não encontrei esse alimento');
+    expect(
+      service.answer({
+        request: 'Qual quantidade nessa nova opção?',
+        route,
+        current: { status: 'AVAILABLE', plan },
+      })?.content,
+    ).toContain('Não encontrei esse alimento');
+  });
   it('does not turn a persistent adaptation request into a read-only answer', () => {
     expect(
       service.answer({

@@ -34,6 +34,31 @@ describe('Nutrition advice integration (real semantic pipeline, external I/O dou
   });
   afterAll(() => module.close());
 
+  it.each([
+    'Nesse almoço das 12h que você acabou de me mostrar, posso substituir o peito de frango por ovos? Essa substituição está prevista na minha dieta atual? Não quero alterar meu plano, apenas saber.',
+    'uai no almoço kkk, posso trocar o frango por ovo ou não?',
+  ])(
+    'routes the incident substitution inquiry as read-only, not a diet update: %s',
+    async (text) => {
+      const understanding = await module
+        .get(ConversationUnderstandingService)
+        .understand(
+          understandingInput(text, { dietAvailable: true, targetPlan: 'DIET' }),
+        );
+      expect(understanding).toMatchObject({
+        domain: 'NUTRITION',
+        operation: 'PROVIDE_GUIDANCE',
+        intent: 'NUTRITION_QUESTION',
+      });
+      const decision = module.get(ConversationRoutingDecisionService).decide(
+        goalPreparationInput(understanding, {
+          snapshot: routingSnapshot({ dietAvailable: true }),
+        }),
+      );
+      expect(decision.executionRoute.kind).toBe('NUTRITION_GUIDANCE');
+    },
+  );
+
   const plan: PublicNutritionResponse = {
     title: 'Plano ativo',
     summary: 'Estrutura diária',
@@ -205,7 +230,9 @@ describe('Nutrition advice integration (real semantic pipeline, external I/O dou
             disposition: 'ANSWER',
             domain: 'NUTRITION',
             answer:
-              'Uma alternativa prática é um sanduíche de ovos com tomate e uma fruta.',
+              intent === 'MEAL_SUBSTITUTION'
+                ? 'Como orientação aproximada fora do plano, uma alternativa prática é um sanduíche de ovos com tomate e uma fruta.'
+                : 'Uma alternativa prática é um sanduíche de ovos com tomate e uma fruta.',
             followUpQuestion: null,
             grounding: 'MIXED',
             confidence: 'HIGH',
@@ -290,7 +317,9 @@ describe('Nutrition advice integration (real semantic pipeline, external I/O dou
           expect(result.content).toContain(item.name);
         expect(ai.runTextJob).not.toHaveBeenCalled();
       } else {
-        expect(result.observability?.answerSource).toBe('AI');
+        expect(result.observability?.answerSource).toBe(
+          intent === 'MEAL_SUBSTITUTION' ? 'DETERMINISTIC_FALLBACK' : 'AI',
+        );
         expect(result.content).not.toContain('Macarrão');
         const payload: unknown = JSON.parse(
           ai.runTextJob.mock.calls[0][1].input as string,
@@ -298,7 +327,13 @@ describe('Nutrition advice integration (real semantic pipeline, external I/O dou
         expect(payload).toMatchObject({
           nutritionGuidance: {
             intent,
-            policy: { readOnly: true, currentPlanRole: 'CONTEXT_NOT_ANSWER' },
+            policy: {
+              readOnly: true,
+              currentPlanRole:
+                intent === 'MEAL_SUBSTITUTION'
+                  ? 'SUBSTITUTION_EVIDENCE'
+                  : 'CONTEXT_NOT_ANSWER',
+            },
           },
         });
         if (/op[cç][aã]o r[aá]pida e proteica/u.test(text))

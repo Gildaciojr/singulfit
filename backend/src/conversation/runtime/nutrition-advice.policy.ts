@@ -14,6 +14,14 @@ import type { ConversationAnswerCandidate } from './conversation-qa.contract';
 
 export interface NutritionAdviceContext {
   readonly request: NutritionRequest;
+  readonly substitutionEvidence: Readonly<{
+    status: 'REGISTERED' | 'NOT_REGISTERED' | 'UNRESOLVED';
+    meal: string | null;
+    source: string | null;
+    requestedAlternative: string | null;
+    registered: readonly PublicNutritionResponse['substitutions'][number][];
+    unresolvedAlternative?: boolean;
+  }> | null;
   readonly immediateConstraints: readonly string[];
   readonly safetyConstraints: readonly string[];
   readonly excludedFoods: readonly string[];
@@ -27,7 +35,7 @@ export interface NutritionAdviceContext {
 
 const constraintBuilder = new NutritionPlanningContextBuilder();
 
-function matchesFoodTerm(text: string, food: string): boolean {
+export function matchesFoodTerm(text: string, food: string): boolean {
   const term = normalizeFoodTerm(food);
   if (!term) return false;
   const pattern = term
@@ -110,8 +118,33 @@ export function nutritionAdviceContext(
   previousAnswer: string | null,
   referenceDate: Date,
 ): NutritionAdviceContext | null {
+  const inboundHistory = [
+    ...(human.recentConversation ?? [])
+      .filter((turn) => turn.direction === 'USER')
+      .map((turn) => turn.text),
+    ...(record(personalized) && Array.isArray(personalized.recentConversation)
+      ? personalized.recentConversation.flatMap((turn) =>
+          record(turn) &&
+          turn.direction === 'INBOUND' &&
+          typeof turn.text === 'string'
+            ? [turn.text]
+            : [],
+        )
+      : []),
+  ];
+  const precedingRequest = [...inboundHistory]
+    .reverse()
+    .find((text) => nutritionRequest(text)?.intent === 'MEAL_SUBSTITUTION');
   const request =
-    human.effectiveNutritionRequest ?? nutritionRequest(human.currentMessage);
+    human.effectiveNutritionRequest ??
+    nutritionRequest(human.currentMessage) ??
+    (precedingRequest &&
+    /\b(?:tro(?:c|qu)\w*|substitu\w*)\b/u.test(
+      normalizeFoodTerm(human.currentMessage),
+    )
+      ? nutritionRequest(`${human.currentMessage} ${precedingRequest}`)
+      : null);
+
   if (!request || request.intent === 'PLAN_LOOKUP') return null;
   const safety =
     record(personalized) && record(personalized.safety)
@@ -156,13 +189,21 @@ export function nutritionAdviceContext(
         : [],
     ),
   ];
+  const targetMeal =
+    request.meal ??
+    (request.intent === 'MEAL_SUBSTITUTION'
+      ? ([...inboundHistory]
+          .reverse()
+          .map(nutritionRequest)
+          .find((prior) => prior?.meal)?.meal ?? null)
+      : null);
   const meals = plan?.days.flatMap((day) => day.meals) ?? [];
-  const originalMeals = request.meal
+  const originalMeals = targetMeal
     ? meals.filter((meal) => {
         const name = normalizeFoodTerm(meal.name);
         return (
-          name.includes(request.meal ?? '') ||
-          (request.meal === 'lanche' && name.includes('lanche'))
+          name.includes(targetMeal ?? '') ||
+          (targetMeal === 'lanche' && name.includes('lanche'))
         );
       })
     : meals;
@@ -178,8 +219,187 @@ export function nutritionAdviceContext(
       : (human.recentConversation ?? [])
           .filter((turn) => turn.direction === 'COACH')
           .map((turn) => turn.text);
+  // Roles come from explicit quoted spans, not global plan membership. The QA
+  // model retains full language/history for ambiguity; uncertain facts stay so.
+  const grammaticalTerms = new Set([
+    'o',
+    'a',
+    'os',
+    'as',
+    'de',
+    'do',
+    'da',
+    'dos',
+    'das',
+    'um',
+    'uma',
+    'meu',
+    'minha',
+    'meus',
+    'minhas',
+  ]);
+  const foodTokens = (value: string) =>
+    normalizeFoodTerm(value)
+      .split(' ')
+      .filter((term) => term && !grammaticalTerms.has(term))
+      .map((term) =>
+        term.length > 3 && term.endsWith('s') ? term.slice(0, -1) : term,
+      );
+  const cleanSpan = (value: string) => {
+    let text = normalizeFoodTerm(value);
+    // Question polarity and a resolved meal are context, not extra ingredients.
+    if (text.endsWith(' ou nao')) text = text.slice(0, -' ou nao'.length);
+    const mealNames = new Set([
+      ...(targetMeal ? [targetMeal] : []),
+      ...originalMeals.map((meal) => normalizeFoodTerm(meal.name)),
+    ]);
+    for (const meal of mealNames) {
+      for (const preposition of ['no', 'na', 'em', 'para o', 'para a']) {
+        const suffix = ` ${preposition} ${meal}`;
+        if (text.endsWith(suffix)) text = text.slice(0, -suffix.length);
+      }
+    }
+    return text.trim();
+  };
+  const exchange = (
+    value: string,
+  ): { source: string; alternative: string } | null => {
+    const text = normalizeFoodTerm(value.split(/[?.!;]/u)[0]);
+    const direct = text.match(
+      /\b(?:tro(?:c|qu)\w*|substitu\w*)\s+(.+?)\s+por\s+(.+)/u,
+    );
+    if (direct)
+      return {
+        source: cleanSpan(direct[1]),
+        alternative: cleanSpan(direct[2]),
+      };
+    const inverse = text.match(
+      /(.+?)\s+(?:no lugar|em vez)\s+(?:de|do|da|dos|das)\s+(.+)/u,
+    );
+    if (!inverse) return null;
+    const before = inverse[1].split(' ');
+    const action = before.findLastIndex((term) =>
+      ['comer', 'usar', 'colocar'].includes(term),
+    );
+    return {
+      source: cleanSpan(inverse[2]),
+      alternative: cleanSpan(before.slice(action + 1).join(' ')),
+    };
+  };
+  const currentExchange = exchange(human.currentMessage);
+  const priorExchange = [...inboundHistory]
+    .reverse()
+    .map(exchange)
+    .find(Boolean);
+  const roles = currentExchange ?? priorExchange;
+  const sourceSpan = roles?.source || null;
+  const alternativeSpan =
+    roles?.alternative && foodTokens(roles.alternative).length
+      ? roles.alternative
+      : null;
+  const foodDescriptor =
+    /^(?:cozid[oa]s?|grelhad[oa]s?|assad[oa]s?|peito|file|mexid[oa]s?|integral)$/u;
+  const foodMentioned = (text: string, food: string) => {
+    const terms = normalizeFoodTerm(food)
+      .split(' ')
+      .filter((term) => term.length >= 3 && !foodDescriptor.test(term));
+    return (
+      terms.length > 0 &&
+      terms.every((term) =>
+        matchesFoodTerm(text, term.endsWith('s') ? term.slice(0, -1) : term),
+      )
+    );
+  };
+  const sourceItems = sourceSpan
+    ? originalMeals
+        .flatMap((meal) => meal.items)
+        .filter((item) => foodMentioned(sourceSpan, item.name))
+    : [];
+  const sourceNames = [...new Set(sourceItems.map((item) => item.name))];
+  const source = sourceNames.length === 1 ? sourceNames[0] : null;
+  const sourceMeals = originalMeals.filter((meal) =>
+    meal.items.some((item) => item.name === source),
+  );
+  const sourceMealNames = [...new Set(sourceMeals.map((meal) => meal.name))];
+  const resolvedMeal =
+    targetMeal ?? (sourceMealNames.length === 1 ? sourceMealNames[0] : null);
+  const identity = (value: string) => foodTokens(value).join(' ');
+  const containsWholeMention = (mention: string, name: string) => {
+    const terms = foodTokens(mention);
+    const named = new Set(foodTokens(name));
+    return terms.length > 0 && terms.every((term) => named.has(term));
+  };
+  const alternativeIdentities = [
+    ...new Set(
+      [
+        ...meals.flatMap((meal) => meal.items.map((item) => item.name)),
+        ...(plan?.substitutions.map((swap) => swap.alternative) ?? []),
+      ]
+        .filter((name) => {
+          if (!alternativeSpan || !containsWholeMention(alternativeSpan, name))
+            return false;
+          const requested = new Set(foodTokens(alternativeSpan));
+          return foodTokens(name).every(
+            (term) => requested.has(term) || foodDescriptor.test(term),
+          );
+        })
+        .map(identity),
+    ),
+  ];
+  const exactAlternative = alternativeSpan ? identity(alternativeSpan) : null;
+  const unresolvedAlternative =
+    !!alternativeSpan &&
+    alternativeIdentities.length > 1 &&
+    !alternativeIdentities.includes(exactAlternative ?? '');
+  const completeSource =
+    !!source &&
+    !!sourceSpan &&
+    containsWholeMention(
+      foodTokens(sourceSpan)
+        .filter((term) => term !== 'peito' && term !== 'file')
+        .join(' '),
+      source,
+    );
+  const registered =
+    source &&
+    alternativeSpan &&
+    plan &&
+    resolvedMeal &&
+    completeSource &&
+    !unresolvedAlternative
+      ? plan.substitutions.filter(
+          (swap) =>
+            identity(source) === identity(swap.source) &&
+            (identity(swap.alternative) === exactAlternative ||
+              (alternativeIdentities.length === 1 &&
+                alternativeIdentities[0] === identity(swap.alternative))),
+        )
+      : [];
+  const substitutionEvidence: NutritionAdviceContext['substitutionEvidence'] =
+    request.intent === 'MEAL_SUBSTITUTION'
+      ? {
+          status:
+            !source ||
+            !alternativeSpan ||
+            !plan ||
+            !resolvedMeal ||
+            unresolvedAlternative
+              ? 'UNRESOLVED'
+              : registered.length
+                ? 'REGISTERED'
+                : 'NOT_REGISTERED',
+          meal: resolvedMeal,
+          source,
+          requestedAlternative: alternativeSpan
+            ? normalizeFoodTerm(alternativeSpan)
+            : null,
+          registered,
+          ...(unresolvedAlternative ? { unresolvedAlternative: true } : {}),
+        }
+      : null;
   return Object.freeze({
     request,
+    substitutionEvidence,
     immediateConstraints: request.constraints,
     safetyConstraints: Object.freeze([
       ...new Set([
@@ -244,13 +464,66 @@ export function nutritionAdviceContext(
   });
 }
 
+/** Public plan decisions are domain facts, never an authorization inferred from AI prose. */
+export function nutritionSubstitutionAnswer(
+  context: NutritionAdviceContext | null,
+): ConversationAnswerCandidate | null {
+  if (context?.request.intent !== 'MEAL_SUBSTITUTION') return null;
+  const evidence = context.substitutionEvidence;
+  const meal = evidence?.meal
+    ? (context.originalMeals.find((original) =>
+        matchesFoodTerm(original.name, evidence.meal ?? ''),
+      )?.name ?? evidence.meal)
+    : null;
+  const registered = evidence?.registered[0];
+  if (evidence?.status === 'REGISTERED' && registered) {
+    return {
+      disposition: 'ANSWER',
+      domain: 'NUTRITION',
+      answer: `${meal ? `Para ${meal}, o` : 'O'} plano registra a troca de ${registered.source} por ${registered.alternative}. Isso confirma o cadastro, não uma equivalência adicional de porções ou nutrientes.`,
+      followUpQuestion: null,
+      grounding: 'CURRENT_PLAN',
+      confidence: 'HIGH',
+    };
+  }
+  if (evidence?.status === 'NOT_REGISTERED') {
+    return {
+      disposition: 'ANSWER',
+      domain: 'NUTRITION',
+      answer: `Não há essa troca cadastrada${evidence.source ? ` para ${evidence.source}` : ''}${meal ? ` em ${meal}` : ''} no seu plano. Não posso confirmar essa substituição como parte da sua dieta. Uma sugestão geral fora do plano seria aproximada, sem porção equivalente confirmada.`,
+      followUpQuestion: null,
+      grounding: 'CURRENT_PLAN',
+      confidence: 'HIGH',
+    };
+  }
+  return {
+    disposition: 'CLARIFY',
+    domain: 'NUTRITION',
+    answer: null,
+    followUpQuestion:
+      !evidence?.source && !evidence?.requestedAlternative
+        ? `Quais alimentos você quer substituir${meal ? ` em ${meal}` : ''}: qual é o original e qual é a alternativa?`
+        : !evidence?.source
+          ? 'Qual é o alimento original dessa troca?'
+          : !evidence?.requestedAlternative
+            ? 'Qual alimento você quer usar como alternativa?'
+            : evidence?.unresolvedAlternative
+              ? `Qual é a preparação ou o nome completo de ${evidence.requestedAlternative} nessa troca?`
+              : !meal
+                ? 'Em qual refeição você quer conferir essa troca?'
+                : 'Não tenho registros suficientes para confirmar essa troca no plano. Você pode esclarecer a substituição que quer consultar?',
+    grounding: 'RECENT_CONTEXT',
+    confidence: 'LOW',
+  };
+}
+
 export function nutritionAdvicePayload(
   context: NutritionAdviceContext | null,
 ): ConversationAIValue {
   if (!context) return null;
   return Object.freeze({
     intent: context.request.intent,
-    meal: context.request.meal,
+    meal: context.substitutionEvidence?.meal ?? context.request.meal,
     immediateConstraints: context.immediateConstraints,
     safetyConstraints: context.safetyConstraints,
     excludedFoods: context.excludedFoods,
@@ -266,13 +539,27 @@ export function nutritionAdvicePayload(
       })),
     })),
     recentSuggestions: context.recentSuggestions,
+    substitutionEvidence: context.substitutionEvidence
+      ? {
+          ...context.substitutionEvidence,
+          registered: context.substitutionEvidence.registered.map((swap) => ({
+            source: swap.source,
+            alternative: swap.alternative,
+          })),
+        }
+      : null,
     policy: {
       readOnly: true,
-      currentPlanRole: 'CONTEXT_NOT_ANSWER',
+      currentPlanRole: context.substitutionEvidence
+        ? 'SUBSTITUTION_EVIDENCE'
+        : 'CONTEXT_NOT_ANSWER',
       preserveApproximateNutritionalFunction:
         context.request.intent === 'MEAL_SUBSTITUTION',
       instructions:
-        'Entregue uma ideia concreta nova, plausível e compatível com o objetivo, perfil, horário local, rotina, preferências e todas as alergias/restrições fornecidas. O plano orienta a estratégia; não copie a composição da refeição de originalMeals. Ingredientes isolados podem ser reutilizados em uma combinação diferente. Combine todas as immediateConstraints: QUICK significa pouco preparo, HIGH_PROTEIN significa incluir fonte compatível de proteína, LOW_COST significa acessível, PORTABLE significa fácil de transportar; LACTOSE/GLUTEN são exclusões obrigatórias. Não invente alergias nem preferências. Em MEAL_SUBSTITUTION, entenda a refeição original e preserve aproximadamente sua função nutricional, sem prometer equivalência exata de calorias/macros; apresente como alternativa para essa refeição, sem afirmar alteração do plano. Varie em relação às recentSuggestions quando houver alternativas compatíveis. Responda em um ou dois parágrafos curtos, com uma opção principal e no máximo uma alternativa útil, sem menu numerado ou preâmbulo genérico. Se faltar contexto essencial de segurança ou da refeição a substituir, faça apenas uma pergunta útil. Conhecimento geral não clínico é permitido; não é necessário que a sugestão esteja cadastrada no plano.',
+        (context.substitutionEvidence
+          ? 'Responda primeiro se o par perguntado está cadastrado no plano verdadeiro, mantendo a refeição e o alimento original. Não trate esta consulta como pedido de uma nova receita nem de alteração permanente. '
+          : 'Entregue uma ideia concreta nova, plausível e compatível com o objetivo, perfil, horário local, rotina e preferências. O plano orienta a estratégia; não copie a composição da refeição de originalMeals. Ingredientes isolados podem ser reutilizados em uma combinação diferente. ') +
+        'Combine todas as immediateConstraints: QUICK significa pouco preparo, HIGH_PROTEIN significa incluir fonte compatível de proteína, LOW_COST significa acessível, PORTABLE significa fácil de transportar; LACTOSE/GLUTEN são exclusões obrigatórias. Não invente alergias nem preferências. Em MEAL_SUBSTITUTION, entenda a refeição original e preserve aproximadamente sua função nutricional, sem prometer equivalência exata de calorias/macros; apresente como alternativa para essa refeição, sem afirmar alteração do plano. Nas consultas de troca, preserve os fatos do plano e do histórico; somente nas recomendações novas varie em relação às recentSuggestions quando houver alternativas compatíveis. Responda em um ou dois parágrafos curtos, com uma opção principal e no máximo uma alternativa útil, sem menu numerado ou preâmbulo genérico. Se faltar contexto essencial de segurança ou da refeição a substituir, faça apenas uma pergunta útil. Conhecimento geral não clínico é permitido. Para substituição, responda separadamente se a troca está cadastrada: use substitutionEvidence e os registros reais, nunca a presença da alternativa em outra refeição. Source é o alimento original e requestedAlternative é a alternativa perguntada, não os inverta. Preserve o almoço/horário e a resposta anterior, inclusive ausência de troca cadastrada, sem perguntar novamente por um alvo já informado. Se UNRESOLVED, esclareça apenas a informação essencial que falta. Se NOT_REGISTERED, não atribua a troca à dieta: qualquer sugestão deve ser explicitamente uma orientação aproximada fora do plano. Não invente porções da alternativa nem equivalência de calorias/macros. Uma porção do alimento original ou de outra refeição não comprova a porção da alternativa. Ser REGISTERED comprova somente o par descrito no registro; não comprova doses ausentes. Use a compreensão semântica do histórico e da mensagem, sem inferir fatos faltantes.',
     },
   });
 }
@@ -334,14 +621,90 @@ export function nutritionAdviceViolation(
   }
   if (context.excludedFoods.some((food) => matchesFoodTerm(text, food)))
     return 'NUTRITION_ADVICE_REJECTED_FOOD';
+  if (
+    context.request.intent === 'MEAL_SUBSTITUTION' &&
+    !context.substitutionEvidence
+  )
+    return 'NUTRITION_SUBSTITUTION_MISSING_EVIDENCE';
+  if (context.substitutionEvidence) {
+    const evidence = context.substitutionEvidence;
+    const deniesRegistration =
+      /\b(?:nao (?:esta|e) (?:previst\w*|cadastrad\w*)|nao (?:ha|existe|consta))\b/u.test(
+        text,
+      );
+    const asserted = text.replace(
+      /\bnao (?:esta|e) (?:previst\w*|cadastrad\w*)\b/gu,
+      '',
+    );
+    if (
+      evidence.status !== 'REGISTERED' &&
+      (/\b(?:esta|e) (?:previst\w*|cadastrad\w*)\b|\b(?:seu plano|minha dieta|sua dieta) (?:permite|autoriza|registra|preve)\b/u.test(
+        asserted,
+      ) ||
+        (candidate.disposition === 'ANSWER' &&
+          candidate.grounding === 'CURRENT_PLAN' &&
+          !(evidence.status === 'NOT_REGISTERED' && deniesRegistration)))
+    )
+      return 'NUTRITION_SUBSTITUTION_UNSUPPORTED_PLAN_CLAIM';
+    if (
+      candidate.disposition === 'ANSWER' &&
+      evidence.status !== 'REGISTERED' &&
+      !/\b(?:fora (?:do|de seu|da sua) plano|nao (?:esta|e) (?:previst\w*|cadastrad\w*)|nao (?:ha|existe|consta)|orientacao (?:geral|aproximada)|sugestao (?:geral|aproximada))\b/u.test(
+        text,
+      )
+    )
+      return 'NUTRITION_SUBSTITUTION_MISSING_GROUNDING';
+    if (
+      evidence.status !== 'REGISTERED' &&
+      /\b(?:pode|experimente|sugiro|recomendo)\b/u.test(text) &&
+      !/\b(?:fora (?:do|de seu|da sua) plano|orientacao (?:geral|aproximada)|sugestao (?:geral|aproximada))\b/u.test(
+        text,
+      )
+    )
+      return 'NUTRITION_SUBSTITUTION_MISSING_GROUNDING';
+    if (
+      /(?<!nao )\b(?:e|sao|tem|possuem|fornecem|oferecem)\s+(?:exatamente\s+)?(?:a\s+|o\s+)?(?:mesma\s+(?:proteina|quantidade\s+de\s+(?:proteina|calorias))|mesmas\s+calorias|equivalentes?\s+exat[ao]s?)\b/u.test(
+        text,
+      )
+    )
+      return 'NUTRITION_SUBSTITUTION_UNSUPPORTED_EQUIVALENCE';
+    const portions = [
+      ...(text.match(
+        /\b(?:\d+(?:[.,]\d+)?|um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez)\s*(?:g|kg|gramas?|unidades?|ovos?|colheres?|fatias?|kcal|calorias?)\b/gu,
+      ) ?? []),
+      ...(text.match(/(?<![\d:])\b\d+(?:[.,]\d+)?\b(?![:\d])/gu) ?? []),
+    ];
+    if (
+      portions.some(
+        (portion) =>
+          !evidence.registered.some((swap) =>
+            matchesFoodTerm(swap.alternative, portion),
+          ),
+      )
+    )
+      return 'NUTRITION_SUBSTITUTION_UNSUPPORTED_PORTION';
+    const factual = nutritionSubstitutionAnswer(context);
+    if (
+      factual &&
+      (candidate.disposition !== factual.disposition ||
+        candidate.domain !== factual.domain ||
+        candidate.grounding !== factual.grounding ||
+        candidate.answer !== factual.answer ||
+        candidate.followUpQuestion !== factual.followUpQuestion)
+    )
+      return 'NUTRITION_SUBSTITUTION_DOMAIN_DECISION_REQUIRED';
+  }
   if (candidate.disposition !== 'ANSWER') return null;
   if (
+    !context.substitutionEvidence &&
     context.previousAdvice &&
     candidate.answer &&
     materiallyRepeatsNutritionAdvice(context.previousAdvice, candidate.answer)
   )
     return 'NUTRITION_ADVICE_REPEATS_PREVIOUS_SUGGESTION';
-  for (const meal of context.originalMeals) {
+  for (const meal of context.substitutionEvidence
+    ? []
+    : context.originalMeals) {
     if (meal.items.length < 2) continue;
     const copied = meal.items.every((item) => {
       const terms = normalizeFoodTerm(item.name)

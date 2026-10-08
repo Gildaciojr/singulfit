@@ -1,3 +1,4 @@
+import { matchesFoodTerm } from './nutrition-advice.policy';
 import { Injectable } from '@nestjs/common';
 import { isNutritionAdvice } from '../understanding/nutrition-request.policy';
 import type { ConversationExecutionRoute } from '../contracts/conversation-execution-route.contract';
@@ -25,7 +26,13 @@ export class ConversationNutritionDeterministicAnswerService {
     readonly current: ConversationCurrentNutritionContext;
   }): DeterministicNutritionAnswer | null {
     const request = this.normalize(input.request);
-    if (isNutritionAdvice(request)) return null;
+    // Substitution questions require source/alternative roles and conversation
+    // context. A food appearing anywhere in the plan cannot establish a swap.
+    if (
+      isNutritionAdvice(request) ||
+      /\b(?:tro(?:c|qu)\w*|substitu\w*)\b/u.test(request)
+    )
+      return null;
     // Consumption and expenditure belong to the daily query service, never targets.
     if (dailyQuery(request) || isWeeklyFollowUp(request)) return null;
     if (!this.nutritionRequest(input.route, request)) return null;
@@ -47,34 +54,11 @@ export class ConversationNutritionDeterministicAnswerService {
     }
     if (this.planMutation(request)) return null;
     const content =
-      this.substitution(request, plan) ??
       this.targets(request, plan) ??
-      this.meal(request, plan) ??
       this.item(request, plan) ??
+      this.meal(request, plan) ??
       (planRequest ? this.presenter.present(plan) : null);
     return content ? this.result(content) : null;
-  }
-
-  private substitution(
-    request: string,
-    plan: PublicNutritionResponse,
-  ): string | null {
-    if (!/(?:trocar|troque|substitu|nao tenho|sem )/u.test(request))
-      return null;
-    const item = this.referencedItem(request, plan);
-    if (!item) return 'Qual alimento do seu plano você quer substituir?';
-    const replacement = plan.substitutions.find(
-      (candidate) =>
-        this.sameFood(candidate.source, item.name) ||
-        this.sameFood(candidate.alternative, item.name),
-    );
-    if (!replacement) {
-      return `Encontrei *${item.name}* no seu plano, mas não há uma troca cadastrada para ele. Em qual refeição você quer fazer a substituição?`;
-    }
-    const alternative = this.sameFood(replacement.source, item.name)
-      ? replacement.alternative
-      : replacement.source;
-    return `No seu plano, *${item.name}* pode ser trocado por *${alternative}*. Siga a porção indicada na refeição.`;
   }
 
   private targets(
@@ -134,14 +118,21 @@ export class ConversationNutritionDeterministicAnswerService {
   private referencedItem(request: string, plan: PublicNutritionResponse) {
     return (
       plan.days
-        .flatMap((day) => day.meals.flatMap((meal) => meal.items))
+        .flatMap((day) => day.meals)
+        .filter((meal) => {
+          const requestedMeal = request.match(
+            /\b(?:almoco|jantar|cafe da manha|lanche|ceia)\b/u,
+          )?.[0];
+          return !requestedMeal || matchesFoodTerm(meal.name, requestedMeal);
+        })
+        .flatMap((meal) => meal.items)
         .find((item) => {
           const name = this.normalize(item.name);
-          if (request.includes(name)) return true;
+          if (matchesFoodTerm(request, name)) return true;
           return name
             .split(' ')
             .filter((token) => token.length >= 4 && !this.genericToken(token))
-            .some((token) => request.includes(token));
+            .some((token) => matchesFoodTerm(request, token));
         }) ?? null
     );
   }
@@ -204,12 +195,6 @@ export class ConversationNutritionDeterministicAnswerService {
     if (name.includes('ceia')) return ['ceia'];
     if (name.includes('lanche')) return ['lanche'];
     return Object.freeze([]);
-  }
-
-  private sameFood(left: string, right: string): boolean {
-    const a = this.normalize(left);
-    const b = this.normalize(right);
-    return a === b || a.includes(b) || b.includes(a);
   }
 
   private macro(values: string[], label: string, value?: number): void {

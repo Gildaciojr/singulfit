@@ -5,6 +5,10 @@ import { AIService } from '../../ai/ai.service';
 import { ConversationPublicAnswerBoundaryService } from '../runtime/conversation-public-answer-boundary.service';
 import { ConversationQAExecutorService } from '../runtime/conversation-qa-executor.service';
 import { ConversationNutritionDeterministicAnswerService } from '../runtime/conversation-nutrition-deterministic-answer.service';
+import {
+  nutritionAdviceContext,
+  nutritionAdviceViolation,
+} from '../runtime/nutrition-advice.policy';
 import type { PersonalizedCoachContextService } from '../runtime/personalized-coach-context.service';
 import type { CoachConversationHumanContext } from '../../context/coach-conversation-human-context.contract';
 import type { PublicNutritionResponse } from '../../diet/v2/presentation/public-nutrition-response.contract';
@@ -15,6 +19,891 @@ import {
 } from '../runtime/coach-conversational-qa.prompt.definition';
 
 describe('ConversationQAExecutorService', () => {
+  const substitutionQuestion =
+    'Nesse almoço das 12h que você acabou de me mostrar, posso substituir o peito de frango por ovos? Essa substituição está prevista na minha dieta atual? Não quero alterar meu plano, apenas saber.';
+  const informalSubstitution =
+    'uai no almoço kkk, posso trocar o frango por ovo ou não?';
+  function substitutionPlan(registered = false): PublicNutritionResponse {
+    return {
+      ...publicPlan,
+      days: [
+        {
+          meals: [
+            {
+              name: 'Café da manhã',
+              time: '08:00',
+              items: [{ name: 'Ovos mexidos', quantity: '2 unidades' }],
+            },
+            {
+              name: 'Almoço',
+              time: '12:00',
+              items: [
+                { name: 'Arroz', quantity: '4 colheres' },
+                { name: 'Feijão', quantity: '1 concha' },
+                { name: 'Filé de frango', quantity: '120 g' },
+                { name: 'Salada', quantity: '1 prato' },
+              ],
+            },
+          ],
+        },
+      ],
+      substitutions: registered
+        ? [{ source: 'Filé de frango', alternative: 'Ovos mexidos' }]
+        : [],
+    };
+  }
+  function substitutionAnswer(
+    answer: string,
+    grounding: 'CURRENT_PLAN' | 'MIXED' = 'MIXED',
+  ) {
+    return {
+      disposition: 'ANSWER',
+      domain: 'NUTRITION',
+      answer,
+      followUpQuestion: null,
+      grounding,
+      confidence: 'HIGH',
+    };
+  }
+  it.each([
+    ['ANSWER', AIJobStatus.PENDING],
+    ['CLARIFY', AIJobStatus.PENDING],
+    ['ANSWER', AIJobStatus.COMPLETED],
+    ['CLARIFY', AIJobStatus.COMPLETED],
+    ['ANSWER', AIJobStatus.PROCESSING],
+    ['CLARIFY', AIJobStatus.PROCESSING],
+  ])(
+    'publishes domain facts instead of contradictory AI approval: %s / %s',
+    async (disposition, status) => {
+      const contradictory =
+        'Não está cadastrada no seu plano, mas dá sim pra trocar o frango por ovos.';
+      const candidate = {
+        ...substitutionAnswer(contradictory),
+        disposition,
+        followUpQuestion: disposition === 'CLARIFY' ? 'Quer trocar?' : null,
+      };
+      expect(
+        nutritionAdviceViolation(
+          nutritionAdviceContext(
+            human(informalSubstitution),
+            null,
+            substitutionPlan(),
+            null,
+            new Date('2026-10-08T12:00:00.000Z'),
+          ),
+          {
+            disposition: disposition === 'CLARIFY' ? 'CLARIFY' : 'ANSWER',
+            domain: 'NUTRITION',
+            answer: contradictory,
+            followUpQuestion: candidate.followUpQuestion,
+            grounding: 'MIXED',
+            confidence: 'HIGH',
+          },
+        ),
+      ).toBe('NUTRITION_SUBSTITUTION_DOMAIN_DECISION_REQUIRED');
+      const subject = createSubject(candidate, status, true);
+      subject.currentNutrition.read.mockResolvedValue({
+        status: 'AVAILABLE',
+        plan: substitutionPlan(),
+      });
+      const result = await subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'contradictory-substitution',
+        route: route('NUTRITION_GUIDANCE'),
+        humanContext: human(informalSubstitution),
+      });
+      expect(result).toMatchObject({
+        status: 'COMPLETED',
+        observability: { answerSource: 'DETERMINISTIC_FALLBACK' },
+      });
+      if (result.status !== 'COMPLETED')
+        throw new Error('Expected factual answer');
+      expect(result.content).toContain(
+        'Não há essa troca cadastrada para Filé de frango em Almoço',
+      );
+      expect(result.content).toContain(
+        'Não posso confirmar essa substituição como parte da sua dieta',
+      );
+      expect(result.content).not.toContain('dá sim');
+      expect(result.content).not.toContain('Quer trocar?');
+      if (status === AIJobStatus.PENDING) {
+        expect(subject.ai.completeJobInTransaction).toHaveBeenCalledWith(
+          expect.objectContaining({}),
+          expect.objectContaining({
+            result: expect.objectContaining({ answer: result.content }),
+          }),
+        );
+      }
+    },
+  );
+  it.each(['ANSWER', 'CLARIFY'])(
+    'never confirms an unresolved swap from AI prose: %s',
+    async (disposition) => {
+      const subject = createSubject(
+        {
+          ...substitutionAnswer(
+            'Não está cadastrada no seu plano, mas dá sim pra trocar o frango por ovos.',
+          ),
+          disposition,
+          followUpQuestion: null,
+        },
+        AIJobStatus.PENDING,
+        true,
+      );
+      subject.currentNutrition.read.mockResolvedValue({
+        status: 'AVAILABLE',
+        plan: substitutionPlan(),
+      });
+      const result = await subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'unresolved-contradiction',
+        route: route('NUTRITION_GUIDANCE'),
+        humanContext: human('No almoço posso substituir isso?'),
+      });
+      expect(result).toMatchObject({
+        status: 'COMPLETED',
+        observability: {
+          disposition: 'CLARIFY',
+          answerSource: 'DETERMINISTIC_FALLBACK',
+        },
+      });
+      if (result.status !== 'COMPLETED')
+        throw new Error('Expected clarification');
+      expect(result.content).toContain(
+        'qual é o original e qual é a alternativa',
+      );
+      expect(result.content).not.toContain('dá sim');
+    },
+  );
+  it.each([
+    ['No almoço posso trocar o frango por ovos?', 'REGISTERED'],
+    ['Posso comer ovo no lugar do frango no almoço?', 'REGISTERED'],
+    ['Posso usar OVOS em vez do FRANGO no ALMOÇO?', 'REGISTERED'],
+    ['No almoço posso trocar o frango por ovos e bacon?', 'NOT_REGISTERED'],
+    ['Posso comer ovo e bacon no lugar do frango no almoço?', 'NOT_REGISTERED'],
+    ['No almoço posso trocar o frango e bacon por ovos?', 'NOT_REGISTERED'],
+    ['Posso comer ovos fritos no lugar do frango no almoço?', 'NOT_REGISTERED'],
+  ])(
+    'matches the complete requested pair and publishes its actual status: %s',
+    async (message, status) => {
+      const subject = createSubject(
+        substitutionAnswer('Pode sim, essa troca está cadastrada.'),
+        AIJobStatus.PENDING,
+        true,
+      );
+      subject.currentNutrition.read.mockResolvedValue({
+        status: 'AVAILABLE',
+        plan: substitutionPlan(true),
+      });
+      const result = await subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'complete-pair',
+        route: route('NUTRITION_GUIDANCE'),
+        humanContext: human(message),
+      });
+      expect(result).toMatchObject({ status: 'COMPLETED' });
+      if (result.status !== 'COMPLETED')
+        throw new Error('Expected domain decision');
+      if (status === 'REGISTERED') {
+        expect(result.content).toContain(
+          'o plano registra a troca de Filé de frango por Ovos mexidos',
+        );
+        expect(result.content).not.toContain('?');
+      } else {
+        expect(result.content).toContain('Não há essa troca cadastrada');
+        expect(result.content).not.toContain('o plano registra a troca');
+      }
+      const payload = JSON.parse(
+        subject.ai.runTextJob.mock.calls[0][1].input as string,
+      ) as {
+        nutritionGuidance: {
+          substitutionEvidence: { status: string; registered: unknown[] };
+        };
+      };
+      expect(payload.nutritionGuidance.substitutionEvidence.status).toBe(
+        status,
+      );
+      if (status === 'NOT_REGISTERED')
+        expect(
+          payload.nutritionGuidance.substitutionEvidence.registered,
+        ).toEqual([]);
+    },
+  );
+  it.each([
+    [
+      'Posso comer no lugar do frango no almoço?',
+      'Qual alimento você quer usar como alternativa?',
+    ],
+    [
+      'Posso comer ovo no lugar de algo no almoço?',
+      'Qual é o alimento original dessa troca?',
+    ],
+  ])('clarifies only the missing role: %s', async (message, question) => {
+    const subject = createSubject(
+      substitutionAnswer('Essa troca está cadastrada.'),
+      AIJobStatus.PENDING,
+      true,
+    );
+    subject.currentNutrition.read.mockResolvedValue({
+      status: 'AVAILABLE',
+      plan: substitutionPlan(true),
+    });
+    await expect(
+      subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'missing-role',
+        route: route('NUTRITION_GUIDANCE'),
+        humanContext: human(message),
+      }),
+    ).resolves.toMatchObject({
+      status: 'COMPLETED',
+      content: question,
+      observability: { disposition: 'CLARIFY' },
+    });
+  });
+  it.each([
+    ['Posso comer ovo no lugar do frango no almoço?', 'NOT_REGISTERED'],
+    ['Posso comer ovo e bacon no lugar do frango no almoço?', 'REGISTERED'],
+  ])(
+    'requires the entire compound alternative actually registered: %s',
+    async (message, status) => {
+      const plan = {
+        ...substitutionPlan(),
+        substitutions: [
+          { source: 'Filé de frango', alternative: 'Ovos mexidos e bacon' },
+        ],
+      };
+      const subject = createSubject(
+        substitutionAnswer('Pode sim.'),
+        AIJobStatus.PENDING,
+        true,
+      );
+      subject.currentNutrition.read.mockResolvedValue({
+        status: 'AVAILABLE',
+        plan,
+      });
+      const result = await subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'compound-record',
+        route: route('NUTRITION_GUIDANCE'),
+        humanContext: human(message),
+      });
+      expect(result).toMatchObject({ status: 'COMPLETED' });
+      if (result.status !== 'COMPLETED')
+        throw new Error('Expected domain decision');
+      expect(result.content).toContain(
+        status === 'REGISTERED'
+          ? 'o plano registra a troca de Filé de frango por Ovos mexidos e bacon'
+          : 'Não há essa troca cadastrada',
+      );
+    },
+  );
+  it('asks only for the meal when the same original food belongs to multiple meals', async () => {
+    const plan = substitutionPlan(true);
+    const multipleMeals = {
+      ...plan,
+      days: [
+        {
+          meals: [
+            ...plan.days[0].meals,
+            {
+              name: 'Jantar',
+              items: [{ name: 'Filé de frango', quantity: '120 g' }],
+            },
+          ],
+        },
+      ],
+    };
+    const subject = createSubject(
+      substitutionAnswer('Pode sim.'),
+      AIJobStatus.PENDING,
+      true,
+    );
+    subject.currentNutrition.read.mockResolvedValue({
+      status: 'AVAILABLE',
+      plan: multipleMeals,
+    });
+    await expect(
+      subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'missing-meal',
+        route: route('NUTRITION_GUIDANCE'),
+        humanContext: human('Posso comer ovo no lugar do frango?'),
+      }),
+    ).resolves.toMatchObject({
+      status: 'COMPLETED',
+      content: 'Em qual refeição você quer conferir essa troca?',
+    });
+  });
+  it('preserves the inverse relation through an elliptical follow-up', async () => {
+    const subject = createSubject(
+      substitutionAnswer('Pode sim.'),
+      AIJobStatus.PENDING,
+      true,
+    );
+    subject.currentNutrition.read.mockResolvedValue({
+      status: 'AVAILABLE',
+      plan: substitutionPlan(true),
+    });
+    const result = await subject.service.execute({
+      userId: 'user-id',
+      conversationId: 'conversation-id',
+      messageId: 'inverse-follow-up',
+      route: route('NUTRITION_GUIDANCE'),
+      humanContext: human('E essa troca?', [
+        {
+          direction: 'USER',
+          text: 'Posso comer ovo no lugar do frango no almoço?',
+        },
+        {
+          direction: 'COACH',
+          text: 'A troca de frango por ovos está cadastrada para o almoço.',
+        },
+      ]),
+    });
+    expect(result).toMatchObject({
+      status: 'COMPLETED',
+      content: expect.stringContaining(
+        'o plano registra a troca de Filé de frango por Ovos mexidos',
+      ),
+    });
+  });
+  it('does not infer a preparation alias when the actual plan contains distinct egg identities', async () => {
+    const plan = substitutionPlan(true);
+    const ambiguous = {
+      ...plan,
+      days: [
+        {
+          meals: [
+            ...plan.days[0].meals,
+            {
+              name: 'Jantar',
+              items: [{ name: 'Ovos cozidos', quantity: '2 unidades' }],
+            },
+          ],
+        },
+      ],
+    };
+    const subject = createSubject(
+      substitutionAnswer('Essa troca está cadastrada.'),
+      AIJobStatus.PENDING,
+      true,
+    );
+    subject.currentNutrition.read.mockResolvedValue({
+      status: 'AVAILABLE',
+      plan: ambiguous,
+    });
+    const result = await subject.service.execute({
+      userId: 'user-id',
+      conversationId: 'conversation-id',
+      messageId: 'ambiguous-name',
+      route: route('NUTRITION_GUIDANCE'),
+      humanContext: human('Posso comer ovo no lugar do frango no almoço?'),
+    });
+    expect(result).toMatchObject({
+      status: 'COMPLETED',
+      observability: { disposition: 'CLARIFY' },
+    });
+    if (result.status !== 'COMPLETED')
+      throw new Error('Expected clarification');
+    expect(result.content).toContain(
+      'Qual é a preparação ou o nome completo de ovo',
+    );
+    expect(result.content).not.toContain('qual é o original');
+  });
+  it('keeps the full informal sequence grounded in lunch, without turning an absent swap into a portion', async () => {
+    const first = substitutionAnswer(
+      'Essa troca não está cadastrada na sua dieta atual para o almoço.',
+      'CURRENT_PLAN',
+    );
+    const second = substitutionAnswer(
+      'A troca continua fora do plano. Como orientação aproximada, ovos podem ser uma alternativa, mas não tenho uma porção equivalente registrada.',
+    );
+    const subject = createSubject(first, AIJobStatus.PENDING, true);
+    subject.currentNutrition.read.mockResolvedValue({
+      status: 'AVAILABLE',
+      plan: substitutionPlan(),
+    });
+    subject.ai.runTextJob
+      .mockResolvedValueOnce({
+        outputText: JSON.stringify(first),
+        model: 'controlled',
+        promptTokens: 20,
+        completionTokens: 10,
+        totalTokens: 30,
+        responseId: 'first',
+      })
+      .mockResolvedValueOnce({
+        outputText: JSON.stringify(second),
+        model: 'controlled',
+        promptTokens: 20,
+        completionTokens: 10,
+        totalTokens: 30,
+        responseId: 'second',
+      });
+    const request = {
+      userId: 'user-id',
+      conversationId: 'conversation-id',
+      messageId: 'first',
+      route: route('NUTRITION_GUIDANCE'),
+    };
+    const lookup = await subject.service.execute({
+      ...request,
+      humanContext: human('Qual meu almoço?'),
+    });
+    expect(lookup).toMatchObject({
+      status: 'COMPLETED',
+      observability: { answerSource: 'DETERMINISTIC_FALLBACK' },
+    });
+    expect(subject.ai.createJob).not.toHaveBeenCalled();
+    const history: NonNullable<
+      CoachConversationHumanContext['recentConversation']
+    > = [
+      { direction: 'USER', text: 'Qual meu almoço?' },
+      {
+        direction: 'COACH',
+        text: lookup.status === 'COMPLETED' ? lookup.content : '',
+      },
+    ];
+    const firstResult = await subject.service.execute({
+      ...request,
+      humanContext: human(substitutionQuestion, history),
+    });
+    expect(firstResult).toMatchObject({
+      status: 'COMPLETED',
+      observability: { answerSource: 'DETERMINISTIC_FALLBACK' },
+    });
+    if (firstResult.status !== 'COMPLETED')
+      throw new Error('Expected domain facts');
+    expect(firstResult.content).toContain(
+      'Não há essa troca cadastrada para Filé de frango em Almoço',
+    );
+    const publicFirst = firstResult.content;
+    const subsequent: CoachConversationHumanContext = {
+      ...human(informalSubstitution, [
+        ...history,
+        { direction: 'USER', text: substitutionQuestion },
+        { direction: 'COACH', text: publicFirst },
+      ]),
+      currentReadOnlyReferent: {
+        source: 'DELIVERED_QA',
+        sourceMessageId: request.messageId,
+        domain: 'NUTRITION',
+        nutrition: null,
+        previousAnswer: publicFirst,
+        followUpQuestion: null,
+        deliveredAt: '2026-10-08T12:00:00.000Z',
+      },
+    };
+    await expect(
+      subject.service.execute({
+        ...request,
+        messageId: 'second',
+        humanContext: subsequent,
+        previousAnswer: publicFirst,
+      }),
+    ).resolves.toMatchObject({
+      status: 'COMPLETED',
+      content: publicFirst,
+      observability: { answerSource: 'DETERMINISTIC_FALLBACK' },
+    });
+    expect(subject.ai.runTextJob).toHaveBeenCalledTimes(2);
+    const payload = JSON.parse(
+      subject.ai.runTextJob.mock.calls[1][1].input as string,
+    ) as {
+      nutritionGuidance: {
+        substitutionEvidence: { status: string; source: string; meal: string };
+        recentSuggestions: string[];
+      };
+    };
+    expect(payload.nutritionGuidance.substitutionEvidence).toMatchObject({
+      status: 'NOT_REGISTERED',
+      source: 'Filé de frango',
+      meal: 'almoco',
+    });
+    expect(payload.nutritionGuidance.recentSuggestions).toContain(publicFirst);
+    subject.ai.createJob.mockResolvedValueOnce({
+      id: 'job-id',
+      userId: 'user-id',
+      status: AIJobStatus.COMPLETED,
+      result: second,
+      promptVersion: { prompt: 'Existing QA instructions' },
+    });
+    await expect(
+      subject.service.execute({
+        ...request,
+        messageId: 'second',
+        humanContext: subsequent,
+        previousAnswer: publicFirst,
+      }),
+    ).resolves.toMatchObject({
+      status: 'COMPLETED',
+      observability: { answerSource: 'DETERMINISTIC_FALLBACK' },
+    });
+    expect(subject.ai.runTextJob).toHaveBeenCalledTimes(2);
+    expect(subject.ai.createJob).toHaveBeenCalledWith(
+      expect.objectContaining({ type: AIJobType.TEXT }),
+    );
+    expect(subject.ai.completeJobInTransaction).toHaveBeenCalledTimes(2);
+  });
+  it('answers a registered pair from the real substitution records without inventing quantities', async () => {
+    const answer =
+      'Essa troca está cadastrada no seu plano: filé de frango por ovos mexidos. Não há uma porção da alternativa registrada.';
+    const subject = createSubject(
+      substitutionAnswer(answer, 'CURRENT_PLAN'),
+      AIJobStatus.PENDING,
+      true,
+    );
+    subject.currentNutrition.read.mockResolvedValue({
+      status: 'AVAILABLE',
+      plan: substitutionPlan(true),
+    });
+    await expect(
+      subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+        route: route('NUTRITION_GUIDANCE'),
+        humanContext: human(substitutionQuestion),
+      }),
+    ).resolves.toMatchObject({
+      status: 'COMPLETED',
+      content: expect.stringContaining(
+        'o plano registra a troca de Filé de frango por Ovos mexidos',
+      ),
+    });
+  });
+  it.each([
+    [
+      'Pode sim, use 3 ovos no lugar do frango.',
+      'NUTRITION_SUBSTITUTION_MISSING_GROUNDING',
+    ],
+    [
+      'Como orientação aproximada fora do plano, use 3 ovos no lugar do frango.',
+      'NUTRITION_SUBSTITUTION_UNSUPPORTED_PORTION',
+    ],
+    [
+      'Como orientação aproximada fora do plano, use três ovos.',
+      'NUTRITION_SUBSTITUTION_UNSUPPORTED_PORTION',
+    ],
+    [
+      'Como orientação aproximada fora do plano, ovos têm exatamente a mesma proteína do frango.',
+      'NUTRITION_SUBSTITUTION_UNSUPPORTED_EQUIVALENCE',
+    ],
+    [
+      'Essa troca está prevista na sua dieta.',
+      'NUTRITION_SUBSTITUTION_UNSUPPORTED_PLAN_CLAIM',
+    ],
+  ])(
+    'discards unsupported prose and publishes domain facts: %s',
+    async (answer, reason) => {
+      const subject = createSubject(
+        substitutionAnswer(answer),
+        AIJobStatus.PENDING,
+        true,
+      );
+      subject.currentNutrition.read.mockResolvedValue({
+        status: 'AVAILABLE',
+        plan: substitutionPlan(),
+      });
+      expect(
+        nutritionAdviceViolation(
+          nutritionAdviceContext(
+            human(informalSubstitution),
+            null,
+            substitutionPlan(),
+            null,
+            new Date('2026-10-08T12:00:00.000Z'),
+          ),
+          {
+            disposition: 'ANSWER',
+            domain: 'NUTRITION',
+            answer,
+            followUpQuestion: null,
+            grounding: 'MIXED',
+            confidence: 'HIGH',
+          },
+        ),
+      ).toBe(reason);
+      const result = await subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+        route: route('NUTRITION_GUIDANCE'),
+        humanContext: human(informalSubstitution),
+      });
+      expect(result).toMatchObject({ status: 'COMPLETED' });
+      if (result.status !== 'COMPLETED')
+        throw new Error('Expected domain facts');
+      expect(result.content).toContain('Não há essa troca cadastrada');
+      expect(result.content).not.toContain(answer);
+      expect(subject.ai.completeJobInTransaction).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each([
+    [
+      'No almoço, posso comer ovos no lugar de frango?',
+      'ANSWER',
+      'NOT_REGISTERED',
+    ],
+    [
+      'No almoço, posso comer ovos no lugar de frango?',
+      'CLARIFY',
+      'NOT_REGISTERED',
+    ],
+    ['No almoço, posso substituir isso?', 'ANSWER', 'UNRESOLVED'],
+    ['No almoço, posso substituir isso?', 'CLARIFY', 'UNRESOLVED'],
+    ['No almoço, posso trocar o frango?', 'ANSWER', 'UNRESOLVED'],
+  ])(
+    'blocks invented portions without lexical roles: %s / %s',
+    async (message, disposition, evidenceStatus) => {
+      const subject = createSubject(
+        {
+          ...substitutionAnswer(
+            'Como orientação aproximada fora do plano, use 3 ovos.',
+          ),
+          disposition,
+          followUpQuestion: disposition === 'CLARIFY' ? 'Qual alimento?' : null,
+        },
+        AIJobStatus.PENDING,
+        true,
+      );
+      subject.currentNutrition.read.mockResolvedValue({
+        status: 'AVAILABLE',
+        plan: substitutionPlan(),
+      });
+      const result = await subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'unresolved-portion',
+        route: route('NUTRITION_GUIDANCE'),
+        humanContext: human(message),
+      });
+      expect(result).toMatchObject({
+        status: 'COMPLETED',
+        observability: {
+          disposition: evidenceStatus === 'UNRESOLVED' ? 'CLARIFY' : 'ANSWER',
+        },
+      });
+      if (result.status !== 'COMPLETED')
+        throw new Error('Expected clarification');
+      expect(result.content).not.toContain('3 ovos');
+      expect(result.content).not.toContain('use');
+      const payload = JSON.parse(
+        subject.ai.runTextJob.mock.calls[0][1].input as string,
+      ) as {
+        nutritionGuidance: {
+          substitutionEvidence: { status: string; registered: unknown[] };
+        };
+      };
+      expect(payload.nutritionGuidance.substitutionEvidence).toMatchObject({
+        status: evidenceStatus,
+        registered: [],
+      });
+      expect(subject.ai.completeJobInTransaction).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each([
+    ['Qual alimento você quer substituir?', 'CLARIFY'],
+    [
+      'Como orientação aproximada fora do plano, ovos podem ser uma alternativa, sem equivalência confirmada.',
+      'ANSWER',
+    ],
+  ])(
+    'preserves safe public decisions for natural swap wording: %s',
+    async (answer, disposition) => {
+      const subject = createSubject(
+        {
+          ...substitutionAnswer(answer),
+          disposition,
+          followUpQuestion: disposition === 'CLARIFY' ? 'Qual alimento?' : null,
+        },
+        AIJobStatus.PENDING,
+        true,
+      );
+      subject.currentNutrition.read.mockResolvedValue({
+        status: 'AVAILABLE',
+        plan: substitutionPlan(),
+      });
+      await expect(
+        subject.service.execute({
+          userId: 'user-id',
+          conversationId: 'conversation-id',
+          messageId: 'unresolved-safe',
+          route: route('NUTRITION_GUIDANCE'),
+          humanContext: human('No almoço posso comer ovos no lugar de frango?'),
+        }),
+      ).resolves.toMatchObject({ status: 'COMPLETED' });
+    },
+  );
+  it.each([
+    'Essa troca está cadastrada na sua dieta.',
+    'Como orientação aproximada, ovos fornecem exatamente a mesma proteína.',
+    'Como orientação aproximada fora do plano, use 3 ovos.',
+    'Como orientação aproximada fora do plano, prepare 3 omeletes.',
+  ])('checks unsafe claims in clarification text: %s', async (answer) => {
+    const subject = createSubject(
+      {
+        ...substitutionAnswer(answer),
+        disposition: 'CLARIFY',
+        followUpQuestion: 'Qual alimento?',
+      },
+      AIJobStatus.PENDING,
+      true,
+    );
+    subject.currentNutrition.read.mockResolvedValue({
+      status: 'AVAILABLE',
+      plan: substitutionPlan(true),
+    });
+    const result = await subject.service.execute({
+      userId: 'user-id',
+      conversationId: 'conversation-id',
+      messageId: 'unresolved-claim',
+      route: route('NUTRITION_GUIDANCE'),
+      humanContext: human('No almoço posso substituir isso?'),
+    });
+    expect(result).toMatchObject({
+      status: 'COMPLETED',
+      observability: { disposition: 'CLARIFY' },
+    });
+    if (result.status !== 'COMPLETED')
+      throw new Error('Expected clarification');
+    expect(result.content).not.toContain(answer);
+    expect(subject.ai.completeJobInTransaction).toHaveBeenCalledTimes(1);
+  });
+  it('resolves an elliptical swap from the owned conversational history, preserving lunch and the earlier denial', async () => {
+    const previous = 'Essa troca não está cadastrada no plano.';
+    const subject = createSubject(
+      substitutionAnswer(
+        'Não está cadastrada. Como orientação aproximada fora do plano, ovos podem ser uma alternativa sem porção equivalente confirmada.',
+      ),
+      AIJobStatus.PENDING,
+      true,
+    );
+    subject.currentNutrition.read.mockResolvedValue({
+      status: 'AVAILABLE',
+      plan: substitutionPlan(),
+    });
+    await expect(
+      subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'ellipse',
+        route: route('NUTRITION_GUIDANCE'),
+        humanContext: human('E essa troca então?', [
+          { direction: 'USER', text: substitutionQuestion },
+          { direction: 'COACH', text: previous },
+        ]),
+      }),
+    ).resolves.toMatchObject({ status: 'COMPLETED' });
+    const payload = JSON.parse(
+      subject.ai.runTextJob.mock.calls[0][1].input as string,
+    ) as {
+      nutritionGuidance: {
+        meal: string;
+        substitutionEvidence: { status: string; source: string };
+      };
+    };
+    expect(payload.nutritionGuidance).toMatchObject({
+      meal: 'almoco',
+      substitutionEvidence: {
+        status: 'NOT_REGISTERED',
+        source: 'Filé de frango',
+      },
+    });
+  });
+  it('keeps unknown source evidence unresolved instead of claiming plan authorization', async () => {
+    const subject = createSubject(
+      substitutionAnswer(
+        'Essa troca está prevista na sua dieta.',
+        'CURRENT_PLAN',
+      ),
+      AIJobStatus.PENDING,
+      true,
+    );
+    subject.currentNutrition.read.mockResolvedValue({
+      status: 'AVAILABLE',
+      plan: substitutionPlan(),
+    });
+    await expect(
+      subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'unknown',
+        route: route('NUTRITION_GUIDANCE'),
+        humanContext: human('No almoço posso trocar atum por ovos?'),
+      }),
+    ).resolves.toMatchObject({
+      status: 'COMPLETED',
+      content: 'Qual é o alimento original dessa troca?',
+      observability: { disposition: 'CLARIFY' },
+    });
+  });
+  it('does not waive egg allergy for a registered substitution', async () => {
+    const subject = createSubject(
+      substitutionAnswer('Essa troca está cadastrada: frango por ovos.'),
+      AIJobStatus.PENDING,
+      true,
+    );
+    subject.currentNutrition.read.mockResolvedValue({
+      status: 'AVAILABLE',
+      plan: substitutionPlan(true),
+    });
+    const context = human(substitutionQuestion);
+    await expect(
+      subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'allergy',
+        route: route('NUTRITION_GUIDANCE'),
+        humanContext: {
+          ...context,
+          restrictions: { value: ['alergia a ovo'], sources: [] },
+        },
+      }),
+    ).resolves.toMatchObject({
+      status: 'FAILED',
+      reason: 'NUTRITION_ADVICE_UNSAFE_FOOD',
+    });
+  });
+  it('does not reuse another user job or substitution response', async () => {
+    const subject = createSubject(
+      substitutionAnswer('Essa troca está cadastrada.'),
+      AIJobStatus.COMPLETED,
+      true,
+    );
+    subject.ai.createJob.mockResolvedValueOnce({
+      id: 'job-id',
+      userId: 'other-user',
+      status: AIJobStatus.COMPLETED,
+      result: substitutionAnswer('Essa troca está cadastrada.'),
+      promptVersion: { prompt: 'Existing QA instructions' },
+    });
+    subject.currentNutrition.read.mockResolvedValue({
+      status: 'AVAILABLE',
+      plan: substitutionPlan(),
+    });
+    await expect(
+      subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'owned',
+        route: route('NUTRITION_GUIDANCE'),
+        humanContext: human(informalSubstitution),
+      }),
+    ).resolves.toMatchObject({
+      status: 'FAILED',
+      reason: 'AI_JOB_OWNERSHIP_MISMATCH',
+    });
+    expect(subject.ai.runTextJob).not.toHaveBeenCalled();
+    expect(subject.currentNutrition.read).toHaveBeenCalledWith('user-id');
+  });
   it('prepares prompt version 2 with the compatible name and full schema wrapper', () => {
     expect(COACH_CONVERSATIONAL_QA_V1_PROMPT.version).toBe(1);
     expect(COACH_CONVERSATIONAL_QA_V2_PROMPT_SEED).toMatchObject({
@@ -790,7 +1679,11 @@ describe('ConversationQAExecutorService', () => {
       async (message, intent, constraints) => {
         const before = JSON.stringify(snackPlan);
         const subject = createSubject(
-          option('Uma opção prática é pão integral com ovos e uma fruta.'),
+          option(
+            intent === 'MEAL_SUBSTITUTION'
+              ? 'Como orientação aproximada fora do plano, uma opção prática é pão integral com ovos e uma fruta.'
+              : 'Uma opção prática é pão integral com ovos e uma fruta.',
+          ),
           AIJobStatus.PENDING,
           true,
         );
@@ -801,7 +1694,10 @@ describe('ConversationQAExecutorService', () => {
         const result = await subject.service.execute(input(message));
         expect(result).toMatchObject({
           status: 'COMPLETED',
-          observability: { answerSource: 'AI' },
+          observability: {
+            answerSource:
+              intent === 'MEAL_SUBSTITUTION' ? 'DETERMINISTIC_FALLBACK' : 'AI',
+          },
         });
         const payload: unknown = JSON.parse(
           subject.ai.runTextJob.mock.calls[0][1].input as string,
@@ -819,7 +1715,10 @@ describe('ConversationQAExecutorService', () => {
             ],
             policy: {
               readOnly: true,
-              currentPlanRole: 'CONTEXT_NOT_ANSWER',
+              currentPlanRole:
+                intent === 'MEAL_SUBSTITUTION'
+                  ? 'SUBSTITUTION_EVIDENCE'
+                  : 'CONTEXT_NOT_ANSWER',
               preserveApproximateNutritionalFunction:
                 intent === 'MEAL_SUBSTITUTION',
             },
@@ -1283,7 +2182,15 @@ describe('ConversationQAExecutorService', () => {
           route: route('NUTRITION_GUIDANCE'),
           humanContext: human(message),
         }),
-      ).resolves.toMatchObject({ status: 'COMPLETED', content: answer });
+      ).resolves.toMatchObject({
+        status: 'COMPLETED',
+        content:
+          message === 'Posso trocar arroz por macarrão?'
+            ? expect.stringContaining(
+                'o plano registra a troca de Arroz por Macarrão',
+              )
+            : answer,
+      });
 
       expect(subject.ai.runTextJob).toHaveBeenCalledTimes(1);
       expect(subject.ai.completeJobInTransaction).toHaveBeenCalledTimes(1);
