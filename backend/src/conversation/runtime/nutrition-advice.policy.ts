@@ -1,6 +1,9 @@
 import type { ConversationAIValue } from '../../ai/conversation-ai.contract';
 import type { CoachConversationHumanContext } from '../../context/coach-conversation-human-context.contract';
-import { normalizeFoodTerm } from '../../context/food-preference-policy';
+import {
+  isSemanticFoodTerm,
+  normalizeFoodTerm,
+} from '../../context/food-preference-policy';
 import { CoachProactiveSchedulePolicy } from '../../automation/coach-proactive-schedule.policy';
 import { NutritionPlanningContextBuilder } from '../../diet/v2/nutrition-planning-context.builder';
 import { CONSTRAINT_TERMS } from '../../diet/v2/nutrition-plan-v2.validator';
@@ -188,7 +191,7 @@ export function nutritionAdviceContext(
         ? [item.foodName]
         : [],
     ),
-  ];
+  ].filter(isSemanticFoodTerm);
   const targetMeal =
     request.meal ??
     (request.intent === 'MEAL_SUBSTITUTION'

@@ -24,6 +24,109 @@ describe('ConversationQAExecutorService', () => {
     'Nesse almoço das 12h que você acabou de me mostrar, posso substituir o peito de frango por ovos? Essa substituição está prevista na minha dieta atual? Não quero alterar meu plano, apenas saber.';
   const informalSubstitution =
     'uai no almoço kkk, posso trocar o frango por ovo ou não?';
+  it('does not turn historical plan commands into food exclusions, preserving confirmed vegetables', async () => {
+    const message = 'Me dê uma dica alternativa de jantar para hoje?';
+    const context = {
+      ...human(message),
+      nutrition: {
+        ...human('').nutrition,
+        rejectedFoods: {
+          value: ['beterraba', 'tomate', 'alterar meu plano'],
+          sources: [],
+        },
+      },
+    };
+    const advice = nutritionAdviceContext(
+      context,
+      null,
+      null,
+      null,
+      new Date('2026-10-08T12:00:00Z'),
+    );
+    expect(advice?.excludedFoods).toEqual(['beterraba', 'tomate']);
+    for (const answer of [
+      'Uma opção é tomate com lentilhas.',
+      'Uma opção é beterraba com legumes.',
+    ]) {
+      expect(
+        nutritionAdviceViolation(advice, {
+          disposition: 'ANSWER',
+          domain: 'NUTRITION',
+          answer,
+          followUpQuestion: null,
+          grounding: 'MIXED',
+          confidence: 'HIGH',
+        }),
+      ).toBe('NUTRITION_ADVICE_REJECTED_FOOD');
+    }
+    const answer =
+      'Sem alterar meu plano, uma ideia aproximada é lentilhas com legumes.';
+    const s = createSubject(
+      substitutionAnswer(answer),
+      AIJobStatus.PENDING,
+      true,
+    );
+    expect(
+      await s.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'clean-exclusions',
+        route: route('NUTRITION_GUIDANCE'),
+        humanContext: context,
+      }),
+    ).toMatchObject({ status: 'COMPLETED', content: answer });
+    expect(JSON.parse(s.ai.runTextJob.mock.calls[0][1].input)).toMatchObject({
+      nutritionGuidance: { excludedFoods: ['beterraba', 'tomate'] },
+    });
+  });
+  it.each([AIJobStatus.PENDING, AIJobStatus.FAILED])(
+    'clarifies rejected free advice without a correction gateway or replaying a failed provider: %s',
+    async (status) => {
+      const s = createSubject(
+        substitutionAnswer('Experimente frango grelhado.'),
+        status,
+        true,
+      );
+      const job = {
+        id: 'job-id',
+        userId: 'user-id',
+        status,
+        result: null,
+        error:
+          status === AIJobStatus.FAILED
+            ? 'NUTRITION_ADVICE_REJECTED_FOOD'
+            : null,
+        promptVersion: { prompt: 'Existing QA instructions' },
+      };
+      s.ai.createJob.mockResolvedValue(job);
+      const context = {
+        ...human('Me dê uma dica alternativa de jantar para hoje?'),
+        nutrition: {
+          ...human('').nutrition,
+          rejectedFoods: { value: ['frango'], sources: [] },
+        },
+      };
+      const result = await s.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'preference-no-retry',
+        route: route('NUTRITION_GUIDANCE'),
+        humanContext: context,
+      });
+      expect(result).toMatchObject({
+        status: 'COMPLETED',
+        content: 'Que alimentos você tem disponíveis para uma alternativa?',
+        observability: {
+          fallbackReason: 'NUTRITION_ADVICE_REJECTED_FOOD',
+          nutritionAdviceRetryAttempted: false,
+        },
+      });
+      expect(s.ai.runTextJob).toHaveBeenCalledTimes(
+        status === AIJobStatus.PENDING ? 1 : 0,
+      );
+      expect(s.ai.completeJobInTransaction).not.toHaveBeenCalled();
+    },
+  );
   it.each([
     ['Não tenho frango, o que uso no lugar?', 'OFF_PLAN_ADVICE'],
     ['O que posso comer no lugar do frango no almoço?', 'OFF_PLAN_ADVICE'],
@@ -1756,6 +1859,79 @@ describe('ConversationQAExecutorService', () => {
         expect(s.ai.runTextJob).toHaveBeenCalledTimes(1);
         expect(s.usage.recordInTransaction).toHaveBeenCalledTimes(1);
       });
+      it.each([
+        ['Uma ideia aproximada é lentilhas com legumes.', 'RECOVERED'],
+        ['Experimente frango grelhado.', 'FAILED'],
+        ['Não use frango; prefira lentilhas.', 'FAILED'],
+        ['Uma opção é pasta de amendoim.', 'FAILED'],
+      ] as const)(
+        'recovers rejected preferences once and revalidates the entire correction: %s',
+        async (second, outcome) => {
+          const s = recovery('Experimente frango grelhado.', second);
+          s.request.humanContext = {
+            ...human('Me dê uma dica alternativa de jantar para hoje?'),
+            nutrition: {
+              ...human('').nutrition,
+              rejectedFoods: { value: ['frango'], sources: [] },
+            },
+            restrictions: { value: ['amendoim'], sources: [] },
+          };
+          const result = await s.service.execute(s.request);
+          expect(result).toMatchObject({
+            status: 'COMPLETED',
+            content:
+              outcome === 'RECOVERED'
+                ? second
+                : 'Que alimentos você tem disponíveis para uma alternativa?',
+            observability: {
+              nutritionAdviceInitialViolation: 'NUTRITION_ADVICE_REJECTED_FOOD',
+              nutritionAdviceRetryAttempted: true,
+              nutritionAdviceRetryOutcome: outcome,
+              totalTokens: 70,
+            },
+          });
+          expect(s.gateway.createTextResponse).toHaveBeenCalledTimes(1);
+          expect(s.ai.runTextJob).toHaveBeenCalledTimes(1);
+          expect(s.usage.recordInTransaction).toHaveBeenCalledTimes(1);
+          expect(
+            JSON.parse(s.gateway.createTextResponse.mock.calls[0][0].input),
+          ).toMatchObject({
+            nutritionGuidance: { excludedFoods: ['frango'] },
+            nutritionAdviceCorrection: {
+              originalViolation: 'NUTRITION_ADVICE_REJECTED_FOOD',
+              correctiveAttempt: 1,
+            },
+          });
+          expect(s.stored.status).toBe(
+            outcome === 'RECOVERED'
+              ? AIJobStatus.COMPLETED
+              : AIJobStatus.FAILED,
+          );
+        },
+      );
+      it('clarifies a rejected preference if the correction provider fails, preserving first-call accounting', async () => {
+        const s = recovery('Experimente frango grelhado.');
+        s.request.humanContext = {
+          ...human('Me dê uma dica alternativa de jantar para hoje?'),
+          nutrition: {
+            ...human('').nutrition,
+            rejectedFoods: { value: ['frango'], sources: [] },
+          },
+        };
+        s.gateway.createTextResponse.mockRejectedValue(
+          new Error('controlled correction timeout'),
+        );
+        expect(await s.service.execute(s.request)).toMatchObject({
+          status: 'COMPLETED',
+          observability: {
+            disposition: 'CLARIFY',
+            fallbackReason: 'PROVIDER_EXECUTION_FAILED',
+            totalTokens: 30,
+          },
+        });
+        expect(s.gateway.createTextResponse).toHaveBeenCalledTimes(1);
+        expect(s.usage.recordInTransaction).toHaveBeenCalledTimes(1);
+      });
       it('clarifies safely when the only corrective candidate still repeats', async () => {
         const s = recovery(repeated, repeated);
         expect(await s.service.execute(s.request)).toMatchObject({
@@ -1849,6 +2025,50 @@ describe('ConversationQAExecutorService', () => {
           expect(s.usage.recordInTransaction).toHaveBeenCalledTimes(1);
         } finally {
           now.mockRestore();
+        }
+      });
+      it('clarifies a rejected preference without retry when the original deadline is exhausted', async () => {
+        const s = recovery('Experimente frango grelhado.');
+        s.request.humanContext = {
+          ...human('Me dê uma dica alternativa de jantar para hoje?'),
+          nutrition: {
+            ...human('').nutrition,
+            rejectedFoods: { value: ['frango'], sources: [] },
+          },
+        };
+        const baseTime = Date.now();
+        let clockTime = baseTime;
+        s.ai.runTextJob.mockImplementation(() => {
+          clockTime = baseTime + 24_000;
+          return Promise.resolve({
+            responseId: 'first',
+            model: 'model',
+            outputText: JSON.stringify(
+              candidate('Experimente frango grelhado.'),
+            ),
+            promptTokens: 20,
+            completionTokens: 10,
+            totalTokens: 30,
+          });
+        });
+        const clock = jest
+          .spyOn(Date, 'now')
+          .mockImplementation(() => clockTime);
+        try {
+          expect(await s.service.execute(s.request)).toMatchObject({
+            status: 'COMPLETED',
+            observability: {
+              disposition: 'CLARIFY',
+              nutritionAdviceInitialViolation: 'NUTRITION_ADVICE_REJECTED_FOOD',
+              nutritionAdviceRetryAttempted: false,
+              fallbackReason: 'INSUFFICIENT_RUNTIME_BUDGET',
+              totalTokens: 30,
+            },
+          });
+          expect(s.gateway.createTextResponse).not.toHaveBeenCalled();
+          expect(s.usage.recordInTransaction).toHaveBeenCalledTimes(1);
+        } finally {
+          clock.mockRestore();
         }
       });
       it('does not retry provider failures', async () => {
@@ -2225,9 +2445,43 @@ describe('ConversationQAExecutorService', () => {
           true,
           personalized as unknown as PersonalizedCoachContextService,
         );
-        await expect(
-          subject.service.execute(input('Me dê uma dica para lanche da tarde')),
-        ).resolves.toMatchObject({ status });
+        const request = input('Me dê uma dica para lanche da tarde');
+        expect(
+          nutritionAdviceViolation(
+            nutritionAdviceContext(
+              request.humanContext,
+              await personalized.build(),
+              null,
+              null,
+              new Date('2026-10-08T12:00:00Z'),
+            ),
+            {
+              disposition: 'ANSWER',
+              domain: 'NUTRITION',
+              answer,
+              followUpQuestion: null,
+              grounding: 'MIXED',
+              confidence: 'HIGH',
+            },
+          ),
+        ).toBe(status === 'FAILED' ? 'NUTRITION_ADVICE_REJECTED_FOOD' : null);
+        // Rejected content remains vetoed; the new public outcome is a validated
+        // clarification, not the rejected candidate disguised as a success.
+        const result = await subject.service.execute(request);
+        expect(result).toMatchObject({ status: 'COMPLETED' });
+        if (status === 'FAILED') {
+          expect(result).toMatchObject({
+            content: 'Que alimentos você tem disponíveis para uma alternativa?',
+            observability: {
+              disposition: 'CLARIFY',
+              fallbackReason: 'NUTRITION_ADVICE_REJECTED_FOOD',
+            },
+          });
+          expect(subject.ai.failJob).toHaveBeenCalledTimes(1);
+          expect(subject.ai.completeJobInTransaction).not.toHaveBeenCalled();
+        } else {
+          expect(result).toMatchObject({ content: answer });
+        }
       },
     );
 

@@ -32,6 +32,60 @@ describe('Canonical conversation continuation', () => {
     reference: 'PENDING',
   };
   it.each([
+    'Gere um treino de academia para mim, 4 vezes por semana.',
+    'Monte um treino para academia, 4 vezes por semana.',
+    'Eu quero que você gere um treino para mim, para eu fazer na academia 04 vezes por semana',
+  ])(
+    'does not consume an owned explicit planning request as uncertain continuity: %s',
+    async (content) => {
+      for (const kind of [
+        null,
+        'MEAL_COMPLETION_CHECK',
+        'WORKOUT_COMPLETION_CHECK',
+      ] as const) {
+        const s = subject(kind, {
+          action: 'UNRESOLVED',
+          workoutEffect: 'NONE',
+        });
+        s.prisma.message.findFirst.mockResolvedValue({
+          id: 'message',
+          content,
+          timestamp: at,
+          conversationId: 'conversation',
+          replyToExternalMessageId: null,
+          conversation: { userId: 'user' },
+        });
+        const provider = {
+          execute: jest.fn().mockResolvedValue({
+            status: 'COMPLETED',
+            structuredOutput: { ...base, workoutEffect: 'NONE' },
+          }),
+        };
+        const interpreter = new ConversationContinuationSemanticsService(
+          provider as unknown as ConversationAIService,
+          new ConversationPublicAnswerBoundaryService(),
+        );
+        s.semantics.interpret.mockImplementation((text, pending) =>
+          interpreter.interpret(text, pending),
+        );
+        expect(await s.service.resolve('user', 'message')).toBeNull();
+        expect(s.prisma.scheduledMessage.updateMany).not.toHaveBeenCalled();
+        expect(s.workout.presentCanonicalDay).not.toHaveBeenCalled();
+        // An old completed semantic receipt is not permission to consume this request.
+        jest.spyOn(s.store, 'resolveOnce').mockResolvedValue({
+          content:
+            'Pode me dizer a que mensagem você está respondendo? Ainda não tenho contexto suficiente para confirmar isso.',
+          domain: 'GENERAL',
+          pending: null,
+          next: null,
+          outcome: 'UNKNOWN',
+          evidence: {},
+        });
+        expect(await s.service.resolve('user', 'message')).toBeNull();
+      }
+    },
+  );
+  it.each([
     'Qual minha meta de calorias para a semana?',
     'Qual minha meta calórica diária?',
     'Quanto de proteína consta como meta diária?',

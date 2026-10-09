@@ -1087,9 +1087,14 @@ export class LongitudinalService {
   private rejectedFoods(content: string): string[] {
     const normalized = content.replace(/\s+/g, ' ').trim();
     const matches = [
-      ...normalized.matchAll(
-        /(?:não gosto de|nao gosto de|odeio|não quero|nao quero|evito)\s+([^,.!?;]{2,60})/gi,
-      ),
+      ...normalized
+        .split(/(?<=[.!?;])/u)
+        .filter((clause) => !clause.includes('?'))
+        .flatMap((clause) => [
+          ...clause.matchAll(
+            /(?:não gosto de|nao gosto de|odeio|não quero|nao quero|evito)\s+([^,.!?;]{2,60})/gi,
+          ),
+        ]),
     ];
 
     return matches

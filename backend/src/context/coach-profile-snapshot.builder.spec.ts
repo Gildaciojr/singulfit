@@ -102,7 +102,7 @@ describe('CoachProfileSnapshotBuilder', () => {
       foodPreferenceSnapshots: [
         {
           foodName: 'Arroz',
-          kind: FoodPreferenceKind.FREQUENT,
+          kind: FoodPreferenceKind.FREQUENT as FoodPreferenceKind,
           confidence: new Prisma.Decimal('0.9100'),
           occurrences: 8,
           evidence: { source: 'MEAL_HISTORY' },
@@ -273,6 +273,17 @@ describe('CoachProfileSnapshotBuilder', () => {
   it('filters legacy isolated observations and structural values before exposing preferences', async () => {
     const user = userRecord();
     user.foodPreferenceSnapshots = [
+      ...[
+        FoodPreferenceKind.REJECTED,
+        FoodPreferenceKind.AVOIDED,
+        FoodPreferenceKind.FREQUENT,
+      ].map((kind) => ({
+        foodName: 'alterar meu plano',
+        kind,
+        confidence: new Prisma.Decimal('0.9200'),
+        occurrences: 1,
+        evidence: { source: 'EXPLICIT_MESSAGE' },
+      })),
       {
         foodName: 'Bebida energética',
         kind: FoodPreferenceKind.ACCEPTED,

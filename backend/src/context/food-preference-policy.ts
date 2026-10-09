@@ -13,6 +13,21 @@ export function isSemanticFoodTerm(value: string): boolean {
   const normalized = normalizeFoodTerm(trimmed);
   if (normalized.length < 2) return false;
 
+  // Preferências armazenam sintagmas alimentares, não atos conversacionais.
+  // A proveniência EXPLICIT_MESSAGE não torna o trecho extraído um alimento.
+  if (
+    /[?!]/u.test(trimmed) ||
+    /^(?:nao|quero|posso|pode|como|quando|por que|sera|voce|eu|que (?:voce|eu|ele|ela))\b/u.test(
+      normalized,
+    ) ||
+    /^(?:trocar|substituir)\s+\S+.*\bpor\s+\S+/u.test(normalized) ||
+    /\b(?:alterar|mudar|criar|montar|gerar|atualizar|substituir|cancelar|confirmar)\b.*\b(?:plano|dieta|treino|pedido|mensagem|resposta)\b/u.test(
+      normalized,
+    )
+  ) {
+    return false;
+  }
+
   if (
     /^(?:sem|nenhum(?:a)?|nao (?:tenho|possuo|ha)(?: nenhum(?:a)?)?)\s+(?:qualquer\s+)?(?:restric(?:ao|oes)|alergia(?:s)?|intolerancia(?:s)?)(?:\s+alimentar(?:es)?)?(?:\s+(?:conhecid[ao]s?|declarad[ao]s?))?$/u.test(
       normalized,

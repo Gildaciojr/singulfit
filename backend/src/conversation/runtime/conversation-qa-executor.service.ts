@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, Optional } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  Optional,
+} from '@nestjs/common';
 import { AIJobStatus, AIJobType, Prisma } from '@prisma/client';
 import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
@@ -89,6 +94,7 @@ const JOIN_POLL_INTERVAL_MS = 250;
 
 @Injectable()
 export class ConversationQAExecutorService {
+  private readonly logger = new Logger(ConversationQAExecutorService.name);
   private readonly verifiedDecisions =
     new WeakSet<ConversationAnswerCandidate>();
   private readonly factualFallbacks =
@@ -247,6 +253,53 @@ export class ConversationQAExecutorService {
       );
     }
     if (job.status !== AIJobStatus.PENDING) {
+      if (
+        job.status === AIJobStatus.FAILED &&
+        job.error === 'NUTRITION_ADVICE_REJECTED_FOOD' &&
+        nutritionAdvice &&
+        (nutritionAdvice.request.intent !== 'MEAL_SUBSTITUTION' ||
+          nutritionAdvice.request.substitutionPurpose === 'OFF_PLAN_ADVICE')
+      ) {
+        const clarification: ConversationAnswerCandidate = {
+          disposition: 'CLARIFY',
+          domain: 'NUTRITION',
+          answer: null,
+          followUpQuestion:
+            'Que alimentos você tem disponíveis para uma alternativa?',
+          grounding: 'RECENT_CONTEXT',
+          confidence: 'LOW',
+        };
+        const violation = nutritionAdviceViolation(
+          nutritionAdvice,
+          clarification,
+        );
+        if (violation) return this.failed(violation);
+        if (
+          this.personalized &&
+          !this.personalized.validatesAnswer(
+            personalized,
+            clarification.followUpQuestion!,
+          )
+        )
+          return this.failed('UNSUPPORTED_PERSONAL_ASSERTION');
+        const result = this.candidateResult(
+          clarification,
+          'DETERMINISTIC_FALLBACK',
+          0,
+          undefined,
+          nutritionAdvice,
+        );
+        return {
+          ...result,
+          observability: {
+            ...result.observability,
+            fallbackReason: job.error,
+            nutritionAdviceInitialViolation: 'NUTRITION_ADVICE_REJECTED_FOOD',
+            nutritionAdviceRetryAttempted: false,
+            nutritionAdviceRetryOutcome: 'NOT_ATTEMPTED',
+          },
+        };
+      }
       return this.failed(`AI_JOB_${job.status}`);
     }
 
@@ -262,18 +315,32 @@ export class ConversationQAExecutorService {
     let response: Awaited<ReturnType<AIService['runTextJob']>>;
     const providerStartedAt = performance.now();
     try {
+      const payload = this.payload(
+        input.route,
+        input.humanContext,
+        currentNutrition,
+        input.previousAnswer ?? null,
+        input.previousFollowUpQuestion ?? null,
+        personalized,
+        nutritionAdvice,
+      );
+      const serialized = JSON.stringify(payload);
+      this.logger.debug({
+        event: 'CONVERSATION_QA_CONTEXT_SIZE',
+        messageId: input.messageId,
+        routeKind: input.route.kind,
+        inputCharacters: serialized.length,
+        trustedContextCharacters: JSON.stringify(payload.trustedContext).length,
+        currentNutritionCharacters: JSON.stringify(payload.currentNutrition)
+          .length,
+        nutritionGuidanceCharacters: JSON.stringify(
+          payload.nutritionGuidance ?? null,
+        ).length,
+        recentConversationCharacters: JSON.stringify(payload.recentConversation)
+          .length,
+      });
       response = await this.ai.runTextJob(job.id, {
-        input: JSON.stringify(
-          this.payload(
-            input.route,
-            input.humanContext,
-            currentNutrition,
-            input.previousAnswer ?? null,
-            input.previousFollowUpQuestion ?? null,
-            personalized,
-            nutritionAdvice,
-          ),
-        ),
+        input: serialized,
         jsonSchema: COACH_CONVERSATIONAL_QA_V4_PROMPT.schema,
         timeoutMs: providerBudgetMs,
       });
@@ -346,6 +413,20 @@ export class ConversationQAExecutorService {
         return finish(
           this.failed(fallbackViolation, providerDurationMs, response),
         );
+      if (
+        this.personalized &&
+        !this.personalized.validatesAnswer(
+          personalized,
+          fallback.followUpQuestion!,
+        )
+      )
+        return finish(
+          this.failed(
+            'UNSUPPORTED_PERSONAL_ASSERTION',
+            providerDurationMs,
+            response,
+          ),
+        );
       const result = this.candidateResult(
         fallback,
         'DETERMINISTIC_FALLBACK',
@@ -391,18 +472,29 @@ export class ConversationQAExecutorService {
       candidate,
       this.verifiedDecisions.has(candidate),
     );
+    const rejectedPreference =
+      violation === 'NUTRITION_ADVICE_REJECTED_FOOD' &&
+      nutritionAdvice !== null &&
+      (nutritionAdvice.request.intent !== 'MEAL_SUBSTITUTION' ||
+        nutritionAdvice.request.substitutionPurpose === 'OFF_PLAN_ADVICE');
     if (
       (violation === 'NUTRITION_ADVICE_REPEATS_CURRENT_MEAL' ||
-        violation === 'NUTRITION_ADVICE_REPEATS_PREVIOUS_SUGGESTION') &&
-      this.correctionGateway &&
-      candidate.disposition === 'ANSWER'
+        violation === 'NUTRITION_ADVICE_REPEATS_PREVIOUS_SUGGESTION' ||
+        rejectedPreference) &&
+      (this.correctionGateway || rejectedPreference) &&
+      (candidate.disposition === 'ANSWER' || rejectedPreference)
     ) {
       recovery = {
-        nutritionAdviceInitialViolation: violation,
+        nutritionAdviceInitialViolation:
+          violation ?? 'NUTRITION_ADVICE_REJECTED_FOOD',
         nutritionAdviceRetryAttempted: false,
         nutritionAdviceRetryOutcome: 'NOT_ATTEMPTED',
       };
       const remaining = this.providerBudget(deadlineAtMs);
+      if (!this.correctionGateway) {
+        await this.ai.failJob(job.id, new Error(violation!), response);
+        return safeNutritionFallback(violation!);
+      }
       if (!remaining) {
         await this.ai.failJob(
           job.id,
@@ -433,7 +525,7 @@ export class ConversationQAExecutorService {
               originalViolation: violation,
               correctiveAttempt: 1,
               instruction:
-                'O primeiro candidato repetiu uma composição já oferecida (refeição atual ou sugestão anterior) e foi descartado. Entregue uma alternativa diferente, mantendo o alvo, constraints e todas as restrições de segurança. Não altere o plano. Esta é a única tentativa corretiva.',
+                'O primeiro candidato foi descartado pela violação indicada. Entregue uma alternativa diferente, mantendo o alvo, constraints, excludedFoods e todas as restrições de segurança. Não mencione nem reutilize alimentos rejeitados. Alergias e restrições alimentares continuam obrigatórias. Não altere o plano nem afirme equivalência ou autorização sem evidência. Esta é a única tentativa corretiva.',
             },
           }),
           requestId: `${job.id}:nutrition-advice-correction:1`,
@@ -448,7 +540,16 @@ export class ConversationQAExecutorService {
           totalTokens: response.totalTokens + corrected.totalTokens,
         };
       } catch (error: unknown) {
+        this.logger.warn({
+          event: 'CONVERSATION_QA_EXECUTION_FAILED',
+          stage: 'NUTRITION_CORRECTION',
+          messageId: input.messageId,
+          reason: 'PROVIDER_EXECUTION_FAILED',
+          errorType: error instanceof Error ? 'Error' : 'UNKNOWN',
+        });
         await this.ai.failJob(job.id, error, response);
+        if (rejectedPreference)
+          return safeNutritionFallback('PROVIDER_EXECUTION_FAILED');
         return finish(
           this.failed(
             'PROVIDER_EXECUTION_FAILED',

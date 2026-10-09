@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { ConversationRoutingDecision } from '../contracts/conversation-execution-route.contract';
 import type { ConversationBridgeResult } from '../contracts/conversation-runtime.contract';
 import type { CoachConversationHumanContext } from '../../context/coach-conversation-human-context.contract';
@@ -28,6 +28,7 @@ export interface ConversationBridgeExecutionContext {
 
 @Injectable()
 export class ConversationExecutionBridgeService {
+  private readonly logger = new Logger(ConversationExecutionBridgeService.name);
   constructor(
     private readonly payloadBuilder: ConversationResponsePayloadBuilder,
     private readonly realizer: ConversationLanguageRealizerService,
@@ -205,7 +206,20 @@ export class ConversationExecutionBridgeService {
           ? humanContext.currentReadOnlyReferent.followUpQuestion
           : (previousFollowUp?.previousFollowUpQuestion ?? null),
       });
-    } catch {
+    } catch (error: unknown) {
+      this.logger.warn({
+        event: 'CONVERSATION_QA_EXECUTION_FAILED',
+        stage: 'QA_EXECUTOR',
+        messageId: executionContext.messageId,
+        routeKind: decision.executionRoute.kind,
+        reason: 'QA_EXECUTOR_UNEXPECTED_EXCEPTION',
+        errorType:
+          error instanceof TypeError
+            ? 'TypeError'
+            : error instanceof Error
+              ? 'Error'
+              : 'UNKNOWN',
+      });
       return Object.freeze({
         status: 'COMPLETED',
         content:
@@ -241,6 +255,14 @@ export class ConversationExecutionBridgeService {
         observability: result.observability,
       });
     }
+    this.logger.warn({
+      event: 'CONVERSATION_QA_EXECUTION_FAILED',
+      stage: 'QA_RESULT',
+      messageId: executionContext.messageId,
+      routeKind: decision.executionRoute.kind,
+      reason: result.reason,
+      fallbackReason: result.observability.fallbackReason,
+    });
     return Object.freeze({
       status: 'COMPLETED',
       content:

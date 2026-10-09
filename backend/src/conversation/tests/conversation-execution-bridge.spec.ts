@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { ConversationExecutionRouterService } from '../routing/conversation-execution-router.service';
 import { ConversationExecutionBridgeService } from '../runtime/conversation-execution-bridge.service';
 import { ConversationLanguageRealizerService } from '../runtime/conversation-language-realizer.service';
@@ -746,6 +747,9 @@ describe('ConversationExecutionBridgeService', () => {
   });
 
   it('contains an unexpected Q&A exception as a completed safe fallback', async () => {
+    const warning = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
     const qa = {
       execute: jest.fn().mockRejectedValue(new Error('database join failed')),
     };
@@ -791,6 +795,18 @@ describe('ConversationExecutionBridgeService', () => {
         fallbackReason: 'QA_EXECUTOR_UNEXPECTED_EXCEPTION',
       },
     });
+    expect(warning).toHaveBeenCalledWith({
+      event: 'CONVERSATION_QA_EXECUTION_FAILED',
+      stage: 'QA_EXECUTOR',
+      messageId: 'message-id',
+      routeKind: 'ANSWER_MESSAGE',
+      reason: 'QA_EXECUTOR_UNEXPECTED_EXCEPTION',
+      errorType: 'Error',
+    });
+    expect(JSON.stringify(warning.mock.calls)).not.toContain(
+      'database join failed',
+    );
+    warning.mockRestore();
   });
 
   it('turns AI defer into a clarification without entering legacy execution', async () => {

@@ -1,4 +1,5 @@
 import { ConversationContinuationStore } from './conversation-continuation.store';
+import { isWorkoutEffectAuthorized } from '../../workout/v2/workout-generation-authorization.policy';
 import { explicitContinuationDomain } from '../understanding/explicit-continuation-domain.policy';
 import { selfContainedNutritionRequest } from '../understanding/nutrition-request.policy';
 import {
@@ -134,6 +135,25 @@ export class ConversationContinuationService {
       () => this.resolveUncached(userId, messageId),
       fallback,
     );
+    // A semantic receipt describes continuity, never overrides the owned turn's
+    // authorization. This also fences historical SAFE_CONTEXT receipts on replay.
+    if (result && !result.evidence.safetyAction) {
+      const message = await this.source(userId, messageId, MessageType.TEXT);
+      if (!message) return null;
+      if (isWorkoutEffectAuthorized(message.content)) {
+        const effect = result.evidence.workoutEffect;
+        const quote = result.evidence.workoutRequestQuote;
+        if (
+          (effect !== 'GENERATE' && effect !== 'UPDATE') ||
+          typeof quote !== 'string' ||
+          !isWorkoutEffectAuthorized(message.content, {
+            effect,
+            requestQuote: quote,
+          })
+        )
+          return null;
+      }
+    }
     // Durable receipts may predate this policy. They do not authorize a reader
     // whose domain contradicts the owned inbound's independent current intent.
     if (result?.next?.kind === 'WORKOUT_DAY_QUERY') {
@@ -266,6 +286,13 @@ export class ConversationContinuationService {
       outcome: 'UNKNOWN',
       evidence: {},
     });
+    // Preserve legitimate mixed reminder/effect interpretations, but an uncertain
+    // or read-only interpretation cannot consume an explicit planning request.
+    if (
+      isWorkoutEffectAuthorized(message.content) &&
+      (!interpreted?.workoutEffect || interpreted.workoutEffect === 'NONE')
+    )
+      return null;
     // A canonical turn never re-enters the proactive regex classifier on uncertainty.
     if (
       !message.replyToExternalMessageId &&

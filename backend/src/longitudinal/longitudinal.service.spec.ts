@@ -7,11 +7,94 @@ import {
   RecommendationStatus,
 } from '@prisma/client';
 import { EventService } from '../observability/event.service';
+import { isSemanticFoodTerm } from '../context/food-preference-policy';
 import { PrismaService } from '../prisma/prisma.service';
 import { LongitudinalCalculatorService } from './longitudinal-calculator.service';
 import { LongitudinalService } from './longitudinal.service';
 
 describe('LongitudinalService', () => {
+  it.each([
+    'beterraba',
+    'tomate',
+    'arroz integral',
+    'pasta de amendoim',
+    'queijo de minas',
+    'carne de panela',
+    'carne de sol',
+    'molho de tomate',
+  ])(
+    'preserves food noun phrases without a closed food catalog: %s',
+    (food) => {
+      expect(isSemanticFoodTerm(food)).toBe(true);
+    },
+  );
+  it.each([
+    'Não quero alterar meu plano.',
+    'Não quero criar um treino.',
+    'Evito mudar minha dieta.',
+    'Você acha que não gosto de tomate?',
+    'Não quero tomate?',
+    'Não quero que você altere meu plano.',
+    'Não quero trocar frango por ovos.',
+    'Não quero substituir arroz por batata.',
+  ])(
+    'does not persist conversational intentions as rejected food: %s',
+    (content) => {
+      expect(
+        service().foodPreferences(
+          [],
+          [{ content, timestamp: new Date('2026-10-08T22:11:30.624Z') }],
+          [],
+          [],
+        ),
+      ).toEqual([]);
+    },
+  );
+
+  it('preserves genuine declared and explicit food evidence while deduplicating normalized names', () => {
+    const preferences = service().foodPreferences(
+      [],
+      [
+        {
+          content: 'Não gosto de beterraba.',
+          timestamp: new Date('2026-10-08T22:11:30.624Z'),
+        },
+        {
+          content: 'Não quero tomate.',
+          timestamp: new Date('2026-10-08T22:11:30.624Z'),
+        },
+        {
+          content: 'Evito TOMATE.',
+          timestamp: new Date('2026-10-08T22:11:30.624Z'),
+        },
+        {
+          content: 'Não quero alterar meu plano.',
+          timestamp: new Date('2026-10-08T22:11:30.624Z'),
+        },
+      ],
+      ['Tomate', 'Amendoim'],
+      [],
+    );
+    expect(preferences).toHaveLength(3);
+    expect(preferences).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          normalizedFood: 'beterraba',
+          kind: FoodPreferenceKind.REJECTED,
+          evidence: expect.objectContaining({ source: 'EXPLICIT_MESSAGE' }),
+        }),
+        expect.objectContaining({
+          normalizedFood: 'tomate',
+          kind: FoodPreferenceKind.AVOIDED,
+          evidence: { source: 'REGISTERED_RESTRICTION' },
+        }),
+        expect.objectContaining({
+          normalizedFood: 'amendoim',
+          kind: FoodPreferenceKind.AVOIDED,
+        }),
+      ]),
+    );
+  });
   function service(prisma: object = {}) {
     return new LongitudinalService(
       prisma as PrismaService,

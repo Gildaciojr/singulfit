@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { coachUserFirstName } from './coach-user-name.policy';
+import { isSemanticFoodTerm } from './food-preference-policy';
 import {
   BehavioralCommunicationStyle,
   FitnessGoal,
@@ -165,7 +166,7 @@ export class CoachConversationHumanContextBuilder {
         ...(learned?.value
           .filter((item) => this.preferenceKind(item) === 'REJECTED')
           .map((item) => item.foodName) ?? []),
-      ],
+      ].filter(isSemanticFoodTerm),
       MAX_LIST_ITEMS,
     );
     const sources = [...(declared?.sources ?? []), ...(learned?.sources ?? [])];
@@ -181,7 +182,8 @@ export class CoachConversationHumanContextBuilder {
     const values = this.unique(
       available.value
         .filter((item) => this.preferenceKind(item) === kind)
-        .map((item) => item.foodName),
+        .map((item) => item.foodName)
+        .filter(isSemanticFoodTerm),
       MAX_LIST_ITEMS,
     );
     return values.length > 0 ? this.fact(values, available.sources) : null;
