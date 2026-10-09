@@ -2,6 +2,7 @@ import type { ConversationAIService } from '../ai/conversation-ai.service';
 import { chunkWorkoutWhatsApp } from '../workout/v2/workout-whatsapp.chunker';
 import { explicitContinuationDomain } from '../conversation/understanding/explicit-continuation-domain.policy';
 import { isWorkoutCurrentPlanRead } from '../workout/v2/workout-current-plan-read.policy';
+import { isWorkoutExpenditureTopic } from '../conversation/understanding/daily-query.policy';
 import { Test } from '@nestjs/testing';
 import { IntegrationEventHandlersService } from '../event-bus/integration-event-handlers.service';
 import { EventHandlerRegistry } from '../event-bus/event-handler.registry';
@@ -2484,8 +2485,33 @@ describe('CoachCommandService', () => {
 
   it.each([
     'Não tenho frango, o que uso no lugar?',
+    'o treino que você montou para mim para academia, consigo gastar quantas calorias em média por treino?',
+    'Quanto posso gastar em média de calorias fazendo meu treino de academia?',
     'O que posso comer no lugar do frango no almoço?',
     'Me sugere um jantar diferente hoje?',
+    {
+      content: 'Me dê uma dica alternativa de jantar para hoje?',
+      disposition: 'ANSWER',
+      registered: false,
+      expectedRegistered: false,
+      rejectedFood: 'tomate',
+      rejectedFoods: ['tomate', 'beterraba'],
+      initialAnswer: 'Uma opção é salada de tomate.',
+      correctedAnswer:
+        'Como orientação aproximada fora do plano, prepare arroz refogado com frango desfiado.',
+      recoveryExpected: true,
+    },
+    {
+      content: 'Me dê uma dica alternativa de jantar para hoje?',
+      disposition: 'ANSWER',
+      registered: false,
+      expectedRegistered: false,
+      rejectedFood: 'tomate',
+      rejectedFoods: ['tomate', 'beterraba'],
+      initialAnswer: 'Uma opção é salada de tomate.',
+      correctedAnswer: 'Uma alternativa é sopa de beterraba.',
+      recoveryExpected: false,
+    },
     {
       content: 'Me dê uma dica alternativa de jantar para hoje?',
       disposition: 'ANSWER',
@@ -2567,15 +2593,28 @@ describe('CoachCommandService', () => {
       const content =
         typeof testInput === 'string' ? testInput : testInput.content;
       const contradictory = typeof testInput !== 'string';
+      const expenditure = isWorkoutExpenditureTopic(content);
       const preference =
         contradictory && 'rejectedFood' in testInput ? testInput : null;
+      const rejectedFoods = preference
+        ? (('rejectedFoods' in preference
+            ? preference.rejectedFoods
+            : undefined) ?? [preference.rejectedFood])
+        : [];
       const natural =
         contradictory && 'naturalAnswer' in testInput
           ? testInput.naturalAnswer
           : null;
       const disposition = contradictory ? testInput.disposition : 'ANSWER';
       const answer =
-        (preference ? 'Experimente frango grelhado.' : null) ??
+        (expenditure
+          ? 'É possível estimar o gasto desse treino, mas isso não é uma medição. A estimativa depende do seu peso, duração e intensidade.'
+          : null) ??
+        (preference
+          ? 'initialAnswer' in preference
+            ? preference.initialAnswer
+            : 'Experimente frango grelhado.'
+          : null) ??
         natural ??
         (contradictory
           ? 'Não está cadastrada no seu plano, mas dá sim pra trocar o frango por ovos.'
@@ -2598,7 +2637,10 @@ describe('CoachCommandService', () => {
             ...builtHuman,
             nutrition: {
               ...builtHuman.nutrition,
-              rejectedFoods: { value: [preference.rejectedFood], sources: [] },
+              rejectedFoods: {
+                value: rejectedFoods,
+                sources: [],
+              },
             },
           }
         : builtHuman;
@@ -2611,7 +2653,7 @@ describe('CoachCommandService', () => {
         runTextJob: jest.fn().mockResolvedValue({
           outputText: JSON.stringify({
             disposition,
-            domain: 'NUTRITION',
+            domain: expenditure ? 'WORKOUT' : 'NUTRITION',
             answer,
             followUpQuestion: null,
             grounding:
@@ -2786,7 +2828,9 @@ describe('CoachCommandService', () => {
         expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
         expect(planning).not.toHaveBeenCalled();
         await expect(evaluate.mock.results[0]?.value).resolves.toMatchObject({
-          summary: { routeKind: 'NUTRITION_GUIDANCE' },
+          summary: {
+            routeKind: expenditure ? 'ANSWER_MESSAGE' : 'NUTRITION_GUIDANCE',
+          },
         });
         await expect(bridge.mock.results[0]?.value).resolves.toMatchObject({
           status: 'COMPLETED',
@@ -2806,13 +2850,28 @@ describe('CoachCommandService', () => {
           ...effects.scheduledMessages.values(),
         ]);
         if (preference) {
-          expect(delivered).not.toContain('frango');
+          for (const food of rejectedFoods)
+            expect(delivered).not.toContain(food);
           expect(delivered).toContain(
             preference.recoveryExpected
               ? preference.correctedAnswer
               : 'Que alimentos você tem disponíveis para uma alternativa?',
           );
           expect(correctiveCall).toHaveBeenCalledTimes(1);
+          if ('rejectedFoods' in preference) {
+            const correctionCall = correctiveCall.mock.calls[0]?.[0];
+            if (!correctionCall)
+              throw new Error('Expected corrective provider call');
+            expect(JSON.parse(correctionCall.input)).toMatchObject({
+              nutritionGuidance: {
+                excludedFoods: ['tomate', 'beterraba'],
+                compatibleFoods: expect.arrayContaining([
+                  { name: 'Filé de frango', source: 'CURRENT_PLAN' },
+                  { name: 'Arroz', source: 'CURRENT_PLAN' },
+                ]),
+              },
+            });
+          }
           await expect(bridge.mock.results[0]?.value).resolves.toMatchObject({
             observability: {
               nutritionAdviceInitialViolation: 'NUTRITION_ADVICE_REJECTED_FOOD',

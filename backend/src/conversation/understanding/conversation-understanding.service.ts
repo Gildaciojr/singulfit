@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConversationUnderstandingValidator } from '../validators/conversation-understanding.validator';
 import { isWorkoutCurrentPlanRead } from '../../workout/v2/workout-current-plan-read.policy';
+import { isWorkoutExpenditureTopic } from './daily-query.policy';
 import type {
   ConversationUnderstandingInput,
   ConversationUnderstandingResult,
@@ -56,6 +57,7 @@ export class ConversationUnderstandingService {
       };
     if (
       !resolution.modality ||
+      isWorkoutExpenditureTopic(input.text) ||
       !['PLAN_REQUEST', 'MODALITY_CHANGE'].includes(resolution.action)
     )
       return original;

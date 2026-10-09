@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type {
   ConversationRuntimeEvaluation,
   ConversationRuntimeInput,
@@ -12,6 +12,7 @@ import { ConversationTurnContextBuilderService } from './conversation-turn-conte
 
 @Injectable()
 export class ConversationRuntimeService {
+  private readonly logger = new Logger(ConversationRuntimeService.name);
   constructor(
     private readonly config: ConversationRuntimeOperationalConfigService,
     private readonly contextBuilder: ConversationTurnContextBuilderService,
@@ -42,8 +43,10 @@ export class ConversationRuntimeService {
         humanContext: null,
       });
     }
+    let stage: 'CONTEXT_BUILD' | 'UNDERSTANDING' | 'ROUTING' = 'CONTEXT_BUILD';
     try {
       const context = await this.contextBuilder.build(input);
+      stage = 'UNDERSTANDING';
       const understanding = await this.understanding.understand(
         context.understandingInput,
       );
@@ -69,6 +72,7 @@ export class ConversationRuntimeService {
           humanContext: context.humanContext,
         });
       }
+      stage = 'ROUTING';
       const decision = this.routing.decide({
         understanding,
         ...context.preparationBase,
@@ -92,12 +96,28 @@ export class ConversationRuntimeService {
         humanContext: context.humanContext,
       });
     } catch (error) {
+      const fallbackReason = `${stage}_FAILED`;
+      this.logger.warn({
+        event: 'CONVERSATION_RUNTIME_EXECUTION_FAILED',
+        messageId: input.messageId,
+        operationKey,
+        stage,
+        fallbackReason,
+        errorType:
+          error instanceof TypeError
+            ? 'TypeError'
+            : error instanceof RangeError
+              ? 'RangeError'
+              : error instanceof Error
+                ? 'Error'
+                : 'UNKNOWN',
+      });
       return Object.freeze({
         summary: this.summary({
           status: 'FAILED',
           mode: config.mode,
           operationKey,
-          fallbackReason: error instanceof Error ? error.name : 'UNKNOWN_ERROR',
+          fallbackReason,
           authorized,
           durationMs: Date.now() - startedAt,
         }),

@@ -25,6 +25,10 @@ export interface NutritionAdviceContext {
     registered: readonly PublicNutritionResponse['substitutions'][number][];
     unresolvedAlternative?: boolean;
   }> | null;
+  readonly compatibleFoods?: readonly Readonly<{
+    name: string;
+    source: 'CURRENT_PLAN' | 'PROFILE_PREFERENCE';
+  }>[];
   readonly immediateConstraints: readonly string[];
   readonly safetyConstraints: readonly string[];
   readonly excludedFoods: readonly string[];
@@ -400,7 +404,7 @@ export function nutritionAdviceContext(
           ...(unresolvedAlternative ? { unresolvedAlternative: true } : {}),
         }
       : null;
-  return Object.freeze({
+  const context: NutritionAdviceContext = Object.freeze({
     request,
     substitutionEvidence,
     immediateConstraints: request.constraints,
@@ -434,6 +438,7 @@ export function nutritionAdviceContext(
         safety.foodRestrictions,
         safety.allergies,
         nutrition.foodIntolerances,
+        nutrition.dietaryPattern,
       ].some(
         (value) =>
           record(value) &&
@@ -465,6 +470,36 @@ export function nutritionAdviceContext(
             timezone: clock.timezone(),
             local: clock.parts(referenceDate, clock.timezone()),
           },
+  });
+  const candidates: NonNullable<NutritionAdviceContext['compatibleFoods']> = [
+    ...meals.flatMap((meal) =>
+      meal.items.map((item) => ({
+        name: item.name,
+        source: 'CURRENT_PLAN' as const,
+      })),
+    ),
+    ...(human.nutrition.preferredFoods?.value ?? []).map((name) => ({
+      name,
+      source: 'PROFILE_PREFERENCE' as const,
+    })),
+  ];
+  const seen = new Set<string>();
+  const compatibleFoods = context.unresolvedSafety
+    ? []
+    : candidates.filter((food) => {
+        const key = normalizeFoodTerm(food.name);
+        if (
+          !isSemanticFoodTerm(food.name) ||
+          seen.has(key) ||
+          nutritionAdviceFoodViolation(context, food.name)
+        )
+          return false;
+        seen.add(key);
+        return true;
+      });
+  return Object.freeze({
+    ...context,
+    compatibleFoods: Object.freeze(compatibleFoods),
   });
 }
 
@@ -536,6 +571,7 @@ export function nutritionAdvicePayload(
     immediateConstraints: context.immediateConstraints,
     safetyConstraints: context.safetyConstraints,
     excludedFoods: context.excludedFoods,
+    compatibleFoods: context.compatibleFoods ?? [],
     unresolvedSafety: context.unresolvedSafety,
     unresolvedOriginalMeal: context.unresolvedOriginalMeal,
     temporalContext: context.temporalContext,
@@ -559,9 +595,14 @@ export function nutritionAdvicePayload(
       : null,
     policy: {
       readOnly: true,
+      foodEvidence:
+        'compatibleFoods contém somente nomes encontrados no plano ou nas preferências e aprovados contra as restrições/rejeições deste turno. Use-os como base para uma combinação concreta nova quando forem suficientes. Isso não comprova estoque em casa, porção da alternativa, equivalência nutricional ou troca cadastrada. Não copie uma refeição inteira só porque seus ingredientes são compatíveis. A lista não é um catálogo fechado: conhecimento geral não clínico continua permitido se respeitar todos os controles. Se unresolvedSafety for true, esclareça a restrição antes de recomendar.',
+      publicFoodBoundary:
+        'A validação alimentar abrange todo o texto público, incluindo explicações, negações e followUpQuestion. Nunca mencione alimentos de excludedFoods ou incompatíveis com safetyConstraints, nem para dizer que foram evitados. Apresente diretamente a opção segura; não repita alimentos vetados do plano ou do histórico.',
+
       decisionIsAuthoritativeRealizationIsFlexible: true,
       personalizedEstimates:
-        'Use metas, objetivo, estratégia, porções e estimativas dos itens disponíveis em trustedContext.activeNutritionPlan. O plano contextualiza, não limita os ingredientes. Estimativas de conhecimento geral devem ser identificadas como aproximadas, nunca como meta, consumo observado ou equivalência comprovada. Sem fundamento para uma quantidade individual, dê uma orientação proporcional ou pergunte somente o dado essencial. Consumo registrado inclui apenas refeições analisadas e seu período, não o total real. Nas trocas oficiais, realize os fatos em linguagem natural e variada, sem alterar a decisão ou acrescentar doses. NOT_REGISTERED nunca é aprovação; UNRESOLVED pede só o dado ausente.',
+        'Use metas, objetivo, estratégia, porções e estimativas dos itens disponíveis em originalMeals e as metas/estratégia de trustedContext.activeNutritionPlan. O plano contextualiza, não limita os ingredientes. Estimativas de conhecimento geral devem ser identificadas como aproximadas, nunca como meta, consumo observado ou equivalência comprovada. Sem fundamento para uma quantidade individual, dê uma orientação proporcional ou pergunte somente o dado essencial. Consumo registrado inclui apenas refeições analisadas e seu período, não o total real. Nas trocas oficiais, realize os fatos em linguagem natural e variada, sem alterar a decisão ou acrescentar doses. NOT_REGISTERED nunca é aprovação; UNRESOLVED pede só o dado ausente.',
       currentPlanRole:
         context.substitutionEvidence &&
         context.request.substitutionPurpose !== 'OFF_PLAN_ADVICE'
@@ -579,20 +620,11 @@ export function nutritionAdvicePayload(
   });
 }
 
-/** Conservative public boundary: invalid advice never reaches delivery or a plan writer. */
-export function nutritionAdviceViolation(
-  context: NutritionAdviceContext | null,
-  candidate: ConversationAnswerCandidate,
-  decisionVerified = false,
+export function nutritionAdviceFoodViolation(
+  context: Pick<NutritionAdviceContext, 'safetyConstraints' | 'excludedFoods'>,
+  value: string,
 ): string | null {
-  if (!context) return null;
-  if (candidate.disposition === 'ANSWER' && context.unresolvedSafety)
-    return 'NUTRITION_ADVICE_UNRESOLVED_SAFETY';
-  if (candidate.disposition === 'ANSWER' && candidate.domain !== 'NUTRITION')
-    return 'NUTRITION_ADVICE_WRONG_DOMAIN';
-  const text = normalizeFoodTerm(
-    [candidate.answer, candidate.followUpQuestion].filter(Boolean).join(' '),
-  );
+  const text = normalizeFoodTerm(value);
   for (const constraint of context.safetyConstraints) {
     const directCode = constraint.trim().toUpperCase();
     const code = Object.hasOwn(NUTRITION_CONSTRAINT_CODE, directCode)
@@ -637,6 +669,25 @@ export function nutritionAdviceViolation(
   }
   if (context.excludedFoods.some((food) => matchesFoodTerm(text, food)))
     return 'NUTRITION_ADVICE_REJECTED_FOOD';
+  return null;
+}
+
+/** Conservative public boundary: invalid advice never reaches delivery or a plan writer. */
+export function nutritionAdviceViolation(
+  context: NutritionAdviceContext | null,
+  candidate: ConversationAnswerCandidate,
+  decisionVerified = false,
+): string | null {
+  if (!context) return null;
+  if (candidate.disposition === 'ANSWER' && context.unresolvedSafety)
+    return 'NUTRITION_ADVICE_UNRESOLVED_SAFETY';
+  if (candidate.disposition === 'ANSWER' && candidate.domain !== 'NUTRITION')
+    return 'NUTRITION_ADVICE_WRONG_DOMAIN';
+  const text = normalizeFoodTerm(
+    [candidate.answer, candidate.followUpQuestion].filter(Boolean).join(' '),
+  );
+  const foodViolation = nutritionAdviceFoodViolation(context, text);
+  if (foodViolation) return foodViolation;
   // Read-only and unsupported equivalence are public boundaries, including CLARIFY.
   if (
     /\b(?:atualizei|alterei|mudei|salvei|substitui)\b.*\b(?:plano|dieta)\b/u.test(

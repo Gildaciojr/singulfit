@@ -127,6 +127,75 @@ describe('ConversationQAExecutorService', () => {
       expect(s.ai.completeJobInTransaction).not.toHaveBeenCalled();
     },
   );
+
+  it('derives compatible food evidence from the plan and preferences using the public food safety policy', () => {
+    const context = {
+      ...human('Me dê uma dica alternativa de jantar para hoje?'),
+      nutrition: {
+        ...human('').nutrition,
+        rejectedFoods: { value: ['tomate', 'beterraba'], sources: [] },
+        preferredFoods: {
+          value: ['Arroz', 'Feijão', 'Iogurte sem lactose', 'Amendoim'],
+          sources: [],
+        },
+      },
+      restrictions: { value: ['MILK', 'PEANUT'], sources: [] },
+    };
+    const plan: PublicNutritionResponse = {
+      ...publicPlan,
+      days: [
+        {
+          meals: [
+            {
+              name: 'Jantar',
+              items: [
+                { name: 'Arroz', quantity: '1 porção' },
+                { name: 'Tomate', quantity: '1 unidade' },
+                { name: 'Beterraba', quantity: '1 unidade' },
+                { name: 'Iogurte sem lactose', quantity: '1 pote' },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const advice = nutritionAdviceContext(
+      context,
+      null,
+      plan,
+      null,
+      new Date(),
+    );
+    expect(advice?.compatibleFoods).toEqual([
+      { name: 'Arroz', source: 'CURRENT_PLAN' },
+      { name: 'Feijão', source: 'PROFILE_PREFERENCE' },
+    ]);
+    expect(advice?.excludedFoods).toEqual(['tomate', 'beterraba']);
+    expect(advice?.safetyConstraints).toEqual(['MILK', 'PEANUT']);
+  });
+
+  it('does not certify food candidates when dietary safety is conflicted', () => {
+    const context = {
+      ...human('Me sugira um jantar'),
+      nutrition: {
+        ...human('').nutrition,
+        preferredFoods: { value: ['Arroz'], sources: [] },
+      },
+    };
+    const advice = nutritionAdviceContext(
+      context,
+      {
+        nutrition: { dietaryPattern: { status: 'CONFLICTED', value: 'VEGAN' } },
+      },
+      null,
+      null,
+      new Date(),
+    );
+    expect(advice).toMatchObject({
+      unresolvedSafety: true,
+      compatibleFoods: [],
+    });
+  });
   it.each([
     ['Não tenho frango, o que uso no lugar?', 'OFF_PLAN_ADVICE'],
     ['O que posso comer no lugar do frango no almoço?', 'OFF_PLAN_ADVICE'],
@@ -1701,6 +1770,7 @@ describe('ConversationQAExecutorService', () => {
       function recovery(
         first = repeated,
         second = 'Uma opção diferente é pão integral com frango desfiado.',
+        personalized?: PersonalizedCoachContextService,
       ) {
         const gateway = {
           createTextResponse: jest.fn().mockResolvedValue({
@@ -1716,7 +1786,7 @@ describe('ConversationQAExecutorService', () => {
           candidate(first),
           AIJobStatus.PENDING,
           true,
-          undefined,
+          personalized,
           gateway as unknown as OpenAIGateway,
         );
         subject.currentNutrition.read.mockResolvedValue({
@@ -1991,6 +2061,165 @@ describe('ConversationQAExecutorService', () => {
         });
         expect(s.gateway.createTextResponse).not.toHaveBeenCalled();
       });
+      it.each([
+        ['Uma ideia aproximada é arroz refogado com feijão.', 'RECOVERED'],
+        ['Uma alternativa é sopa de beterraba.', 'FAILED'],
+        ['Evite tomate; prefira arroz com feijão.', 'FAILED'],
+        ['Uma opção é pasta de amendoim.', 'FAILED'],
+      ] as const)(
+        'uses food evidence in a compact correction while preserving safety: %s',
+        async (second, outcome) => {
+          const plan: PublicNutritionResponse = {
+            ...publicPlan,
+            days: Array.from({ length: 7 }, (_, index) => ({
+              label: `Dia ${index + 1}`,
+              meals: [
+                {
+                  name: 'Jantar',
+                  time: '20:00',
+                  items: [
+                    'Arroz',
+                    'Feijão',
+                    'Tomate',
+                    'Beterraba',
+                    'Amendoim',
+                    'Iogurte sem lactose',
+                  ].map((name) => ({ name, quantity: '1 porção' })),
+                },
+              ],
+            })),
+          };
+          const trusted = {
+            safety: {
+              allergies: { status: 'KNOWN', value: ['PEANUT', 'MILK'] },
+            },
+            nutrition: {
+              declaredFoodRejections: {
+                status: 'KNOWN',
+                value: ['tomate', 'beterraba'],
+              },
+              dietaryPattern: { status: 'KNOWN', value: 'VEGAN' },
+            },
+            goals: { nutrition: 'WEIGHT_LOSS' },
+            routine: {
+              cookingAvailability: { status: 'KNOWN', value: 'LIMITED' },
+            },
+            activeNutritionPlan: {
+              title: plan.title,
+              strategy: { objective: 'WEIGHT_LOSS' },
+              days: plan.days,
+            },
+            activeWorkoutPlan: { title: 'Treino contextual', sessions: [] },
+            recentConversation: [],
+          };
+          const personalized = {
+            build: jest.fn().mockResolvedValue(trusted),
+            answer: jest.fn().mockReturnValue(null),
+            validatesAnswer: jest.fn().mockReturnValue(true),
+          };
+          const s = recovery(
+            'Uma opção é salada de tomate.',
+            second,
+            personalized as unknown as PersonalizedCoachContextService,
+          );
+          s.request.humanContext = human(
+            'Me dê uma dica alternativa de jantar para hoje?',
+          );
+          s.currentNutrition.read.mockResolvedValue({
+            status: 'AVAILABLE',
+            plan,
+          });
+          const before = JSON.stringify(plan);
+          const result = await s.service.execute(s.request);
+          expect(result).toMatchObject({
+            status: 'COMPLETED',
+            content:
+              outcome === 'RECOVERED'
+                ? second
+                : 'Que alimentos você tem disponíveis para uma alternativa?',
+            observability: {
+              nutritionAdviceRetryAttempted: true,
+              nutritionAdviceRetryOutcome: outcome,
+              totalTokens: 70,
+            },
+          });
+          expect(s.gateway.createTextResponse).toHaveBeenCalledTimes(1);
+          expect(s.ai.runTextJob).toHaveBeenCalledTimes(1);
+          expect(s.usage.recordInTransaction).toHaveBeenCalledTimes(1);
+          expect(JSON.stringify(plan)).toBe(before);
+          const firstPayload = JSON.parse(
+            s.ai.runTextJob.mock.calls[0][1].input,
+          );
+          const corrected = JSON.parse(
+            s.gateway.createTextResponse.mock.calls[0][0].input,
+          );
+          expect(corrected).toMatchObject({
+            trustedContext: {
+              safety: trusted.safety,
+              nutrition: trusted.nutrition,
+              goals: trusted.goals,
+              routine: trusted.routine,
+              activeWorkoutPlan: trusted.activeWorkoutPlan,
+              activeNutritionPlan: {
+                title: plan.title,
+                strategy: trusted.activeNutritionPlan.strategy,
+              },
+            },
+            nutritionGuidance: {
+              excludedFoods: ['tomate', 'beterraba'],
+              safetyConstraints: expect.arrayContaining([
+                'PEANUT',
+                'MILK',
+                'VEGAN',
+              ]),
+              originalMeals: firstPayload.nutritionGuidance.originalMeals,
+              compatibleFoods: [
+                { name: 'Arroz', source: 'CURRENT_PLAN' },
+                { name: 'Feijão', source: 'CURRENT_PLAN' },
+              ],
+              policy: { readOnly: true },
+            },
+          });
+          expect(
+            corrected.trustedContext.activeNutritionPlan,
+          ).not.toHaveProperty('days');
+          expect(corrected.currentNutrition.plan).not.toHaveProperty('days');
+          const fullCorrection = {
+            ...firstPayload,
+            nutritionAdviceCorrection: corrected.nutritionAdviceCorrection,
+          };
+          expect(JSON.stringify(corrected).length).toBeLessThan(
+            JSON.stringify(fullCorrection).length,
+          );
+        },
+      );
+
+      it('clarifies conflicting dietary evidence without generating or correcting a recommendation', async () => {
+        const personalized = {
+          build: jest.fn().mockResolvedValue({
+            nutrition: {
+              dietaryPattern: { status: 'CONFLICTED', value: 'VEGAN' },
+            },
+          }),
+          answer: jest.fn().mockReturnValue(null),
+          validatesAnswer: jest.fn().mockReturnValue(true),
+        };
+        const s = recovery(
+          'Uma opção é arroz.',
+          'Outra opção é feijão.',
+          personalized as unknown as PersonalizedCoachContextService,
+        );
+        const result = await s.service.execute(s.request);
+        expect(result).toMatchObject({
+          status: 'COMPLETED',
+          observability: { disposition: 'CLARIFY' },
+        });
+        expect(s.ai.createJob).not.toHaveBeenCalled();
+        expect(s.ai.runTextJob).not.toHaveBeenCalled();
+        expect(s.gateway.createTextResponse).not.toHaveBeenCalled();
+        expect(personalized.validatesAnswer).toHaveBeenCalled();
+      });
+
       it('does not retry without the remaining provider budget', async () => {
         const s = recovery();
         const baseTime = Date.now();

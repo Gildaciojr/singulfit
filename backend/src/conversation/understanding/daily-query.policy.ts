@@ -13,8 +13,23 @@ export function foldDailyText(value: string): string {
 export type DailyMetric = 'CALORIES' | 'PROTEIN' | 'CARBS' | 'FAT' | 'ALL';
 /** A nutrition metric owns its domain even when its date/operation needs QA. */
 export function isNutritionMetricTopic(value: string): boolean {
+  if (isWorkoutExpenditureTopic(value)) return false;
   return /\b(?:calorias?|caloric[ao]s?|proteinas?|carboidratos?|gorduras?|macros|macronutrientes)\b/u.test(
     foldDailyText(value),
+  );
+}
+/** Expenditure belongs to activity; a calorie unit alone is not food intake. */
+export function isWorkoutExpenditureTopic(value: string): boolean {
+  const text = foldDailyText(value);
+  return (
+    /\b(?:calorias?|caloric[ao]s?|gasto energetico)\b/u.test(text) &&
+    /\b(?:gast\w*|queim\w*|energetico)\b/u.test(text) &&
+    /\b(?:treinos?|exercicios?|sessoes?|sessao|academia|musculacao|corrida|caminhada|atividade fisica)\b/u.test(
+      text,
+    ) &&
+    !/\b(?:consumi|consumo|ingeri|ingeridas|comi|comer|refeicao|dieta)\b/u.test(
+      text,
+    )
   );
 }
 export function isDailyMealRequest(value: string): boolean {
@@ -39,6 +54,7 @@ export type DailyQuery = Readonly<{
   metric: DailyMetric;
 }>;
 export function dailyQuery(value: string): DailyQuery | null {
+  if (isWorkoutExpenditureTopic(value)) return null;
   const text = foldDailyText(value);
   if (
     !/^(?:quanto|quantas|quantos|qual|quais|mostre|calorias (?:consumidas|gast|queim)|consumo)\b/u.test(

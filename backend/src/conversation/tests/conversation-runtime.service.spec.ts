@@ -1,4 +1,6 @@
 import { Test, type TestingModule } from '@nestjs/testing';
+import { Logger } from '@nestjs/common';
+import { ConversationRuntimeAuditService } from '../runtime/conversation-runtime-audit.service';
 import { ConversationModule } from '../conversation.module';
 import { ConversationExecutionBridgeService } from '../runtime/conversation-execution-bridge.service';
 import { ConversationLanguageRealizerService } from '../runtime/conversation-language-realizer.service';
@@ -135,7 +137,7 @@ describe('ConversationRuntimeService', () => {
 
     expect(first.summary).toMatchObject({
       status: 'FAILED',
-      fallbackReason: 'Error',
+      fallbackReason: 'CONTEXT_BUILD_FAILED',
       operationKey:
         'conversation-runtime:v1:39eb3bcc40aea12a8b72d16eba5072350c1819c0a71e34bb4240449122e2b85e',
     });
@@ -153,4 +155,109 @@ describe('ConversationRuntimeService', () => {
     });
     expect(subject.contextBuilder.build).not.toHaveBeenCalled();
   });
+
+  it('identifies a pre-QA context failure without logging private exception data', async () => {
+    const subject = service('INTERNAL');
+    const warning = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    subject.contextBuilder.build.mockRejectedValue(
+      new TypeError('private profile and message body'),
+    );
+    try {
+      const result = await subject.runtime.evaluate({
+        ...request,
+        messageId: '95755ed4-6a56-4bd1-9977-6a13b55dd947',
+        text: 'o treino que você montou para mim para academia, consigo gastar quantas calorias em média por treino?',
+      });
+      expect(result).toMatchObject({
+        summary: {
+          status: 'FAILED',
+          understandingStatus: 'NOT_EVALUATED',
+          recognizedIntent: null,
+          routeKind: null,
+          fallbackReason: 'CONTEXT_BUILD_FAILED',
+        },
+        decision: null,
+      });
+      expect(warning).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messageId: '95755ed4-6a56-4bd1-9977-6a13b55dd947',
+          stage: 'CONTEXT_BUILD',
+          errorType: 'TypeError',
+        }),
+      );
+      expect(JSON.stringify(warning.mock.calls)).not.toContain(
+        'private profile',
+      );
+      const audit = { record: jest.fn().mockResolvedValue(undefined) };
+      await new ConversationRuntimeAuditService(audit as never).record({
+        request,
+        evaluation: result,
+        bridge: {
+          status: 'FALLBACK_REQUIRED',
+          content: null,
+          routeKind: null,
+          reason: 'RUNTIME_EVALUATION_FAILED',
+        },
+        selection: {
+          source: 'LEGACY',
+          content: 'Não consegui concluir isso com segurança agora.',
+          reason: 'RUNTIME_FALLBACK',
+        },
+        comparison: {
+          equivalent: false,
+          classification: 'LEGACY_ONLY',
+          code: 'NO_RUNTIME_ROUTE',
+        },
+      });
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            runtimeFallbackReason: 'CONTEXT_BUILD_FAILED',
+          }),
+        }),
+      );
+      expect(JSON.stringify(audit.record.mock.calls)).not.toContain(
+        'private profile',
+      );
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  it.each([
+    'o treino que você montou para mim para academia, consigo gastar quantas calorias em média por treino?',
+    'Qual seria uma estimativa de gasto energético por sessão desse treino?',
+    'Quanto posso gastar em média de calorias fazendo meu treino de academia?',
+  ])(
+    'evaluates an expenditure question read-only when context is available: %s',
+    async (text) => {
+      const subject = service('INTERNAL', text);
+      const result = await subject.runtime.evaluate({ ...request, text });
+      expect(result.summary.status).toBe('OFFICIAL_CANDIDATE');
+      expect(result.summary.understandingStatus).toBe('UNDERSTOOD');
+      expect(result.summary.routeKind).toBe('ANSWER_MESSAGE');
+    },
+  );
+
+  it.each(['UNDERSTANDING', 'ROUTING'] as const)(
+    'distinguishes %s failures from context construction failures',
+    async (stage) => {
+      const subject = service('INTERNAL');
+      const failure = new Error('private failure details');
+      const fault =
+        stage === 'UNDERSTANDING'
+          ? jest.spyOn(understanding, 'understand').mockRejectedValue(failure)
+          : jest.spyOn(routing, 'decide').mockImplementation(() => {
+              throw failure;
+            });
+      try {
+        await expect(subject.runtime.evaluate(request)).resolves.toMatchObject({
+          summary: { status: 'FAILED', fallbackReason: `${stage}_FAILED` },
+          decision: null,
+        });
+      } finally {
+        fault.mockRestore();
+      }
+    },
+  );
 });

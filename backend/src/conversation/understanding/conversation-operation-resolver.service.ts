@@ -127,7 +127,7 @@ export class ConversationOperationResolverService {
       !/\b(?:nao|nunca)\s+(?:quero|preciso)\b/u.test(text) &&
       (fullReplacement ||
         explicitWorkoutRequest ||
-        /\b(ger\w*|cri\w*|mont\w*|elabor\w*|quero|preciso|faca|faz)\b/u.test(
+        /\b(gere|gerar|gera|crie|criar|cria|monte|montar|monta|elabore|elaborar|elabora|quero|preciso|faca|faz)\b/u.test(
           text,
         )) &&
       !candidates.includes(CONVERSATION_OPERATION.UPDATE_PLAN) &&

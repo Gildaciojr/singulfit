@@ -163,8 +163,10 @@ export class ConversationQAExecutorService {
       nutritionAdvice?.unresolvedSafety ||
       nutritionAdvice?.unresolvedOriginalMeal
     ) {
-      return this.candidateResult(
-        {
+      const clarification: ConversationAnswerCandidate =
+        (!nutritionAdvice.unresolvedSafety
+          ? this.factualSubstitution(nutritionAdvice)
+          : null) ?? {
           disposition: 'CLARIFY',
           domain: 'NUTRITION',
           answer: null,
@@ -173,10 +175,22 @@ export class ConversationQAExecutorService {
             : 'O que costuma ter nessa refeição que você quer substituir?',
           grounding: 'PROFILE',
           confidence: 'LOW',
-        },
-        'DETERMINISTIC_FALLBACK',
-        0,
+        };
+      const violation = nutritionAdviceViolation(
+        nutritionAdvice,
+        clarification,
+        this.verifiedDecisions.has(clarification),
       );
+      if (violation) return this.failed(violation);
+      if (
+        this.personalized &&
+        !this.personalized.validatesAnswer(
+          personalized,
+          clarification.followUpQuestion!,
+        )
+      )
+        return this.failed('UNSUPPORTED_PERSONAL_ASSERTION');
+      return this.candidateResult(clarification, 'DETERMINISTIC_FALLBACK', 0);
     }
     const deterministic = this.deterministicNutrition?.answer({
       request: input.humanContext.currentMessage,
@@ -509,25 +523,34 @@ export class ConversationQAExecutorService {
         nutritionAdviceRetryOutcome: 'FAILED',
       };
       try {
+        const fullPayload = this.payload(
+          input.route,
+          input.humanContext,
+          currentNutrition,
+          input.previousAnswer ?? null,
+          input.previousFollowUpQuestion ?? null,
+          personalized,
+          nutritionAdvice,
+        );
+        const correctionInput = JSON.stringify({
+          ...this.nutritionCorrectionPayload(fullPayload, nutritionAdvice),
+          nutritionAdviceCorrection: {
+            originalViolation: violation,
+            correctiveAttempt: 1,
+            instruction:
+              'O primeiro candidato foi descartado pela violação indicada. Entregue uma combinação concreta diferente usando compatibleFoods quando houver base suficiente, mantendo o alvo, immediateConstraints, excludedFoods e todas as safetyConstraints. Não mencione nem reutilize alimentos rejeitados, nem em negações, explicações ou perguntas. Se faltar informação essencial de segurança, esclareça apenas o dado ausente. Não altere o plano nem afirme equivalência, dose ou autorização sem evidência. Esta é a única tentativa corretiva.',
+          },
+        });
+        this.logger.debug({
+          event: 'CONVERSATION_QA_CONTEXT_SIZE',
+          messageId: input.messageId,
+          phase: 'NUTRITION_CORRECTION',
+          fullPayloadCharacters: JSON.stringify(fullPayload).length,
+          inputCharacters: correctionInput.length,
+        });
         const corrected = await this.correctionGateway.createTextResponse({
           instructions: job.promptVersion.prompt,
-          input: JSON.stringify({
-            ...this.payload(
-              input.route,
-              input.humanContext,
-              currentNutrition,
-              input.previousAnswer ?? null,
-              input.previousFollowUpQuestion ?? null,
-              personalized,
-              nutritionAdvice,
-            ),
-            nutritionAdviceCorrection: {
-              originalViolation: violation,
-              correctiveAttempt: 1,
-              instruction:
-                'O primeiro candidato foi descartado pela violação indicada. Entregue uma alternativa diferente, mantendo o alvo, constraints, excludedFoods e todas as restrições de segurança. Não mencione nem reutilize alimentos rejeitados. Alergias e restrições alimentares continuam obrigatórias. Não altere o plano nem afirme equivalência ou autorização sem evidência. Esta é a única tentativa corretiva.',
-            },
-          }),
+          input: correctionInput,
           requestId: `${job.id}:nutrition-advice-correction:1`,
           jsonSchema: COACH_CONVERSATIONAL_QA_V4_PROMPT.schema,
           timeoutMs: remaining,
@@ -909,6 +932,46 @@ export class ConversationQAExecutorService {
     } catch {
       return fallback();
     }
+  }
+
+  private nutritionCorrectionPayload(
+    payload: Readonly<Record<string, ConversationAIValue>>,
+    advice: NutritionAdviceContext | null,
+  ): Readonly<Record<string, ConversationAIValue>> {
+    if (
+      !advice ||
+      (advice.request.intent === 'MEAL_SUBSTITUTION' &&
+        advice.request.substitutionPurpose !== 'OFF_PLAN_ADVICE')
+    )
+      return payload;
+    const summary = (value: ConversationAIValue): ConversationAIValue =>
+      this.record(value)
+        ? Object.fromEntries(
+            Object.entries(value).filter(
+              ([key]) => key !== 'days' && key !== 'meals',
+            ),
+          )
+        : value;
+    const trusted = payload.trustedContext;
+    const current = payload.currentNutrition;
+    return {
+      ...payload,
+      trustedContext: this.record(trusted)
+        ? {
+            ...trusted,
+            activeNutritionPlan: summary(trusted.activeNutritionPlan ?? null),
+          }
+        : trusted,
+      currentNutrition: this.record(current)
+        ? { ...current, plan: summary(current.plan ?? null) }
+        : current,
+      correctionContextPolicy: {
+        mealDetailsSource: 'nutritionGuidance.originalMeals',
+        foodEvidenceSource: 'nutritionGuidance.compatibleFoods',
+        safetyContextPreserved: true,
+        omittedPlanMealsAreNotMissingSafetyEvidence: true,
+      },
+    };
   }
 
   private payload(

@@ -1,75 +1,86 @@
 import { ConversationRuntimeAuditService } from '../runtime/conversation-runtime-audit.service';
 
 describe('ConversationRuntimeAuditService', () => {
-  it('persists traceable identifiers and decision metadata without message bodies', async () => {
-    const audit = { record: jest.fn().mockResolvedValue({ id: 'audit-id' }) };
-    const service = new ConversationRuntimeAuditService(audit as never);
+  it.each([
+    [null, 'NONE'],
+    ['CONTEXT_BUILD_FAILED', 'CONTEXT_BUILD_FAILED'],
+    ['UNDERSTANDING_FAILED', 'UNDERSTANDING_FAILED'],
+    ['ROUTING_FAILED', 'ROUTING_FAILED'],
+    ['private profile and message body', 'UNCLASSIFIED_FAILURE'],
+  ])(
+    'persists sanitized runtime failure %s without message bodies',
+    async (reason, expectedReason) => {
+      const audit = { record: jest.fn().mockResolvedValue({ id: 'audit-id' }) };
+      const service = new ConversationRuntimeAuditService(audit as never);
 
-    await service.record({
-      request: {
-        userId: 'sensitive-user',
-        conversationId: 'sensitive-conversation',
-        messageId: 'sensitive-message',
-        text: 'private message body',
-        receivedAt: '2026-08-01T12:00:00.000Z',
-        legacyIntent: 'UNKNOWN',
-      },
-      evaluation: {
-        summary: {
-          status: 'OFFICIAL_CANDIDATE',
-          mode: 'INTERNAL',
-          operationKey: 'key',
-          understandingStatus: 'UNDERSTOOD',
-          recognizedIntent: 'COMMON_MESSAGE',
-          goal: 'ANSWER_MESSAGE',
-          routeKind: 'ANSWER_MESSAGE',
-          confidence: 'HIGH',
-          ambiguityPresent: false,
-          safetyRequired: false,
-          authorized: true,
-          fallbackReason: null,
-          durationMs: 3,
-          versions: {
-            runtime: 'conversation-runtime:v1',
-            understanding: 'conversation-understanding:v1',
-            routing: 'conversation-routing-decision:v1',
-          },
-        },
-        decision: null,
-      },
-      bridge: {
-        status: 'COMPLETED',
-        content: 'private runtime response',
-        routeKind: 'ANSWER_MESSAGE',
-      },
-      selection: {
-        source: 'CONVERSATION_RUNTIME',
-        content: 'private runtime response',
-        reason: 'RUNTIME_SELECTED',
-      },
-      comparison: {
-        equivalent: true,
-        classification: 'MATCH',
-        code: 'GENERAL_ROUTE_MATCH',
-      },
-    });
-
-    const serialized = JSON.stringify(audit.record.mock.calls[0][0]);
-    expect(serialized).not.toContain('private message body');
-    expect(serialized).not.toContain('private runtime response');
-    expect(audit.record).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: 'CONVERSATION_RUNTIME_EVALUATED',
-        entityType: 'CONVERSATION_RUNTIME',
-        userId: 'sensitive-user',
-        metadata: expect.objectContaining({
+      await service.record({
+        request: {
+          userId: 'sensitive-user',
           conversationId: 'sensitive-conversation',
           messageId: 'sensitive-message',
-          selectedSource: 'CONVERSATION_RUNTIME',
+          text: 'private message body',
+          receivedAt: '2026-08-01T12:00:00.000Z',
+          legacyIntent: 'UNKNOWN',
+        },
+        evaluation: {
+          summary: {
+            status: 'OFFICIAL_CANDIDATE',
+            mode: 'INTERNAL',
+            operationKey: 'key',
+            understandingStatus: 'UNDERSTOOD',
+            recognizedIntent: 'COMMON_MESSAGE',
+            goal: 'ANSWER_MESSAGE',
+            routeKind: 'ANSWER_MESSAGE',
+            confidence: 'HIGH',
+            ambiguityPresent: false,
+            safetyRequired: false,
+            authorized: true,
+            fallbackReason: reason,
+            durationMs: 3,
+            versions: {
+              runtime: 'conversation-runtime:v1',
+              understanding: 'conversation-understanding:v1',
+              routing: 'conversation-routing-decision:v1',
+            },
+          },
+          decision: null,
+        },
+        bridge: {
+          status: 'COMPLETED',
+          content: 'private runtime response',
+          routeKind: 'ANSWER_MESSAGE',
+        },
+        selection: {
+          source: 'CONVERSATION_RUNTIME',
+          content: 'private runtime response',
+          reason: 'RUNTIME_SELECTED',
+        },
+        comparison: {
+          equivalent: true,
+          classification: 'MATCH',
+          code: 'GENERAL_ROUTE_MATCH',
+        },
+      });
+
+      const serialized = JSON.stringify(audit.record.mock.calls[0][0]);
+      expect(serialized).not.toContain('private message body');
+      expect(serialized).not.toContain('private runtime response');
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'CONVERSATION_RUNTIME_EVALUATED',
+          entityType: 'CONVERSATION_RUNTIME',
+          userId: 'sensitive-user',
+          metadata: expect.objectContaining({
+            conversationId: 'sensitive-conversation',
+            messageId: 'sensitive-message',
+            selectedSource: 'CONVERSATION_RUNTIME',
+            runtimeFallbackReason: expectedReason,
+          }),
         }),
-      }),
-    );
-  });
+      );
+      expect(serialized).not.toContain('private profile and message body');
+    },
+  );
 
   it('never propagates an audit failure', async () => {
     const service = new ConversationRuntimeAuditService({

@@ -35,6 +35,9 @@ export class ConversationRuntimeAuditService {
           conversationHash: this.hash(input.request.conversationId),
           mode: input.evaluation.summary.mode,
           runtimeStatus: input.evaluation.summary.status,
+          runtimeFallbackReason: this.safeFallbackReason(
+            input.evaluation.summary.fallbackReason,
+          ),
           understandingStatus: input.evaluation.summary.understandingStatus,
           recognizedIntent: input.evaluation.summary.recognizedIntent ?? 'NONE',
           goal: input.evaluation.summary.goal ?? 'NONE',
@@ -95,5 +98,22 @@ export class ConversationRuntimeAuditService {
 
   private hash(value: string): string {
     return createHash('sha256').update(value).digest('hex');
+  }
+
+  private safeFallbackReason(reason: string | null): string {
+    if (reason === null) return 'NONE';
+    const reasons = [
+      'INVALID_IDENTIFIERS',
+      'CONTEXT_BUILD_FAILED',
+      'UNDERSTANDING_FAILED',
+      'ROUTING_FAILED',
+      'EMPTY_MESSAGE',
+      'UNSUPPORTED_CONTENT',
+      'INVALID_RESULT',
+      'AMBIGUOUS',
+      'CONTEXT_UNAVAILABLE',
+      'NOT_IMPLEMENTED',
+    ];
+    return reasons.includes(reason) ? reason : 'UNCLASSIFIED_FAILURE';
   }
 }
