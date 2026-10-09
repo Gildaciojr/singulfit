@@ -1,3 +1,11 @@
+import { isWorkoutExpenditureTopic } from '../understanding/daily-query.policy';
+import {
+  nutritionCompositionSchema,
+  parseNutritionComposition,
+  nutritionCompositionViolation,
+  type NutritionAdviceComposition,
+  type NutritionSuggestionComposition,
+} from './nutrition-advice-variety.policy';
 import {
   ConflictException,
   Injectable,
@@ -97,6 +105,18 @@ export class ConversationQAExecutorService {
   private readonly logger = new Logger(ConversationQAExecutorService.name);
   private readonly verifiedDecisions =
     new WeakSet<ConversationAnswerCandidate>();
+  private readonly compositions = new WeakMap<
+    ConversationAnswerCandidate,
+    NutritionAdviceComposition
+  >();
+  private readonly previousCompositions = new WeakMap<
+    NutritionAdviceContext,
+    readonly NutritionSuggestionComposition[]
+  >();
+  private readonly hydrationGuidance = new WeakMap<
+    ConversationAnswerCandidate,
+    string
+  >();
   private readonly factualFallbacks =
     new WeakSet<ConversationAnswerCandidate>();
   constructor(
@@ -152,13 +172,50 @@ export class ConversationQAExecutorService {
         0,
       );
     const currentNutrition = await this.currentNutrition.read(input.userId);
-    const nutritionAdvice = nutritionAdviceContext(
-      input.humanContext,
-      personalized,
-      currentNutrition.plan,
-      input.previousAnswer ?? null,
-      input.referenceDate ?? new Date(),
-    );
+    const nutritionAdvice = input.humanContext.hydrationReply
+      ? null
+      : nutritionAdviceContext(
+          input.humanContext,
+          personalized,
+          currentNutrition.plan,
+          input.previousAnswer ?? null,
+          input.referenceDate ?? new Date(),
+        );
+    if (nutritionAdvice?.previousAdvice) {
+      const referent = input.humanContext.currentReadOnlyReferent;
+      if (
+        referent?.source === 'DELIVERED_QA' &&
+        referent.domain === 'NUTRITION' &&
+        this.prisma.aIJob?.findFirst
+      ) {
+        const priorJob = await this.prisma.aIJob.findFirst({
+          where: {
+            userId: input.userId,
+            conversationId: input.conversationId,
+            messageId: referent.sourceMessageId,
+            type: AIJobType.TEXT,
+            status: AIJobStatus.COMPLETED,
+            completedAt: { lte: new Date(referent.deliveredAt) },
+            promptVersion: { name: COACH_CONVERSATIONAL_QA_V4_PROMPT.name },
+          },
+          select: { result: true },
+          orderBy: [{ completedAt: 'desc' }, { id: 'desc' }],
+        });
+        const prior = this.parseStoredCandidate(priorJob?.result);
+        const composition = prior ? this.compositions.get(prior) : null;
+        if (
+          prior?.answer === referent.previousAnswer &&
+          prior.answer === nutritionAdvice.previousAdvice &&
+          composition &&
+          !nutritionCompositionViolation(
+            { previous: [], current: composition.current },
+            prior.answer,
+            [],
+          )
+        )
+          this.previousCompositions.set(nutritionAdvice, composition.current);
+      }
+    }
     if (
       nutritionAdvice?.unresolvedSafety ||
       nutritionAdvice?.unresolvedOriginalMeal
@@ -176,7 +233,7 @@ export class ConversationQAExecutorService {
           grounding: 'PROFILE',
           confidence: 'LOW',
         };
-      const violation = nutritionAdviceViolation(
+      const violation = this.adviceViolation(
         nutritionAdvice,
         clarification,
         this.verifiedDecisions.has(clarification),
@@ -192,21 +249,33 @@ export class ConversationQAExecutorService {
         return this.failed('UNSUPPORTED_PERSONAL_ASSERTION');
       return this.candidateResult(clarification, 'DETERMINISTIC_FALLBACK', 0);
     }
-    const deterministic = this.deterministicNutrition?.answer({
-      request: input.humanContext.currentMessage,
-      route: input.route,
-      current: currentNutrition,
-    });
+    const deterministic = input.humanContext.hydrationReply
+      ? null
+      : this.deterministicNutrition?.answer({
+          request: input.humanContext.currentMessage,
+          route: input.route,
+          current: currentNutrition,
+        });
     if (deterministic) {
-      return Object.freeze({
-        status: 'COMPLETED' as const,
-        content: deterministic.content,
-        observability: this.observability(
-          0,
-          deterministic.candidate,
-          'DETERMINISTIC_FALLBACK',
-        ),
-      });
+      if (!this.compatibleDomain(requestedDomain, deterministic.candidate))
+        return this.failed('ANSWER_DOMAIN_MISMATCH');
+      const violation = this.adviceViolation(
+        nutritionAdvice,
+        deterministic.candidate,
+      );
+      if (violation) return this.failed(violation);
+      if (
+        this.personalized &&
+        !this.personalized.validatesAnswer(personalized, deterministic.content)
+      )
+        return this.failed('UNSUPPORTED_PERSONAL_ASSERTION');
+      return this.candidateResult(
+        deterministic.candidate,
+        'DETERMINISTIC_FALLBACK',
+        0,
+        undefined,
+        nutritionAdvice,
+      );
     }
     let job: Awaited<ReturnType<AIService['createJob']>>;
     try {
@@ -227,11 +296,17 @@ export class ConversationQAExecutorService {
       let stored = this.parseStoredCandidate(job.result);
       if (stored)
         stored = this.storedSubstitution(stored, job.result, nutritionAdvice);
+      if (
+        stored &&
+        input.humanContext.hydrationReply &&
+        !this.validHydrationAnswer(stored)
+      )
+        return this.failed('UNSUPPORTED_HYDRATION_ASSERTION');
       if (stored && !this.compatibleDomain(requestedDomain, stored))
         return this.failed('ANSWER_DOMAIN_MISMATCH');
       const violation =
         stored &&
-        nutritionAdviceViolation(
+        this.adviceViolation(
           nutritionAdvice,
           stored,
           this.verifiedDecisions.has(stored),
@@ -264,6 +339,7 @@ export class ConversationQAExecutorService {
         input.userId,
         nutritionAdvice,
         requestedDomain,
+        Boolean(input.humanContext.hydrationReply),
       );
     }
     if (job.status !== AIJobStatus.PENDING) {
@@ -283,10 +359,7 @@ export class ConversationQAExecutorService {
           grounding: 'RECENT_CONTEXT',
           confidence: 'LOW',
         };
-        const violation = nutritionAdviceViolation(
-          nutritionAdvice,
-          clarification,
-        );
+        const violation = this.adviceViolation(nutritionAdvice, clarification);
         if (violation) return this.failed(violation);
         if (
           this.personalized &&
@@ -329,16 +402,34 @@ export class ConversationQAExecutorService {
     let response: Awaited<ReturnType<AIService['runTextJob']>>;
     const providerStartedAt = performance.now();
     try {
-      const payload = this.payload(
-        input.route,
-        input.humanContext,
-        currentNutrition,
-        input.previousAnswer ?? null,
-        input.previousFollowUpQuestion ?? null,
-        personalized,
+      const payload = this.nutritionCorrectionPayload(
+        this.payload(
+          input.route,
+          input.humanContext,
+          currentNutrition,
+          input.previousAnswer ?? null,
+          input.previousFollowUpQuestion ?? null,
+          personalized,
+          nutritionAdvice,
+        ),
         nutritionAdvice,
       );
-      const serialized = JSON.stringify(payload);
+      const serialized = JSON.stringify({
+        ...payload,
+        ...(input.humanContext.hydrationReply
+          ? {
+              hydrationReply: input.humanContext.hydrationReply,
+              hydrationPolicy:
+                'Reconheça o relato atual sem apenas ecoá-lo. Ofereça uma orientação breve e útil com o contexto individual autorizado. Preencha hydrationGuidance com o trecho literal da orientação útil (ou pergunta útil), separado do reconhecimento do relato; use null para mero eco, mesmo parafraseado. Uma frase breve basta. Este fluxo não registra volume nem comprova meta: nunca afirme que registrou água, soma diária medida ou meta atingida. Diferencie relato parcial, acompanhamento de resposta ao lembrete e orientação. Não invente uma meta individual ou capacidade clínica; safety prevalece.',
+            }
+          : {}),
+        ...(isWorkoutExpenditureTopic(input.humanContext.currentMessage)
+          ? {
+              expenditurePolicy:
+                'O pedido é gasto estimado de atividade, não ingestão ou meta alimentar. Use somente peso/duração/modalidade explicitamente informados ou confirmados e premissas de intensidade. Intervalos devem ser aproximados e tecnicamente fundamentados; não existe medição real disponível, nem autorização para alterar planos.',
+            }
+          : {}),
+      });
       this.logger.debug({
         event: 'CONVERSATION_QA_CONTEXT_SIZE',
         messageId: input.messageId,
@@ -355,7 +446,10 @@ export class ConversationQAExecutorService {
       });
       response = await this.ai.runTextJob(job.id, {
         input: serialized,
-        jsonSchema: COACH_CONVERSATIONAL_QA_V4_PROMPT.schema,
+        jsonSchema: this.answerSchema(
+          nutritionAdvice,
+          Boolean(input.humanContext.hydrationReply),
+        ),
         timeoutMs: providerBudgetMs,
       });
     } catch (error: unknown) {
@@ -367,6 +461,7 @@ export class ConversationQAExecutorService {
           input.userId,
           nutritionAdvice,
           requestedDomain,
+          Boolean(input.humanContext.hydrationReply),
         );
       }
       await this.ai.failJob(job.id, error);
@@ -419,10 +514,7 @@ export class ConversationQAExecutorService {
         grounding: 'RECENT_CONTEXT',
         confidence: 'LOW',
       };
-      const fallbackViolation = nutritionAdviceViolation(
-        nutritionAdvice,
-        fallback,
-      );
+      const fallbackViolation = this.adviceViolation(nutritionAdvice, fallback);
       if (fallbackViolation)
         return finish(
           this.failed(fallbackViolation, providerDurationMs, response),
@@ -481,7 +573,7 @@ export class ConversationQAExecutorService {
         };
       providerDurationMs = this.elapsed(providerStartedAt);
     }
-    let violation = nutritionAdviceViolation(
+    let violation = this.adviceViolation(
       nutritionAdvice,
       candidate,
       this.verifiedDecisions.has(candidate),
@@ -492,7 +584,8 @@ export class ConversationQAExecutorService {
       (nutritionAdvice.request.intent !== 'MEAL_SUBSTITUTION' ||
         nutritionAdvice.request.substitutionPurpose === 'OFF_PLAN_ADVICE');
     if (
-      (violation === 'NUTRITION_ADVICE_REPEATS_CURRENT_MEAL' ||
+      (violation === 'NUTRITION_ADVICE_COMPOSITION_UNSUPPORTED' ||
+        violation === 'NUTRITION_ADVICE_REPEATS_CURRENT_MEAL' ||
         violation === 'NUTRITION_ADVICE_REPEATS_PREVIOUS_SUGGESTION' ||
         rejectedPreference) &&
       (this.correctionGateway || rejectedPreference) &&
@@ -552,7 +645,10 @@ export class ConversationQAExecutorService {
           instructions: job.promptVersion.prompt,
           input: correctionInput,
           requestId: `${job.id}:nutrition-advice-correction:1`,
-          jsonSchema: COACH_CONVERSATIONAL_QA_V4_PROMPT.schema,
+          jsonSchema: this.answerSchema(
+            nutritionAdvice,
+            Boolean(input.humanContext.hydrationReply),
+          ),
           timeoutMs: remaining,
         });
         response = {
@@ -592,7 +688,7 @@ export class ConversationQAExecutorService {
         return safeNutritionFallback('INVALID_AI_RESPONSE');
       }
       candidate = this.factualSubstitution(nutritionAdvice) ?? candidate;
-      violation = nutritionAdviceViolation(
+      violation = this.adviceViolation(
         nutritionAdvice,
         candidate,
         this.verifiedDecisions.has(candidate),
@@ -602,6 +698,23 @@ export class ConversationQAExecutorService {
         return safeNutritionFallback(violation);
       }
       recovery = { ...recovery, nutritionAdviceRetryOutcome: 'RECOVERED' };
+    }
+    if (
+      input.humanContext.hydrationReply &&
+      !this.validHydrationAnswer(candidate)
+    ) {
+      await this.ai.failJob(
+        job.id,
+        new Error('UNSUPPORTED_HYDRATION_ASSERTION'),
+        response,
+      );
+      return finish(
+        this.failed(
+          'UNSUPPORTED_HYDRATION_ASSERTION',
+          providerDurationMs,
+          response,
+        ),
+      );
     }
     if (!this.compatibleDomain(requestedDomain, candidate))
       violation = 'ANSWER_DOMAIN_MISMATCH';
@@ -661,6 +774,12 @@ export class ConversationQAExecutorService {
           response,
           result: {
             ...candidate,
+            ...(this.compositions.has(candidate)
+              ? { nutritionComposition: this.compositions.get(candidate) }
+              : {}),
+            ...(this.hydrationGuidance.has(candidate)
+              ? { hydrationGuidance: this.hydrationGuidance.get(candidate) }
+              : {}),
             ...(nutritionAdvice?.substitutionEvidence &&
             this.verifiedDecisions.has(candidate)
               ? {
@@ -706,6 +825,7 @@ export class ConversationQAExecutorService {
     userId?: string,
     nutritionAdvice: NutritionAdviceContext | null = null,
     requestedDomain: ReturnType<typeof explicitContinuationDomain> = null,
+    hydrationReply = false,
   ): Promise<ConversationQAExecutionResult> {
     const joinDeadlineAtMs = deadlineAtMs - OFFICIAL_SELECTION_MARGIN_MS;
     while (Date.now() < joinDeadlineAtMs) {
@@ -716,11 +836,13 @@ export class ConversationQAExecutorService {
         let stored = this.parseStoredCandidate(job.result);
         if (stored)
           stored = this.storedSubstitution(stored, job.result, nutritionAdvice);
+        if (stored && hydrationReply && !this.validHydrationAnswer(stored))
+          return this.failed('UNSUPPORTED_HYDRATION_ASSERTION');
         if (stored && !this.compatibleDomain(requestedDomain, stored))
           return this.failed('ANSWER_DOMAIN_MISMATCH');
         const violation =
           stored &&
-          nutritionAdviceViolation(
+          this.adviceViolation(
             nutritionAdvice,
             stored,
             this.verifiedDecisions.has(stored),
@@ -767,7 +889,7 @@ export class ConversationQAExecutorService {
     nutritionAdvice: NutritionAdviceContext | null = null,
   ): ConversationQAExecutionResult {
     if (nutritionAdvice?.substitutionEvidence) {
-      const violation = nutritionAdviceViolation(
+      const violation = this.adviceViolation(
         nutritionAdvice,
         candidate,
         this.verifiedDecisions.has(candidate),
@@ -887,7 +1009,7 @@ export class ConversationQAExecutorService {
     if (
       !this.correctionGateway ||
       !budget ||
-      nutritionAdviceViolation(context, candidate, true)
+      this.adviceViolation(context, candidate, true)
     )
       return fallback();
     try {
@@ -1135,7 +1257,21 @@ export class ConversationQAExecutorService {
 
   private parseCandidate(value: unknown): ConversationAnswerCandidate | null {
     if (!this.record(value)) return null;
-    const keys = Object.keys(value).sort();
+    const composition =
+      value.nutritionComposition === undefined
+        ? null
+        : parseNutritionComposition(value.nutritionComposition);
+    if (value.nutritionComposition !== undefined && !composition) return null;
+    if (
+      value.hydrationGuidance !== undefined &&
+      !this.nullableText(value.hydrationGuidance)
+    )
+      return null;
+    const keys = Object.keys(value)
+      .filter(
+        (key) => key !== 'nutritionComposition' && key !== 'hydrationGuidance',
+      )
+      .sort();
     const expected = [
       'answer',
       'confidence',
@@ -1173,7 +1309,7 @@ export class ConversationQAExecutorService {
     ) {
       return null;
     }
-    return normalizeConversationQACandidate(
+    const parsed = normalizeConversationQACandidate(
       Object.freeze({
         disposition: value.disposition,
         domain: value.domain,
@@ -1182,6 +1318,104 @@ export class ConversationQAExecutorService {
         grounding: value.grounding,
         confidence: value.confidence,
       }),
+    );
+    if (composition) this.compositions.set(parsed, composition);
+    if (typeof value.hydrationGuidance === 'string')
+      this.hydrationGuidance.set(parsed, value.hydrationGuidance);
+    return parsed;
+  }
+
+  private validHydrationAnswer(candidate: ConversationAnswerCandidate) {
+    const normalize = (value: string) =>
+      value
+        .normalize('NFD')
+        .replace(/\p{Diacritic}/gu, '')
+        .toLowerCase()
+        .replace(/\s+/gu, ' ')
+        .trim();
+    const text = normalize(
+      [candidate.answer, candidate.followUpQuestion].filter(Boolean).join(' '),
+    );
+    const guidance = this.hydrationGuidance.get(candidate);
+    if (!guidance?.trim() || !text.includes(normalize(guidance))) return false;
+    // Past intake descriptions are acknowledgements, not actionable guidance.
+    if (/\b(?:bebeu|tomou|ingeriu|consumiu)\b/u.test(normalize(guidance)))
+      return false;
+    const clauses = text.split(/[.!?;,]+|\b(?:mas|porem|contudo)\b/u);
+    return clauses.every((clause) => {
+      const assertions = clause.matchAll(
+        /\b(?:registrei|registrad[oa]s?|salvei|anotei)\b|\b(?:atingiu|cumpriu|completou|alcancou|bateu)\b[^.!?]{0,40}\bmeta\b|\bmeta\b[^.!?]{0,40}\b(?:atingida|cumprida|completada|alcancada)\b/gu,
+      );
+      return [...assertions].every((assertion) =>
+        /\b(?:nao|nunca|nem)\s+(?:(?:foi|esta|tenho|posso|podemos|afirmar|dizer|que|ainda)\s+)*$/u.test(
+          clause.slice(0, assertion.index),
+        ),
+      );
+    });
+  }
+
+  private answerSchema(
+    context: NutritionAdviceContext | null,
+    hydrationReply = false,
+  ) {
+    if (hydrationReply) {
+      const base = COACH_CONVERSATIONAL_QA_V4_PROMPT.schema;
+      const schema = base.schema as {
+        properties: Record<string, unknown>;
+        required: readonly string[];
+      };
+      return {
+        ...base,
+        name: 'coach_hydration_guidance',
+        schema: {
+          ...base.schema,
+          properties: {
+            ...schema.properties,
+            hydrationGuidance: { type: ['string', 'null'] },
+          },
+          required: [...schema.required, 'hydrationGuidance'],
+        },
+      };
+    }
+    return context &&
+      (!context.substitutionEvidence ||
+        context.request.substitutionPurpose === 'OFF_PLAN_ADVICE')
+      ? nutritionCompositionSchema(COACH_CONVERSATIONAL_QA_V4_PROMPT.schema)
+      : COACH_CONVERSATIONAL_QA_V4_PROMPT.schema;
+  }
+
+  private adviceViolation(
+    context: NutritionAdviceContext | null,
+    candidate: ConversationAnswerCandidate,
+    decisionVerified = false,
+  ): string | null {
+    const violation = nutritionAdviceViolation(
+      context,
+      candidate,
+      decisionVerified,
+    );
+    if (
+      violation ||
+      !context ||
+      candidate.disposition !== 'ANSWER' ||
+      (context.substitutionEvidence &&
+        context.request.substitutionPurpose !== 'OFF_PLAN_ADVICE')
+    )
+      return violation;
+    const composition = this.compositions.get(candidate);
+    if (!composition)
+      return context.requiresMaterialVariety && context.previousAdvice
+        ? 'NUTRITION_ADVICE_COMPOSITION_UNSUPPORTED'
+        : null;
+    return nutritionCompositionViolation(
+      composition,
+      candidate.answer,
+      [
+        ...context.recentSuggestions,
+        ...(context.previousAdvice ? [context.previousAdvice] : []),
+      ],
+      Boolean(context.requiresMaterialVariety && context.previousAdvice),
+      this.previousCompositions.get(context) ?? [],
     );
   }
 

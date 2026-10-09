@@ -46,6 +46,7 @@ integration(
     let foreignUserId: string;
     let conversationId: string;
     let otherConversationId: string;
+    let createdRule = false;
     let textId: string;
     let secondTextId: string;
     let imageId: string;
@@ -124,12 +125,27 @@ integration(
       ).id;
       conversationId = (
         await db.conversation.create({
-          data: { userId, phoneNumber: `test-${run}` },
+          data: {
+            userId,
+            phoneNumber:
+              '+999' +
+              BigInt('0x' + run.replace(/-/gu, '').slice(0, 12))
+                .toString()
+                .slice(0, 10),
+          },
         })
       ).id;
       otherConversationId = (
         await db.conversation.create({
-          data: { userId, phoneNumber: `other-${run}` },
+          data: {
+            userId,
+            status: 'CLOSED',
+            phoneNumber:
+              '+998' +
+              BigInt('0x' + run.replace(/-/gu, '').slice(0, 12))
+                .toString()
+                .slice(0, 10),
+          },
         })
       ).id;
       const message = (type: MessageType, content: string) =>
@@ -145,13 +161,15 @@ integration(
       textId = (await message('TEXT', 'arroz e frango')).id;
       secondTextId = (await message('TEXT', 'sim')).id;
       imageId = (await message('IMAGE', 'foto')).id;
+      const existingRule = await db.automationRule.findUnique({
+        where: { code: 'DAILY_COACH' },
+      });
+      createdRule = !existingRule;
       ruleId = (
-        await db.automationRule.create({
-          data: {
-            code: `CONTINUATION_TEST_${run}`,
-            name: 'Isolated integration fixture',
-          },
-        })
+        existingRule ??
+        (await db.automationRule.create({
+          data: { code: 'DAILY_COACH', name: 'Isolated integration fixture' },
+        }))
       ).id;
     });
     beforeEach(async () => {
@@ -192,7 +210,8 @@ integration(
         });
       if (userId) await db.user.delete({ where: { id: userId } });
       if (foreignUserId) await db.user.delete({ where: { id: foreignUserId } });
-      if (ruleId) await db.automationRule.delete({ where: { id: ruleId } });
+      if (ruleId && createdRule)
+        await db.automationRule.delete({ where: { id: ruleId } });
       if (fixturePromptId)
         await db.promptVersion.delete({ where: { id: fixturePromptId } });
       await Promise.all([db.$disconnect(), peer.$disconnect()]);
@@ -698,6 +717,7 @@ integration(
           type: 'TEXT',
           promptVersionId: prompt.id,
           status: 'COMPLETED',
+          startedAt: new Date(at.getTime() - 6000),
           completedAt: new Date(at.getTime() - 5000),
           result: { answer, followUpQuestion: question },
         },

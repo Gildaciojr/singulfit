@@ -1,3 +1,4 @@
+import { readOnlyFollowUp } from './conversation-read-only-referent.policy';
 import type { ConversationAIValue } from '../../ai/conversation-ai.contract';
 import type { CoachConversationHumanContext } from '../../context/coach-conversation-human-context.contract';
 import {
@@ -35,6 +36,7 @@ export interface NutritionAdviceContext {
   readonly originalMeals: readonly PublicNutritionResponse['days'][number]['meals'][number][];
   readonly recentSuggestions: readonly string[];
   readonly previousAdvice?: string | null;
+  readonly requiresMaterialVariety?: boolean;
   readonly unresolvedSafety: boolean;
   readonly unresolvedOriginalMeal: boolean;
   readonly temporalContext: ConversationAIValue;
@@ -429,6 +431,8 @@ export function nutritionAdviceContext(
     recentSuggestions: Object.freeze(
       [...history, ...(previousAnswer ? [previousAnswer] : [])].slice(-3),
     ),
+    requiresMaterialVariety:
+      readOnlyFollowUp(human.currentMessage)?.kind === 'ALTERNATIVE_REQUEST',
     previousAdvice:
       human.currentReadOnlyReferent?.domain === 'NUTRITION'
         ? previousAnswer
@@ -584,6 +588,9 @@ export function nutritionAdvicePayload(
       })),
     })),
     recentSuggestions: context.recentSuggestions,
+    requiresMaterialVariety: context.requiresMaterialVariety ?? false,
+    compositionPolicy:
+      'Para recomendações livres, preencha nutritionComposition: current descreve cada opção realmente sugerida; previous descreve todas as opções das recomendações anteriores relevantes, inclusive alternativas. quote é um trecho literal completo da respectiva opção. mainIngredients são nomes de ingredientes centrais literalmente presentes na quote; mainProtein identifica uma dessas fontes principais ou null; accompaniments são acompanhamentos literais, e preparation é preparo literal ou null. Não use objetivo, adjetivos, quantidades ou prosa como ingredientes. Não omita opções para disfarçar repetição. Outra opção precisa mudar a composição central, não somente acompanhamentos ou redação. Isso é análise da resposta, nunca evidência de cadastro, estoque ou dose.',
     substitutionEvidence: context.substitutionEvidence
       ? {
           ...context.substitutionEvidence,

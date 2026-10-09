@@ -351,7 +351,7 @@ describe('Canonical conversation continuation', () => {
       );
     },
   );
-  it('keeps the real hydration + completed workout report in its quoted reminder and preserves the AI response', async () => {
+  it('keeps the real hydration + completed workout event linked and delegates its public response to contextual QA', async () => {
     const content =
       'Bom dia. Já tomei 1 litro de água pela manhã e já realizei meu treino de superiores na academia.';
     const response =
@@ -371,12 +371,16 @@ describe('Canonical conversation continuation', () => {
     });
     const result = await s.service.resolve('user', 'message');
     expect(result).toMatchObject({
-      content: response,
       domain: 'HYDRATION',
       outcome: 'COMPLETED',
       pending: { scheduledMessageId: 'scheduled' },
-      evidence: { workoutEffect: 'NONE', hydrationGoal: false },
+      evidence: {
+        workoutEffect: 'NONE',
+        hydrationGoal: false,
+        delegateRuntime: true,
+      },
     });
+    expect(result?.content).not.toBe(response);
     expect(s.semantics.interpret).toHaveBeenCalledWith(
       content,
       expect.objectContaining({
@@ -1021,6 +1025,26 @@ describe('Canonical conversation continuation', () => {
       outcome: 'COMPLETED',
       next: { kind: 'WORKOUT_FEEDBACK' },
     });
+  });
+  it('consolidated P0 hydration does not publish the interpreter echo', async () => {
+    const s = subject('HYDRATION_CHECK', {
+      action: 'HYDRATION_REPLY',
+      consumption: 'UNKNOWN',
+      workoutEffect: 'NONE',
+      response: 'Você já bebeu 1 litro de água hoje.',
+    });
+    s.prisma.message.findFirst.mockResolvedValue({
+      ...(await s.prisma.message.findFirst()),
+      content: 'Já bebi 1 litro de água hoje.',
+    });
+    const result = await s.service.resolve('user', 'message');
+    expect(result).toMatchObject({
+      domain: 'HYDRATION',
+      pending: { scheduledMessageId: 'scheduled' },
+      evidence: { delegateRuntime: true, hydrationGoal: false },
+      outcome: 'UNKNOWN',
+    });
+    expect(result?.content).not.toBe('Você já bebeu 1 litro de água hoje.');
   });
   it('preserves hydration without inventing daily goal completion', async () => {
     const s = subject('HYDRATION_CHECK', {

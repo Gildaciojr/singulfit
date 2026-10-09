@@ -210,6 +210,27 @@ describe('Nutrition read-only follow-up: real semantic pipeline', () => {
           disposition: 'ANSWER',
           domain: 'NUTRITION',
           answer: 'Uma alternativa de jantar é frango com batata e salada.',
+          nutritionComposition: {
+            previous: [
+              {
+                quote: dinnerAnswer,
+                mainIngredients: ['lentilhas'],
+                mainProtein: 'lentilhas',
+                accompaniments: ['legumes'],
+                preparation: 'sopa',
+              },
+            ],
+            current: [
+              {
+                quote:
+                  'Uma alternativa de jantar é frango com batata e salada.',
+                mainIngredients: ['frango', 'batata'],
+                mainProtein: 'frango',
+                accompaniments: ['salada'],
+                preparation: null,
+              },
+            ],
+          },
           followUpQuestion: null,
           grounding: 'MIXED',
           confidence: 'HIGH',
@@ -299,6 +320,28 @@ describe('Nutrition read-only follow-up: real semantic pipeline', () => {
           disposition: 'ANSWER',
           domain: 'NUTRITION',
           answer,
+          nutritionComposition: {
+            previous: [
+              {
+                quote: 'Uma ideia de jantar é sopa de lentilhas com legumes.',
+                mainIngredients: ['lentilhas'],
+                mainProtein: 'lentilhas',
+                accompaniments: ['legumes'],
+                preparation: 'sopa',
+              },
+            ],
+            current: [
+              {
+                quote: answer,
+                mainIngredients:
+                  outcome === 'RECOVERED' ? ['frango', 'batata'] : ['lentilha'],
+                mainProtein: outcome === 'RECOVERED' ? 'frango' : 'lentilha',
+                accompaniments:
+                  outcome === 'RECOVERED' ? ['salada'] : ['legumes'],
+                preparation: outcome === 'RECOVERED' ? null : 'sopa',
+              },
+            ],
+          },
           followUpQuestion: null,
           grounding: 'MIXED',
           confidence: 'HIGH',
@@ -399,10 +442,32 @@ describe('Nutrition read-only follow-up: real semantic pipeline', () => {
     const candidates = [
       answer('Iogurte natural com banana e aveia.'),
       answer('Uma ideia de jantar é sopa de lentilhas com legumes.'),
-      answer(
-        'Outra opção de jantar é arroz com frango e legumes.',
-        'Quer mais duas opções de jantar?',
-      ),
+      {
+        ...answer(
+          'Outra opção de jantar é arroz com frango e legumes.',
+          'Quer mais duas opções de jantar?',
+        ),
+        nutritionComposition: {
+          previous: [
+            {
+              quote: 'Uma ideia de jantar é sopa de lentilhas com legumes.',
+              mainIngredients: ['lentilhas'],
+              mainProtein: 'lentilhas',
+              accompaniments: ['legumes'],
+              preparation: 'sopa',
+            },
+          ],
+          current: [
+            {
+              quote: 'Outra opção de jantar é arroz com frango e legumes.',
+              mainIngredients: ['arroz', 'frango'],
+              mainProtein: 'frango',
+              accompaniments: ['legumes'],
+              preparation: null,
+            },
+          ],
+        },
+      },
       answer(
         'Mais duas opções de jantar: peixe com batata e salada, ou omelete com tomate e pão integral.',
       ),

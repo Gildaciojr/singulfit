@@ -9,6 +9,7 @@ import type { ConversationCurrentNutritionContext } from './conversation-current
 import {
   dailyQuery,
   isWeeklyFollowUp,
+  isWorkoutExpenditureTopic,
 } from '../understanding/daily-query.policy';
 
 export interface DeterministicNutritionAnswer {
@@ -29,6 +30,7 @@ export class ConversationNutritionDeterministicAnswerService {
     // Substitution questions require source/alternative roles and conversation
     // context. A food appearing anywhere in the plan cannot establish a swap.
     if (
+      isWorkoutExpenditureTopic(request) ||
       isNutritionAdvice(request) ||
       /\b(?:tro(?:c|qu)\w*|substitu\w*)\b/u.test(request)
     )
@@ -189,9 +191,7 @@ export class ConversationNutritionDeterministicAnswerService {
       return true;
     return (
       route.kind === 'NUTRITION_GUIDANCE' ||
-      /(?:dieta|plano alimentar|refeicao|comida|alimento|calori|proteina|carboidr|gordura|cafe da manha|almoco|jantar)/u.test(
-        request,
-      )
+      dailyQuery(request)?.kind === 'TARGET'
     );
   }
 

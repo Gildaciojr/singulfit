@@ -27,6 +27,8 @@ export interface ConversationRuntimeConfig {
 
 export interface ConversationRuntimeInput {
   readonly proactiveReply?: boolean;
+  /** Internal owned reminder reference; grants no persistent effect. */
+  readonly hydrationReminderId?: string;
   readonly userId: string;
   readonly conversationId: string;
   readonly messageId: string;

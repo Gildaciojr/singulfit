@@ -34,6 +34,11 @@ export type CoachConversationTurnCue =
 export interface CoachConversationHumanContext {
   readonly currentReadOnlyReferent?: CurrentReadOnlyReferent | null;
   readonly effectiveNutritionRequest?: NutritionRequest | null;
+  readonly hydrationReply?: Readonly<{
+    reminderQuestion: string;
+    tracking: 'READ_ONLY_REPORT';
+    goalConfirmed: false;
+  }>;
   readonly currentMessage: string;
   readonly turnCue: CoachConversationTurnCue;
   readonly preferredName: CoachConversationHumanFact<string> | null;

@@ -145,6 +145,7 @@ export class ConversationExecutionBridgeService {
         });
       }
       const directlyEligible =
+        Boolean(humanContext.hydrationReply) ||
         Boolean(humanContext.effectiveNutritionRequest) ||
         this.qaEligible(payload.cue, payload.currentMessage, humanContext);
       const previousFollowUp = directlyEligible
@@ -315,6 +316,7 @@ export class ConversationExecutionBridgeService {
   private reminderResponse(
     context: CoachConversationHumanContext,
   ): string | null {
+    if (context.hydrationReply) return null;
     const latest = context.recentConversation?.at(-1);
     if (
       latest?.direction !== 'COACH' ||

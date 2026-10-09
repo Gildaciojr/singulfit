@@ -236,6 +236,12 @@ export class CoachCommandService {
         receivedAt: message.timestamp.toISOString(),
         replyToExternalMessageId: message.replyToExternalMessageId,
         legacyIntent: 'UNKNOWN',
+        ...(reply.domain === 'HYDRATION' && reply.pending
+          ? {
+              hydrationReminderId: reply.pending.scheduledMessageId,
+              proactiveReply: true,
+            }
+          : {}),
       });
       reply = {
         ...reply,
@@ -1104,6 +1110,7 @@ export class CoachCommandService {
     replyToExternalMessageId?: string | null;
     legacyIntent: CoachCommandIntent;
     proactiveReply?: boolean;
+    hydrationReminderId?: string;
   }) {
     if (!this.conversationRuntime) {
       return { source: 'LEGACY' as const, reason: 'RUNTIME_DISABLED' as const };

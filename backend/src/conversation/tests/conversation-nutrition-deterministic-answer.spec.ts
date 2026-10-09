@@ -48,6 +48,26 @@ describe('ConversationNutritionDeterministicAnswerService', () => {
   } as ConversationExecutionRoute;
 
   it.each([
+    'O treino de academia que você montou para mim, com 4 sessões semanais de aproximadamente 60 minutos, pode me fazer gastar quantas calorias em média por sessão? Considere meu peso de 95 kg.',
+    'Quanto posso queimar de calorias por sessão de musculação?',
+    'Qual o gasto energético estimado do meu treino?',
+  ])(
+    'consolidated P0 calorie expenditure is never a diet target: %s',
+    (request) => {
+      for (const execution of [
+        route,
+        { ...route, kind: 'ANSWER_MESSAGE' } as ConversationExecutionRoute,
+      ])
+        expect(
+          service.answer({
+            request,
+            route: execution,
+            current: { status: 'AVAILABLE', plan },
+          }),
+        ).toBeNull();
+    },
+  );
+  it.each([
     'quantas calorias consumi hoje?',
     'quanto de proteína consumi hoje?',
     'quanto gastei de calorias hoje?',

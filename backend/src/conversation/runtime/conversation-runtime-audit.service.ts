@@ -40,6 +40,10 @@ export class ConversationRuntimeAuditService {
           ),
           understandingStatus: input.evaluation.summary.understandingStatus,
           recognizedIntent: input.evaluation.summary.recognizedIntent ?? 'NONE',
+          understandingDomain:
+            input.evaluation.decision?.understanding.domain ?? 'NONE',
+          understandingOperation:
+            input.evaluation.decision?.understanding.operation ?? 'NONE',
           goal: input.evaluation.summary.goal ?? 'NONE',
           routeKind: input.evaluation.summary.routeKind ?? 'NONE',
           confidence: input.evaluation.summary.confidence ?? 'NONE',

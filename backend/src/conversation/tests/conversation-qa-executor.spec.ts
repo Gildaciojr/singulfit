@@ -2186,8 +2186,19 @@ describe('ConversationQAExecutorService', () => {
           expect(corrected.currentNutrition.plan).not.toHaveProperty('days');
           const fullCorrection = {
             ...firstPayload,
+            trustedContext: trusted,
+            currentNutrition: { ...firstPayload.currentNutrition, plan },
             nutritionAdviceCorrection: corrected.nutritionAdviceCorrection,
           };
+          expect(firstPayload.trustedContext.safety).toEqual(trusted.safety);
+          expect(firstPayload.currentNutrition.plan.days).toBeUndefined();
+          expect(JSON.stringify(firstPayload).length).toBeLessThan(
+            JSON.stringify({
+              ...firstPayload,
+              trustedContext: trusted,
+              currentNutrition: { ...firstPayload.currentNutrition, plan },
+            }).length,
+          );
           expect(JSON.stringify(corrected).length).toBeLessThan(
             JSON.stringify(fullCorrection).length,
           );

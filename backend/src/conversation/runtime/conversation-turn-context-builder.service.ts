@@ -1,3 +1,4 @@
+import { CONTINUATION_WINDOW_MS } from './conversation-continuation.contract';
 import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { ConversationQAFollowUpContextService } from './conversation-qa-follow-up-context.service';
 import {
@@ -309,12 +310,72 @@ export class ConversationTurnContextBuilderService {
       continuity,
       referenceDate: snapshot.referenceDate,
     });
+    // Authorization lookup is independent of the bounded conversation-history window.
+    const hydrationReminder = input.hydrationReminderId
+      ? await this.prisma.scheduledMessage.findFirst({
+          where: {
+            id: input.hydrationReminderId,
+            userId: input.userId,
+            conversationId: input.conversationId,
+            conversation: { userId: input.userId, status: 'ACTIVE' },
+            automationRule: { code: 'HYDRATION_REMINDER' },
+            status: ScheduledMessageStatus.SENT,
+            AND: [
+              {
+                OR: [
+                  {
+                    sentAt: {
+                      lte: referenceDate,
+                      gt: new Date(
+                        referenceDate.getTime() - CONTINUATION_WINDOW_MS,
+                      ),
+                    },
+                  },
+                  {
+                    sentAt: null,
+                    scheduledFor: {
+                      lte: referenceDate,
+                      gt: new Date(
+                        referenceDate.getTime() - CONTINUATION_WINDOW_MS,
+                      ),
+                    },
+                  },
+                ],
+              },
+              {
+                OR: [
+                  { responseExpiresAt: null },
+                  { responseExpiresAt: { gt: referenceDate } },
+                ],
+              },
+              {
+                OR: [
+                  { responseMessageId: null },
+                  { responseMessageId: input.messageId },
+                ],
+              },
+            ],
+          },
+          select: { id: true, content: true },
+        })
+      : null;
+    if (input.hydrationReminderId && !hydrationReminder)
+      throw new Error('UNOWNED_HYDRATION_REMINDER');
     const humanContext = Object.freeze({
       ...this.humanContextBuilder.build(snapshot, {
         expectedUserId: input.userId,
         currentMessage: input.text,
         recentHistory: history,
       }),
+      ...(hydrationReminder
+        ? {
+            hydrationReply: {
+              reminderQuestion: hydrationReminder.content,
+              tracking: 'READ_ONLY_REPORT' as const,
+              goalConfirmed: false as const,
+            },
+          }
+        : {}),
       ...(referent
         ? {
             currentReadOnlyReferent: referent,

@@ -341,6 +341,27 @@ export class ConversationContinuationService {
         },
       };
     }
+    // The interpreter resolves the reminder/event; public guidance belongs to QA
+    // with the owned profile. No volume ledger is written by this read-only path.
+    if (
+      interpreted.action === 'HYDRATION_REPLY' &&
+      (!interpreted.workoutEffect || interpreted.workoutEffect === 'NONE') &&
+      pending?.continuation.domain === 'HYDRATION'
+    ) {
+      return {
+        ...safe(),
+        domain: 'HYDRATION',
+        pending,
+        outcome:
+          interpreted.consumption === 'CONFIRMED' ? 'COMPLETED' : 'UNKNOWN',
+        evidence: {
+          delegateRuntime: true,
+          workoutEffect: 'NONE',
+          consumption: interpreted.consumption,
+          hydrationGoal: false,
+        },
+      };
+    }
     // Interpretation selects a capability; it cannot answer independent guidance
     // with only text/pending. Keep genuinely referential reminder replies below.
     if (
