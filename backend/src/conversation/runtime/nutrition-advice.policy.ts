@@ -275,11 +275,11 @@ export function nutritionAdviceContext(
   ): { source: string; alternative: string } | null => {
     const text = normalizeFoodTerm(value.split(/[?.!;]/u)[0]);
     const direct = text.match(
-      /\b(?:tro(?:c|qu)\w*|substitu\w*)\s+(.+?)\s+por\s+(.+)/u,
+      /\b(?:tro(?:c|qu)\w*|substitu\w*)\s+(?:(.+?)\s+)?por\s+(.+)/u,
     );
     if (direct)
       return {
-        source: cleanSpan(direct[1]),
+        source: cleanSpan(direct[1] ?? ''),
         alternative: cleanSpan(direct[2]),
       };
     const inverse = text.match(
@@ -419,9 +419,7 @@ export function nutritionAdviceContext(
       ]),
     ]),
     excludedFoods: Object.freeze([...new Set(excludedFoods)]),
-    originalMeals: Object.freeze(
-      originalMeals.length > 0 ? originalMeals : meals,
-    ),
+    originalMeals: Object.freeze(originalMeals),
     unresolvedOriginalMeal:
       request.intent === 'MEAL_SUBSTITUTION' &&
       request.substitutionPurpose !== 'OFF_PLAN_ADVICE' &&
@@ -429,7 +427,11 @@ export function nutritionAdviceContext(
       request.meal !== 'refeicao' &&
       originalMeals.length === 0,
     recentSuggestions: Object.freeze(
-      [...history, ...(previousAnswer ? [previousAnswer] : [])].slice(-3),
+      previousAnswer
+        ? [...history, previousAnswer].slice(-3)
+        : request.meal === null
+          ? history.slice(-3)
+          : [],
     ),
     requiresMaterialVariety:
       readOnlyFollowUp(human.currentMessage)?.kind === 'ALTERNATIVE_REQUEST',
@@ -590,7 +592,7 @@ export function nutritionAdvicePayload(
     recentSuggestions: context.recentSuggestions,
     requiresMaterialVariety: context.requiresMaterialVariety ?? false,
     compositionPolicy:
-      'Para recomendações livres, preencha nutritionComposition: current descreve cada opção realmente sugerida; previous descreve todas as opções das recomendações anteriores relevantes, inclusive alternativas. quote é um trecho literal completo da respectiva opção. mainIngredients são nomes de ingredientes centrais literalmente presentes na quote; mainProtein identifica uma dessas fontes principais ou null; accompaniments são acompanhamentos literais, e preparation é preparo literal ou null. Não use objetivo, adjetivos, quantidades ou prosa como ingredientes. Não omita opções para disfarçar repetição. Outra opção precisa mudar a composição central, não somente acompanhamentos ou redação. Isso é análise da resposta, nunca evidência de cadastro, estoque ou dose.',
+      'Para recomendações livres, preencha nutritionComposition: current descreve cada opção realmente sugerida; previous descreve todas as opções das recomendações anteriores relevantes, inclusive alternativas. quote é um trecho literal completo da respectiva opção. mainIngredients são nomes de ingredientes centrais literalmente presentes na quote; mainProtein reutiliza literalmente um desses nomes ou null; accompaniments são acompanhamentos literais, e preparation é preparo literal ou null se não estiver na quote. Não use objetivo, adjetivos, quantidades ou prosa como ingredientes. Não omita opções para disfarçar repetição. Outra opção precisa mudar a composição central, não somente acompanhamentos ou redação. Isso é análise da resposta, nunca evidência de cadastro, estoque ou dose.',
     substitutionEvidence: context.substitutionEvidence
       ? {
           ...context.substitutionEvidence,
@@ -684,6 +686,7 @@ export function nutritionAdviceViolation(
   context: NutritionAdviceContext | null,
   candidate: ConversationAnswerCandidate,
   decisionVerified = false,
+  optionQuotes: readonly string[] = [],
 ): string | null {
   if (!context) return null;
   if (candidate.disposition === 'ANSWER' && context.unresolvedSafety)
@@ -814,24 +817,35 @@ export function nutritionAdviceViolation(
     materiallyRepeatsNutritionAdvice(context.previousAdvice, candidate.answer)
   )
     return 'NUTRITION_ADVICE_REPEATS_PREVIOUS_SUGGESTION';
+  // Compare each grounded option separately; leftovers still receive the same veto.
+  // Food safety above always evaluates the entire public text.
+  let remaining = text;
+  const optionTexts = optionQuotes.map((quote) => {
+    const normalized = normalizeFoodTerm(quote);
+    remaining = remaining.replace(normalized, ' ');
+    return normalized;
+  });
+  const mealScopes = optionTexts.length ? [...optionTexts, remaining] : [text];
   for (const meal of context.substitutionEvidence
     ? []
     : context.originalMeals) {
     if (meal.items.length < 2) continue;
-    const copied = meal.items.every((item) => {
-      const terms = normalizeFoodTerm(item.name)
-        .split(' ')
-        .filter(
-          (term) =>
-            term.length >= 4 &&
-            !/^(?:cozid\w*|grelhad\w*|assad\w*|natural|integral|peito)$/u.test(
-              term,
-            ),
+    const copied = mealScopes.some((scope) =>
+      meal.items.every((item) => {
+        const terms = normalizeFoodTerm(item.name)
+          .split(' ')
+          .filter(
+            (term) =>
+              term.length >= 4 &&
+              !/^(?:cozid\w*|grelhad\w*|assad\w*|natural|integral|peito)$/u.test(
+                term,
+              ),
+          );
+        return (
+          terms.length > 0 && terms.some((term) => matchesFoodTerm(scope, term))
         );
-      return (
-        terms.length > 0 && terms.some((term) => matchesFoodTerm(text, term))
-      );
-    });
+      }),
+    );
     if (copied) return 'NUTRITION_ADVICE_REPEATS_CURRENT_MEAL';
   }
   return null;

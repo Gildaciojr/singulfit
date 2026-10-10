@@ -38,6 +38,18 @@ describe('delivered read-only referent', () => {
     followUpQuestion: null,
     deliveredAt: deliveredTime.toISOString(),
   };
+  it('keeps an elliptical substitution question tied to owned nutrition evidence without authorizing a mutation', () => {
+    const followUp = readOnlyFollowUp('troca por ovo?');
+    expect(followUp?.kind).toBe('SUBSTITUTION_INQUIRY');
+    expect(effectiveNutritionRequest(followUp!, referent)).toMatchObject({
+      intent: 'MEAL_SUBSTITUTION',
+      meal: 'jantar',
+      substitutionPurpose: 'PLAN_INQUIRY',
+    });
+    expect(
+      effectiveNutritionRequest(followUp!, { ...referent, domain: 'WORKOUT' }),
+    ).toBeNull();
+  });
   function subject() {
     const prisma = {
       message: {
@@ -209,6 +221,11 @@ describe('delivered read-only referent', () => {
     ['Eu quero outra alternativa', 'ALTERNATIVE_REQUEST', []],
     ['Me dá outra', 'ALTERNATIVE_REQUEST', []],
     ['mais uma', 'ALTERNATIVE_REQUEST', []],
+    ['outra', 'ALTERNATIVE_REQUEST', []],
+    ['não gostei, tem outra?', 'ALTERNATIVE_REQUEST', []],
+    ['quero algo rápido', 'CONSTRAINT_REFINEMENT', ['QUICK']],
+    ['pode ser coisa barata?', 'CONSTRAINT_REFINEMENT', ['LOW_COST']],
+    ['sem leite, por favor', 'CONSTRAINT_REFINEMENT', ['MILK']],
     ['sem lactose', 'CONSTRAINT_REFINEMENT', ['LACTOSE']],
     ['mais barato', 'CONSTRAINT_REFINEMENT', ['LOW_COST']],
     ['mais leve', 'CONSTRAINT_REFINEMENT', ['LIGHT']],

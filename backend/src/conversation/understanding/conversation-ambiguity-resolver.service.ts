@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { isNutritionAdvice } from './nutrition-request.policy';
 import type { ConversationAmbiguity } from '../contracts/conversation-understanding.contract';
 import { CONVERSATION_OPERATION } from '../contracts/conversation-intent.contract';
 import type {
@@ -49,7 +50,11 @@ export class ConversationAmbiguityResolverService {
     }
     if (
       domain.domain === 'COMBINED' &&
-      operation.operation !== CONVERSATION_OPERATION.GENERATE_PLAN
+      operation.operation !== CONVERSATION_OPERATION.GENERATE_PLAN &&
+      !(
+        operation.operation === CONVERSATION_OPERATION.PROVIDE_GUIDANCE &&
+        isNutritionAdvice(message.original)
+      )
     ) {
       codes.add('CONFLICTING_GOALS');
     }

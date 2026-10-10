@@ -115,7 +115,8 @@ describe('ConversationQAExecutorService', () => {
       });
       expect(result).toMatchObject({
         status: 'COMPLETED',
-        content: 'Que alimentos você tem disponíveis para uma alternativa?',
+        content:
+          'Não consegui validar uma sugestão segura para jantar. Que alimentos você prefere usar?',
         observability: {
           fallbackReason: 'NUTRITION_ADVICE_REJECTED_FOOD',
           nutritionAdviceRetryAttempted: false,
@@ -1952,7 +1953,7 @@ describe('ConversationQAExecutorService', () => {
             content:
               outcome === 'RECOVERED'
                 ? second
-                : 'Que alimentos você tem disponíveis para uma alternativa?',
+                : 'Não consegui validar uma sugestão segura para jantar. Que alimentos você prefere usar?',
             observability: {
               nutritionAdviceInitialViolation: 'NUTRITION_ADVICE_REJECTED_FOOD',
               nutritionAdviceRetryAttempted: true,
@@ -2006,7 +2007,8 @@ describe('ConversationQAExecutorService', () => {
         const s = recovery(repeated, repeated);
         expect(await s.service.execute(s.request)).toMatchObject({
           status: 'COMPLETED',
-          content: 'Que alimentos você tem disponíveis para uma alternativa?',
+          content:
+            'Não consegui validar uma sugestão segura para lanche da tarde. Que alimentos você prefere usar?',
           observability: {
             disposition: 'CLARIFY',
             answerSource: 'DETERMINISTIC_FALLBACK',
@@ -2109,7 +2111,29 @@ describe('ConversationQAExecutorService', () => {
               strategy: { objective: 'WEIGHT_LOSS' },
               days: plan.days,
             },
-            activeWorkoutPlan: { title: 'Treino contextual', sessions: [] },
+            activeWorkoutPlan: {
+              title: 'Treino contextual',
+              calendar: ['MONDAY'],
+              sessions: [
+                {
+                  weekday: 'MONDAY',
+                  title: 'Sessão atual',
+                  estimatedDurationMinutes: 60,
+                  blocks: [
+                    { instruction: 'Detalhe de exercício. '.repeat(1000) },
+                  ],
+                },
+              ],
+            },
+            previousWorkoutPlan: {
+              title: 'Treino anterior',
+              sessions: [
+                {
+                  weekday: 'TUESDAY',
+                  blocks: [{ instruction: 'Detalhe histórico. '.repeat(1000) }],
+                },
+              ],
+            },
             recentConversation: [],
           };
           const personalized = {
@@ -2136,7 +2160,7 @@ describe('ConversationQAExecutorService', () => {
             content:
               outcome === 'RECOVERED'
                 ? second
-                : 'Que alimentos você tem disponíveis para uma alternativa?',
+                : 'Não consegui validar uma sugestão segura para jantar. Que alimentos você prefere usar?',
             observability: {
               nutritionAdviceRetryAttempted: true,
               nutritionAdviceRetryOutcome: outcome,
@@ -2159,7 +2183,21 @@ describe('ConversationQAExecutorService', () => {
               nutrition: trusted.nutrition,
               goals: trusted.goals,
               routine: trusted.routine,
-              activeWorkoutPlan: trusted.activeWorkoutPlan,
+              activeWorkoutPlan: {
+                title: trusted.activeWorkoutPlan.title,
+                calendar: trusted.activeWorkoutPlan.calendar,
+                sessions: [
+                  {
+                    weekday: 'MONDAY',
+                    title: 'Sessão atual',
+                    estimatedDurationMinutes: 60,
+                  },
+                ],
+              },
+              previousWorkoutPlan: {
+                title: 'Treino anterior',
+                sessions: [{ weekday: 'TUESDAY' }],
+              },
               activeNutritionPlan: {
                 title: plan.title,
                 strategy: trusted.activeNutritionPlan.strategy,
@@ -2328,7 +2366,8 @@ describe('ConversationQAExecutorService', () => {
         };
         expect(await s.service.execute(s.request)).toMatchObject({
           status: 'COMPLETED',
-          content: 'Que alimentos você tem disponíveis para uma alternativa?',
+          content:
+            'Não consegui validar uma sugestão segura para lanche da tarde. Que alimentos você prefere usar?',
           observability: {
             nutritionAdviceRetryAttempted: true,
             nutritionAdviceRetryOutcome: 'FAILED',
@@ -2711,7 +2750,8 @@ describe('ConversationQAExecutorService', () => {
         expect(result).toMatchObject({ status: 'COMPLETED' });
         if (status === 'FAILED') {
           expect(result).toMatchObject({
-            content: 'Que alimentos você tem disponíveis para uma alternativa?',
+            content:
+              'Não consegui validar uma sugestão segura para lanche da tarde. Que alimentos você prefere usar?',
             observability: {
               disposition: 'CLARIFY',
               fallbackReason: 'NUTRITION_ADVICE_REJECTED_FOOD',

@@ -1261,5 +1261,267 @@ integration(
       expect(provider.createTextResponse).not.toHaveBeenCalled();
       expect(send).not.toHaveBeenCalled();
     });
+    it('macro P0 dinner preserves two distinct options without aggregating their ingredients into a copied plan meal', async () => {
+      const first = 'Peito de frango com batata e abobrinha.';
+      const second = 'Arroz branco com peixe e feijão.';
+      const text = `${first} Outra ideia é ${second}`;
+      outputs.push({
+        ...answer(text),
+        nutritionComposition: {
+          previous: [],
+          current: [
+            composition(
+              first,
+              ['Peito de frango', 'batata'],
+              'Peito de frango',
+              ['abobrinha'],
+            ),
+            composition(second, ['Arroz branco', 'peixe'], 'peixe', ['feijão']),
+          ],
+        },
+      });
+      expect(
+        (await inbound('Me dê uma dica para jantar hoje')).response.content,
+      ).toBe(text);
+      expect(provider.createTextResponse).toHaveBeenCalledTimes(1);
+    });
+    it.each([true, false])(
+      'macro P0 rejects a full copied meal even when composition omits it, within or outside the declared quote: %s',
+      async (withinQuote) => {
+        const copied =
+          'Arroz branco com peito de frango grelhado, abobrinha e feijão.';
+        const fresh = 'Batata assada com peixe.';
+        const text = `${fresh} Outra opção é ${copied}`;
+        outputs.push(
+          {
+            ...answer(text),
+            nutritionComposition: {
+              previous: [],
+              current: [
+                composition(
+                  withinQuote ? text : fresh,
+                  ['batata', 'peixe'],
+                  'peixe',
+                ),
+              ],
+            },
+          },
+          answer(newDinner),
+        );
+        const turn = await inbound('Me dê uma dica para jantar hoje');
+        expect(turn.response.content).toBe(newDinner);
+        expect(provider.createTextResponse).toHaveBeenCalledTimes(2);
+        const audit = await db.auditLog.findFirstOrThrow({
+          where: { userId, action: 'CONVERSATION_RUNTIME_EVALUATED' },
+        });
+        expect(audit.metadata).toMatchObject({
+          nutritionAdviceInitialViolation:
+            'NUTRITION_ADVICE_REPEATS_CURRENT_MEAL',
+          nutritionAdviceRetryOutcome: 'RECOVERED',
+        });
+      },
+    );
+    it.each([
+      ['me dá uma dica de janta 😋!!', 'jantar', newDinner],
+      [
+        'me de uma dica pra jantar',
+        'jantar',
+        'Uma ideia aproximada para jantar é macarrão com bife bovino e cenoura.',
+      ],
+      [
+        'o que eu como hoje a noite?',
+        null,
+        'Para hoje à noite, uma ideia aproximada é batata assada com peixe.',
+      ],
+      [
+        'tô com fome, o que faço?',
+        null,
+        'Se está com fome, uma ideia é banana com aveia, respeitando suas restrições.',
+      ],
+      [
+        'manda um lanche',
+        'lanche',
+        'Uma ideia para o lanche é banana com aveia.',
+      ],
+      [
+        'um lanche pra tarde',
+        'lanche',
+        'Uma ideia para o lanche da tarde é um sanduíche de frango com pepino.',
+      ],
+      [
+        'o que eu como antes do treino?',
+        null,
+        'Antes do treino, uma ideia aproximada e simples é banana com aveia.',
+      ],
+      [
+        'que posso comer depois da academia?',
+        null,
+        'Depois da academia, uma ideia aproximada é um sanduíche de frango com cenoura.',
+      ],
+      [
+        'e pro café da manhã?',
+        'cafe da manha',
+        'Para o café da manhã, uma ideia é aveia com banana.',
+      ],
+      [
+        'o que eu como agora?',
+        null,
+        'Para comer agora, uma ideia simples é banana com aveia.',
+      ],
+      [
+        'tô com fome agora, o que faço?',
+        null,
+        'Uma ideia para essa fome agora é um sanduíche de frango com pepino.',
+      ],
+    ] as const)(
+      'macro P0 everyday language reaches controlled QA and a single public response: %s',
+      async (text, meal, recommendation) => {
+        outputs.push(answer(recommendation));
+        const turn = await inbound(text);
+        const audit = await db.auditLog.findFirstOrThrow({
+          where: { userId, action: 'CONVERSATION_RUNTIME_EVALUATED' },
+        });
+        expect(audit.metadata).toMatchObject({
+          routeKind: expect.stringMatching(
+            /^(NUTRITION_GUIDANCE|ANSWER_MESSAGE)$/u,
+          ),
+          answerSource: 'AI',
+        });
+        expect(turn.response.content).toBe(recommendation);
+        expect(provider.createTextResponse).toHaveBeenCalledTimes(1);
+        const payload: {
+          request: string;
+          nutritionGuidance: { meal: string | null; intent: string };
+        } = JSON.parse(provider.createTextResponse.mock.calls[0][0].input);
+        expect(payload.request).toBe(text);
+        expect(payload.nutritionGuidance).toMatchObject({
+          meal,
+          intent: 'NUTRITION_ADVICE',
+        });
+      },
+    );
+    it('macro P0 sequence calories then dinner then snack then two options preserves targets, safety and retries', async () => {
+      const calories =
+        'Como aproximação para 95 kg e 60 minutos de musculação, o gasto pode ficar em torno de 350 a 550 kcal, conforme intensidade e pausas. Não é uma medição individual.';
+      outputs.push(answer(calories, 'WORKOUT'));
+      expect((await inbound(realCalories)).response.content).toBe(calories);
+      for (const [request, meal, recommendation] of [
+        ['Me dê uma dica para jantar hoje', 'jantar', newDinner],
+        [
+          'Me dê uma dica de lanche da tarde',
+          'lanche da tarde',
+          'Uma ideia para o lanche da tarde é banana com aveia.',
+        ],
+      ]) {
+        outputs.push(answer(recommendation));
+        expect((await inbound(request)).response.content).toBe(recommendation);
+        const payload: {
+          request: string;
+          nutritionGuidance: { meal: string | null };
+        } = JSON.parse(provider.createTextResponse.mock.calls.at(-1)![0].input);
+        expect(payload.request).toBe(request);
+        expect(payload.nutritionGuidance.meal).toBe(meal);
+      }
+      const text = 'Batata com peixe. Outra ideia é macarrão com bife bovino.';
+      outputs.push({
+        ...answer(text),
+        nutritionComposition: {
+          previous: [],
+          current: [
+            composition('Batata com peixe.', ['batata', 'peixe'], 'peixe'),
+            composition(
+              'macarrão com bife bovino.',
+              ['macarrão', 'bife bovino'],
+              'bife bovino',
+            ),
+          ],
+        },
+      });
+      expect(
+        (
+          await inbound(
+            'Me sugira duas opções de jantar para hoje, considerando meu plano alimentar atual e minhas restrições.',
+          )
+        ).response.content,
+      ).toBe(text);
+      expect(provider.createTextResponse).toHaveBeenCalledTimes(4);
+    });
+    it('macro P0 elliptical substitution retains the delivered meal and clarifies missing evidence without granting permission', async () => {
+      outputs.push(answer(newDinner));
+      await inbound('Me dê uma dica para jantar hoje');
+      outputs.push({
+        ...answer('', 'NUTRITION'),
+        disposition: 'CLARIFY',
+        answer: null,
+        followUpQuestion:
+          'Qual alimento do jantar você quer substituir por ovo?',
+      });
+      const turn = await inbound('troca por ovo?');
+      expect(turn.response.content).not.toMatch(
+        /pode (?:sim|trocar)|\b\d+ ovos?\b/iu,
+      );
+      expect(provider.createTextResponse).toHaveBeenCalledTimes(2);
+      const job = await db.aIJob.findFirstOrThrow({
+        where: { userId, messageId: turn.inbound.id },
+      });
+      expect(job.result).toMatchObject({
+        disposition: 'CLARIFY',
+        domain: 'NUTRITION',
+        nutritionDecisionSource: 'DOMAIN',
+      });
+      expect(turn.response.content).toBe(
+        'Qual é o alimento original dessa troca?',
+      );
+    });
+    it('macro P0 snack is independent from a dinner plan and failed dinner clarification', async () => {
+      await db.scheduledMessage.create({
+        data: {
+          userId,
+          conversationId,
+          automationRuleId: ruleId,
+          scheduledFor: new Date(at.getTime() - 1000),
+          sentAt: new Date(at.getTime() - 1000),
+          status: 'SENT',
+          content: 'Que alimentos você tem disponíveis para uma alternativa?',
+        },
+      });
+      const text =
+        'Uma ideia aproximada para o lanche é arroz branco com peito de frango, abobrinha e feijão.';
+      outputs.push(answer(text));
+      expect(
+        (await inbound('Me dê uma dica de lanche da tarde')).response.content,
+      ).toBe(text);
+      expect(provider.createTextResponse).toHaveBeenCalledTimes(1);
+    });
+    it('macro P0 two dinner options repair malformed composition once and publish the valid correction', async () => {
+      const first = 'Batata com peixe.';
+      const second = 'Macarrão com bife bovino.';
+      outputs.push({
+        ...answer(`${first} ${second}`),
+        nutritionComposition: {
+          previous: [],
+          current: [composition(first, ['batata', 'peixe'], 'PEIXE')],
+        },
+      });
+      const text = `${first} Outra ideia é ${second}`;
+      outputs.push({
+        ...answer(text),
+        nutritionComposition: {
+          previous: [],
+          current: [
+            composition(first, ['batata', 'peixe'], 'peixe'),
+            composition(second, ['macarrão', 'bife bovino'], 'bife bovino'),
+          ],
+        },
+      });
+      expect(
+        (
+          await inbound(
+            'Me sugira duas opções de jantar para hoje, considerando meu plano alimentar atual e minhas restrições.',
+          )
+        ).response.content,
+      ).toBe(text);
+      expect(provider.createTextResponse).toHaveBeenCalledTimes(2);
+    });
   },
 );

@@ -315,13 +315,19 @@ describe('ConversationDailyQueryService', () => {
     ['qual meu almoço de hoje?', 'Almoço segunda'],
     ['qual meu jantar de hoje?', 'Jantar segunda'],
     ['qual minha próxima refeição?', 'Almoço segunda'],
-    ['o que eu como agora?', 'Almoço segunda'],
+    ['qual minha próxima refeição agora?', 'Almoço segunda'],
+    ['o que eu como agora?', null],
     ['qual refeição vem depois?', 'Almoço segunda'],
-  ])(
+  ] as const)(
     'selects the explicit local day and meal for %s',
     async (text, expected) => {
       const s = subject();
       const answer = await s.service.answer({ ...s.input, text });
+      if (expected === null) {
+        expect(answer).toBeNull();
+        expect(s.nutrition.getCurrent).not.toHaveBeenCalled();
+        return;
+      }
       expect(answer).toContain(expected);
       expect(answer).not.toContain('domingo');
     },

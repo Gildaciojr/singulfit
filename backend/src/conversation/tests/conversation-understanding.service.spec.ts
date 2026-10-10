@@ -21,6 +21,35 @@ describe('ConversationUnderstandingService', () => {
   afterAll(async () => module.close());
 
   it.each([
+    ['não tenho frango', 'PROVIDE_GUIDANCE'],
+    ['posso comer isso?', 'PROVIDE_GUIDANCE'],
+    ['tenho alergia a amendoim', 'ANSWER'],
+    ['me diz o que tem na minha dieta hoje', 'PRESENT_CURRENT_PLAN'],
+    ['monta uma dieta nova pra mim', 'GENERATE_PLAN'],
+  ])(
+    'preserves the operation boundary for informal context and plan requests: %s',
+    async (text, operation) => {
+      await expect(
+        service.understand(understandingInput(text, { dietAvailable: true })),
+      ).resolves.toMatchObject({
+        status: 'UNDERSTOOD',
+        operation,
+      });
+    },
+  );
+
+  it('preserves structural context while answering food guidance after physical activity', async () => {
+    await expect(
+      service.understand(
+        understandingInput('que posso comer depois da academia?'),
+      ),
+    ).resolves.toMatchObject({
+      status: 'UNDERSTOOD',
+      operation: 'PROVIDE_GUIDANCE',
+    });
+  });
+
+  it.each([
     ['Olá 👋', 'COMMON_MESSAGE', 'ANSWER', 'GENERAL'],
     ['Muito obrigado!', 'COMMON_MESSAGE', 'ANSWER', 'GENERAL'],
     ['Até mais', 'COMMON_MESSAGE', 'ANSWER', 'GENERAL'],

@@ -2855,7 +2855,7 @@ describe('CoachCommandService', () => {
           expect(delivered).toContain(
             preference.recoveryExpected
               ? preference.correctedAnswer
-              : 'Que alimentos você tem disponíveis para uma alternativa?',
+              : 'Não consegui validar uma sugestão segura para jantar. Que alimentos você prefere usar?',
           );
           expect(correctiveCall).toHaveBeenCalledTimes(1);
           if ('rejectedFoods' in preference) {

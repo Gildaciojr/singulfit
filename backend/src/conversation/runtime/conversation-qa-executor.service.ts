@@ -350,15 +350,7 @@ export class ConversationQAExecutorService {
         (nutritionAdvice.request.intent !== 'MEAL_SUBSTITUTION' ||
           nutritionAdvice.request.substitutionPurpose === 'OFF_PLAN_ADVICE')
       ) {
-        const clarification: ConversationAnswerCandidate = {
-          disposition: 'CLARIFY',
-          domain: 'NUTRITION',
-          answer: null,
-          followUpQuestion:
-            'Que alimentos você tem disponíveis para uma alternativa?',
-          grounding: 'RECENT_CONTEXT',
-          confidence: 'LOW',
-        };
+        const clarification = this.nutritionClarification(nutritionAdvice);
         const violation = this.adviceViolation(nutritionAdvice, clarification);
         if (violation) return this.failed(violation);
         if (
@@ -505,15 +497,7 @@ export class ConversationQAExecutorService {
     const safeNutritionFallback = (
       reason: string,
     ): ConversationQAExecutionResult => {
-      const fallback: ConversationAnswerCandidate = {
-        disposition: 'CLARIFY',
-        domain: 'NUTRITION',
-        answer: null,
-        followUpQuestion:
-          'Que alimentos você tem disponíveis para uma alternativa?',
-        grounding: 'RECENT_CONTEXT',
-        confidence: 'LOW',
-      };
+      const fallback = this.nutritionClarification(nutritionAdvice);
       const fallbackViolation = this.adviceViolation(nutritionAdvice, fallback);
       if (fallbackViolation)
         return finish(
@@ -545,13 +529,19 @@ export class ConversationQAExecutorService {
       });
     };
 
-    let candidate = this.parseText(response.outputText);
+    let candidate = this.parseText(response.outputText, input.messageId);
     if (!candidate) candidate = this.factualSubstitution(nutritionAdvice);
-    if (!candidate) {
+    const invalidFreeAdvice =
+      !candidate &&
+      nutritionAdvice !== null &&
+      (!nutritionAdvice.substitutionEvidence ||
+        nutritionAdvice.request.substitutionPurpose === 'OFF_PLAN_ADVICE');
+    if (!candidate && !invalidFreeAdvice) {
       await this.ai.failJob(job.id, new Error('INVALID_QA_RESPONSE'), response);
       return this.failed('INVALID_AI_RESPONSE', providerDurationMs, response);
     }
     if (
+      candidate &&
       nutritionAdvice &&
       nutritionSubstitutionAnswer(nutritionAdvice) &&
       !this.factualFallbacks.has(candidate)
@@ -573,23 +563,28 @@ export class ConversationQAExecutorService {
         };
       providerDurationMs = this.elapsed(providerStartedAt);
     }
-    let violation = this.adviceViolation(
-      nutritionAdvice,
-      candidate,
-      this.verifiedDecisions.has(candidate),
-    );
+    let violation = candidate
+      ? this.adviceViolation(
+          nutritionAdvice,
+          candidate,
+          this.verifiedDecisions.has(candidate),
+        )
+      : 'INVALID_QA_RESPONSE';
     const rejectedPreference =
       violation === 'NUTRITION_ADVICE_REJECTED_FOOD' &&
       nutritionAdvice !== null &&
       (nutritionAdvice.request.intent !== 'MEAL_SUBSTITUTION' ||
         nutritionAdvice.request.substitutionPurpose === 'OFF_PLAN_ADVICE');
     if (
-      (violation === 'NUTRITION_ADVICE_COMPOSITION_UNSUPPORTED' ||
+      (invalidFreeAdvice ||
+        violation === 'NUTRITION_ADVICE_COMPOSITION_UNSUPPORTED' ||
         violation === 'NUTRITION_ADVICE_REPEATS_CURRENT_MEAL' ||
         violation === 'NUTRITION_ADVICE_REPEATS_PREVIOUS_SUGGESTION' ||
         rejectedPreference) &&
       (this.correctionGateway || rejectedPreference) &&
-      (candidate.disposition === 'ANSWER' || rejectedPreference)
+      (candidate?.disposition === 'ANSWER' ||
+        rejectedPreference ||
+        invalidFreeAdvice)
     ) {
       recovery = {
         nutritionAdviceInitialViolation:
@@ -678,7 +673,7 @@ export class ConversationQAExecutorService {
         );
       }
       providerDurationMs = this.elapsed(providerStartedAt);
-      candidate = this.parseText(response.outputText);
+      candidate = this.parseText(response.outputText, input.messageId);
       if (!candidate) {
         await this.ai.failJob(
           job.id,
@@ -698,6 +693,12 @@ export class ConversationQAExecutorService {
         return safeNutritionFallback(violation);
       }
       recovery = { ...recovery, nutritionAdviceRetryOutcome: 'RECOVERED' };
+    }
+    if (!candidate) {
+      await this.ai.failJob(job.id, new Error('INVALID_QA_RESPONSE'), response);
+      return finish(
+        this.failed('INVALID_AI_RESPONSE', providerDurationMs, response),
+      );
     }
     if (
       input.humanContext.hydrationReply &&
@@ -1056,6 +1057,21 @@ export class ConversationQAExecutorService {
     }
   }
 
+  private nutritionClarification(
+    context: NutritionAdviceContext | null,
+  ): ConversationAnswerCandidate {
+    return {
+      disposition: 'CLARIFY',
+      domain: 'NUTRITION',
+      answer: null,
+      followUpQuestion: context?.request.meal
+        ? `Não consegui validar uma sugestão segura para ${context.request.meal}. Que alimentos você prefere usar?`
+        : 'Não consegui validar uma sugestão segura. Para qual refeição você quer uma ideia?',
+      grounding: 'RECENT_CONTEXT',
+      confidence: 'LOW',
+    };
+  }
+
   private nutritionCorrectionPayload(
     payload: Readonly<Record<string, ConversationAIValue>>,
     advice: NutritionAdviceContext | null,
@@ -1074,6 +1090,33 @@ export class ConversationQAExecutorService {
             ),
           )
         : value;
+    const workoutSummary = (value: ConversationAIValue): ConversationAIValue =>
+      this.record(value)
+        ? {
+            ...value,
+            ...(Array.isArray(value.sessions)
+              ? {
+                  sessions: value.sessions.map(
+                    (session: ConversationAIValue) =>
+                      this.record(session)
+                        ? Object.fromEntries(
+                            Object.entries(session).filter(([key]) =>
+                              [
+                                'weekday',
+                                'title',
+                                'sessionKey',
+                                'estimatedDurationMinutes',
+                                'durationMinutes',
+                                'focus',
+                              ].includes(key),
+                            ),
+                          )
+                        : session,
+                  ),
+                }
+              : {}),
+          }
+        : value;
     const trusted = payload.trustedContext;
     const current = payload.currentNutrition;
     return {
@@ -1082,6 +1125,12 @@ export class ConversationQAExecutorService {
         ? {
             ...trusted,
             activeNutritionPlan: summary(trusted.activeNutritionPlan ?? null),
+            activeWorkoutPlan: workoutSummary(
+              trusted.activeWorkoutPlan ?? null,
+            ),
+            previousWorkoutPlan: workoutSummary(
+              trusted.previousWorkoutPlan ?? null,
+            ),
           }
         : trusted,
       currentNutrition: this.record(current)
@@ -1247,10 +1296,32 @@ export class ConversationQAExecutorService {
     });
   }
 
-  private parseText(value: string): ConversationAnswerCandidate | null {
+  private parseText(
+    value: string,
+    messageId?: string,
+  ): ConversationAnswerCandidate | null {
     try {
-      return this.parseCandidate(JSON.parse(value));
+      const parsed: unknown = JSON.parse(value);
+      const candidate = this.parseCandidate(parsed);
+      if (!candidate && messageId)
+        this.logger.warn({
+          event: 'CONVERSATION_QA_CANDIDATE_REJECTED',
+          messageId,
+          reason:
+            this.record(parsed) &&
+            parsed.nutritionComposition !== undefined &&
+            !parseNutritionComposition(parsed.nutritionComposition)
+              ? 'INVALID_NUTRITION_COMPOSITION'
+              : 'INVALID_QA_FIELDS',
+        });
+      return candidate;
     } catch {
+      if (messageId)
+        this.logger.warn({
+          event: 'CONVERSATION_QA_CANDIDATE_REJECTED',
+          messageId,
+          reason: 'MALFORMED_JSON',
+        });
       return null;
     }
   }
@@ -1389,10 +1460,31 @@ export class ConversationQAExecutorService {
     candidate: ConversationAnswerCandidate,
     decisionVerified = false,
   ): string | null {
+    const composition = this.compositions.get(candidate);
+    const compositionViolation =
+      context &&
+      composition &&
+      candidate.disposition === 'ANSWER' &&
+      (!context.substitutionEvidence ||
+        context.request.substitutionPurpose === 'OFF_PLAN_ADVICE')
+        ? nutritionCompositionViolation(
+            composition,
+            candidate.answer,
+            [
+              ...context.recentSuggestions,
+              ...(context.previousAdvice ? [context.previousAdvice] : []),
+            ],
+            Boolean(context.requiresMaterialVariety && context.previousAdvice),
+            this.previousCompositions.get(context) ?? [],
+          )
+        : null;
     const violation = nutritionAdviceViolation(
       context,
       candidate,
       decisionVerified,
+      composition && !compositionViolation
+        ? composition.current.map((option) => option.quote)
+        : [],
     );
     if (
       violation ||
@@ -1402,21 +1494,11 @@ export class ConversationQAExecutorService {
         context.request.substitutionPurpose !== 'OFF_PLAN_ADVICE')
     )
       return violation;
-    const composition = this.compositions.get(candidate);
     if (!composition)
       return context.requiresMaterialVariety && context.previousAdvice
         ? 'NUTRITION_ADVICE_COMPOSITION_UNSUPPORTED'
         : null;
-    return nutritionCompositionViolation(
-      composition,
-      candidate.answer,
-      [
-        ...context.recentSuggestions,
-        ...(context.previousAdvice ? [context.previousAdvice] : []),
-      ],
-      Boolean(context.requiresMaterialVariety && context.previousAdvice),
-      this.previousCompositions.get(context) ?? [],
-    );
+    return compositionViolation;
   }
 
   private failed(

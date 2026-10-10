@@ -119,6 +119,7 @@ export function referentCompatibility(
 
 export type ReadOnlyFollowUpKind =
   | 'ALTERNATIVE_REQUEST'
+  | 'SUBSTITUTION_INQUIRY'
   | 'CONSTRAINT_REFINEMENT'
   | 'FOLLOW_UP_ACCEPTANCE';
 export interface ReadOnlyFollowUp {
@@ -139,13 +140,23 @@ export interface CurrentReadOnlyReferent {
 
 export function readOnlyFollowUp(value: string): ReadOnlyFollowUp | null {
   const text = normalizeFoodTerm(value);
+  const currentTurn = originalCurrentTurn(value);
+  if (
+    !currentTurn.selfContained &&
+    currentTurn.operation === 'PROVIDE_GUIDANCE' &&
+    normalizer.normalize(value).question &&
+    /\b(?:tro(?:c|qu)\w*|substitu\w*)\b/u.test(text) &&
+    !/\b(?:plano|dieta|permanent\w*|definitiv\w*|daqui para frente)\b/u.test(
+      text,
+    )
+  )
+    return { kind: 'SUBSTITUTION_INQUIRY', constraints: [], currentTurn };
   if (
     /\b(?:tro(?:c|qu)\w*|substitu\w*|atualiz\w*|mud\w*|alter(?:e|a(?:r|cao)?|ou|ei|ando)|ajust\w*|adapt\w*|inclu\w*|remov\w*|adicion\w*|cancel\w*|persist\w*|permanent\w*|plano|dieta|isso|ess[ea])\b/u.test(
       text,
     )
   )
     return null;
-  const currentTurn = originalCurrentTurn(value);
   if (/\b(?:outr[oa]|mais (?:uma?|opcao|alternativa))\b/u.test(text))
     return {
       kind: 'ALTERNATIVE_REQUEST',
@@ -162,9 +173,12 @@ export function readOnlyFollowUp(value: string): ReadOnlyFollowUp | null {
   const request = nutritionRequest(`Me sugira uma refeição ${text}`);
   if (
     request?.constraints.length &&
-    /^(?:sem\b|mais\b|rapid[oa]s?\b|proteic[oa]s?\b|barat[oa]s?\b|leves?\b|pratic[oa]s?\b|para levar\b)/u.test(
+    (/^(?:sem\b|mais\b|rapid[oa]s?\b|proteic[oa]s?\b|barat[oa]s?\b|leves?\b|pratic[oa]s?\b|para levar\b)/u.test(
       text,
-    )
+    ) ||
+      (!currentTurn.selfContained &&
+        ['NUTRITION', 'GENERAL', 'UNKNOWN'].includes(currentTurn.domain) &&
+        ['ANSWER', 'PROVIDE_GUIDANCE'].includes(currentTurn.operation)))
   )
     return {
       kind: 'CONSTRAINT_REFINEMENT',
@@ -191,15 +205,23 @@ export function effectiveNutritionRequest(
     ...new Set([...referent.nutrition.constraints, ...followUp.constraints]),
   ]);
   return Object.freeze({
-    intent: constraints.length
-      ? 'CONSTRAINED_RECOMMENDATION'
-      : 'NUTRITION_ADVICE',
+    intent:
+      followUp.kind === 'SUBSTITUTION_INQUIRY'
+        ? 'MEAL_SUBSTITUTION'
+        : constraints.length
+          ? 'CONSTRAINED_RECOMMENDATION'
+          : 'NUTRITION_ADVICE',
     meal: referent.nutrition.meal,
     constraints,
+    ...(followUp.kind === 'SUBSTITUTION_INQUIRY'
+      ? { substitutionPurpose: 'PLAN_INQUIRY' as const }
+      : {}),
   });
 }
 
 export function nutritionRequestText(request: NutritionRequest): string {
+  if (request.intent === 'MEAL_SUBSTITUTION')
+    return `Posso substituir um alimento na ${request.meal ?? 'refeição'}?`;
   const labels: Readonly<Record<string, string>> = {
     QUICK: 'rápido',
     HIGH_PROTEIN: 'proteico',

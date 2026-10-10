@@ -69,11 +69,19 @@ export class ConversationDomainResolverService {
       this.addReferenceDomain(candidates, reference);
     }
 
-    const mealScopedNutrition = entityRecognition.entities.some(
-      (entity) => entity.kind === 'MEAL',
-    );
+    const mealScopedNutrition =
+      (nutritionAdvice && /\b(?:comer|como|comida|rango|fome)\b/u.test(text)) ||
+      entityRecognition.entities.some((entity) => entity.kind === 'MEAL');
     if (
       mealScopedNutrition &&
+      !entityRecognition.entities.some(
+        (entity) =>
+          entity.kind === 'WORKOUT_ARTIFACT' ||
+          entity.kind === 'WORKOUT_MODALITY' ||
+          entity.kind === 'EXERCISE' ||
+          entity.kind === 'EQUIPMENT' ||
+          (entity.kind === 'PLAN_COMPONENT' && entity.domain === 'WORKOUT'),
+      ) &&
       (nutritionAdvice ||
         /\b(comer|jantar|almocar|refeicao|suger|mont)\w*\b/u.test(text)) &&
       !/\b(plano de treino|monte (?:um )?treino|crie (?:um )?treino)\b/u.test(

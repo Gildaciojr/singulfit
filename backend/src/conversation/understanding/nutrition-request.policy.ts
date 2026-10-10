@@ -17,11 +17,19 @@ export interface NutritionRequest {
 export function nutritionRequest(value: string): NutritionRequest | null {
   const text = normalizeFoodTerm(value);
   const meal =
-    text.match(
-      /\b(?:lanche da tarde|lanche da manha|cafe da manha|almoco|jantar|lanche|ceia|refeicao)\b/u,
-    )?.[0] ?? null;
+    text
+      .match(
+        /\b(?:lanche da tarde|lanche da manha|cafe da manha|almoco|jantar|janta|lanche|ceia|refeicao)\b/u,
+      )?.[0]
+      ?.replace(/^janta$/u, 'jantar') ?? null;
+  const eatingQuestion =
+    meal === null &&
+    ((/\b(?:o que|que|qual)\b/u.test(text) &&
+      /\b(?:comer|comida|rango|fome)\b/u.test(text)) ||
+      /\b(?:o que|que)\s+(?:eu\s+)?como\b/u.test(text));
   const foodContext =
     meal !== null ||
+    eatingQuestion ||
     /\b(?:comer|comida|alimento|alimentacao|dieta|cardapio|frango|arroz|banana|proteic[oa]s?|lactose|gluten|vegan\w*|vegetarian\w*)\b/u.test(
       text,
     ) ||
@@ -74,7 +82,13 @@ export function nutritionRequest(value: string): NutritionRequest | null {
   );
   const substitution =
     /\b(?:no lugar|em vez|nao tenho|tro(?:c|qu)\w*|substitu\w*)\b/u.test(text);
+  const mealRequest =
+    meal !== null &&
+    (/\b(?:manda|mande|envie|envia)\b/u.test(text) ||
+      /^(?:um|uma|e (?:pro|pra|para))\b/u.test(text));
   const advice =
+    eatingQuestion ||
+    mealRequest ||
     (substitution && /\b(?:o que|qual alimento|qual opcao)\b/u.test(text)) ||
     /\b(?:dica|ideia|sugest\w*|sug(?:er|ir)\w*|recomend\w*|indi(?:c|qu)\w*|opcao|alternativa|bom .*comer|comer .*bom|algo diferente)\b/u.test(
       text,
@@ -135,10 +149,16 @@ export function selfContainedNutritionRequest(
     return null;
   const explicitFoodTarget =
     request.meal !== null ||
-    /\b(?:comer|comida|alimentacao|alimento|dieta|cardapio|frango|arroz|banana)\b/u.test(
+    /\b(?:comer|como|comida|rango|fome|alimentacao|alimento|dieta|cardapio|frango|arroz|banana)\b/u.test(
       text,
     );
   if (/\b(?:outr[oa]s?|mesm[oa]s?)\b/u.test(text) && !explicitFoodTarget)
     return null;
-  return explicitFoodTarget || request.constraints.length > 0 ? request : null;
+  return explicitFoodTarget ||
+    (request.constraints.length > 0 &&
+      /\b(?:manha|tarde|noite|sug(?:er|ir)\w*|recomend\w*|dica|ideia|opcao|alternativa)\b/u.test(
+        text,
+      ))
+    ? request
+    : null;
 }

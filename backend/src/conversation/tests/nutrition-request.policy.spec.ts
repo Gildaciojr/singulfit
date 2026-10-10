@@ -6,6 +6,42 @@ import { isDailyMealRequest } from '../understanding/daily-query.policy';
 import { explicitContinuationDomain } from '../understanding/explicit-continuation-domain.policy';
 
 describe('nutrition meal request semantics', () => {
+  it.each(['o que eu como agora?', 'tô com fome agora, o que faço?'])(
+    'recognizes immediate food guidance without a plan effect: %s',
+    (text) => {
+      expect(nutritionRequest(text)?.intent).toBe('NUTRITION_ADVICE');
+      expect(selfContainedNutritionRequest(text)).not.toBeNull();
+      expect(isDailyMealRequest(text)).toBe(false);
+    },
+  );
+  it.each([
+    'como agora eu configuro meu aplicativo?',
+    'como agora eu vejo meu histórico?',
+    'Como você acha que estou indo agora?',
+  ])('does not interpret general adverbial como as eating: %s', (text) => {
+    expect(nutritionRequest(text)).toBeNull();
+    expect(selfContainedNutritionRequest(text)).toBeNull();
+  });
+  it.each([
+    'me dá uma dica de janta',
+    'me de uma dica pra jantar',
+    'manda uma ideia de janta hoje',
+    'o que eu como hoje a noite?',
+    'tem algo bom pra comer?',
+    'tô com fome, o que faço?',
+    'manda um lanche',
+    'me dá uma dica de lanche',
+    'um lanche pra tarde',
+    'o que eu como antes do treino?',
+    'que posso comer depois da academia?',
+    'e pro café da manhã?',
+    'qual rango de hoje?',
+    'me dá uma ideia de comida',
+    'me dá uma dica de janta 😋!!',
+  ])('macro P0 recognizes everyday read-only food requests: %s', (text) => {
+    expect(nutritionRequest(text)?.intent).toBe('NUTRITION_ADVICE');
+    expect(selfContainedNutritionRequest(text)).not.toBeNull();
+  });
   it.each([
     ['O que posso comer no lugar do frango no almoço?', 'OFF_PLAN_ADVICE'],
     ['Não tenho frango, o que uso no lugar?', 'OFF_PLAN_ADVICE'],
@@ -73,6 +109,11 @@ describe('nutrition meal request semantics', () => {
     'Troque permanentemente meu lanche por uma fruta',
     'Qual meu lanche da tarde?',
     'Minha reunião é à tarde',
+    'quero algo rápido',
+    'pode ser coisa barata?',
+    'sem leite, por favor',
+    'tenho alergia a amendoim',
+    'monta uma dieta nova pra mim',
   ])('does not bypass reference, mutation or other intent: %s', (text) => {
     expect(selfContainedNutritionRequest(text)).toBeNull();
   });
