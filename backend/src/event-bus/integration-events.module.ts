@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AudioModule } from '../audio/audio.module';
 import { AutomationModule } from '../automation/automation.module';
 import { EvolutionModule } from '../evolution/evolution.module';
 import { NutritionModule } from '../nutrition/nutrition.module';
@@ -11,6 +12,7 @@ import { IntegrationEventHandlersService } from './integration-event-handlers.se
 
 @Module({
   imports: [
+    AudioModule,
     WebhooksModule,
     EvolutionModule,
     NutritionModule,

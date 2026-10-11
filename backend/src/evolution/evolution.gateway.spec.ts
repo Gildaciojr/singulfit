@@ -21,6 +21,99 @@ describe('EvolutionGateway', () => {
     return new EvolutionGateway(configService as unknown as ConfigService);
   }
 
+  it('retrieves decrypted audio from the configured Evolution instance without fetching the CDN URL', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          mediaType: 'audioMessage',
+          fileName: 'synthetic-audio.ogg',
+          caption: null,
+          size: { fileLength: 4 },
+          base64: 'T2dnUw==',
+          mimetype: 'audio/ogg; codecs=opus',
+          buffer: null,
+        }),
+      ),
+    );
+    const gateway = createGateway();
+    await expect(
+      gateway.getAudioBase64({
+        instanceName: 'singulfit',
+        externalMessageId: 'synthetic-audio',
+        remoteJid: '5511987654321@s.whatsapp.net',
+      }),
+    ).resolves.toEqual({
+      base64: 'T2dnUw==',
+      mimeType: 'audio/ogg; codecs=opus',
+    });
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'https://evolution.example.com/chat/getBase64FromMediaMessage/singulfit',
+    );
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({
+      method: 'POST',
+      headers: {
+        apikey: 'evolution-api-key',
+        'Content-Type': 'application/json',
+      },
+    });
+    const body = fetchMock.mock.calls[0][1]?.body;
+    if (typeof body !== 'string') throw new Error('Missing audio request JSON');
+    expect(JSON.parse(body)).toEqual({
+      message: {
+        key: {
+          id: 'synthetic-audio',
+          remoteJid: '5511987654321@s.whatsapp.net',
+          fromMe: false,
+        },
+      },
+      convertToMp4: false,
+    });
+  });
+  it('rejects foreign instances before retrieving private audio', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch');
+    await expect(
+      createGateway().getAudioBase64({
+        instanceName: 'foreign',
+        externalMessageId: 'synthetic',
+        remoteJid: '5511987654321@s.whatsapp.net',
+      }),
+    ).rejects.toThrow('instance mismatch');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it.each([400, 401, 404, 429, 500])(
+    'classifies audio retrieval failure %s without falling back to encrypted bytes',
+    async (status) => {
+      jest
+        .spyOn(global, 'fetch')
+        .mockResolvedValue(new Response('{}', { status }));
+      await expect(
+        createGateway().getAudioBase64({
+          instanceName: 'singulfit',
+          externalMessageId: 'synthetic',
+          remoteJid: '5511987654321@s.whatsapp.net',
+        }),
+      ).rejects.toThrow(
+        status >= 500 || status === 429
+          ? 'AUDIO_DOWNLOAD_UNAVAILABLE'
+          : 'AUDIO_DOWNLOAD_REJECTED',
+      );
+    },
+  );
+  it.each([{}, { base64: '' }, { base64: null }])(
+    'rejects invalid decrypted media responses: %j',
+    async (value) => {
+      jest
+        .spyOn(global, 'fetch')
+        .mockResolvedValue(new Response(JSON.stringify(value)));
+      await expect(
+        createGateway().getAudioBase64({
+          instanceName: 'singulfit',
+          externalMessageId: 'synthetic',
+          remoteJid: '5511987654321@s.whatsapp.net',
+        }),
+      ).rejects.toThrow('AUDIO_DOWNLOAD_EMPTY');
+    },
+  );
   it('consults the configured instance using the API key', async () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
       new Response(

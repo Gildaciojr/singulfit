@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  PayloadTooLargeException,
+} from '@nestjs/common';
 import {
   MediaType,
   MessageType,
@@ -344,12 +349,45 @@ export class EvolutionWebhookService {
         messageId: persisted.message.id,
       })}`,
     );
-    const mediaFile = await this.storeMediaIfPresent(
-      user.id,
-      persisted.message.conversationId,
-      persisted.message.id,
-      inboundMessage,
-    );
+    let mediaFile: Awaited<
+      ReturnType<EvolutionWebhookService['storeMediaIfPresent']>
+    >;
+    try {
+      mediaFile = await this.storeMediaIfPresent(
+        user.id,
+        persisted.message.conversationId,
+        persisted.message.id,
+        inboundMessage,
+      );
+    } catch (error: unknown) {
+      if (
+        inboundMessage.messageType !== 'AUDIO' ||
+        !(
+          error instanceof BadRequestException ||
+          error instanceof PayloadTooLargeException
+        )
+      )
+        throw error;
+      // Permanent intake failures get a bounded clarification through the audio
+      // consumer; transient download failures retain the existing outbox retry.
+      await this.eventBus.publish({
+        eventType: INTERNAL_EVENT.MEDIA_RECEIVED,
+        aggregateType: 'MESSAGE',
+        aggregateId: persisted.message.id,
+        payload: {
+          userId: user.id,
+          messageId: persisted.message.id,
+          mediaType: MediaType.AUDIO,
+          audioIntakeError: 'AUDIO_MEDIA_INVALID',
+        },
+      });
+      return {
+        received: true,
+        processed: true,
+        messageId: persisted.message.id,
+        userId: user.id,
+      };
+    }
 
     if (mediaFile) {
       await this.eventBus.publish({
@@ -592,6 +630,37 @@ export class EvolutionWebhookService {
       AUDIO: MediaType.AUDIO,
       DOCUMENT: MediaType.DOCUMENT,
     };
+
+    if (inboundMessage.messageType === 'AUDIO') {
+      if (inboundMessage.fileSize === 0)
+        throw new BadRequestException('AUDIO_DOWNLOAD_EMPTY');
+      // A WhatsApp CDN URL may point to encrypted .enc bytes. Evolution owns
+      // decryption; raw CDN bytes must never be treated as an audio file.
+      const existing = await this.prisma.mediaFile.findUnique({
+        where: { messageId },
+      });
+      if (existing) {
+        if (
+          existing.userId !== userId ||
+          existing.conversationId !== conversationId ||
+          existing.mediaType !== MediaType.AUDIO
+        )
+          throw new BadRequestException('Audio media ownership mismatch');
+        return { mediaFile: existing, deduplicated: true };
+      }
+      if (!inboundMessage.mediaBase64) {
+        const decoded = await this.evolutionGateway.getAudioBase64({
+          instanceName: inboundMessage.instanceName,
+          externalMessageId: inboundMessage.externalMessageId,
+          remoteJid: inboundMessage.remoteJid,
+        });
+        inboundMessage = {
+          ...inboundMessage,
+          mediaBase64: decoded.base64,
+          mimeType: decoded.mimeType ?? inboundMessage.mimeType,
+        };
+      }
+    }
 
     return this.mediaService.storeRemoteMedia({
       userId,

@@ -42,6 +42,84 @@ export class EvolutionGateway {
     return this.getRequiredConfig('EVOLUTION_INSTANCE_NAME');
   }
 
+  async getAudioBase64(input: {
+    instanceName: string;
+    externalMessageId: string;
+    remoteJid: string;
+  }): Promise<{ base64: string; mimeType?: string }> {
+    if (
+      input.instanceName !== this.getInstanceName() ||
+      !input.externalMessageId.trim()
+    )
+      throw new BadRequestException('Audio source instance mismatch');
+    let response: Response;
+    try {
+      response = await fetch(
+        `${this.getBaseUrl()}/chat/getBase64FromMediaMessage/${encodeURIComponent(input.instanceName)}`,
+        {
+          method: 'POST',
+          headers: {
+            apikey: this.getRequiredConfig('EVOLUTION_API_KEY'),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            message: {
+              key: {
+                id: input.externalMessageId,
+                remoteJid: input.remoteJid,
+                fromMe: false,
+              },
+            },
+            convertToMp4: false,
+          }),
+          signal: AbortSignal.timeout(15_000),
+        },
+      );
+    } catch {
+      throw new BadGatewayException('AUDIO_DOWNLOAD_UNAVAILABLE');
+    }
+    if (!response.ok) {
+      if (response.status >= 500 || response.status === 429)
+        throw new BadGatewayException('AUDIO_DOWNLOAD_UNAVAILABLE');
+      throw new BadRequestException('AUDIO_DOWNLOAD_REJECTED');
+    }
+    if (!response.body) throw new BadRequestException('AUDIO_DOWNLOAD_EMPTY');
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    // Base64 overhead plus JSON metadata; never buffer an unbounded API response.
+    const maxBytes = Math.ceil((25 * 1024 * 1024 * 4) / 3) + 65536;
+    try {
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        size += chunk.value.length;
+        if (size > maxBytes)
+          throw new BadRequestException('AUDIO_DOWNLOAD_TOO_LARGE');
+        chunks.push(chunk.value);
+      }
+    } finally {
+      await reader.cancel();
+    }
+    let payload: unknown;
+    try {
+      payload = JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+    } catch {
+      throw new BadRequestException('AUDIO_DOWNLOAD_INVALID');
+    }
+    if (
+      !this.isRecord(payload) ||
+      typeof payload.base64 !== 'string' ||
+      !payload.base64.trim()
+    )
+      throw new BadRequestException('AUDIO_DOWNLOAD_EMPTY');
+    return {
+      base64: payload.base64,
+      mimeType:
+        typeof payload.mimetype === 'string' ? payload.mimetype : undefined,
+    };
+  }
+
   validateWebhookSecret(suppliedSecret: string | undefined): void {
     const configuredSecret = this.getRequiredConfig('EVOLUTION_WEBHOOK_SECRET');
     const suppliedDigest = createHash('sha256')

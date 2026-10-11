@@ -1,3 +1,20 @@
+import { BadGatewayException, BadRequestException } from '@nestjs/common';
+import { AudioConversationService } from '../../audio/audio-conversation.service';
+import {
+  AudioTranscriptionGateway,
+  AudioTranscriptionError,
+} from '../../audio/audio-transcription.gateway';
+import type { AudioTranscriptionRequest } from '../../audio/audio-transcription.gateway';
+import { opusSilenceFixture } from '../../audio/audio.fixture';
+import { MediaService } from '../../storage/media.service';
+import { SecureMediaDownloader } from '../../storage/secure-media-downloader';
+import { Readable } from 'node:stream';
+import { MessagesService } from '../../whatsapp/messages.service';
+import { ConversationsService } from '../../whatsapp/conversations.service';
+import { EvolutionWebhookService } from '../../evolution/evolution-webhook.service';
+import type { EvolutionGateway } from '../../evolution/evolution.gateway';
+import type { UsersService } from '../../users/users.service';
+import type { SubscriptionsService } from '../../subscriptions/subscriptions.service';
 import { CurrentNutritionPlanReaderService } from '../../diet/current-nutrition-plan-reader.service';
 import { CanonicalNutritionPlanPresenterService } from '../../diet/canonical-nutrition-plan-presenter.service';
 import { NutritionPlanV2PersistenceValidator } from '../../diet/v2/persistence/nutrition-plan-v2-persistence.validator';
@@ -44,10 +61,7 @@ import { PersonalizedCoachContextService } from '../runtime/personalized-coach-c
 import type { CurrentWorkoutPlanReaderService } from '../../workout/v2/current-workout-plan-reader.service';
 import type { ConversationAIService } from '../../ai/conversation-ai.service';
 import { AIService } from '../../ai/ai.service';
-import type {
-  AIUsageService,
-  RecordAIUsageInput,
-} from '../../ai/ai-usage.service';
+import { AIUsageService, RecordAIUsageInput } from '../../ai/ai-usage.service';
 import { OpenAIGateway } from '../../ai/openai.gateway';
 import type { OpenAITextRequest } from '../../ai/interfaces/openai.interface';
 import type { PromptService } from '../../ai/prompt.service';
@@ -124,6 +138,16 @@ integration(
     let command: CoachCommandService;
     let automation: AutomationService;
     let handleInbound: OutboxEventHandler;
+    let handleMedia: OutboxEventHandler;
+    let audioService: AudioConversationService;
+    let audioUsage: AIUsageService;
+    let audioWebhook: EvolutionWebhookService;
+    let audioMedia: MediaService;
+    let audioAllowed: boolean;
+    let audioRolloutValues: Record<string, unknown>;
+    const audioProvider = { configuration: jest.fn(), transcribe: jest.fn() };
+    const audioDownload = jest.fn();
+    const audioObjects = new Map<string, Buffer>();
     let promptId: string;
     let ruleId: string;
     let hydrationRuleId: string;
@@ -422,7 +446,10 @@ integration(
               durationMinutes: 60,
               modality: 'GYM',
             },
-            safety: { allergies: { status: 'KNOWN', value: ['PEANUT'] } },
+            safety: {
+              allergies: { status: 'KNOWN', value: ['PEANUT'] },
+              physicalLimitations: snapshot.restrictions.physicalLimitations,
+            },
             nutrition: {
               declaredFoodRejections: {
                 status: 'KNOWN',
@@ -566,6 +593,91 @@ integration(
         {} as never,
         new CoachProactiveSchedulePolicy(),
       );
+      audioAllowed = true;
+      audioRolloutValues = {
+        AUDIO_TRANSCRIPTION_MODE: 'CANARY',
+        AUDIO_TRANSCRIPTION_CANARY_USER_IDS: userId,
+        AUDIO_TRANSCRIPTION_GLOBAL_AUTHORIZED: 'false',
+      };
+      audioProvider.configuration
+        .mockReset()
+        .mockReturnValue({ model: 'controlled-transcribe' });
+      audioProvider.transcribe.mockReset();
+      audioDownload.mockReset().mockResolvedValue({
+        base64: opusSilenceFixture().toString('base64'),
+        mimeType: 'audio/ogg; codecs=opus',
+      });
+      audioObjects.clear();
+      audioMedia = new MediaService(
+        prisma,
+        new ConfigService({ MAX_AUDIO_SIZE_MB: '25' }),
+        {} as SecureMediaDownloader,
+        {
+          store: ({ checksum, content }) => {
+            audioObjects.set(checksum, content);
+            return Promise.resolve({
+              storagePath: checksum,
+              deduplicated: false,
+            });
+          },
+          open: (path) => {
+            const content = audioObjects.get(path);
+            if (!content) throw new Error('Missing controlled audio object');
+            return Promise.resolve({
+              stream: Readable.from(content),
+              fileSize: content.length,
+            });
+          },
+        },
+      );
+      audioUsage = new AIUsageService(
+        prisma,
+        new ConfigService({
+          OPENAI_AUDIO_INPUT_COST_PER_1M_USD: '1',
+          OPENAI_AUDIO_OUTPUT_COST_PER_1M_USD: '2',
+        }),
+      );
+      const audioAI = new AIService(
+        prisma,
+        {} as PromptService,
+        {} as OpenAIGateway,
+        audioUsage,
+        {} as ReservationService,
+        { confirmInTransaction: jest.fn() } as unknown as UsageService,
+        new ConfigService(),
+        eventBus,
+      );
+      audioService = new AudioConversationService(
+        prisma,
+        audioMedia,
+        audioProvider as unknown as AudioTranscriptionGateway,
+        audioAI,
+        audioUsage,
+        eventBus,
+        {
+          get: (key: string) => audioRolloutValues[key],
+        } as unknown as ConfigService,
+      );
+      const conversations = new ConversationsService(prisma);
+      audioWebhook = new EvolutionWebhookService(
+        {
+          validateWebhookSecret: () => undefined,
+          getInstanceName: () => 'isolated-audio',
+          getAudioBase64: audioDownload,
+        } as unknown as EvolutionGateway,
+        {
+          findByWhatsAppPhone: () =>
+            db.user.findUniqueOrThrow({ where: { id: userId } }),
+        } as unknown as UsersService,
+        {
+          getMessagingSubscription: () => Promise.resolve(null),
+        } as unknown as SubscriptionsService,
+        conversations,
+        new MessagesService(prisma, conversations),
+        audioMedia,
+        prisma,
+        eventBus,
+      );
       const registry = new EventHandlerRegistry();
       const handlers = new IntegrationEventHandlersService(
         registry,
@@ -584,9 +696,10 @@ integration(
         {
           captureActiveResponse: () => Promise.resolve({ handled: false }),
         } as never,
-        { authorizeOrNotify: () => Promise.resolve(true) } as never,
+        { authorizeOrNotify: () => Promise.resolve(audioAllowed) } as never,
         undefined,
         continuations,
+        audioService,
       );
       handlers.onModuleInit();
       const handler = registry.get(
@@ -594,6 +707,9 @@ integration(
       );
       if (!handler) throw new Error('Real inbound handler missing');
       handleInbound = handler;
+      const mediaHandler = registry.get(INTERNAL_EVENT.MEDIA_RECEIVED);
+      if (!mediaHandler) throw new Error('Missing media handler');
+      handleMedia = mediaHandler;
     });
     afterEach(async () => {
       if (userId) {
@@ -634,6 +750,12 @@ integration(
           payload: { userId, messageId: row.id },
         },
       });
+      return deliverInbound(row, event);
+    }
+    async function deliverInbound(
+      row: { id: string },
+      event: Parameters<OutboxEventHandler>[0],
+    ) {
       await handleInbound(event);
       await db.outboxEvent.update({
         where: { id: event.id },
@@ -705,6 +827,786 @@ integration(
       ).toBe('SENT');
       return { inbound: row, response };
     }
+    async function queuedAudio(
+      options: {
+        externalId?: string;
+        mime?: string;
+        content?: Buffer;
+        download?: boolean;
+      } = {},
+    ) {
+      at = new Date();
+      const externalId = options.externalId ?? randomUUID();
+      const payload = {
+        event: 'messages.upsert',
+        instance: 'isolated-audio',
+        data: {
+          key: {
+            id: externalId,
+            remoteJid: '5511987654321@s.whatsapp.net',
+            fromMe: false,
+          },
+          messageTimestamp: Math.floor(at.getTime() / 1000),
+          message: {
+            audioMessage: {
+              mimetype: options.mime ?? 'audio/ogg; codecs=opus',
+              fileLength: (options.content ?? opusSilenceFixture()).length,
+              url: 'https://cdn.example.test/encrypted.enc',
+              ...(options.download
+                ? {}
+                : {
+                    base64: (options.content ?? opusSilenceFixture()).toString(
+                      'base64',
+                    ),
+                  }),
+            },
+          },
+        },
+      };
+      // Link the synthetic conversation to the controlled sender, never an external account.
+      await db.conversation.update({
+        where: { id: conversationId },
+        data: { remoteJid: payload.data.key.remoteJid },
+      });
+      await audioWebhook.handle(payload, 'synthetic-secret');
+      const event = await db.evolutionInboundEvent.findUniqueOrThrow({
+        where: {
+          instanceName_externalMessageId: {
+            instanceName: 'isolated-audio',
+            externalMessageId: externalId,
+          },
+        },
+      });
+      await audioWebhook.processQueuedEvent(event.id);
+      const source = await db.message.findUniqueOrThrow({
+        where: {
+          instanceName_externalMessageId: {
+            instanceName: 'isolated-audio',
+            externalMessageId: externalId,
+          },
+        },
+      });
+      const mediaEvent = await db.outboxEvent.findFirstOrThrow({
+        where: {
+          eventType: INTERNAL_EVENT.MEDIA_RECEIVED,
+          payload: { path: ['messageId'], equals: source.id },
+        },
+      });
+      return { payload, source, mediaEvent };
+    }
+    function transcript(text: string) {
+      return {
+        responseId: randomUUID(),
+        model: 'controlled-transcribe',
+        outputText: text,
+        promptTokens: 10,
+        completionTokens: 5,
+        totalTokens: 15,
+      };
+    }
+    async function deliverAudio(
+      queued: Awaited<ReturnType<typeof queuedAudio>>,
+    ) {
+      await handleMedia(queued.mediaEvent);
+      const job = await db.aIJob.findFirstOrThrow({
+        where: { messageId: queued.source.id, type: 'AUDIO' },
+      });
+      expect(job.status).toBe('COMPLETED');
+      expect(job.result).toMatchObject({
+        sourceMessageId: queued.source.id,
+        phase: 'PUBLISHED',
+      });
+      const projection = await db.message.findUniqueOrThrow({
+        where: {
+          instanceName_externalMessageId: {
+            instanceName: 'INTERNAL_AUDIO_TRANSCRIPT',
+            externalMessageId: queued.source.id,
+          },
+        },
+      });
+      expect(projection.type).toBe('TEXT');
+      expect(projection.conversationId).toBe(conversationId);
+      expect(
+        (
+          await db.message.findUniqueOrThrow({
+            where: { id: queued.source.id },
+          })
+        ).type,
+      ).toBe('AUDIO');
+      const event = await db.outboxEvent.findUniqueOrThrow({
+        where: {
+          eventType_aggregateType_aggregateId: {
+            eventType: INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED,
+            aggregateType: 'MESSAGE',
+            aggregateId: projection.id,
+          },
+        },
+      });
+      const response = await deliverInbound(projection, event);
+      await handleMedia(queued.mediaEvent);
+      expect(await db.aIUsage.count({ where: { aiJobId: job.id } })).toBe(1);
+      expect(
+        await db.aIJob.count({
+          where: { messageId: queued.source.id, type: 'AUDIO' },
+        }),
+      ).toBe(1);
+      return response;
+    }
+    it.each([
+      'DEFAULT_OFF',
+      'OFF',
+      'CANARY_OTHER_USER',
+      'CANARY_EMPTY',
+      'CANARY_WILDCARD',
+      'CANARY_CONTACT',
+      'CANARY_EMAIL',
+      'CANARY_PARTIAL_INVALID',
+      'CANARY_TRAILING_COMMA',
+      'MODE_INVALID',
+      'MODE_NON_STRING',
+      'ALLOWLIST_NON_STRING',
+      'GLOBAL_UNAUTHORIZED',
+      'GLOBAL_FLAG_INVALID',
+      'GLOBAL_FLAG_NON_STRING',
+      'GLOBAL_ALLOWLIST_INVALID',
+    ])(
+      'audio rollout %s ignores original AUDIO and replay without jobs, calls or clarification',
+      async (scenario) => {
+        switch (scenario) {
+          case 'DEFAULT_OFF':
+            audioRolloutValues = {};
+            break;
+          case 'OFF':
+            audioRolloutValues.AUDIO_TRANSCRIPTION_MODE = 'OFF';
+            audioRolloutValues.AUDIO_TRANSCRIPTION_GLOBAL_AUTHORIZED = 'true';
+            break;
+          case 'CANARY_OTHER_USER':
+            audioRolloutValues.AUDIO_TRANSCRIPTION_CANARY_USER_IDS = foreignId;
+            break;
+          case 'CANARY_EMPTY':
+            audioRolloutValues.AUDIO_TRANSCRIPTION_CANARY_USER_IDS = '';
+            break;
+          case 'CANARY_WILDCARD':
+            audioRolloutValues.AUDIO_TRANSCRIPTION_CANARY_USER_IDS = '*';
+            break;
+          case 'CANARY_CONTACT':
+            audioRolloutValues.AUDIO_TRANSCRIPTION_CANARY_USER_IDS =
+              '5511999999999';
+            break;
+          case 'CANARY_EMAIL':
+            audioRolloutValues.AUDIO_TRANSCRIPTION_CANARY_USER_IDS =
+              'synthetic@example.invalid';
+            break;
+          case 'CANARY_PARTIAL_INVALID':
+            audioRolloutValues.AUDIO_TRANSCRIPTION_CANARY_USER_IDS = `${userId},*`;
+            break;
+          case 'CANARY_TRAILING_COMMA':
+            audioRolloutValues.AUDIO_TRANSCRIPTION_CANARY_USER_IDS = `${userId},`;
+            break;
+          case 'MODE_INVALID':
+            audioRolloutValues.AUDIO_TRANSCRIPTION_MODE = 'ON';
+            break;
+          case 'MODE_NON_STRING':
+            audioRolloutValues.AUDIO_TRANSCRIPTION_MODE = true;
+            break;
+          case 'ALLOWLIST_NON_STRING':
+            audioRolloutValues.AUDIO_TRANSCRIPTION_CANARY_USER_IDS = [userId];
+            break;
+          case 'GLOBAL_UNAUTHORIZED':
+            audioRolloutValues.AUDIO_TRANSCRIPTION_MODE = 'GLOBAL';
+            delete audioRolloutValues.AUDIO_TRANSCRIPTION_GLOBAL_AUTHORIZED;
+            break;
+          case 'GLOBAL_FLAG_INVALID':
+            audioRolloutValues.AUDIO_TRANSCRIPTION_MODE = 'GLOBAL';
+            audioRolloutValues.AUDIO_TRANSCRIPTION_GLOBAL_AUTHORIZED = 'yes';
+            break;
+          case 'GLOBAL_FLAG_NON_STRING':
+            audioRolloutValues.AUDIO_TRANSCRIPTION_MODE = 'GLOBAL';
+            audioRolloutValues.AUDIO_TRANSCRIPTION_GLOBAL_AUTHORIZED = true;
+            break;
+          case 'GLOBAL_ALLOWLIST_INVALID':
+            audioRolloutValues.AUDIO_TRANSCRIPTION_MODE = 'GLOBAL';
+            audioRolloutValues.AUDIO_TRANSCRIPTION_GLOBAL_AUTHORIZED = 'true';
+            audioRolloutValues.AUDIO_TRANSCRIPTION_CANARY_USER_IDS = '*';
+            break;
+        }
+        const queued = await queuedAudio();
+        const prompts = await db.promptVersion.count({
+          where: { name: 'whatsapp_audio_transcription' },
+        });
+        const scheduled = await db.scheduledMessage.count({
+          where: { userId },
+        });
+        await handleMedia(queued.mediaEvent);
+        await handleMedia(queued.mediaEvent);
+        // Calling the service directly must not bypass the consumer's rollout.
+        await audioService.process({
+          userId,
+          messageId: queued.source.id,
+          intakeError: true,
+        });
+        expect(audioProvider.configuration).not.toHaveBeenCalled();
+        expect(audioProvider.transcribe).not.toHaveBeenCalled();
+        expect(provider.createTextResponse).not.toHaveBeenCalled();
+        expect(send).not.toHaveBeenCalled();
+        expect(await db.aIJob.count({ where: { userId, type: 'AUDIO' } })).toBe(
+          0,
+        );
+        expect(await db.aIUsage.count({ where: { userId } })).toBe(0);
+        expect(
+          await db.promptVersion.count({
+            where: { name: 'whatsapp_audio_transcription' },
+          }),
+        ).toBe(prompts);
+        expect(await db.scheduledMessage.count({ where: { userId } })).toBe(
+          scheduled,
+        );
+        expect(
+          await db.message.count({
+            where: {
+              instanceName: 'INTERNAL_AUDIO_TRANSCRIPT',
+              externalMessageId: queued.source.id,
+            },
+          }),
+        ).toBe(0);
+        expect(
+          (
+            await db.message.findUniqueOrThrow({
+              where: { id: queued.source.id },
+            })
+          ).type,
+        ).toBe('AUDIO');
+      },
+    );
+    it('CANARY activates only its internal user and OFF preserves a completed replay without new effects', async () => {
+      audioRolloutValues.AUDIO_TRANSCRIPTION_CANARY_USER_IDS = ` ${userId.toUpperCase()} `;
+      expect(audioService.isEnabledForUser(userId)).toBe(true);
+      expect(audioService.isEnabledForUser(foreignId)).toBe(false);
+      audioProvider.transcribe.mockResolvedValueOnce(
+        transcript('Já bebi água hoje'),
+      );
+      const queued = await queuedAudio();
+      await deliverAudio(queued);
+      const sends = send.mock.calls.length;
+      const jobs = await db.aIJob.count({ where: { userId } });
+      const scheduled = await db.scheduledMessage.count({ where: { userId } });
+      audioRolloutValues.AUDIO_TRANSCRIPTION_MODE = 'OFF';
+      await handleMedia(queued.mediaEvent);
+      await audioService.process({ userId, messageId: queued.source.id });
+      expect(audioProvider.transcribe).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledTimes(sends);
+      expect(await db.aIJob.count({ where: { userId } })).toBe(jobs);
+      expect(await db.scheduledMessage.count({ where: { userId } })).toBe(
+        scheduled,
+      );
+    });
+    it('GLOBAL requires both explicit switches and still enforces AUDIO ownership', async () => {
+      audioRolloutValues.AUDIO_TRANSCRIPTION_MODE = 'GLOBAL';
+      expect(audioService.isEnabledForUser(userId)).toBe(false);
+      audioRolloutValues.AUDIO_TRANSCRIPTION_GLOBAL_AUTHORIZED = 'true';
+      expect(audioService.isEnabledForUser(userId)).toBe(true);
+      expect(audioService.isEnabledForUser(foreignId)).toBe(true);
+      expect(audioService.isEnabledForUser('5511999999999')).toBe(false);
+      const queued = await queuedAudio();
+      await expect(
+        audioService.process({
+          userId: foreignId,
+          messageId: queued.source.id,
+        }),
+      ).rejects.toThrow('ownership');
+      expect(audioProvider.transcribe).not.toHaveBeenCalled();
+      audioProvider.transcribe.mockResolvedValueOnce(
+        transcript('Já bebi água hoje'),
+      );
+      await deliverAudio(queued);
+    });
+    it('audio follows webhook, transcription, canonical QA and controlled WhatsApp delivery once', async () => {
+      outputs.push(
+        answer('Uma ideia geral para jantar é arroz com peixe e pepino.'),
+      );
+      audioProvider.transcribe.mockResolvedValueOnce(
+        transcript('Me dá uma dica de jantar'),
+      );
+      const queued = await queuedAudio({ download: true });
+      await audioWebhook.handle(queued.payload, 'synthetic-secret');
+      const turn = await deliverAudio(queued);
+      expect(turn.response.content).toContain('peixe');
+      expect(audioDownload).toHaveBeenCalledTimes(1);
+      expect(audioProvider.transcribe).toHaveBeenCalledTimes(1);
+      expect(
+        await db.message.count({
+          where: {
+            instanceName: 'isolated-audio',
+            externalMessageId: queued.source.externalMessageId,
+          },
+        }),
+      ).toBe(1);
+      expect(
+        JSON.parse(provider.createTextResponse.mock.calls[0][0].input),
+      ).toMatchObject({ request: 'Me dá uma dica de jantar' });
+    });
+    it('audio consults the registered diet without generating or changing plans', async () => {
+      audioProvider.transcribe.mockResolvedValueOnce(
+        transcript('Me mostra minha dieta atual'),
+      );
+      const turn = await deliverAudio(await queuedAudio());
+      expect(turn.response.content).toContain(plan.title);
+      expect(provider.createTextResponse).not.toHaveBeenCalled();
+    });
+    it('audio water report uses canonical hydration without claiming tracking', async () => {
+      audioProvider.transcribe.mockResolvedValueOnce(
+        transcript('Já bebi 1 litro de água hoje'),
+      );
+      const turn = await deliverAudio(await queuedAudio());
+      expect(turn.response.content).toContain('ao longo do dia');
+      expect(turn.response.content).not.toMatch(/registrei|meta.*atingida/iu);
+      expect(provider.createTextResponse).not.toHaveBeenCalled();
+    });
+    it('text audio text preserves temporary food unavailability and safe substitutions', async () => {
+      outputs.push(answer('Uma ideia geral de jantar é arroz com frango.'));
+      await inbound('Me dá uma dica de jantar');
+      outputs.push(answer('Uma ideia aproximada é arroz com ovo.'));
+      audioProvider.transcribe.mockResolvedValueOnce(
+        transcript('Não tenho frango'),
+      );
+      await deliverAudio(await queuedAudio());
+      outputs.push(answer('Uma ideia geral depois do treino é pão com ovo.'));
+      const next = await inbound('O que posso comer depois do treino?');
+      expect(next.response.content).not.toContain('frango');
+      expect(
+        JSON.parse(provider.createTextResponse.mock.calls.at(-1)![0].input),
+      ).toMatchObject({
+        nutritionGuidance: {
+          temporarilyUnavailableFoods: expect.arrayContaining(['frango']),
+        },
+      });
+    });
+    it('audio workout guidance keeps physical restrictions in the contextual executor', async () => {
+      snapshot = {
+        ...snapshot,
+        restrictions: {
+          ...snapshot.restrictions,
+          physicalLimitations: knownDatum([
+            {
+              type: 'KNEE_PAIN',
+              description: 'Dor no joelho',
+              source: 'USER',
+            },
+          ]),
+        },
+      };
+      outputs.push(
+        answer(
+          'Com dor no joelho, respeite seus limites e converse com o profissional que acompanha você.',
+          'WORKOUT',
+        ),
+      );
+      audioProvider.transcribe.mockResolvedValueOnce(
+        transcript(
+          'Como adaptar meu treino de academia às minhas limitações físicas?',
+        ),
+      );
+      const turn = await deliverAudio(await queuedAudio());
+      expect(turn.response.content).toContain('joelho');
+      expect(
+        JSON.stringify(
+          JSON.parse(provider.createTextResponse.mock.calls[0][0].input),
+        ),
+      ).toContain('joelho');
+      expect(planning.execute).not.toHaveBeenCalled();
+    });
+    it('concurrent media processing claims a single transcription and replays its result', async () => {
+      let release: ((value: ReturnType<typeof transcript>) => void) | undefined;
+      audioProvider.transcribe.mockImplementationOnce(
+        () =>
+          new Promise<ReturnType<typeof transcript>>((resolve) => {
+            release = resolve;
+          }),
+      );
+      const queued = await queuedAudio();
+      const first = handleMedia(queued.mediaEvent);
+      for (let i = 0; !release && i < 100; i++)
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(release).toBeDefined();
+      await expect(handleMedia(queued.mediaEvent)).rejects.toThrow(
+        'already in progress',
+      );
+      release!(transcript('Já bebi água hoje'));
+      await first;
+      await deliverAudio(queued);
+      expect(audioProvider.transcribe).toHaveBeenCalledTimes(1);
+    });
+    it('explicit transient provider rejection retries once without duplicate accounting or delivery', async () => {
+      audioProvider.transcribe
+        .mockRejectedValueOnce(
+          new AudioTranscriptionError('AUDIO_PROVIDER_RATE_LIMIT', true),
+        )
+        .mockResolvedValueOnce(transcript('Já bebi água hoje'));
+      const queued = await queuedAudio();
+      await expect(handleMedia(queued.mediaEvent)).rejects.toThrow(
+        'AUDIO_TRANSIENT_FAILURE',
+      );
+      const pending = await db.aIJob.findFirstOrThrow({
+        where: { messageId: queued.source.id, type: 'AUDIO' },
+      });
+      expect(pending).toMatchObject({
+        status: 'PENDING',
+        startedAt: null,
+        leaseExpiresAt: null,
+      });
+      await deliverAudio(queued);
+      expect(audioProvider.transcribe).toHaveBeenCalledTimes(2);
+    });
+    it.each(['', '  ', '\u0000invalid'])(
+      'invalid transcript %j clarifies once instead of manufacturing understanding',
+      async (text) => {
+        audioProvider.transcribe.mockResolvedValueOnce(transcript(text));
+        const queued = await queuedAudio();
+        await handleMedia(queued.mediaEvent);
+        await handleMedia(queued.mediaEvent);
+        expect(provider.createTextResponse).not.toHaveBeenCalled();
+        expect(audioProvider.transcribe).toHaveBeenCalledTimes(1);
+        expect(
+          await db.message.count({
+            where: {
+              instanceName: 'INTERNAL_AUDIO_TRANSCRIPT',
+              externalMessageId: queued.source.id,
+            },
+          }),
+        ).toBe(0);
+        const clarifications = await db.scheduledMessage.findMany({
+          where: {
+            userId,
+            context: {
+              path: ['audioSourceMessageId'],
+              equals: queued.source.id,
+            },
+          },
+        });
+        expect(clarifications).toHaveLength(1);
+        const sends = send.mock.calls.length;
+        await automation.sendScheduledMessage(
+          clarifications[0].id,
+          new Date(Date.now() + 2000),
+        );
+        await automation.sendScheduledMessage(
+          clarifications[0].id,
+          new Date(Date.now() + 3000),
+        );
+        expect(send).toHaveBeenCalledTimes(sends + 1);
+        expect(send.mock.calls.at(-1)?.[0].text).toContain(
+          'Não consegui entender',
+        );
+      },
+    );
+    it.each([
+      { mime: 'application/pdf', content: opusSilenceFixture() },
+      { mime: 'audio/ogg', content: Buffer.alloc(0) },
+      { mime: 'audio/ogg', content: Buffer.from('encrypted .enc data') },
+    ])(
+      'invalid audio media clarifies without a paid transcription: %s',
+      async (options) => {
+        const queued = await queuedAudio(options);
+        await handleMedia(queued.mediaEvent);
+        await handleMedia(queued.mediaEvent);
+        expect(audioProvider.transcribe).not.toHaveBeenCalled();
+        expect(
+          await db.scheduledMessage.count({
+            where: {
+              userId,
+              context: {
+                path: ['audioSourceMessageId'],
+                equals: queued.source.id,
+              },
+            },
+          }),
+        ).toBe(1);
+      },
+    );
+    it('a transient Evolution download failure retries intake without recreating the AUDIO inbound', async () => {
+      const externalId = randomUUID();
+      audioDownload.mockRejectedValueOnce(
+        new BadGatewayException('controlled download unavailable'),
+      );
+      await expect(queuedAudio({ externalId, download: true })).rejects.toThrow(
+        'download unavailable',
+      );
+      audioProvider.transcribe.mockResolvedValueOnce(
+        transcript('Já bebi água hoje'),
+      );
+      const queued = await queuedAudio({ externalId, download: true });
+      await deliverAudio(queued);
+      expect(
+        await db.message.count({
+          where: {
+            instanceName: 'isolated-audio',
+            externalMessageId: externalId,
+          },
+        }),
+      ).toBe(1);
+      expect(audioProvider.transcribe).toHaveBeenCalledTimes(1);
+    });
+    it('a permanent Evolution download failure publishes a single safe clarification', async () => {
+      audioDownload.mockRejectedValue(
+        new BadRequestException('controlled permanent download rejection'),
+      );
+      const queued = await queuedAudio({ download: true });
+      await handleMedia(queued.mediaEvent);
+      await handleMedia(queued.mediaEvent);
+      expect(audioProvider.transcribe).not.toHaveBeenCalled();
+      expect(
+        await db.scheduledMessage.count({
+          where: {
+            userId,
+            context: {
+              path: ['audioSourceMessageId'],
+              equals: queued.source.id,
+            },
+          },
+        }),
+      ).toBe(1);
+    });
+    it.each([
+      'OPENAI_MODEL_AUDIO',
+      'OPENAI_AUDIO_INPUT_COST_PER_1M_USD',
+      'OPENAI_AUDIO_OUTPUT_COST_PER_1M_USD',
+    ])(
+      'missing %s resolves the media event safely without transcription or usage',
+      async (missing) => {
+        const values: Record<string, string> = {
+          OPENAI_API_KEY: 'synthetic-test-key',
+          OPENAI_MODEL_AUDIO: 'gpt-4o-mini-transcribe',
+          OPENAI_AUDIO_INPUT_COST_PER_1M_USD: '1',
+          OPENAI_AUDIO_OUTPUT_COST_PER_1M_USD: '2',
+        };
+        delete values[missing];
+        const config = new ConfigService(values);
+        const gateway = new AudioTranscriptionGateway(config);
+        const usage = new AIUsageService(prisma, config);
+        audioProvider.configuration.mockImplementation(() =>
+          gateway.configuration(),
+        );
+        const cost = jest
+          .spyOn(audioUsage, 'estimateCost')
+          .mockImplementation((type, inputTokens, outputTokens) =>
+            usage.estimateCost(type, inputTokens, outputTokens),
+          );
+        const request = jest
+          .spyOn(global, 'fetch')
+          .mockRejectedValue(new Error('Provider calls disabled in this test'));
+        try {
+          const queued = await queuedAudio();
+          await expect(handleMedia(queued.mediaEvent)).resolves.toBeUndefined();
+          await expect(handleMedia(queued.mediaEvent)).resolves.toBeUndefined();
+          expect(request).not.toHaveBeenCalled();
+          expect(audioProvider.transcribe).not.toHaveBeenCalled();
+          expect(provider.createTextResponse).not.toHaveBeenCalled();
+          const job = await db.aIJob.findFirstOrThrow({
+            where: { messageId: queued.source.id, type: 'AUDIO' },
+          });
+          expect(job.status).toBe('FAILED');
+          expect(job.error).toBe('AUDIO_TRANSCRIPTION_NOT_CONFIGURED');
+          expect(await db.aIUsage.count({ where: { aiJobId: job.id } })).toBe(
+            0,
+          );
+          expect(
+            await db.message.count({
+              where: {
+                instanceName: 'INTERNAL_AUDIO_TRANSCRIPT',
+                externalMessageId: queued.source.id,
+              },
+            }),
+          ).toBe(0);
+          const clarifications = await db.scheduledMessage.findMany({
+            where: {
+              userId,
+              context: {
+                path: ['audioSourceMessageId'],
+                equals: queued.source.id,
+              },
+            },
+          });
+          expect(clarifications).toHaveLength(1);
+          const sends = send.mock.calls.length;
+          await automation.sendScheduledMessage(
+            clarifications[0].id,
+            new Date(Date.now() + 2000),
+          );
+          await automation.sendScheduledMessage(
+            clarifications[0].id,
+            new Date(Date.now() + 3000),
+          );
+          expect(send).toHaveBeenCalledTimes(sends + 1);
+        } finally {
+          request.mockRestore();
+          cost.mockRestore();
+        }
+      },
+    );
+    it('unexpected duration accounting never produces invented zero-cost usage or a second provider call', async () => {
+      const gateway = new AudioTranscriptionGateway(
+        new ConfigService({
+          OPENAI_API_KEY: 'synthetic-test-key',
+          OPENAI_MODEL_AUDIO: 'gpt-4o-mini-transcribe',
+        }),
+      );
+      audioProvider.configuration.mockImplementation(() =>
+        gateway.configuration(),
+      );
+      audioProvider.transcribe.mockImplementation(
+        (request: AudioTranscriptionRequest) => gateway.transcribe(request),
+      );
+      const request = jest.spyOn(global, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            text: 'Já bebi água hoje',
+            usage: { type: 'duration', seconds: 4 },
+          }),
+        ),
+      );
+      try {
+        const queued = await queuedAudio();
+        await expect(handleMedia(queued.mediaEvent)).resolves.toBeUndefined();
+        await handleMedia(queued.mediaEvent);
+        expect(request).toHaveBeenCalledTimes(1);
+        expect(audioProvider.transcribe).toHaveBeenCalledTimes(1);
+        expect(provider.createTextResponse).not.toHaveBeenCalled();
+        const job = await db.aIJob.findFirstOrThrow({
+          where: { messageId: queued.source.id, type: 'AUDIO' },
+        });
+        expect(job.status).toBe('FAILED');
+        expect(job.error).toBe('AUDIO_PROVIDER_INVALID_USAGE');
+        expect(job.result).toMatchObject({ phase: 'REQUEST_STARTED' });
+        expect(await db.aIUsage.count({ where: { aiJobId: job.id } })).toBe(0);
+        expect(
+          await db.message.count({
+            where: {
+              instanceName: 'INTERNAL_AUDIO_TRANSCRIPT',
+              externalMessageId: queued.source.id,
+            },
+          }),
+        ).toBe(0);
+        const clarifications = await db.scheduledMessage.findMany({
+          where: {
+            userId,
+            context: {
+              path: ['audioSourceMessageId'],
+              equals: queued.source.id,
+            },
+          },
+        });
+        expect(clarifications).toHaveLength(1);
+        const sends = send.mock.calls.length;
+        await automation.sendScheduledMessage(
+          clarifications[0].id,
+          new Date(Date.now() + 2000),
+        );
+        await automation.sendScheduledMessage(
+          clarifications[0].id,
+          new Date(Date.now() + 3000),
+        );
+        expect(send).toHaveBeenCalledTimes(sends + 1);
+      } finally {
+        request.mockRestore();
+      }
+    });
+    it('replays an acknowledged transcription after transient accounting failure without another provider call', async () => {
+      audioProvider.transcribe.mockResolvedValueOnce(
+        transcript('Já bebi água hoje'),
+      );
+      const queued = await queuedAudio();
+      const accounting = jest
+        .spyOn(audioUsage, 'recordInTransaction')
+        .mockRejectedValueOnce(new Error('controlled transient persistence'));
+      await expect(handleMedia(queued.mediaEvent)).rejects.toThrow(
+        'controlled transient persistence',
+      );
+      const received = await db.aIJob.findFirstOrThrow({
+        where: { messageId: queued.source.id, type: 'AUDIO' },
+      });
+      expect(received.result).toMatchObject({ phase: 'RECEIVED' });
+      expect(await db.aIUsage.count({ where: { aiJobId: received.id } })).toBe(
+        0,
+      );
+      accounting.mockRestore();
+      await deliverAudio(queued);
+      expect(audioProvider.transcribe).toHaveBeenCalledTimes(1);
+    });
+    it('unknown provider outcome is terminal, with no charged retranscription on replay', async () => {
+      audioProvider.transcribe.mockRejectedValue(
+        new AudioTranscriptionError('AUDIO_PROVIDER_OUTCOME_UNKNOWN', false),
+      );
+      const queued = await queuedAudio();
+      await handleMedia(queued.mediaEvent);
+      await handleMedia(queued.mediaEvent);
+      expect(audioProvider.transcribe).toHaveBeenCalledTimes(1);
+      expect(
+        await db.message.count({
+          where: {
+            instanceName: 'INTERNAL_AUDIO_TRANSCRIPT',
+            externalMessageId: queued.source.id,
+          },
+        }),
+      ).toBe(0);
+      expect(
+        await db.scheduledMessage.count({
+          where: {
+            userId,
+            context: {
+              path: ['audioSourceMessageId'],
+              equals: queued.source.id,
+            },
+          },
+        }),
+      ).toBe(1);
+    });
+    it('repeated explicit rate-limit rejection stops after three bounded attempts', async () => {
+      audioProvider.transcribe.mockRejectedValue(
+        new AudioTranscriptionError('AUDIO_PROVIDER_RATE_LIMIT', true),
+      );
+      const queued = await queuedAudio();
+      await expect(handleMedia(queued.mediaEvent)).rejects.toThrow(
+        'AUDIO_TRANSIENT_FAILURE',
+      );
+      await expect(handleMedia(queued.mediaEvent)).rejects.toThrow(
+        'AUDIO_TRANSIENT_FAILURE',
+      );
+      await handleMedia(queued.mediaEvent);
+      await handleMedia(queued.mediaEvent);
+      expect(audioProvider.transcribe).toHaveBeenCalledTimes(3);
+      expect(
+        await db.aIJob.findFirstOrThrow({
+          where: { messageId: queued.source.id, type: 'AUDIO' },
+        }),
+      ).toMatchObject({ status: 'FAILED', attempts: 3 });
+    });
+    it('audio refusal uses the same deterministic effect boundary as text', async () => {
+      audioProvider.transcribe.mockResolvedValueOnce(
+        transcript('Não crie um novo plano de treino. Já bebi água hoje.'),
+      );
+      await deliverAudio(await queuedAudio());
+      expect(planning.execute).not.toHaveBeenCalled();
+      expect(await db.aIJob.count({ where: { userId, type: 'WORKOUT' } })).toBe(
+        0,
+      );
+    });
+    it('ineligible and foreign users cannot transcribe or enter the conversational pipeline', async () => {
+      const queued = await queuedAudio();
+      audioAllowed = false;
+      await handleMedia(queued.mediaEvent);
+      expect(audioProvider.transcribe).not.toHaveBeenCalled();
+      expect(
+        await db.aIJob.count({ where: { messageId: queued.source.id } }),
+      ).toBe(0);
+      audioRolloutValues.AUDIO_TRANSCRIPTION_CANARY_USER_IDS = `${userId},${foreignId}`;
+      await expect(
+        audioService.process({
+          userId: foreignId,
+          messageId: queued.source.id,
+        }),
+      ).rejects.toThrow('ownership');
+      expect(audioProvider.transcribe).not.toHaveBeenCalled();
+    });
     // Paid calls require a dedicated test credential and explicit bounded opt-in.
     const realProvider =
       process.env.SINGULFIT_CONVERSATION_PROVIDER_E2E_AUTHORIZED === 'YES' &&

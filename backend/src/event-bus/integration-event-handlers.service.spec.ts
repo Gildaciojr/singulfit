@@ -21,8 +21,71 @@ import { IntegrationEventHandlersService } from './integration-event-handlers.se
 import { SubscriptionLifecycleService } from '../subscriptions/subscription-lifecycle.service';
 import { CoachProactiveResponseService } from '../automation/coach-proactive-response.service';
 import type { ConversationContinuationService } from '../conversation/runtime/conversation-continuation.service';
+import type { AudioConversationService } from '../audio/audio-conversation.service';
 
 describe('IntegrationEventHandlersService', () => {
+  it('disabled AUDIO preserves the previous ignored-media behavior before subscription notifications', async () => {
+    const registry = new EventHandlerRegistry();
+    const lifecycle = subscriptionLifecycle();
+    const audio = {
+      isEnabledForUser: jest.fn().mockReturnValue(false),
+      process: jest.fn(),
+    };
+    const nutrition = {
+      createMealFromMedia: jest.fn().mockResolvedValue({
+        id: 'meal-id',
+        userId: 'user-id',
+        messageId: 'image-message-id',
+        mediaFileId: 'image-media-id',
+      }),
+    };
+    const vision = { analyzeMeal: jest.fn().mockResolvedValue(undefined) };
+    const handlers = new IntegrationEventHandlersService(
+      registry,
+      {} as PagBankWebhookService,
+      {} as EvolutionWebhookService,
+      nutrition as unknown as NutritionService,
+      vision as unknown as NutritionVisionService,
+      {} as ResponseBuilderService,
+      {} as EvolutionSendService,
+      {} as CoachCommandService,
+      {} as AutomationService,
+      {} as ActivationJourneyService,
+      {} as ActivationOnboardingService,
+      acquisitionRollout() as unknown as ProfileAcquisitionInternalRolloutService,
+      lifecycle as unknown as SubscriptionLifecycleService,
+      undefined,
+      undefined,
+      audio as unknown as AudioConversationService,
+    );
+    handlers.onModuleInit();
+    const handler = registry.get(INTERNAL_EVENT.MEDIA_RECEIVED);
+    if (!handler) throw new Error('Missing media handler');
+    const event = outboxEvent(INTERNAL_EVENT.MEDIA_RECEIVED, {
+      userId: 'user-id',
+      messageId: 'message-id',
+      mediaType: 'AUDIO',
+    });
+    await handler(event);
+    await handler(event);
+    expect(audio.isEnabledForUser).toHaveBeenCalledWith('user-id');
+    expect(audio.process).not.toHaveBeenCalled();
+    expect(lifecycle.authorizeOrNotify).not.toHaveBeenCalled();
+    expect(nutrition.createMealFromMedia).not.toHaveBeenCalled();
+    await handler(
+      outboxEvent(INTERNAL_EVENT.MEDIA_RECEIVED, {
+        userId: 'user-id',
+        messageId: 'image-message-id',
+        mediaFileId: 'image-media-id',
+        mediaType: 'IMAGE',
+      }),
+    );
+    expect(audio.isEnabledForUser).toHaveBeenCalledTimes(2);
+    expect(audio.process).not.toHaveBeenCalled();
+    expect(lifecycle.authorizeOrNotify).toHaveBeenCalledTimes(1);
+    expect(nutrition.createMealFromMedia).toHaveBeenCalledTimes(1);
+    expect(vision.analyzeMeal).toHaveBeenCalledWith('meal-id', 'user-id');
+  });
   it.each([true, false])(
     'uses canonical continuation before proactive legacy only when eligible=%s',
     async (eligible) => {
@@ -276,7 +339,7 @@ describe('IntegrationEventHandlersService', () => {
     expect(responses.buildNutritionResponse).not.toHaveBeenCalled();
   });
 
-  it('keeps media handling unchanged for non-image events', async () => {
+  it('keeps document handling outside image and audio execution', async () => {
     const registry = new EventHandlerRegistry();
     const nutritionService = {
       createMealFromMedia: jest.fn(),
@@ -309,7 +372,7 @@ describe('IntegrationEventHandlersService', () => {
 
     await handler(
       outboxEvent(INTERNAL_EVENT.MEDIA_RECEIVED, {
-        mediaType: MediaType.AUDIO,
+        mediaType: MediaType.DOCUMENT,
         mediaFileId: 'media-id',
       }),
     );

@@ -1,3 +1,4 @@
+import { opusSilenceFixture } from '../audio/audio.fixture';
 import {
   BadRequestException,
   ForbiddenException,
@@ -74,12 +75,13 @@ describe('MediaService', () => {
       storagePath: 'sha256/path',
       deduplicated: false,
     });
+    const storageOpenMock = jest.fn().mockResolvedValue({
+      stream: Readable.from(storedContent),
+      fileSize: storedContent.length,
+    });
     const storageProvider: StorageProviderAdapter = {
       store: storageStoreMock,
-      open: jest.fn().mockResolvedValue({
-        stream: Readable.from(storedContent),
-        fileSize: storedContent.length,
-      }),
+      open: storageOpenMock,
     };
     const service = new MediaService(
       prisma as unknown as PrismaService,
@@ -94,10 +96,75 @@ describe('MediaService', () => {
       downloader,
       storageProvider,
       storageStoreMock,
+      storageOpenMock,
       mediaFile,
     };
   }
 
+  it('stores Ogg/Opus with codec MIME parameters while preserving integrity checks', async () => {
+    const s = createSubject({ messageType: MessageType.AUDIO });
+    await s.service.storeRemoteMedia({
+      userId: 'user-id',
+      conversationId: 'conversation-id',
+      messageId: 'message-id',
+      mediaType: MediaType.AUDIO,
+      declaredMimeType: 'audio/ogg; codecs=opus',
+      base64Data: opusSilenceFixture().toString('base64'),
+    });
+    expect(s.prisma.mediaFile.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        mimeType: 'audio/ogg',
+        mediaType: 'AUDIO',
+      }),
+    });
+  });
+  it.each([
+    Buffer.from('OggS'),
+    Buffer.from('encrypted content'),
+    Buffer.alloc(0),
+  ])('rejects invalid audio bytes before storage: %j', async (content) => {
+    const s = createSubject({ messageType: MessageType.AUDIO });
+    await expect(
+      s.service.storeRemoteMedia({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+        mediaType: MediaType.AUDIO,
+        declaredMimeType: 'audio/ogg; codecs=opus',
+        base64Data: content.length
+          ? content.toString('base64')
+          : 'data:audio/ogg;base64,',
+      }),
+    ).rejects.toThrow();
+    expect(s.storageStoreMock).not.toHaveBeenCalled();
+  });
+  it.each(['userId', 'conversationId', 'messageId'] as const)(
+    'binds audio reading to its %s',
+    async (field) => {
+      const s = createSubject({
+        existingMedia: {
+          id: 'media-file-id',
+          userId: 'user-id',
+          conversationId: 'conversation-id',
+          messageId: 'message-id',
+          mediaType: MediaType.AUDIO,
+          storageProvider: StorageProvider.LOCAL,
+          fileSize: 1,
+          storagePath: 'controlled',
+          mimeType: 'audio/ogg',
+        },
+        storedContent: Buffer.from('x'),
+      });
+      await expect(
+        s.service.getAudioContent('media-file-id', {
+          userId: 'user-id',
+          conversationId: 'conversation-id',
+          messageId: 'message-id',
+          [field]: 'foreign',
+        }),
+      ).rejects.toThrow();
+    },
+  );
   it.each(['userId', 'conversationId', 'messageId'])(
     'rejects a foreign image %s before storage access',
     async (field) => {
@@ -113,7 +180,7 @@ describe('MediaService', () => {
           messageId: 'message-id',
         }),
       ).rejects.toThrow();
-      expect(s.storageProvider.open).not.toHaveBeenCalled();
+      expect(s.storageOpenMock).not.toHaveBeenCalled();
     },
   );
 

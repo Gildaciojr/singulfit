@@ -700,6 +700,32 @@ export class AutomationService {
             select: { id: true },
           }));
 
+        const requestedAudioClarification =
+          current.automationRule.code === AUTOMATION_RULE_CODES.DAILY_COACH &&
+          current.context !== null &&
+          typeof current.context === 'object' &&
+          !Array.isArray(current.context) &&
+          current.context.source === 'AUDIO_TRANSCRIPTION_CLARIFICATION' &&
+          typeof current.context.audioSourceMessageId === 'string' &&
+          typeof current.context.audioJobId === 'string' &&
+          !!current.conversationId &&
+          !!(await transaction.aIJob.findFirst({
+            where: {
+              id: current.context.audioJobId,
+              userId: current.userId,
+              conversationId: current.conversationId,
+              messageId: current.context.audioSourceMessageId,
+              type: 'AUDIO',
+              status: 'FAILED',
+              message: {
+                direction: 'INBOUND',
+                type: 'AUDIO',
+                conversation: { userId: current.userId, status: 'ACTIVE' },
+              },
+            },
+            select: { id: true },
+          }));
+
         if (
           !current.user.isActive ||
           !current.automationRule.enabled ||
@@ -707,6 +733,7 @@ export class AutomationService {
           !lifecycleNoticeIsCurrent ||
           (!subscriptionLifecycleNotice &&
             !requestedResponse &&
+            !requestedAudioClarification &&
             !this.isRuleEnabled(
               current.automationRule.code as AutomationRuleCode,
               preferences,

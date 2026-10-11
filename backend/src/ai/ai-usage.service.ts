@@ -122,7 +122,12 @@ export class AIUsageService {
     completionTokens: number,
   ): Prisma.Decimal {
     this.validateTokens(promptTokens, completionTokens, undefined);
-    const capability = jobType === AIJobType.IMAGE ? 'VISION' : 'TEXT';
+    const capability =
+      jobType === AIJobType.IMAGE
+        ? 'VISION'
+        : jobType === AIJobType.AUDIO
+          ? 'AUDIO'
+          : 'TEXT';
     const inputRate = this.getRate(
       `OPENAI_${capability}_INPUT_COST_PER_1M_USD`,
     );

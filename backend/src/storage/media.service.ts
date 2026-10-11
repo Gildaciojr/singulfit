@@ -25,6 +25,7 @@ import {
 import { LOCAL_STORAGE_PROVIDER } from './interfaces/storage-provider.interface';
 import type { StorageProviderAdapter } from './interfaces/storage-provider.interface';
 import { SecureMediaDownloader } from './secure-media-downloader';
+import { validOggAudio } from './ogg-audio.policy';
 
 const ALLOWED_MIME_TYPES: Record<MediaType, ReadonlySet<string>> = {
   [MediaType.IMAGE]: new Set([
@@ -335,6 +336,53 @@ export class MediaService {
     };
   }
 
+  async getAudioContent(
+    mediaFileId: string,
+    expected: Readonly<{
+      userId: string;
+      conversationId: string;
+      messageId: string;
+    }>,
+  ) {
+    const opened = await this.openForDownload(mediaFileId, {
+      userId: expected.userId,
+      role: UserRole.USER,
+    });
+    const media = opened.mediaFile;
+    if (
+      media.mediaType !== MediaType.AUDIO ||
+      media.messageId !== expected.messageId ||
+      media.conversationId !== expected.conversationId ||
+      media.userId !== expected.userId
+    )
+      throw new BadRequestException('Audio ownership mismatch');
+    const maxBytes = Math.min(
+      this.getMaximumSize(MediaType.AUDIO),
+      25 * 1024 * 1024,
+    );
+    if (media.fileSize > maxBytes)
+      throw new PayloadTooLargeException('Audio exceeds transcription limit');
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of opened.stream) {
+      const buffer = Buffer.isBuffer(chunk)
+        ? chunk
+        : Buffer.from(chunk as Uint8Array);
+      size += buffer.length;
+      if (size > media.fileSize || size > maxBytes)
+        throw new BadRequestException('Audio size mismatch');
+      chunks.push(buffer);
+    }
+    const content = Buffer.concat(chunks);
+    if (
+      size !== media.fileSize ||
+      createHash('sha256').update(content).digest('hex') !== media.checksum
+    )
+      throw new BadRequestException('Audio integrity mismatch');
+    this.validateMimeType(MediaType.AUDIO, media.mimeType, content);
+    return { mediaFile: media, content };
+  }
+
   private async loadMedia(
     input: StoreRemoteMediaInput,
     maxBytes: number,
@@ -429,7 +477,7 @@ export class MediaService {
     }
 
     if (mimeType === 'audio/ogg') {
-      return content.subarray(0, 4).toString('ascii') === 'OggS';
+      return validOggAudio(content);
     }
 
     if (mimeType === 'audio/mpeg') {

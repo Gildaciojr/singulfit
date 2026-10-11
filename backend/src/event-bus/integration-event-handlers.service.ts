@@ -24,6 +24,7 @@ import { ProfileAcquisitionInternalRolloutService } from '../context/profile-acq
 import { SubscriptionLifecycleService } from '../subscriptions/subscription-lifecycle.service';
 import { CoachProactiveResponseService } from '../automation/coach-proactive-response.service';
 import { ConversationContinuationService } from '../conversation/runtime/conversation-continuation.service';
+import { AudioConversationService } from '../audio/audio-conversation.service';
 
 @Injectable()
 export class IntegrationEventHandlersService implements OnModuleInit {
@@ -45,6 +46,8 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     private readonly proactiveResponse?: CoachProactiveResponseService,
     @Optional()
     private readonly continuations?: ConversationContinuationService,
+    @Optional()
+    private readonly audioConversation?: AudioConversationService,
   ) {}
 
   onModuleInit(): void {
@@ -179,12 +182,18 @@ export class IntegrationEventHandlersService implements OnModuleInit {
   }
 
   private async processMedia(event: OutboxEvent): Promise<void> {
-    if (this.requiredString(event.payload, 'mediaType') !== MediaType.IMAGE) {
+    const mediaType = this.requiredString(event.payload, 'mediaType');
+    if (mediaType !== MediaType.IMAGE && mediaType !== MediaType.AUDIO) {
       return;
     }
 
     const userId = this.requiredString(event.payload, 'userId');
     const messageId = this.requiredString(event.payload, 'messageId');
+    if (
+      mediaType === MediaType.AUDIO &&
+      !this.audioConversation?.isEnabledForUser(userId)
+    )
+      return;
     if (
       !(await this.subscriptionLifecycle.authorizeOrNotify(
         userId,
@@ -192,6 +201,26 @@ export class IntegrationEventHandlersService implements OnModuleInit {
         event.createdAt,
       ))
     ) {
+      return;
+    }
+
+    if (mediaType === MediaType.AUDIO) {
+      if (!this.audioConversation)
+        throw new Error('Audio transcription consumer unavailable');
+      const payload = event.payload;
+      const intakeError =
+        typeof payload === 'object' &&
+        payload !== null &&
+        !Array.isArray(payload) &&
+        payload.audioIntakeError === 'AUDIO_MEDIA_INVALID';
+      await this.audioConversation.process({
+        userId,
+        messageId,
+        intakeError,
+        mediaFileId: intakeError
+          ? undefined
+          : this.requiredString(payload, 'mediaFileId'),
+      });
       return;
     }
 

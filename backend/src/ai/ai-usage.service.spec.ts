@@ -10,6 +10,8 @@ describe('AIUsageService', () => {
       OPENAI_TEXT_OUTPUT_COST_PER_1M_USD: '0.60',
       OPENAI_VISION_INPUT_COST_PER_1M_USD: '2.50',
       OPENAI_VISION_OUTPUT_COST_PER_1M_USD: '10.00',
+      OPENAI_AUDIO_INPUT_COST_PER_1M_USD: '1.00',
+      OPENAI_AUDIO_OUTPUT_COST_PER_1M_USD: '2.00',
     };
     const configService = {
       get: jest.fn((key: string) => rates[key]),
@@ -27,6 +29,22 @@ describe('AIUsageService', () => {
     const estimatedCost = service.estimateCost(AIJobType.TEXT, 100, 50);
 
     expect(estimatedCost.toString()).toBe('0.000045');
+  });
+
+  it('accounts transcription with explicitly configured audio rates, not text rates', () => {
+    expect(
+      createService().estimateCost(AIJobType.AUDIO, 100, 50).toString(),
+    ).toBe('0.0002');
+    const withoutAudioRates = new AIUsageService(
+      {} as PrismaService,
+      new ConfigService({
+        OPENAI_TEXT_INPUT_COST_PER_1M_USD: '0.15',
+        OPENAI_TEXT_OUTPUT_COST_PER_1M_USD: '0.60',
+      }),
+    );
+    expect(() =>
+      withoutAudioRates.estimateCost(AIJobType.AUDIO, 100, 50),
+    ).toThrow('OPENAI_AUDIO_INPUT_COST_PER_1M_USD');
   });
 
   it('charges diet jobs with text model rates', () => {

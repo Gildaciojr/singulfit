@@ -80,6 +80,7 @@ describe('EvolutionWebhookService', () => {
       },
     };
     const prisma = {
+      mediaFile: { findUnique: jest.fn().mockResolvedValue(null) },
       $transaction: jest.fn(
         (operation: (client: typeof transaction) => unknown) =>
           operation(transaction),
