@@ -381,9 +381,8 @@ export class ConversationContinuationService {
       };
     if (
       interpreted.workoutEffect === 'NONE' &&
-      interpreted.response &&
       (interpreted.action === 'HYDRATION_REPLY' ||
-        interpreted.action === 'WORKOUT_REPLY')
+        (interpreted.action === 'WORKOUT_REPLY' && interpreted.response))
     ) {
       const domain = pending?.continuation.domain ?? 'GENERAL';
       return {
@@ -392,9 +391,10 @@ export class ConversationContinuationService {
         content:
           interpreted.action === 'HYDRATION_REPLY'
             ? 'Obrigado por contar. Continue distribuindo a água aos poucos ao longo do dia, sem tentar compensar tudo de uma vez.'
-            : interpreted.response,
+            : (interpreted.response ?? SAFE_CONTEXT),
         domain: interpreted.action === 'HYDRATION_REPLY' ? 'HYDRATION' : domain,
-        pending,
+        // A water report cannot resolve a pending meal/workout question.
+        pending: interpreted.action === 'HYDRATION_REPLY' ? null : pending,
         next: null,
         outcome:
           interpreted.consumption === 'CONFIRMED' ? 'COMPLETED' : 'UNKNOWN',

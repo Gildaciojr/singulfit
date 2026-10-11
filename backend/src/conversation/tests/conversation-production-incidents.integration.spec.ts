@@ -9,6 +9,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { ConversationModule } from '../conversation.module';
 import { ConversationContinuationService } from '../runtime/conversation-continuation.service';
+import type { ContinuationInterpretation } from '../runtime/conversation-continuation-semantics.service';
 import { ConversationContinuationSemanticsService } from '../runtime/conversation-continuation-semantics.service';
 import { ConversationContinuationStore } from '../runtime/conversation-continuation.store';
 import { ConversationQAFollowUpContextService } from '../runtime/conversation-qa-follow-up-context.service';
@@ -132,6 +133,7 @@ integration(
     const createdRules: string[] = [];
     const provider = { createTextResponse: jest.fn() };
     const outputs: unknown[] = [];
+    const interpretationOutputs: ContinuationInterpretation[] = [];
     const send = jest.fn();
     const planning = { execute: jest.fn() };
     let initialPlans: string;
@@ -201,6 +203,7 @@ integration(
       send.mockReset();
       planning.execute.mockReset();
       outputs.length = 0;
+      interpretationOutputs.length = 0;
       at = new Date(Date.now() - 60_000);
       userId = (
         await db.user.create({
@@ -498,7 +501,7 @@ integration(
           execute: (input: { payload: { text: string } }) =>
             Promise.resolve({
               status: 'COMPLETED',
-              structuredOutput: {
+              structuredOutput: interpretationOutputs.shift() ?? {
                 action: input.payload.text.includes('água')
                   ? 'HYDRATION_REPLY'
                   : 'INDEPENDENT',
@@ -961,6 +964,118 @@ integration(
       expect(job.status).toBe('COMPLETED');
       expect(job.result).toMatchObject({ answer: free });
     });
+    it.each([
+      'Já bebi 1 litro de água hoje',
+      'Hoje tomei aproximadamente um litro de água',
+      'Ao longo do dia já consumi água, cerca de 1 L',
+    ])(
+      'diet to hydration recognizes the report without requiring interpreter prose: %s',
+      async (text) => {
+        const diet = await inbound('Me mostra minha dieta atual');
+        expect(diet.response.content).toContain(plan.title);
+        interpretationOutputs.push({
+          action: 'HYDRATION_REPLY',
+          day: 'UNRESOLVED',
+          consumption: 'CONFIRMED',
+          meal: 'UNKNOWN',
+          description: null,
+          hydrationGoal: false,
+          reference: 'PENDING',
+          workoutEffect: 'NONE',
+          response: null,
+        });
+        const turn = await inbound(text);
+        expect(turn.response.content).not.toContain('a que mensagem');
+        expect(turn.response.content).toContain('ao longo do dia');
+        expect(turn.response.content).not.toMatch(
+          /registrei|meta.*atingida|litros.*precisa/iu,
+        );
+        expect(provider.createTextResponse).not.toHaveBeenCalled();
+        expect(
+          await db.aIJob.count({ where: { messageId: turn.inbound.id } }),
+        ).toBe(0);
+        expect(
+          await continuationService.resolve(foreignId, turn.inbound.id),
+        ).toBeNull();
+      },
+    );
+    it.each(['MEAL_COMPLETION_CHECK', 'WORKOUT_COMPLETION_CHECK'] as const)(
+      'hydration preserves a pending %s through delivery and replay until the next answer',
+      async (kind) => {
+        const question = await db.scheduledMessage.create({
+          data: {
+            userId,
+            conversationId,
+            automationRuleId: ruleId,
+            content:
+              kind === 'MEAL_COMPLETION_CHECK'
+                ? 'Você já almoçou?'
+                : 'Você já terminou o treino?',
+            status: 'SENT',
+            scheduledFor: at,
+            sentAt: at,
+            externalMessageId: randomUUID(),
+            responseExpiresAt: new Date(Date.now() + 3600000),
+            context: {
+              continuation: {
+                ...continuation(
+                  kind,
+                  at,
+                  kind === 'MEAL_COMPLETION_CHECK' ? 'LUNCH' : 'UNKNOWN',
+                ),
+              },
+            },
+          },
+        });
+        const before = await db.scheduledMessage.findUniqueOrThrow({
+          where: { id: question.id },
+        });
+        interpretationOutputs.push({
+          action: 'HYDRATION_REPLY',
+          day: 'UNRESOLVED',
+          consumption: 'CONFIRMED',
+          meal: 'UNKNOWN',
+          description: null,
+          hydrationGoal: false,
+          reference: 'PENDING',
+          workoutEffect: 'NONE',
+          response: null,
+        });
+        const water = await inbound('Já bebi 1 litro de água hoje');
+        expect(water.response.content).toContain('ao longo do dia');
+        expect(water.response.content).not.toContain('a que mensagem');
+        // inbound includes retries of processing and delivery.
+        expect(
+          await db.scheduledMessage.findUniqueOrThrow({
+            where: { id: question.id },
+          }),
+        ).toEqual(before);
+        interpretationOutputs.push({
+          action:
+            kind === 'MEAL_COMPLETION_CHECK' ? 'MEAL_REPLY' : 'WORKOUT_REPLY',
+          day: 'TODAY',
+          consumption: 'CONFIRMED',
+          meal: kind === 'MEAL_COMPLETION_CHECK' ? 'LUNCH' : 'UNKNOWN',
+          description: null,
+          hydrationGoal: false,
+          reference: 'PENDING',
+          workoutEffect: 'NONE',
+          response: null,
+        });
+        const reply = await inbound(
+          'Sim',
+          question.externalMessageId ?? undefined,
+        );
+        expect(reply.response.content).not.toContain('a que mensagem');
+        const answered = await db.scheduledMessage.findUniqueOrThrow({
+          where: { id: question.id },
+        });
+        expect(answered.status).toBe('SENT');
+        expect(answered.responseMessageId).toBe(reply.inbound.id);
+        expect(answered.responseOutcome).toBe('COMPLETED');
+        expect(provider.createTextResponse).not.toHaveBeenCalled();
+      },
+    );
     it('standalone hydration report publishes useful deterministic guidance once, without recording intake', async () => {
       const turn = await inbound('Já bebi 1 litro de água hoje.');
       expect(turn.response.content).not.toBe(

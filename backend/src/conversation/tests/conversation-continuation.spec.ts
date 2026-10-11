@@ -195,6 +195,31 @@ describe('Canonical conversation continuation', () => {
     expect(provider.execute).toHaveBeenCalledTimes(1);
     expect(s.workout.presentCanonicalDay).not.toHaveBeenCalled();
   });
+  it.each(['MEAL_COMPLETION_CHECK', 'WORKOUT_COMPLETION_CHECK'] as const)(
+    'hydration without interpreter prose cannot consume a pending %s',
+    async (kind) => {
+      const s = subject(kind, {
+        action: 'HYDRATION_REPLY',
+        reference: 'PENDING',
+        workoutEffect: 'NONE',
+        consumption: 'CONFIRMED',
+        response: null,
+      });
+      s.prisma.message.findFirst.mockResolvedValue({
+        ...(await s.prisma.message.findFirst()),
+        content: 'Já bebi 1 litro de água hoje',
+      });
+      const result = await s.service.resolve('user', 'message');
+      expect(result).toMatchObject({
+        domain: 'HYDRATION',
+        pending: null,
+        next: null,
+        evidence: { hydrationGoal: false, workoutEffect: 'NONE' },
+      });
+      expect(result?.content).toContain('ao longo do dia');
+      expect(s.prisma.scheduledMessage.updateMany).not.toHaveBeenCalled();
+    },
+  );
   function subject(
     kind:
       | 'WORKOUT_COMPLETION_CHECK'

@@ -963,6 +963,73 @@ describe('Nutrition Planning Engine V2', () => {
     expect(strategyA).not.toEqual(strategyC);
   });
 
+  it('can derive 2440 kcal with a demonstrated estimated deficit, without using a default target', () => {
+    // Synthetic arithmetic example, not a reconstruction of the production user.
+    const base = buildContext('DAILY_STRUCTURE');
+    const context = {
+      ...base,
+      profile: {
+        ...base.profile,
+        sex: { status: 'CONFIRMED' as const, value: Gender.MALE },
+        ageYears: { status: 'CONFIRMED' as const, value: 40 },
+        heightCm: { status: 'CONFIRMED' as const, value: 176 },
+        currentWeightKg: { status: 'CONFIRMED' as const, value: 84.3 },
+        activityLevel: {
+          status: 'CONFIRMED' as const,
+          value: ActivityLevel.MODERATE,
+        },
+        primaryGoal: {
+          status: 'CONFIRMED' as const,
+          value: FitnessGoal.WEIGHT_LOSS,
+        },
+      },
+    };
+    const maintenance = (10 * 84.3 + 6.25 * 176 - 5 * 40 + 5) * 1.55;
+    const strategy = new NutritionPlanningStrategyService().build(context);
+    expect(maintenance).toBeCloseTo(2709.4);
+    expect(strategy.energyTargetKcal).toEqual({
+      status: 'ESTIMATED',
+      value: Math.round((maintenance * 0.9) / 10) * 10,
+    });
+    expect(strategy.energyTargetKcal).toEqual({
+      status: 'ESTIMATED',
+      value: 2440,
+    });
+    expect(strategy.macroTargets).toEqual({
+      status: 'ESTIMATED',
+      value: { proteinGrams: 118, carbohydrateGrams: 339, fatGrams: 68 },
+    });
+    const unchangedGoal = new NutritionPlanningStrategyService().build({
+      ...context,
+      profile: {
+        ...context.profile,
+        primaryGoal: { status: 'CONFIRMED', value: FitnessGoal.MAINTENANCE },
+      },
+    });
+    expect(unchangedGoal.energyTargetKcal).toEqual({
+      status: 'ESTIMATED',
+      value: Math.round(maintenance / 10) * 10,
+    });
+  });
+  it.each([
+    'sex',
+    'ageYears',
+    'heightCm',
+    'currentWeightKg',
+    'activityLevel',
+    'primaryGoal',
+  ] as const)(
+    'does not invent an energy target when required %s is absent',
+    (field) => {
+      const context = buildContext('DAILY_STRUCTURE');
+      const strategy = new NutritionPlanningStrategyService().build({
+        ...context,
+        profile: { ...context.profile, [field]: { status: 'NOT_SET' } },
+      });
+      expect(strategy.energyTargetKcal).toEqual({ status: 'NOT_SET' });
+      expect(strategy.macroTargets).toEqual({ status: 'NOT_SET' });
+    },
+  );
   it('does not reinterpret desiredOutcome text inside the strategy', () => {
     const base = snapshot();
     const recomposition = Object.freeze({
