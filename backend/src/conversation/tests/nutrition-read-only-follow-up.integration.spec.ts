@@ -418,7 +418,7 @@ describe('Nutrition read-only follow-up: real semantic pipeline', () => {
     });
     expect(s.gateway.createTextResponse).not.toHaveBeenCalled();
   });
-  it('executes A through E in the same conversation with one recovery and an explicit domain switch', async () => {
+  it('executes A through E with a safe initial plan reference and an explicit domain switch', async () => {
     const texts = [
       'Me dê uma dica de lanche da tarde',
       'Me da uma ideia de jantar',
@@ -615,8 +615,8 @@ describe('Nutrition read-only follow-up: real semantic pipeline', () => {
       expect(result.status).toBe('COMPLETED');
       if (i === 0)
         expect(result.observability).toMatchObject({
-          nutritionAdviceRetryOutcome: 'RECOVERED',
-          totalTokens: 70,
+          answerSource: 'AI',
+          totalTokens: 30,
         });
       if (i === 3) {
         const payload: unknown = JSON.parse(
@@ -646,7 +646,7 @@ describe('Nutrition read-only follow-up: real semantic pipeline', () => {
       });
     }
     expect(s.ai.runTextJob).toHaveBeenCalledTimes(5);
-    expect(s.gateway.createTextResponse).toHaveBeenCalledTimes(1);
+    expect(s.gateway.createTextResponse).not.toHaveBeenCalled();
     expect(s.ai.completeJobInTransaction).toHaveBeenCalledTimes(5);
     expect(s.ai.failJob).not.toHaveBeenCalled();
   });

@@ -24,6 +24,67 @@ describe('ConversationQAExecutorService', () => {
     'Nesse almoço das 12h que você acabou de me mostrar, posso substituir o peito de frango por ovos? Essa substituição está prevista na minha dieta atual? Não quero alterar meu plano, apenas saber.';
   const informalSubstitution =
     'uai no almoço kkk, posso trocar o frango por ovo ou não?';
+  it.each(['AVAILABLE', 'ABSENT', 'UNAVAILABLE'] as const)(
+    'canonical diet presentation respects %s and creates no AIJob',
+    async (status) => {
+      const subject = createSubject({}, AIJobStatus.PENDING, true);
+      subject.currentNutrition.read.mockResolvedValue({
+        status,
+        plan:
+          status === 'AVAILABLE'
+            ? {
+                title: 'Dieta confirmada',
+                summary: 'Refeições cadastradas',
+                days: [
+                  {
+                    meals: [
+                      {
+                        name: 'Jantar',
+                        items: ['Arroz', 'Frango', 'Feijão', 'Abobrinha'].map(
+                          (name) => ({ name, quantity: '1 porção' }),
+                        ),
+                      },
+                    ],
+                  },
+                ],
+                substitutions: [],
+                hydrationGuidance: [],
+                generalGuidance: [],
+                adaptationGuidance: [],
+                safetyGuidance: [],
+              }
+            : null,
+      });
+      const result = await subject.service.execute({
+        userId: 'user-id',
+        conversationId: 'conversation-id',
+        messageId: 'message-id',
+        route: {
+          ...route('ANSWER_MESSAGE'),
+          kind: 'CURRENT_PLAN_PRESENTATION',
+          targetPlan: 'DIET',
+          references: [],
+        },
+        humanContext: human('me mostra minha dieta'),
+      });
+      expect(result.status).toBe('COMPLETED');
+      if (result.status !== 'COMPLETED')
+        throw new Error('Expected canonical diet answer');
+      expect(result.content).toContain(
+        status === 'AVAILABLE'
+          ? 'Dieta confirmada'
+          : status === 'ABSENT'
+            ? 'não possui um plano alimentar ativo'
+            : 'Não consegui consultar seu plano',
+      );
+      expect(result.observability.publicationKind).toBe(
+        status === 'AVAILABLE' ? 'CANONICAL_NUTRITION_PLAN' : undefined,
+      );
+      expect(subject.currentNutrition.read).toHaveBeenCalledWith('user-id');
+      expect(subject.ai.createJob).not.toHaveBeenCalled();
+      expect(subject.ai.runTextJob).not.toHaveBeenCalled();
+    },
+  );
   it('does not turn historical plan commands into food exclusions, preserving confirmed vegetables', async () => {
     const message = 'Me dê uma dica alternativa de jantar para hoje?';
     const context = {
@@ -1816,7 +1877,7 @@ describe('ConversationQAExecutorService', () => {
           conversationId: 'conversation-id',
           messageId: 'message-id',
           route: route('NUTRITION_GUIDANCE'),
-          humanContext: human('Me dê uma dica de lanche da tarde'),
+          humanContext: human('Me dê outra opção de lanche da tarde'),
           referenceDate: new Date('2026-10-05T18:00:00Z'),
           deadlineAtMs: Date.now() + 25_000,
         };
@@ -2183,21 +2244,6 @@ describe('ConversationQAExecutorService', () => {
               nutrition: trusted.nutrition,
               goals: trusted.goals,
               routine: trusted.routine,
-              activeWorkoutPlan: {
-                title: trusted.activeWorkoutPlan.title,
-                calendar: trusted.activeWorkoutPlan.calendar,
-                sessions: [
-                  {
-                    weekday: 'MONDAY',
-                    title: 'Sessão atual',
-                    estimatedDurationMinutes: 60,
-                  },
-                ],
-              },
-              previousWorkoutPlan: {
-                title: 'Treino anterior',
-                sessions: [{ weekday: 'TUESDAY' }],
-              },
               activeNutritionPlan: {
                 title: plan.title,
                 strategy: trusted.activeNutritionPlan.strategy,
@@ -2222,6 +2268,18 @@ describe('ConversationQAExecutorService', () => {
             corrected.trustedContext.activeNutritionPlan,
           ).not.toHaveProperty('days');
           expect(corrected.currentNutrition.plan).not.toHaveProperty('days');
+          expect(corrected.trustedContext).not.toHaveProperty(
+            'activeWorkoutPlan',
+          );
+          expect(corrected.trustedContext).not.toHaveProperty(
+            'previousWorkoutPlan',
+          );
+          expect(firstPayload.trustedContext).not.toHaveProperty(
+            'activeWorkoutPlan',
+          );
+          expect(firstPayload.trustedContext).not.toHaveProperty(
+            'previousWorkoutPlan',
+          );
           const fullCorrection = {
             ...firstPayload,
             trustedContext: trusted,
@@ -2573,7 +2631,9 @@ describe('ConversationQAExecutorService', () => {
           plan: snackPlan,
         });
         await expect(
-          subject.service.execute(input('Me dê uma dica para lanche da tarde')),
+          subject.service.execute(
+            input('Me dê outra opção para lanche da tarde'),
+          ),
         ).resolves.toMatchObject({
           status: 'FAILED',
           reason: 'NUTRITION_ADVICE_REPEATS_CURRENT_MEAL',

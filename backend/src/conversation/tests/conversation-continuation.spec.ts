@@ -32,6 +32,55 @@ describe('Canonical conversation continuation', () => {
     reference: 'PENDING',
   };
   it.each([
+    'Orientação breve\n• primeiro\n• segundo\n• terceiro\n• quarto',
+    'x'.repeat(4001),
+  ])(
+    'does not give a free runtime reply the structured publication budget on replay',
+    async (content) => {
+      const s = subject('MEAL_COMPLETION_CHECK');
+      jest.spyOn(s.store, 'resolveOnce').mockResolvedValue({
+        content,
+        domain: 'NUTRITION',
+        pending: null,
+        next: null,
+        outcome: 'UNKNOWN',
+        evidence: { responseSource: 'CONVERSATION_RUNTIME' },
+      });
+      const result = await s.service.resolve('user', 'message');
+      expect(result?.content).not.toBe(content);
+      expect(
+        new ConversationPublicAnswerBoundaryService().projectText(
+          result?.content ?? null,
+        ),
+      ).not.toBeNull();
+    },
+  );
+  it.each(['NUTRITION', 'WORKOUT'] as const)(
+    'preserves the authorized structured %s budget on replay',
+    async (domain) => {
+      const s = subject('MEAL_COMPLETION_CHECK');
+      const content =
+        'Plano completo\n• primeiro\n• segundo\n• terceiro\n• quarto';
+      jest.spyOn(s.store, 'resolveOnce').mockResolvedValue({
+        content,
+        domain,
+        pending: null,
+        next: null,
+        outcome: 'UNKNOWN',
+        evidence:
+          domain === 'NUTRITION'
+            ? {
+                responseSource: 'CONVERSATION_RUNTIME',
+                publicationKind: 'CANONICAL_NUTRITION_PLAN',
+              }
+            : {},
+      });
+      expect((await s.service.resolve('user', 'message'))?.content).toBe(
+        content,
+      );
+    },
+  );
+  it.each([
     'Gere um treino de academia para mim, 4 vezes por semana.',
     'Monte um treino para academia, 4 vezes por semana.',
     'Eu quero que você gere um treino para mim, para eu fazer na academia 04 vezes por semana',
@@ -1045,6 +1094,24 @@ describe('Canonical conversation continuation', () => {
       outcome: 'UNKNOWN',
     });
     expect(result?.content).not.toBe('Você já bebeu 1 litro de água hoje.');
+  });
+  it('does not publish a standalone hydration report as an interpreter echo', async () => {
+    const s = subject('HYDRATION_CHECK', {
+      action: 'HYDRATION_REPLY',
+      consumption: 'UNKNOWN',
+      workoutEffect: 'NONE',
+      response: 'Você já bebeu 1 litro de água hoje.',
+    });
+    s.prisma.scheduledMessage.findFirst.mockResolvedValue(null);
+    s.prisma.message.findFirst.mockResolvedValue({
+      ...(await s.prisma.message.findFirst()),
+      content: 'Já bebi 1 litro de água hoje.',
+    });
+    const result = await s.service.resolve('user', 'message');
+    expect(result?.content).toContain('ao longo do dia');
+    expect(result?.content).not.toBe('Você já bebeu 1 litro de água hoje.');
+    expect(result?.content).not.toMatch(/registrei|meta/u);
+    expect(result?.domain).toBe('HYDRATION');
   });
   it('preserves hydration without inventing daily goal completion', async () => {
     const s = subject('HYDRATION_CHECK', {

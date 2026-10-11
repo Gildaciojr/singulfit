@@ -41,6 +41,7 @@ export type ConversationRuntimePreExecutionDecision =
       source: 'CONVERSATION_RUNTIME';
       content: string;
       reason: 'RUNTIME_SELECTED';
+      readonly publicationKind?: 'CANONICAL_NUTRITION_PLAN';
     }>
   | Readonly<{
       source: 'SAFE_RESPONSE';
@@ -169,6 +170,17 @@ export class ConversationRuntimeIntegrationService {
         source: selection.source,
         content: selection.content,
         reason: 'RUNTIME_SELECTED' as const,
+        ...(evaluation.decision?.executionRoute?.kind ===
+          'CURRENT_PLAN_PRESENTATION' &&
+        evaluation.decision.executionRoute.targetPlan === 'DIET' &&
+        bridge.status === 'COMPLETED' &&
+        bridge.observability?.publicationKind === 'CANONICAL_NUTRITION_PLAN' &&
+        bridge.observability.answerSource === 'DETERMINISTIC_FALLBACK' &&
+        bridge.observability.domain === 'NUTRITION' &&
+        bridge.observability.grounding === 'CURRENT_PLAN' &&
+        bridge.observability.disposition === 'ANSWER'
+          ? { publicationKind: 'CANONICAL_NUTRITION_PLAN' as const }
+          : {}),
       });
     }
     if (selection.reason === 'SHADOW_ONLY') {

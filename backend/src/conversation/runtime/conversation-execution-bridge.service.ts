@@ -122,6 +122,16 @@ export class ConversationExecutionBridgeService {
       });
     }
     const payload = this.payloadBuilder.build(route, humanContext);
+    // Plan presentation uses the same owned canonical reader as QA's
+    // deterministic nutrition answers; it does not require a provider call.
+    if (
+      route.kind === 'CURRENT_PLAN_PRESENTATION' &&
+      route.targetPlan === 'DIET' &&
+      humanContext &&
+      executionContext &&
+      this.qa
+    )
+      return this.executeQA(decision, humanContext, executionContext);
     if (!payload) {
       return Object.freeze({
         status: 'FALLBACK_REQUIRED' as const,

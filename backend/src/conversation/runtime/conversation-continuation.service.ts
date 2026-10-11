@@ -172,7 +172,10 @@ export class ConversationContinuationService {
   }
   private publicReply(reply: ContinuationReply): ContinuationReply {
     const content =
-      reply.domain === 'WORKOUT'
+      reply.domain === 'WORKOUT' ||
+      (reply.domain === 'NUTRITION' &&
+        reply.evidence.responseSource === 'CONVERSATION_RUNTIME' &&
+        reply.evidence.publicationKind === 'CANONICAL_NUTRITION_PLAN')
         ? this.boundary.projectStructuredText(reply.content)
         : this.boundary.projectText(reply.content);
     if (!content)
@@ -384,8 +387,13 @@ export class ConversationContinuationService {
     ) {
       const domain = pending?.continuation.domain ?? 'GENERAL';
       return {
-        content: interpreted.response,
-        domain,
+        // A standalone hydration report is not a pending answer and the
+        // interpreter's prose is not contextual guidance or a tracking receipt.
+        content:
+          interpreted.action === 'HYDRATION_REPLY'
+            ? 'Obrigado por contar. Continue distribuindo a água aos poucos ao longo do dia, sem tentar compensar tudo de uma vez.'
+            : interpreted.response,
+        domain: interpreted.action === 'HYDRATION_REPLY' ? 'HYDRATION' : domain,
         pending,
         next: null,
         outcome:

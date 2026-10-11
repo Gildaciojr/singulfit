@@ -27,6 +27,8 @@ export interface ConversationAnswerCandidate {
 }
 
 export interface ConversationQAObservability {
+  /** Backend-only receipt; never read from provider candidate metadata. */
+  readonly publicationKind?: 'CANONICAL_NUTRITION_PLAN';
   readonly effectiveReferentSource?: string;
   readonly effectiveReferentMessageId?: string;
   readonly effectiveReferentDomain?: string;

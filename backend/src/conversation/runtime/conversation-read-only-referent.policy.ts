@@ -118,6 +118,7 @@ export function referentCompatibility(
 }
 
 export type ReadOnlyFollowUpKind =
+  | 'CONTEXTUAL_INQUIRY'
   | 'ALTERNATIVE_REQUEST'
   | 'SUBSTITUTION_INQUIRY'
   | 'CONSTRAINT_REFINEMENT'
@@ -141,6 +142,18 @@ export interface CurrentReadOnlyReferent {
 export function readOnlyFollowUp(value: string): ReadOnlyFollowUp | null {
   const text = normalizeFoodTerm(value);
   const currentTurn = originalCurrentTurn(value);
+  // Reuse the current-turn operation/domain boundary before resolving a
+  // deictic question against an owned, delivered answer. A referent supplies
+  // context, never permission to consume or mutate the plan.
+  if (
+    normalizer.normalize(value).question &&
+    ['ANSWER', 'PROVIDE_GUIDANCE'].includes(currentTurn.operation) &&
+    !currentTurn.selfContained &&
+    text
+      .split(' ')
+      .some((token) => ['isso', 'esse', 'essa', 'aquilo'].includes(token))
+  )
+    return { kind: 'CONTEXTUAL_INQUIRY', constraints: [], currentTurn };
   if (
     !currentTurn.selfContained &&
     currentTurn.operation === 'PROVIDE_GUIDANCE' &&

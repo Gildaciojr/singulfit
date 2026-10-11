@@ -309,14 +309,34 @@ export class ConversationQAFollowUpContextService {
     if (!candidate.answer) return null;
     let nutrition = nutritionRequest(source.content);
     const followUp = readOnlyFollowUp(source.content);
-    if (!nutrition && followUp) {
+    if (
+      (followUp &&
+        (!nutrition ||
+          (followUp.kind === 'CONSTRAINT_REFINEMENT' &&
+            nutrition.meal === null))) ||
+      (candidate.domain === 'NUTRITION' &&
+        (nutrition === null ||
+          (nutrition.intent === 'MEAL_SUBSTITUTION' &&
+            nutrition.meal === null)))
+    ) {
       const prior = await this.deliveredReferent(
         input,
         source.timestamp,
         source.replyToExternalMessageId ?? null,
         depth + 1,
       );
-      nutrition = prior ? effectiveNutritionRequest(followUp, prior) : null;
+      nutrition =
+        nutrition?.intent === 'MEAL_SUBSTITUTION' &&
+        prior?.domain === 'NUTRITION'
+          ? {
+              ...nutrition,
+              meal: nutrition.meal ?? prior.nutrition?.meal ?? null,
+            }
+          : ((prior && followUp
+              ? effectiveNutritionRequest(followUp, prior)
+              : prior?.domain === 'NUTRITION'
+                ? prior.nutrition
+                : null) ?? nutrition);
     }
     return Object.freeze({
       source: 'DELIVERED_QA',

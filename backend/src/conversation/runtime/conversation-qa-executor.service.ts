@@ -1,6 +1,6 @@
 import { isWorkoutExpenditureTopic } from '../understanding/daily-query.policy';
 import {
-  nutritionCompositionSchema,
+  nutritionTextVarietyViolation,
   parseNutritionComposition,
   nutritionCompositionViolation,
   type NutritionAdviceComposition,
@@ -31,6 +31,7 @@ import {
   nutritionAdviceContext,
   nutritionAdvicePayload,
   nutritionAdviceViolation,
+  nutritionAdviceQualityViolation,
   nutritionSubstitutionAnswer,
   type NutritionAdviceContext,
 } from './nutrition-advice.policy';
@@ -275,6 +276,9 @@ export class ConversationQAExecutorService {
         0,
         undefined,
         nutritionAdvice,
+        input.route.kind === 'CURRENT_PLAN_PRESENTATION' &&
+          input.route.targetPlan === 'DIET' &&
+          currentNutrition.status === 'AVAILABLE',
       );
     }
     let job: Awaited<ReturnType<AIService['createJob']>>;
@@ -497,6 +501,9 @@ export class ConversationQAExecutorService {
     const safeNutritionFallback = (
       reason: string,
     ): ConversationQAExecutionResult => {
+      // An invalid public contract is not missing food evidence.
+      if (reason === 'INVALID_AI_RESPONSE' || reason === 'INVALID_QA_RESPONSE')
+        return finish(this.failed(reason, providerDurationMs, response));
       const fallback = this.nutritionClarification(nutritionAdvice);
       const fallbackViolation = this.adviceViolation(nutritionAdvice, fallback);
       if (fallbackViolation)
@@ -570,6 +577,7 @@ export class ConversationQAExecutorService {
           this.verifiedDecisions.has(candidate),
         )
       : 'INVALID_QA_RESPONSE';
+    if (violation) this.logAdviceRejection(input.messageId, violation);
     const rejectedPreference =
       violation === 'NUTRITION_ADVICE_REJECTED_FOOD' &&
       nutritionAdvice !== null &&
@@ -621,12 +629,16 @@ export class ConversationQAExecutorService {
           nutritionAdvice,
         );
         const correctionInput = JSON.stringify({
-          ...this.nutritionCorrectionPayload(fullPayload, nutritionAdvice),
+          ...this.nutritionCorrectionPayload(
+            fullPayload,
+            nutritionAdvice,
+            true,
+          ),
           nutritionAdviceCorrection: {
             originalViolation: violation,
             correctiveAttempt: 1,
             instruction:
-              'O primeiro candidato foi descartado pela violação indicada. Entregue uma combinação concreta diferente usando compatibleFoods quando houver base suficiente, mantendo o alvo, immediateConstraints, excludedFoods e todas as safetyConstraints. Não mencione nem reutilize alimentos rejeitados, nem em negações, explicações ou perguntas. Se faltar informação essencial de segurança, esclareça apenas o dado ausente. Não altere o plano nem afirme equivalência, dose ou autorização sem evidência. Esta é a única tentativa corretiva.',
+              'O primeiro candidato foi descartado pela violação indicada. Entregue uma orientação concreta usando compatibleFoods quando houver base suficiente; mude a composição principal quando requiresMaterialVariety for true, mantendo o alvo, immediateConstraints, excludedFoods e todas as safetyConstraints. Não mencione nem reutilize alimentos rejeitados, nem em negações, explicações ou perguntas. Se faltar informação essencial de segurança, esclareça apenas o dado ausente. Não altere o plano nem afirme equivalência, dose ou autorização sem evidência. Esta é a única tentativa corretiva.',
           },
         });
         this.logger.debug({
@@ -689,6 +701,7 @@ export class ConversationQAExecutorService {
         this.verifiedDecisions.has(candidate),
       );
       if (violation) {
+        this.logAdviceRejection(input.messageId, violation);
         await this.ai.failJob(job.id, new Error(violation), response);
         return safeNutritionFallback(violation);
       }
@@ -888,6 +901,7 @@ export class ConversationQAExecutorService {
       totalTokens: number;
     },
     nutritionAdvice: NutritionAdviceContext | null = null,
+    canonicalPlanPresentation = false,
   ): ConversationQAExecutionResult {
     if (nutritionAdvice?.substitutionEvidence) {
       const violation = this.adviceViolation(
@@ -899,12 +913,12 @@ export class ConversationQAExecutorService {
       if (this.factualFallbacks.has(candidate))
         source = 'DETERMINISTIC_FALLBACK';
     }
-    const observation = this.observability(
-      providerDurationMs,
-      candidate,
-      source,
-      usage,
-    );
+    const observation: ConversationQAObservability = {
+      ...this.observability(providerDurationMs, candidate, source, usage),
+      ...(canonicalPlanPresentation
+        ? { publicationKind: 'CANONICAL_NUTRITION_PLAN' as const }
+        : {}),
+    };
     if (candidate.disposition === 'DEFER_TO_SIDE_EFFECT_PIPELINE') {
       return Object.freeze({
         status: 'DEFERRED',
@@ -912,7 +926,9 @@ export class ConversationQAExecutorService {
         observability: observation,
       });
     }
-    const content = this.boundary.project(candidate);
+    const content = canonicalPlanPresentation
+      ? this.boundary.projectStructuredText(candidate.answer)
+      : this.boundary.project(candidate);
     return content
       ? Object.freeze({
           status: 'COMPLETED',
@@ -1072,9 +1088,29 @@ export class ConversationQAExecutorService {
     };
   }
 
+  private logAdviceRejection(messageId: string, reason: string): void {
+    const classification =
+      reason === 'INVALID_QA_RESPONSE'
+        ? 'CONTRACT'
+        : [
+              'NUTRITION_ADVICE_COMPOSITION_UNSUPPORTED',
+              'NUTRITION_ADVICE_REPEATS_CURRENT_MEAL',
+              'NUTRITION_ADVICE_REPEATS_PREVIOUS_SUGGESTION',
+            ].includes(reason)
+          ? 'QUALITY'
+          : 'HARD_GATE';
+    this.logger.warn({
+      event: 'CONVERSATION_QA_NUTRITION_CANDIDATE_REJECTED',
+      messageId,
+      reason,
+      classification,
+    });
+  }
+
   private nutritionCorrectionPayload(
     payload: Readonly<Record<string, ConversationAIValue>>,
     advice: NutritionAdviceContext | null,
+    correctiveAttempt = false,
   ): Readonly<Record<string, ConversationAIValue>> {
     if (
       !advice ||
@@ -1090,47 +1126,34 @@ export class ConversationQAExecutorService {
             ),
           )
         : value;
-    const workoutSummary = (value: ConversationAIValue): ConversationAIValue =>
-      this.record(value)
-        ? {
-            ...value,
-            ...(Array.isArray(value.sessions)
-              ? {
-                  sessions: value.sessions.map(
-                    (session: ConversationAIValue) =>
-                      this.record(session)
-                        ? Object.fromEntries(
-                            Object.entries(session).filter(([key]) =>
-                              [
-                                'weekday',
-                                'title',
-                                'sessionKey',
-                                'estimatedDurationMinutes',
-                                'durationMinutes',
-                                'focus',
-                              ].includes(key),
-                            ),
-                          )
-                        : session,
-                  ),
-                }
-              : {}),
-          }
-        : value;
     const trusted = payload.trustedContext;
     const current = payload.currentNutrition;
     return {
       ...payload,
+      // A plan containing a different meal is not an ingredient inventory for
+      // this target. Keep the full owned evidence for safety and bounded repair.
+      ...(!correctiveAttempt &&
+      advice.request.meal &&
+      !advice.originalMeals.length &&
+      this.record(payload.nutritionGuidance)
+        ? {
+            nutritionGuidance: {
+              ...payload.nutritionGuidance,
+              compatibleFoods: (advice.compatibleFoods ?? []).filter(
+                (food) => food.source === 'PROFILE_PREFERENCE',
+              ),
+            },
+          }
+        : {}),
       trustedContext: this.record(trusted)
         ? {
-            ...trusted,
+            ...Object.fromEntries(
+              Object.entries(trusted).filter(
+                ([key]) =>
+                  key !== 'activeWorkoutPlan' && key !== 'previousWorkoutPlan',
+              ),
+            ),
             activeNutritionPlan: summary(trusted.activeNutritionPlan ?? null),
-            activeWorkoutPlan: workoutSummary(
-              trusted.activeWorkoutPlan ?? null,
-            ),
-            previousWorkoutPlan: workoutSummary(
-              trusted.previousWorkoutPlan ?? null,
-            ),
           }
         : trusted,
       currentNutrition: this.record(current)
@@ -1303,16 +1326,25 @@ export class ConversationQAExecutorService {
     try {
       const parsed: unknown = JSON.parse(value);
       const candidate = this.parseCandidate(parsed);
+      if (
+        candidate &&
+        messageId &&
+        this.record(parsed) &&
+        parsed.nutritionComposition !== undefined &&
+        !parseNutritionComposition(parsed.nutritionComposition)
+      )
+        this.logger.warn({
+          event: 'CONVERSATION_QA_AUXILIARY_METADATA_IGNORED',
+          messageId,
+          classification: 'QUALITY',
+          reason: 'INVALID_NUTRITION_COMPOSITION',
+        });
       if (!candidate && messageId)
         this.logger.warn({
           event: 'CONVERSATION_QA_CANDIDATE_REJECTED',
           messageId,
-          reason:
-            this.record(parsed) &&
-            parsed.nutritionComposition !== undefined &&
-            !parseNutritionComposition(parsed.nutritionComposition)
-              ? 'INVALID_NUTRITION_COMPOSITION'
-              : 'INVALID_QA_FIELDS',
+          classification: 'CONTRACT',
+          reason: 'INVALID_QA_FIELDS',
         });
       return candidate;
     } catch {
@@ -1321,6 +1353,7 @@ export class ConversationQAExecutorService {
           event: 'CONVERSATION_QA_CANDIDATE_REJECTED',
           messageId,
           reason: 'MALFORMED_JSON',
+          classification: 'CONTRACT',
         });
       return null;
     }
@@ -1332,7 +1365,6 @@ export class ConversationQAExecutorService {
       value.nutritionComposition === undefined
         ? null
         : parseNutritionComposition(value.nutritionComposition);
-    if (value.nutritionComposition !== undefined && !composition) return null;
     if (
       value.hydrationGuidance !== undefined &&
       !this.nullableText(value.hydrationGuidance)
@@ -1448,11 +1480,7 @@ export class ConversationQAExecutorService {
         },
       };
     }
-    return context &&
-      (!context.substitutionEvidence ||
-        context.request.substitutionPurpose === 'OFF_PLAN_ADVICE')
-      ? nutritionCompositionSchema(COACH_CONVERSATIONAL_QA_V4_PROMPT.schema)
-      : COACH_CONVERSATIONAL_QA_V4_PROMPT.schema;
+    return COACH_CONVERSATIONAL_QA_V4_PROMPT.schema;
   }
 
   private adviceViolation(
@@ -1482,9 +1510,6 @@ export class ConversationQAExecutorService {
       context,
       candidate,
       decisionVerified,
-      composition && !compositionViolation
-        ? composition.current.map((option) => option.quote)
-        : [],
     );
     if (
       violation ||
@@ -1494,11 +1519,34 @@ export class ConversationQAExecutorService {
         context.request.substitutionPurpose !== 'OFF_PLAN_ADVICE')
     )
       return violation;
-    if (!composition)
-      return context.requiresMaterialVariety && context.previousAdvice
-        ? 'NUTRITION_ADVICE_COMPOSITION_UNSUPPORTED'
-        : null;
-    return compositionViolation;
+    if (!context.requiresMaterialVariety) {
+      // Optional descriptions cannot become trusted history unless grounded in the public answer.
+      if (compositionViolation) this.compositions.delete(candidate);
+      return null;
+    }
+    const qualityViolation = nutritionAdviceQualityViolation(
+      context,
+      candidate,
+      composition && !compositionViolation
+        ? composition.current.map((option) => option.quote)
+        : [],
+    );
+    if (qualityViolation) return qualityViolation;
+    const textViolation = nutritionTextVarietyViolation(
+      candidate.answer,
+      [
+        ...context.recentSuggestions,
+        ...(context.previousAdvice ? [context.previousAdvice] : []),
+      ],
+      this.previousCompositions.get(context) ?? [],
+      composition && !compositionViolation ? composition.current : [],
+    );
+    if (textViolation) return textViolation;
+    if (compositionViolation === 'NUTRITION_ADVICE_REPEATS_PREVIOUS_SUGGESTION')
+      return compositionViolation;
+    // Unusable descriptions are not proof that the public recommendation repeats.
+    if (compositionViolation) this.compositions.delete(candidate);
+    return null;
   }
 
   private failed(

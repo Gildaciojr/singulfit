@@ -245,10 +245,18 @@ export class CoachCommandService {
       });
       reply = {
         ...reply,
+        ...(decision.source === 'CONVERSATION_RUNTIME' &&
+        decision.publicationKind === 'CANONICAL_NUTRITION_PLAN'
+          ? { domain: 'NUTRITION' as const }
+          : {}),
         evidence: {
           ...reply.evidence,
           responseSource: decision.source,
           responseSelectionReason: decision.reason,
+          publicationKind:
+            decision.source === 'CONVERSATION_RUNTIME'
+              ? (decision.publicationKind ?? null)
+              : null,
         },
         content:
           decision.source === 'CONVERSATION_RUNTIME' ||
@@ -264,7 +272,10 @@ export class CoachCommandService {
         ...reply,
         content: this.continuations.publicText(
           reply.content,
-          reply.domain === 'WORKOUT',
+          reply.domain === 'WORKOUT' ||
+            (reply.domain === 'NUTRITION' &&
+              reply.evidence.responseSource === 'CONVERSATION_RUNTIME' &&
+              reply.evidence.publicationKind === 'CANONICAL_NUTRITION_PLAN'),
         ),
       };
     const intent: CoachCommandIntent =

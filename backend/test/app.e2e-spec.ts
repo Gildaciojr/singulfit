@@ -9,12 +9,12 @@ import {
   ActivityLevel,
   ActivationRiskLevel,
   ActivationStage,
+  CoachProfileAcquisitionField,
   AIJobStatus,
   AIJobType,
   AIResponseEvaluationType,
   AIResponseRiskLevel,
   AIReviewStatus,
-  DietPlanStatus,
   EnergyLevel,
   FitnessGoal,
   Gender,
@@ -66,6 +66,17 @@ import { PilotMetricsService } from './../src/pilot/pilot-metrics.service';
 import { AnalyticsSnapshotService } from './../src/analytics/analytics-snapshot.service';
 import { CoachIntelligenceService } from './../src/automation/coach-intelligence.service';
 
+import {
+  qualityCandidate,
+  qualitySession,
+  strength,
+} from './../src/workout/v2/workout-quality.fixtures';
+import type { GeneratedWorkoutPlanV2Candidate } from './../src/workout/v2/workout-plan-v2.contract';
+import type { GeneratedNutritionPlanCandidate } from './../src/diet/v2/nutrition-plan-v2.contract';
+import type { NutritionPlanningContext } from './../src/diet/v2/nutrition-planning-context.contract';
+import { NUTRITION_PLANNING_V2_PROMPT } from './../src/diet/v2/nutrition-planning-v2.prompt.definition';
+import type { NutritionPlanningStrategy } from './../src/diet/v2/nutrition-planning-strategy.contract';
+
 interface AuthResponse {
   user: {
     id: string;
@@ -110,6 +121,9 @@ describe('AppController (e2e)', () => {
   };
   const openAIGateway = {
     createTextResponse: jest.fn(),
+    getRequestedTextModel: jest.fn().mockReturnValue('e2e-text-model'),
+    startBackgroundTextResponse: jest.fn(),
+    retrieveTextResponse: jest.fn(),
     createVisionResponse: jest.fn(),
   };
   const evolutionGateway = {
@@ -119,12 +133,201 @@ describe('AppController (e2e)', () => {
     sendText: jest.fn(),
   };
 
+  async function confirmFields(
+    userId: string,
+    fields: ReadonlyArray<
+      readonly [
+        CoachProfileAcquisitionField,
+        string | number | readonly string[],
+      ]
+    >,
+  ) {
+    const now = new Date();
+    for (const [field, value] of fields) {
+      await prisma.coachProfileFieldValue.create({
+        data: {
+          userId,
+          field,
+          valueType:
+            typeof value === 'string'
+              ? 'TEXT'
+              : typeof value === 'number'
+                ? 'INTEGER'
+                : 'TEXT_LIST',
+          ...(typeof value === 'string'
+            ? { textValue: value }
+            : typeof value === 'number'
+              ? { integerValue: value }
+              : { textListValue: [...value] }),
+          status: 'CONFIRMED',
+          source: 'USER_CONFIRMED',
+          confirmationState: 'CONFIRMED',
+          definitionVersion: 1,
+          referenceDate: now,
+          confirmedAt: now,
+          operationKey: `e2e:${userId}:${field}:${randomUUID()}`,
+        },
+      });
+    }
+  }
+
+  function workoutCandidate(title: string): GeneratedWorkoutPlanV2Candidate {
+    const sessions = ['MONDAY', 'THURSDAY'].map((weekday, index) => {
+      const activities = [
+        { ...strength(`${weekday}-squat`), repetitions: '8-12' },
+        {
+          ...strength(`${weekday}-bridge`),
+          name: 'Ponte de glúteos',
+          movementPattern: 'HINGE' as const,
+          publicIdentity: {
+            plane: 'SAGITTAL' as const,
+            targetRegion: 'HIPS' as const,
+            bodyPosition: 'LYING' as const,
+            jointAction: null,
+          },
+          repetitions: '8-12',
+        },
+        {
+          ...strength(`${weekday}-core`),
+          name: 'Abdominal curto',
+          movementPattern: 'CORE' as const,
+          publicIdentity: {
+            plane: 'SAGITTAL' as const,
+            targetRegion: 'TRUNK' as const,
+            bodyPosition: 'LYING' as const,
+            jointAction: 'FLEXION' as const,
+          },
+          repetitions: '8-12',
+        },
+      ];
+      const session = qualitySession(weekday, activities);
+      return {
+        ...session,
+        weekday: weekday as 'MONDAY' | 'THURSDAY',
+        sequence: index + 1,
+        blocks: session.blocks.map((block) => ({
+          ...block,
+          activities: block.activities.map((activity) =>
+            activity.kind === 'ENDURANCE'
+              ? {
+                  kind: activity.kind,
+                  activityKey: activity.activityKey,
+                  name: activity.name,
+                  source: activity.source,
+                  movementPattern: 'LOCOMOTION' as const,
+                  equipment: activity.equipment,
+                  instruction: activity.instruction,
+                  alerts: activity.alerts,
+                  appliedConstraintCodes: activity.appliedConstraintCodes,
+                  mode: activity.mode,
+                  durationMinutes: activity.durationMinutes,
+                  distanceKm: activity.distanceKm,
+                  intensity: activity.intensity,
+                }
+              : {
+                  ...activity,
+                  ...(activity.kind === 'STRENGTH'
+                    ? {
+                        prescription: {
+                          execution: {
+                            kind: 'COUNT' as const,
+                            minimum: 8,
+                            maximum: 12,
+                            perSide: false,
+                            alternating: false,
+                          },
+                          load: null,
+                          effort: null,
+                          enduranceMetrics: [],
+                        },
+                      }
+                    : {}),
+                },
+          ),
+        })),
+      };
+    });
+    return { ...qualityCandidate(sessions), title, objective: 'HYPERTROPHY' };
+  }
+
+  function dietCandidate(
+    title: string,
+    breakfast: string,
+    strategy: NutritionPlanningStrategy,
+  ): GeneratedNutritionPlanCandidate {
+    if (
+      strategy.artifactType !== 'DAILY_STRUCTURE' &&
+      strategy.artifactType !== 'WEEKLY_PLAN'
+    )
+      throw new Error('Unexpected plan artifact in controlled HTTP fixture');
+    // Controlled estimates follow the actual strategy; the application still parses and validates them.
+    const calories =
+      strategy.energyTargetKcal.status === 'NOT_SET'
+        ? null
+        : strategy.energyTargetKcal.value / 2;
+    const macros =
+      strategy.macroTargets.status === 'NOT_SET'
+        ? null
+        : strategy.macroTargets.value;
+    const meals = [breakfast, 'Arroz, feijão, frango e salada'].map(
+      (foodName, index) => ({
+        mealKey: `meal-${index}`,
+        name: index === 0 ? 'Café da manhã' : 'Almoço',
+        period: index === 0 ? ('BREAKFAST' as const) : ('LUNCH' as const),
+        suggestedTime: index === 0 ? '08:00' : '13:00',
+        items: [
+          {
+            itemKey: `item-${index}`,
+            foodName,
+            role: 'OTHER' as const,
+            quantity: '1 porção',
+            caloriesKcal: calories,
+            macros: {
+              proteinGrams: macros === null ? null : macros.proteinGrams / 2,
+              carbohydrateGrams:
+                macros === null ? null : macros.carbohydrateGrams / 2,
+              fatGrams: macros === null ? null : macros.fatGrams / 2,
+            },
+            allergenTags: [],
+            dietaryTags: [],
+          },
+        ],
+        alternatives: [],
+      }),
+    );
+    return {
+      artifactType: strategy.artifactType,
+      title,
+      objectiveSummary: 'Emagrecimento gradual com estimativas ajustáveis',
+      guidance: ['Porções estimadas, sem lactose.'],
+      days: Array.from({ length: strategy.dayCount }, (_, index) => ({
+        dayNumber: index + 1,
+        label: `Dia ${index + 1}`,
+        trainingDay: false,
+        meals: meals.map((meal) => ({
+          ...meal,
+          mealKey: `day-${index}-${meal.mealKey}`,
+          items: meal.items.map((item) => ({
+            ...item,
+            itemKey: `day-${index}-${item.itemKey}`,
+          })),
+        })),
+      })),
+      substitutions: [],
+      adaptationRules: [],
+      hydrationGuidance: [],
+      safetyNotes: [],
+    };
+  }
+
   beforeAll(async () => {
     await rm(mediaUploadPath, {
       recursive: true,
       force: true,
     });
-    process.env.PAGBANK_WEBHOOK_SECRET = webhookSecret;
+    process.env.PAGBANK_TOKEN = webhookSecret;
+    process.env.JWT_ACCESS_SECRET = 'e2e-access-secret-not-production';
+    process.env.JWT_REFRESH_SECRET = 'e2e-refresh-secret-not-production';
     process.env.SUBSCRIPTION_GRACE_PERIOD_DAYS = '3';
     process.env.EVOLUTION_BASE_URL = 'https://evolution.example.com';
     process.env.EVOLUTION_API_KEY = 'e2e-evolution-api-key';
@@ -159,6 +362,30 @@ describe('AppController (e2e)', () => {
       completionTokens: 50,
       totalTokens: 150,
     });
+    const backgroundResponses = new Map<
+      string,
+      import('./../src/ai/interfaces/openai.interface').OpenAIResponseResult
+    >();
+    openAIGateway.startBackgroundTextResponse
+      .mockReset()
+      .mockImplementation(
+        async (
+          input: import('./../src/ai/interfaces/openai.interface').OpenAITextRequest,
+        ) => {
+          const response = (await openAIGateway.createTextResponse(
+            input,
+          )) as import('./../src/ai/interfaces/openai.interface').OpenAIResponseResult;
+          backgroundResponses.set(response.responseId, response);
+          return response.responseId;
+        },
+      );
+    openAIGateway.retrieveTextResponse
+      .mockReset()
+      .mockImplementation((responseId: string) => {
+        const result = backgroundResponses.get(responseId);
+        if (!result) throw new Error('Unknown controlled background response');
+        return Promise.resolve({ responseId, status: 'completed', result });
+      });
     openAIGateway.createVisionResponse.mockReset();
     evolutionGateway.getInstanceName.mockReturnValue('singulfit');
     evolutionGateway.validateWebhookSecret
@@ -168,9 +395,16 @@ describe('AppController (e2e)', () => {
           throw new UnauthorizedException('Webhook Evolution não autorizado');
         }
       });
-    evolutionGateway.sendText.mockReset().mockResolvedValue({
-      externalMessageId: 'wamid-outbound-e2e',
-    });
+    const sentIds = new Map<string, string>();
+    evolutionGateway.sendText
+      .mockReset()
+      .mockImplementation((message: { number: string; text: string }) => {
+        const identity = JSON.stringify(message);
+        const externalMessageId =
+          sentIds.get(identity) ?? `wamid-e2e-${randomUUID()}`;
+        sentIds.set(identity, externalMessageId);
+        return Promise.resolve({ externalMessageId });
+      });
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -750,6 +984,16 @@ describe('AppController (e2e)', () => {
     await request(app.getHttpServer())
       .patch('/api/v1/profile')
       .set('Authorization', `Bearer ${accessToken}`)
+      .send({ targetWeightKg: 62.5 })
+      .expect(403);
+    await prisma.subscription.update({
+      where: { id: subscription.id },
+      data: { status: SubscriptionStatus.ACTIVE },
+    });
+
+    await request(app.getHttpServer())
+      .patch('/api/v1/profile')
+      .set('Authorization', `Bearer ${accessToken}`)
       .send({
         targetWeightKg: 62.5,
         activityLevel: ActivityLevel.HIGH,
@@ -978,50 +1222,47 @@ describe('AppController (e2e)', () => {
         },
       },
     });
-    const workoutResponse = (title: string, exerciseName: string) => ({
-      responseId: `response-${title}`,
-      model: 'e2e-text-model',
-      outputText: JSON.stringify({
-        title,
-        days: [
-          {
-            dayNumber: 1,
-            title: 'Peito e tríceps',
-            exercises: [
-              {
-                exerciseName,
-                sets: 4,
-                reps: '8-12',
-                restSeconds: 90,
-                notes: 'Interromper se houver dor no ombro',
-              },
-            ],
-          },
-          {
-            dayNumber: 2,
-            title: 'Pernas',
-            exercises: [
-              {
-                exerciseName: 'Leg press',
-                sets: 4,
-                reps: '10-12',
-                restSeconds: 120,
-                notes: null,
-              },
-            ],
-          },
-        ],
-      }),
-      promptTokens: 400,
-      completionTokens: 250,
-      totalTokens: 650,
-    });
-
+    await request(app.getHttpServer())
+      .post('/api/v1/workouts/generate')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(422)
+      .expect((response) => {
+        expect(response.body.resolutionReason).toBe('MODALITY_REQUIRED');
+      });
+    expect(openAIGateway.createTextResponse).not.toHaveBeenCalled();
+    await confirmFields(createdUserId, [
+      [CoachProfileAcquisitionField.TRAINING_MODALITY, 'GYM_STRENGTH'],
+      [CoachProfileAcquisitionField.TRAINING_EXPERIENCE, 'INTERMEDIATE'],
+      [CoachProfileAcquisitionField.WEEKLY_FREQUENCY, 2],
+      [CoachProfileAcquisitionField.SESSION_DURATION_MINUTES, 60],
+      [CoachProfileAcquisitionField.TRAINING_ENVIRONMENT, 'FULL_GYM'],
+      [CoachProfileAcquisitionField.AVAILABLE_EQUIPMENT, ['BODYWEIGHT']],
+      [
+        CoachProfileAcquisitionField.AVAILABLE_TRAINING_DAYS,
+        ['MONDAY', 'THURSDAY'],
+      ],
+      [
+        CoachProfileAcquisitionField.PHYSICAL_LIMITATIONS,
+        ['Evitar impacto excessivo no ombro esquerdo'],
+      ],
+    ]);
     openAIGateway.createTextResponse
-      .mockResolvedValueOnce(workoutResponse('Hipertrofia inicial', 'Supino'))
-      .mockResolvedValueOnce(
-        workoutResponse('Hipertrofia atualizada', 'Supino com halteres'),
-      );
+      .mockResolvedValueOnce({
+        responseId: 'resp-workout-first',
+        model: 'e2e-text-model',
+        outputText: JSON.stringify(workoutCandidate('Hipertrofia inicial')),
+        promptTokens: 400,
+        completionTokens: 250,
+        totalTokens: 650,
+      })
+      .mockResolvedValueOnce({
+        responseId: 'resp-workout-second',
+        model: 'e2e-text-model',
+        outputText: JSON.stringify(workoutCandidate('Hipertrofia atualizada')),
+        promptTokens: 400,
+        completionTokens: 250,
+        totalTokens: 650,
+      });
 
     await request(app.getHttpServer())
       .post('/api/v1/workouts/generate')
@@ -1030,6 +1271,12 @@ describe('AppController (e2e)', () => {
     const firstGeneration = await request(app.getHttpServer())
       .post('/api/v1/workouts/generate')
       .set('Authorization', `Bearer ${accessToken}`)
+      .expect((response) => {
+        if (response.status !== 201)
+          throw new Error(
+            `workouts generation: ${response.status} ${JSON.stringify(response.body)}`,
+          );
+      })
       .expect(201);
 
     expect(firstGeneration.body).toEqual(
@@ -1043,14 +1290,14 @@ describe('AppController (e2e)', () => {
         days: [
           expect.objectContaining({
             dayNumber: 1,
-            exercises: [
+            exercises: expect.arrayContaining([
               expect.objectContaining({
-                exerciseName: 'Supino',
+                exerciseName: 'Agachamento controlado',
                 sets: 4,
                 reps: '8-12',
                 restSeconds: 90,
               }),
-            ],
+            ]),
           }),
           expect.objectContaining({
             dayNumber: 2,
@@ -1060,33 +1307,38 @@ describe('AppController (e2e)', () => {
     );
     expect(openAIGateway.createTextResponse).toHaveBeenCalledWith(
       expect.objectContaining({
-        instructions: expect.stringContaining('hipertrofia'),
         jsonSchema: expect.objectContaining({
-          name: 'personalized_workout_plan',
+          name: expect.stringContaining('workout'),
         }),
       }),
     );
     const firstOpenAIRequest = openAIGateway.createTextResponse.mock
-      .calls[0][0] as {
-      input: string;
+      .calls[0][0] as { input: string };
+    const workoutPayload = JSON.parse(firstOpenAIRequest.input) as {
+      context: {
+        profile: unknown;
+        movementConstraints: unknown;
+        training: unknown;
+      };
     };
-
-    expect(JSON.parse(firstOpenAIRequest.input)).toEqual(
+    expect(workoutPayload.context.profile).toEqual(
       expect.objectContaining({
-        profile: expect.objectContaining({
-          goal: FitnessGoal.MUSCLE_GAIN,
-          activityLevel: ActivityLevel.HIGH,
+        fitnessGoal: expect.objectContaining({
+          value: FitnessGoal.MUSCLE_GAIN,
         }),
-        restrictions: expect.objectContaining({
-          injuries: ['Evitar impacto excessivo no ombro esquerdo'],
+      }),
+    );
+    expect(
+      JSON.stringify(workoutPayload.context.movementConstraints),
+    ).toContain('ombro esquerdo');
+    expect(workoutPayload.context.training).toEqual(
+      expect.objectContaining({
+        experience: expect.objectContaining({
+          status: 'CONFIRMED',
+          value: 'INTERMEDIATE',
         }),
-        measurements: [
-          expect.objectContaining({
-            weightKg: 82,
-            bodyFatPercent: 16.5,
-            muscleMassKg: 39,
-          }),
-        ],
+        weeklyFrequency: expect.objectContaining({ value: 2 }),
+        equipment: expect.objectContaining({ value: ['BODYWEIGHT'] }),
       }),
     );
 
@@ -1099,9 +1351,25 @@ describe('AppController (e2e)', () => {
       },
     });
 
+    await request(app.getHttpServer())
+      .post('/api/v1/workouts/generate')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(403);
+    expect(openAIGateway.createTextResponse).toHaveBeenCalledTimes(1);
+    await prisma.subscription.update({
+      where: { id: subscription.id },
+      data: { status: SubscriptionStatus.ACTIVE },
+    });
+
     const secondGeneration = await request(app.getHttpServer())
       .post('/api/v1/workouts/generate')
       .set('Authorization', `Bearer ${accessToken}`)
+      .expect((response) => {
+        if (response.status !== 201)
+          throw new Error(
+            `workouts generation: ${response.status} ${JSON.stringify(response.body)}`,
+          );
+      })
       .expect(201);
 
     expect(secondGeneration.body).toEqual(
@@ -1304,65 +1572,79 @@ describe('AppController (e2e)', () => {
         },
       },
     });
-    const dietResponse = (title: string, breakfast: string) => ({
-      responseId: `response-${title}`,
-      model: 'e2e-text-model',
-      outputText: JSON.stringify({
-        title,
-        dailyCaloriesTarget: 1850,
-        proteinTarget: 130,
-        carbsTarget: 205,
-        fatTarget: 55,
-        meals: [
-          {
-            name: 'Café da manhã',
-            order: 1,
-            caloriesTarget: 430,
-            notes: 'Sem ingredientes com lactose',
-            items: [
-              {
-                foodName: breakfast,
-                quantity: '1 porção',
-                calories: 360,
-                protein: 22,
-                carbs: 42,
-                fat: 12,
-                substitutionGroup:
-                  'Substituir por cuscuz com ovos na mesma porção',
-              },
-            ],
-          },
-          {
-            name: 'Almoço',
-            order: 2,
-            caloriesTarget: 620,
-            notes: null,
-            items: [
-              {
-                foodName: 'Arroz, feijão, frango e salada',
-                quantity: '1 prato médio',
-                calories: 590,
-                protein: 46,
-                carbs: 68,
-                fat: 15,
-                substitutionGroup: null,
-              },
-            ],
-          },
-        ],
-      }),
-      promptTokens: 500,
-      completionTokens: 300,
-      totalTokens: 800,
+    await prisma.userPreferences.create({
+      data: { userId: createdUserId, preferredMealTimes: ['08:00', '13:00'] },
     });
-
-    openAIGateway.createTextResponse
-      .mockResolvedValueOnce(
-        dietResponse('Dieta brasileira inicial', 'Tapioca com ovos'),
-      )
-      .mockResolvedValueOnce(
-        dietResponse('Dieta brasileira atualizada', 'Cuscuz com ovos'),
+    await confirmFields(createdUserId, [
+      [CoachProfileAcquisitionField.ALLERGIES, []],
+      [CoachProfileAcquisitionField.MEDICAL_CONDITIONS, []],
+      [CoachProfileAcquisitionField.DESIRED_MEAL_COUNT, 2],
+      [CoachProfileAcquisitionField.DECLARED_FOOD_PREFERENCES, ['ovos']],
+    ]);
+    await prisma.foodPreferenceSnapshot.create({
+      data: {
+        userId: createdUserId,
+        foodName: 'ovos',
+        normalizedFood: 'ovos',
+        sourceKey: `e2e:${createdUserId}:ovos`,
+        observedAt: new Date(),
+        kind: 'FREQUENT',
+        confidence: 1,
+        occurrences: 2,
+        evidence: { source: 'EXPLICIT_MESSAGE' },
+      },
+    });
+    const nutritionDefinition = NUTRITION_PLANNING_V2_PROMPT;
+    const existingNutritionPrompt = await prisma.promptVersion.findUnique({
+      where: {
+        name_version: {
+          name: nutritionDefinition.name,
+          version: nutritionDefinition.version,
+        },
+      },
+    });
+    if (!existingNutritionPrompt) {
+      const prompt = await app.get(PromptService).createVersion({
+        name: nutritionDefinition.name,
+        version: nutritionDefinition.version,
+        prompt: nutritionDefinition.instructions,
+        capability: nutritionDefinition.capability,
+        model: nutritionDefinition.model,
+        jsonSchema: nutritionDefinition.schema,
+        isActive: true,
+      });
+      createdPromptVersionId = prompt.id;
+    } else {
+      expect(existingNutritionPrompt.isActive).toBe(true);
+      expect(existingNutritionPrompt.prompt).toBe(
+        nutritionDefinition.instructions,
       );
+    }
+    let dietCalls = 0;
+    openAIGateway.createTextResponse.mockImplementation(
+      (input: { input: string }) => {
+        const payload = JSON.parse(input.input) as {
+          strategy: NutritionPlanningStrategy;
+        };
+        dietCalls += 1;
+        return Promise.resolve({
+          responseId: `resp-diet-${dietCalls}`,
+          model: 'e2e-text-model',
+          outputText: JSON.stringify(
+            dietCandidate(
+              dietCalls === 1
+                ? 'Dieta brasileira inicial'
+                : 'Dieta brasileira atualizada',
+              dietCalls === 1 ? 'Tapioca com ovos' : 'Cuscuz com ovos',
+              payload.strategy,
+            ),
+          ),
+          promptTokens: 500,
+          completionTokens: 300,
+          totalTokens: 800,
+        });
+      },
+    );
 
     await request(app.getHttpServer())
       .post('/api/v1/diets/generate')
@@ -1371,70 +1653,69 @@ describe('AppController (e2e)', () => {
     const firstGeneration = await request(app.getHttpServer())
       .post('/api/v1/diets/generate')
       .set('Authorization', `Bearer ${accessToken}`)
+      .expect((response) => {
+        if (response.status !== 201)
+          throw new Error(
+            `diets generation: ${response.status} ${JSON.stringify(response.body)}`,
+          );
+      })
       .expect(201);
 
     expect(firstGeneration.body).toEqual(
       expect.objectContaining({
+        implementation: 'V2',
         id: expect.any(String),
         userId: createdUserId,
         profileId: profile.id,
         title: 'Dieta brasileira inicial',
-        objective: FitnessGoal.WEIGHT_LOSS,
-        status: DietPlanStatus.ACTIVE,
-        meals: [
-          expect.objectContaining({
-            name: 'Café da manhã',
-            order: 1,
-            items: [
-              expect.objectContaining({
-                foodName: 'Tapioca com ovos',
-                substitutionGroup:
-                  'Substituir por cuscuz com ovos na mesma porção',
-              }),
-            ],
-          }),
-          expect.objectContaining({
-            name: 'Almoço',
-            order: 2,
-          }),
-        ],
-        aiJob: expect.objectContaining({
-          type: AIJobType.DIET,
-          status: AIJobStatus.COMPLETED,
-          usage: [
+        status: 'ACTIVE',
+        document: expect.objectContaining({
+          days: expect.arrayContaining([
             expect.objectContaining({
-              model: 'e2e-text-model',
-              promptTokens: 500,
-              completionTokens: 300,
-              totalTokens: 800,
-              costCurrency: 'USD',
+              meals: expect.arrayContaining([
+                expect.objectContaining({
+                  name: 'Café da manhã',
+                  items: expect.arrayContaining([
+                    expect.objectContaining({ foodName: 'Tapioca com ovos' }),
+                  ]),
+                }),
+              ]),
             }),
-          ],
+          ]),
         }),
       }),
     );
     const firstDietRequest = openAIGateway.createTextResponse.mock
-      .calls[0][0] as {
-      input: string;
+      .calls[0][0] as { input: string };
+    const firstDietPayload = JSON.parse(firstDietRequest.input) as {
+      context: NutritionPlanningContext;
+      strategy: NutritionPlanningStrategy;
     };
-    const firstDietContext = JSON.parse(firstDietRequest.input) as {
-      foodRestrictions: Array<{ description: string }>;
-      nutritionHistory: Array<{ totalCalories: number }>;
-      progress: Array<{ insights: string[] }>;
-      currentWorkout: { title: string };
-    };
-
-    expect(firstDietContext.foodRestrictions).toEqual([
+    expect(firstDietPayload.context.constraints).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'LACTOSE' })]),
+    );
+    expect(firstDietPayload.context.currentWorkoutAvailable).toBe(true);
+    expect(firstDietPayload.context.profile.currentWeightKg).toEqual(
+      expect.objectContaining({ value: 70 }),
+    );
+    const firstDietJob = await prisma.aIJob.findUniqueOrThrow({
+      where: { id: firstGeneration.body.aiJobId as string },
+      include: { usage: true },
+    });
+    expect(firstDietJob).toEqual(
       expect.objectContaining({
-        description: 'Lactose',
+        type: AIJobType.DIET,
+        status: AIJobStatus.COMPLETED,
+        usage: [
+          expect.objectContaining({
+            model: 'e2e-text-model',
+            promptTokens: 500,
+            completionTokens: 300,
+            totalTokens: 800,
+            costCurrency: 'USD',
+          }),
+        ],
       }),
-    ]);
-    expect(firstDietContext.nutritionHistory[0].totalCalories).toBe(610);
-    expect(firstDietContext.progress[0].insights).toEqual([
-      'Você perdeu 2 kg nos últimos 30 dias.',
-    ]);
-    expect(firstDietContext.currentWorkout.title).toBe(
-      'Treino ativo para emagrecimento',
     );
 
     await prisma.subscription.update({
@@ -1446,9 +1727,25 @@ describe('AppController (e2e)', () => {
       },
     });
 
+    await request(app.getHttpServer())
+      .post('/api/v1/diets/generate')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(403);
+    expect(openAIGateway.createTextResponse).toHaveBeenCalledTimes(1);
+    await prisma.subscription.update({
+      where: { id: subscription.id },
+      data: { status: SubscriptionStatus.ACTIVE },
+    });
+
     const secondGeneration = await request(app.getHttpServer())
       .post('/api/v1/diets/generate')
       .set('Authorization', `Bearer ${accessToken}`)
+      .expect((response) => {
+        if (response.status !== 201)
+          throw new Error(
+            `diets generation: ${response.status} ${JSON.stringify(response.body)}`,
+          );
+      })
       .expect(201);
 
     await request(app.getHttpServer())
@@ -1459,42 +1756,50 @@ describe('AppController (e2e)', () => {
         expect(response.body.id).toBe(secondGeneration.body.id);
       });
 
+    // Explicit by-id/history remain legacy endpoints; canonical V2 is exposed by /current.
     await request(app.getHttpServer())
       .get(`/api/v1/diets/${secondGeneration.body.id}`)
       .set('Authorization', `Bearer ${accessToken}`)
-      .expect(200)
-      .expect((response) => {
-        expect(response.body.meals).toHaveLength(2);
-        expect(response.body.aiJob.usage).toHaveLength(1);
-      });
-
+      .expect(404);
     await request(app.getHttpServer())
       .get('/api/v1/diets/history')
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(200)
       .expect((response) => {
-        expect(response.body).toHaveLength(2);
-        expect(response.body).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({
-              id: firstGeneration.body.id,
-              status: DietPlanStatus.ARCHIVED,
-            }),
-            expect.objectContaining({
-              id: secondGeneration.body.id,
-              status: DietPlanStatus.ACTIVE,
-            }),
-          ]),
-        );
+        expect(response.body).toEqual([]);
       });
+    const persistedDietHistory = await prisma.nutritionPlanV2.findMany({
+      where: { userId: createdUserId },
+      orderBy: { generatedAt: 'asc' },
+    });
+    expect(persistedDietHistory).toHaveLength(2);
+    expect(persistedDietHistory).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: firstGeneration.body.id,
+          status: 'ARCHIVED',
+        }),
+        expect.objectContaining({
+          id: secondGeneration.body.id,
+          status: 'ACTIVE',
+        }),
+      ]),
+    );
     expect(
-      await prisma.dietPlan.count({
-        where: {
-          userId: createdUserId,
-          status: DietPlanStatus.ACTIVE,
-        },
+      await prisma.nutritionPlanV2.count({
+        where: { userId: createdUserId, status: 'ACTIVE' },
       }),
     ).toBe(1);
+    expect(
+      await prisma.nutritionPlanOwnership.findUniqueOrThrow({
+        where: { userId: createdUserId },
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        implementation: 'V2',
+        planId: secondGeneration.body.id,
+      }),
+    );
     expect(
       await prisma.aIUsage.count({
         where: {
@@ -1699,6 +2004,11 @@ describe('AppController (e2e)', () => {
       ),
     ).toBe(true);
     expect(evolutionGateway.sendText).toHaveBeenCalledTimes(2);
+    expect(
+      new Set(dispatched.map((message) => message.externalMessageId)).size,
+    ).toBe(2);
+    expect(await automationService.dispatchDue(now)).toHaveLength(0);
+    expect(evolutionGateway.sendText).toHaveBeenCalledTimes(2);
 
     const futureWorkout = await automationService.scheduleMessage(
       createdUserId,
@@ -1845,9 +2155,34 @@ describe('AppController (e2e)', () => {
           where: {
             userId: user.id,
             status: 'RESERVED',
+            entitlementCode: 'IMAGE_ANALYSIS',
           },
         }),
-      ).toBe(2);
+      ).toBe(1);
+      const reservedJob = await prisma.aIJob.findFirstOrThrow({
+        where: { userId: user.id },
+      });
+      if (!reservedJob.messageId)
+        throw new Error('Image reservation must belong to a message');
+      const replayedJob = await aiService.createJob({
+        userId: user.id,
+        conversationId: conversation.id,
+        messageId: reservedJob.messageId,
+        type: AIJobType.IMAGE,
+        promptName: 'nutrition_vision_brazilian_meal',
+      });
+      expect(replayedJob.id).toBe(reservedJob.id);
+      const reservations = await prisma.usageEvent.findMany({
+        where: { userId: user.id },
+      });
+      expect(reservations).toEqual([
+        expect.objectContaining({
+          entitlementCode: 'IMAGE_ANALYSIS',
+          status: 'RESERVED',
+          quantity: 1,
+        }),
+      ]);
+      expect(openAIGateway.createVisionResponse).not.toHaveBeenCalled();
     } finally {
       await prisma.user.delete({
         where: {
@@ -2063,7 +2398,7 @@ describe('AppController (e2e)', () => {
     };
     const rawPagBankPayload = JSON.stringify(pagBankPayload);
     const pagBankSignature = createHash('sha256')
-      .update(webhookSecret)
+      .update(`${webhookSecret}-`)
       .update(rawPagBankPayload)
       .digest('hex');
     createdWebhookRequestId = `journey-webhook-${uniqueId}`;
@@ -2409,8 +2744,8 @@ describe('AppController (e2e)', () => {
         conversationId: conversation.id,
         sourceMessageId: persistedMessage.id,
         mealAnalysisId: persistedMeal.analysis!.id,
-        content: expect.stringContaining('Impacto no seu objetivo:'),
-        externalMessageId: 'wamid-outbound-e2e',
+        content: expect.stringContaining('Valores estimados pela imagem'),
+        externalMessageId: expect.any(String),
         status: OutboundMessageStatus.SENT,
         sentAt: expect.any(Date),
         failedAt: null,
@@ -2643,7 +2978,7 @@ describe('AppController (e2e)', () => {
             expect.objectContaining({
               id: persistedMeal.analysis!.outboundMessage!.id,
               status: OutboundMessageStatus.SENT,
-              externalMessageId: 'wamid-outbound-e2e',
+              externalMessageId: expect.any(String),
             }),
           ],
           nextCursor: null,
@@ -2807,7 +3142,7 @@ describe('AppController (e2e)', () => {
     expect(repeatedPixResponse.body.paymentId).toBe(pixResponse.body.paymentId);
     expect(paymentGateway.createPixPayment).toHaveBeenCalledTimes(1);
 
-    const approvedAt = new Date('2026-06-06T18:30:00.000Z');
+    const approvedAt = new Date();
     paymentGateway.getPayment.mockResolvedValue({
       providerOrderId: 'ORDE_E2E_TEST',
       providerPaymentId: 'CHAR_E2E_TEST',
@@ -2824,11 +3159,30 @@ describe('AppController (e2e)', () => {
     };
     const rawWebhookPayload = JSON.stringify(webhookPayload);
     const webhookSignature = createHash('sha256')
-      .update(webhookSecret)
+      .update(`${webhookSecret}-`)
       .update(rawWebhookPayload)
       .digest('hex');
     const webhookRequestId = `webhook-${uniqueId}`;
     createdWebhookRequestId = webhookRequestId;
+
+    await request(app.getHttpServer())
+      .post('/api/v1/webhooks/pagbank')
+      .set('Content-Type', 'application/json')
+      .set('x-authenticity-token', '0'.repeat(64))
+      .set('x-request-id', `invalid-${uniqueId}`)
+      .send(rawWebhookPayload)
+      .expect(401);
+    expect(paymentGateway.getPayment).not.toHaveBeenCalled();
+    expect(
+      await prisma.subscription.findFirstOrThrow({
+        where: { userId: createdUserId },
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        status: SubscriptionStatus.PENDING_PAYMENT,
+        activationInvoiceId: null,
+      }),
+    );
 
     const sendWebhook = () =>
       request(app.getHttpServer())
@@ -2879,11 +3233,11 @@ describe('AppController (e2e)', () => {
       settledPayment.invoice.id,
     );
     expect(settledPayment.invoice.subscription.currentPeriodStart).toEqual(
-      approvedAt,
+      settledPayment.invoice.periodStart,
     );
-    expect(firstPeriodEnd).toEqual(new Date('2026-07-06T18:30:00.000Z'));
+    expect(firstPeriodEnd).toEqual(settledPayment.invoice.periodEnd);
     expect(settledPayment.invoice.subscription.gracePeriodEnd).toEqual(
-      new Date('2026-07-09T18:30:00.000Z'),
+      new Date(settledPayment.invoice.periodEnd.getTime() + 3 * 86400000),
     );
 
     await request(app.getHttpServer())
@@ -2980,6 +3334,18 @@ describe('AppController (e2e)', () => {
       .expect(201);
     const registration = registrationResponse.body as AuthResponse;
     createdUserId = registration.user.id;
+    const contextNow = new Date();
+    await prisma.subscription.updateMany({
+      where: { userId: createdUserId },
+      data: {
+        status: SubscriptionStatus.ACTIVE,
+        startedAt: contextNow,
+        currentPeriodStart: contextNow,
+        currentPeriodEnd: new Date(contextNow.getTime() + 30 * 86400000),
+        billingPeriodStart: contextNow,
+        billingPeriodEnd: new Date(contextNow.getTime() + 30 * 86400000),
+      },
+    });
     await prisma.fitnessProfile.create({
       data: {
         userId: createdUserId,

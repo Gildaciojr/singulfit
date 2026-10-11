@@ -1228,6 +1228,81 @@ describe('CoachCommandService', () => {
     );
   });
 
+  it.each([false, true])(
+    'uses the structured budget only with a canonical diet receipt at publication: %s',
+    async (canonical) => {
+      const at = new Date('2026-06-10T12:00:00Z');
+      const content =
+        'Plano completo\n• primeiro\n• segundo\n• terceiro\n• quarto';
+      const publicBoundary = {
+        boundary: new ConversationPublicAnswerBoundaryService(),
+      } as unknown as ConversationContinuationService;
+      const projectPublicText: (text: string, structured?: boolean) => string =
+        ConversationContinuationService.prototype.publicText.bind(
+          publicBoundary,
+        );
+      const continuations = {
+        enabled: jest.fn().mockReturnValue(true),
+        source: jest.fn().mockResolvedValue({
+          id: 'message-id',
+          content: 'me mostra minha dieta',
+          conversationId: 'conversation-id',
+          timestamp: at,
+          replyToExternalMessageId: null,
+        }),
+        resolve: jest.fn().mockResolvedValue({
+          content: 'Interpretação contextual',
+          domain: 'GENERAL',
+          next: null,
+          pending: null,
+          outcome: 'UNKNOWN',
+          evidence: { delegateRuntime: true },
+        }),
+        claim: jest.fn().mockResolvedValue(true),
+        publicText: jest.fn((text: string, structured = false) =>
+          projectPublicText(text, structured),
+        ),
+      };
+      const subject = createSubject({
+        content: 'me mostra minha dieta',
+        runtimeContent: content,
+        continuations:
+          continuations as unknown as ConversationContinuationService,
+      });
+      subject.conversationRuntime.decide.mockResolvedValue({
+        source: 'CONVERSATION_RUNTIME',
+        reason: 'RUNTIME_SELECTED',
+        content,
+        ...(canonical ? { publicationKind: 'CANONICAL_NUTRITION_PLAN' } : {}),
+      });
+      expect(
+        await subject.service.processCanonicalContinuation({
+          userId: 'user-id',
+          messageId: 'message-id',
+        }),
+      ).toBe(true);
+      expect(continuations.publicText).toHaveBeenCalledWith(content, canonical);
+      const stored =
+        subject.transaction.coachMessage.create.mock.results[0].value;
+      expect(stored.content).toBe(projectPublicText(content, canonical));
+      expect(
+        new ConversationPublicAnswerBoundaryService().projectText(
+          stored.content,
+        ),
+      ).toBe(canonical ? null : stored.content);
+      subject.prisma.coachMessage.findUnique.mockResolvedValue(stored);
+      expect(
+        await subject.service.processCanonicalContinuation({
+          userId: 'user-id',
+          messageId: 'message-id',
+        }),
+      ).toBe(true);
+      expect(subject.transaction.coachMessage.create).toHaveBeenCalledTimes(1);
+      expect(subject.conversationRuntime.decide).toHaveBeenCalledTimes(1);
+      expect(subject.dietGenerator.generate).not.toHaveBeenCalled();
+      expect(subject.workoutGenerator.generate).not.toHaveBeenCalled();
+    },
+  );
   it('persists typed canonical continuation and reuses ordered delivery without planning or regeneration', async () => {
     const at = new Date('2026-06-10T12:00:00Z');
     const next = continuation('WORKOUT_DAY_QUERY', at);

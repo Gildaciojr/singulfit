@@ -1,4 +1,9 @@
+import { CurrentNutritionPlanReaderService } from '../../diet/current-nutrition-plan-reader.service';
+import { CanonicalNutritionPlanPresenterService } from '../../diet/canonical-nutrition-plan-presenter.service';
+import { NutritionPlanV2PersistenceValidator } from '../../diet/v2/persistence/nutrition-plan-v2-persistence.validator';
 import { randomUUID } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { ConfigService } from '@nestjs/config';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { Prisma, PrismaClient } from '@prisma/client';
@@ -33,7 +38,7 @@ import { CoachConversationHumanContextBuilder } from '../../context/coach-conver
 import type { CoachProfileSnapshotBuilder } from '../../context/coach-profile-snapshot.builder';
 import type { CoachAdaptiveProfileCollectorService } from '../../context/coach-adaptive-profile-collector.service';
 import type { ProfileQuestionSpecificationService } from '../../context/profile-acquisition/profile-question.service';
-import type { ConversationCurrentNutritionContextService } from '../runtime/conversation-current-nutrition-context.service';
+import { ConversationCurrentNutritionContextService } from '../runtime/conversation-current-nutrition-context.service';
 import { PersonalizedCoachContextService } from '../runtime/personalized-coach-context.service';
 import type { CurrentWorkoutPlanReaderService } from '../../workout/v2/current-workout-plan-reader.service';
 import type { ConversationAIService } from '../../ai/conversation-ai.service';
@@ -42,7 +47,7 @@ import type {
   AIUsageService,
   RecordAIUsageInput,
 } from '../../ai/ai-usage.service';
-import type { OpenAIGateway } from '../../ai/openai.gateway';
+import { OpenAIGateway } from '../../ai/openai.gateway';
 import type { OpenAITextRequest } from '../../ai/interfaces/openai.interface';
 import type { PromptService } from '../../ai/prompt.service';
 import type { ReservationService } from '../../entitlements/reservation.service';
@@ -60,6 +65,7 @@ import { AutomationService } from '../../automation/automation.service';
 import { CoachProactiveSchedulePolicy } from '../../automation/coach-proactive-schedule.policy';
 import type { PrismaService } from '../../prisma/prisma.service';
 import { ACTIVE_CONVERSATION_QA_PROMPT } from '../runtime/conversation-qa-capability';
+import { nutritionAdviceFoodViolation } from '../runtime/nutrition-advice.policy';
 import { continuation } from '../runtime/conversation-continuation.contract';
 import {
   knownDatum,
@@ -122,6 +128,7 @@ integration(
     let hydrationRuleId: string;
     let at: Date;
     let turnBuilder: ConversationTurnContextBuilderService;
+    let continuationService: ConversationContinuationService;
     const createdRules: string[] = [];
     const provider = { createTextResponse: jest.fn() };
     const outputs: unknown[] = [];
@@ -270,6 +277,27 @@ integration(
           proteinTarget: 150,
           carbsTarget: 250,
           fatTarget: 70,
+          // Persist the same synthetic recipe supplied to the conversation;
+          // an ACTIVE header alone is not evidence of registered foods.
+          meals: {
+            create: [
+              {
+                name: 'Jantar',
+                order: 1,
+                caloriesTarget: 600,
+                items: {
+                  create: plan.days[0].meals[0].items.map((item) => ({
+                    foodName: item.name,
+                    quantity: item.quantity,
+                    calories: 150,
+                    protein: 10,
+                    carbs: 15,
+                    fat: 5,
+                  })),
+                },
+              },
+            ],
+          },
         },
       });
       initialPlans = JSON.stringify(
@@ -309,12 +337,13 @@ integration(
         prisma,
         boundary,
       );
-      const nutrition = {
-        read: (owner: string) => {
-          if (owner !== userId) throw new Error('Unexpected nutrition owner');
-          return Promise.resolve({ status: 'AVAILABLE', plan });
-        },
-      } as unknown as ConversationCurrentNutritionContextService;
+      const nutrition = new ConversationCurrentNutritionContextService(
+        new CurrentNutritionPlanReaderService(
+          prisma,
+          new NutritionPlanV2PersistenceValidator(),
+        ),
+        new CanonicalNutritionPlanPresenterService(),
+      );
       const eventBus = new EventBusService(prisma);
       const aiUsage = {
         recordInTransaction: async (
@@ -501,6 +530,7 @@ integration(
         followUp,
         new ConversationContinuationStore(prisma, config),
       );
+      continuationService = continuations;
       command = new CoachCommandService(
         prisma,
         planning as unknown as CoachPlanningExecutionService,
@@ -672,6 +702,531 @@ integration(
       ).toBe('SENT');
       return { inbound: row, response };
     }
+    // Paid calls require a dedicated test credential and explicit bounded opt-in.
+    const realProvider =
+      process.env.SINGULFIT_CONVERSATION_PROVIDER_E2E_AUTHORIZED === 'YES' &&
+      Boolean(process.env.SINGULFIT_CONVERSATION_PROVIDER_E2E_API_KEY) &&
+      Boolean(process.env.SINGULFIT_CONVERSATION_PROVIDER_E2E_MODEL) &&
+      Boolean(process.env.SINGULFIT_CONVERSATION_PROVIDER_E2E_MAX_CALLS);
+    (realProvider ? it : it.skip)(
+      'real provider architecture homologation (synthetic isolated data, transport disabled)',
+      async () => {
+        const maxCalls = Number(
+          process.env.SINGULFIT_CONVERSATION_PROVIDER_E2E_MAX_CALLS,
+        );
+        if (!Number.isInteger(maxCalls) || maxCalls < 1 || maxCalls > 24)
+          throw new Error('Explicit test call limit must be between 1 and 24');
+        const gateway = new OpenAIGateway(
+          new ConfigService({
+            OPENAI_API_KEY:
+              process.env.SINGULFIT_CONVERSATION_PROVIDER_E2E_API_KEY,
+            OPENAI_MODEL_TEXT:
+              process.env.SINGULFIT_CONVERSATION_PROVIDER_E2E_MODEL,
+          }),
+        );
+        const calls: {
+          promptTokens: number;
+          completionTokens: number;
+          totalTokens: number;
+          durationMs: number;
+        }[] = [];
+        let attemptedCalls = 0;
+        const turns: {
+          request: string;
+          response: string;
+          providerCalls: number;
+          jobStatus: string | null;
+          failureCodes: string[];
+          rejectionClassification: string | null;
+        }[] = [];
+        provider.createTextResponse.mockImplementation(
+          async (request: OpenAITextRequest) => {
+            if (attemptedCalls >= maxCalls)
+              throw new Error('Authorized provider test call budget exhausted');
+            attemptedCalls += 1;
+            const started = performance.now();
+            const result = await gateway.createTextResponse(request);
+            calls.push({
+              promptTokens: result.promptTokens,
+              completionTokens: result.completionTokens,
+              totalTokens: result.totalTokens,
+              durationMs: Math.round(performance.now() - started),
+            });
+            return result;
+          },
+        );
+        const scenarios = [
+          'me dá uma dica de janta',
+          'o que eu como agora?',
+          'manda um lanche',
+          'quero algo barato',
+          'outra opção',
+          'não tenho frango',
+          'posso comer isso?',
+          'o que eu como depois do treino?',
+          'me mostra minha dieta',
+          'meu treino gasta quantas calorias?',
+          'já bebi 1 litro de água hoje',
+          'troca isso no meu plano',
+        ];
+        let completed = false;
+        try {
+          for (const request of scenarios) {
+            const count = attemptedCalls;
+            const turn = await inbound(request);
+            const content = turn.response.content;
+            const job = await db.aIJob.findFirst({
+              where: { userId, messageId: turn.inbound.id, type: 'TEXT' },
+            });
+            const audit = await db.auditLog.findFirst({
+              where: { userId, action: 'CONVERSATION_RUNTIME_EVALUATED' },
+              orderBy: { createdAt: 'desc' },
+            });
+            const metadata = audit?.metadata;
+            const safeCode = (value: unknown): string[] =>
+              typeof value === 'string' &&
+              value !== 'NONE' &&
+              value !== 'NOT_APPLICABLE' &&
+              /^[A-Z][A-Z0-9_]{0,100}$/u.test(value)
+                ? [value]
+                : [];
+            const failureCodes = [
+              ...new Set([
+                ...safeCode(job?.error),
+                ...(metadata &&
+                typeof metadata === 'object' &&
+                !Array.isArray(metadata)
+                  ? [
+                      'nutritionAdviceInitialViolation',
+                      'fallbackReason',
+                      'runtimeFallbackReason',
+                      'answerFallbackReason',
+                      'qaReason',
+                    ].flatMap((key) => safeCode(metadata[key]))
+                  : []),
+              ]),
+            ];
+            const rejectionClassification = failureCodes.length
+              ? failureCodes.some(
+                  (code) =>
+                    code.includes('INVALID') || code === 'MALFORMED_JSON',
+                )
+                ? 'CONTRACT'
+                : failureCodes.every(
+                      (code) =>
+                        code.includes('REPEATS') ||
+                        code.includes('COMPOSITION'),
+                    )
+                  ? 'QUALITY'
+                  : 'HARD_GATE_OR_EXECUTION'
+              : null;
+            turns.push({
+              request,
+              response: content,
+              providerCalls: attemptedCalls - count,
+              jobStatus: job?.status ?? null,
+              failureCodes,
+              rejectionClassification,
+            });
+            expect(content.trim().length).toBeGreaterThan(10);
+            expect(
+              nutritionAdviceFoodViolation(
+                {
+                  safetyConstraints: ['PEANUT'],
+                  excludedFoods: ['tomate', 'beterraba'],
+                },
+                content,
+              ),
+            ).toBeNull();
+            expect(content).not.toMatch(
+              /Não consegui concluir|Que alimentos você tem disponíveis/u,
+            );
+            expect(attemptedCalls - count).toBeLessThanOrEqual(2);
+            if (job) expect(job.status).toBe('COMPLETED');
+            // The entire synthetic sequence is read-only, including ambiguous mutation.
+            // inbound() verifies replay, unique delivery and unchanged plans on every turn.
+            if (
+              [
+                'me dá uma dica de janta',
+                'manda um lanche',
+                'o que eu como depois do treino?',
+              ].includes(request)
+            ) {
+              expect(job).not.toBeNull();
+              expect(job?.result).toMatchObject({
+                disposition: 'ANSWER',
+                domain: 'NUTRITION',
+              });
+            }
+            if (request === 'meu treino gasta quantas calorias?') {
+              expect(job?.result).toMatchObject({ domain: 'WORKOUT' });
+              expect(content).not.toContain('Sua meta diária');
+            }
+          }
+          completed = true;
+        } finally {
+          // Only synthetic text and actual aggregate usage; no key, headers or payload dumps.
+          writeFileSync(
+            resolve(
+              process.cwd(),
+              '../SINGULFIT_CONVERSATION_PROVIDER_E2E_RESULTS.json',
+            ),
+            JSON.stringify(
+              {
+                provider: 'REAL',
+                gate: completed ? 'PASS' : 'FAIL',
+                completed,
+                attemptedCalls,
+                calls,
+                turns,
+              },
+              null,
+              2,
+            ),
+            'utf8',
+          );
+        }
+      },
+      360_000,
+    );
+    it('architecture invalid public JSON does not masquerade as missing ingredients', async () => {
+      outputs.push({ answer: newDinner }, { answer: newDinner });
+      const turn = await inbound('me dá uma dica de janta pra hoje');
+      expect(provider.createTextResponse).toHaveBeenCalledTimes(2);
+      expect(turn.response.content).not.toContain('Que alimentos');
+      const job = await db.aIJob.findFirstOrThrow({
+        where: { userId, messageId: turn.inbound.id, type: 'TEXT' },
+      });
+      expect(job).toMatchObject({
+        status: 'FAILED',
+        error: 'INVALID_QA_RESPONSE',
+      });
+    });
+    it('second homologation registered diet lookup publishes the whole canonical plan without a provider call', async () => {
+      const turn = await inbound('me mostra minha dieta');
+      expect(turn.response.content).toContain(plan.title);
+      expect(
+        new ConversationPublicAnswerBoundaryService().projectText(
+          turn.response.content,
+        ),
+      ).toBeNull();
+      expect(turn.response.context).toMatchObject({
+        continuationEvidence: {
+          responseSource: 'CONVERSATION_RUNTIME',
+          publicationKind: 'CANONICAL_NUTRITION_PLAN',
+        },
+      });
+      // inbound() replays the real event and send. The public answer is stored
+      // in the coach/outbox ledger, not the interpreter's semantic receipt.
+      const replay = await db.coachMessage.findFirstOrThrow({
+        where: { userId, idempotencyKey: { contains: turn.inbound.id } },
+      });
+      expect(replay.content).toBe(turn.response.content);
+      expect(
+        (
+          await db.scheduledMessage.findUniqueOrThrow({
+            where: { id: turn.response.id },
+          })
+        ).content,
+      ).toBe(replay.content);
+      expect(
+        await continuationService.resolve(foreignId, turn.inbound.id),
+      ).toBeNull();
+
+      expect(turn.response.content).toContain('120 g');
+      expect(provider.createTextResponse).not.toHaveBeenCalled();
+      expect(
+        await db.aIJob.count({ where: { messageId: turn.inbound.id } }),
+      ).toBe(0);
+    });
+    it('publication boundary does not give free nutrition AI answers the canonical diet budget', async () => {
+      const free =
+        'Uma ideia para jantar:\n• arroz\n• frango\n• abobrinha\n• feijão';
+      outputs.push(answer(free), answer(free));
+      const turn = await inbound('me dá uma dica de janta');
+      expect(turn.response.content).not.toBe(free);
+      expect(
+        new ConversationPublicAnswerBoundaryService().projectText(
+          turn.response.content,
+        ),
+      ).not.toBeNull();
+      expect(turn.response.context).not.toMatchObject({
+        continuationEvidence: { publicationKind: 'CANONICAL_NUTRITION_PLAN' },
+      });
+      const job = await db.aIJob.findFirstOrThrow({
+        where: { userId, messageId: turn.inbound.id, type: 'TEXT' },
+      });
+      // Generation may complete before its text is rejected for publication;
+      // completion is not a structured-publication authorization.
+      expect(job.status).toBe('COMPLETED');
+      expect(job.result).toMatchObject({ answer: free });
+    });
+    it('standalone hydration report publishes useful deterministic guidance once, without recording intake', async () => {
+      const turn = await inbound('Já bebi 1 litro de água hoje.');
+      expect(turn.response.content).not.toBe(
+        'Você já bebeu 1 litro de água hoje.',
+      );
+      expect(turn.response.content).toContain('ao longo do dia');
+      expect(turn.response.content).not.toMatch(/registrei|meta/u);
+      expect(provider.createTextResponse).not.toHaveBeenCalled();
+      expect(
+        await db.aIJob.count({ where: { messageId: turn.inbound.id } }),
+      ).toBe(0);
+    });
+    it('does not reintroduce temporarily unavailable chicken after a food clarification', async () => {
+      outputs.push(
+        answer('Uma ideia de jantar é arroz com frango.'),
+        answer('Uma ideia geral é ovo com arroz.'),
+        answer('Depois do treino, uma ideia é peito de frango com arroz.'),
+        answer('Depois do treino, uma ideia geral é pão com ovo.'),
+      );
+      await inbound('me dá uma dica de janta');
+      await inbound('não tenho frango');
+      const turn = await inbound('o que eu como depois do treino?');
+      expect(turn.response.content).not.toContain('frango');
+      expect(turn.response.content).toContain('ovo');
+      expect(provider.createTextResponse).toHaveBeenCalledTimes(4);
+      const correctivePayload = JSON.parse(
+        provider.createTextResponse.mock.calls.at(-1)![0].input,
+      );
+      expect(
+        correctivePayload.nutritionGuidance.temporarilyUnavailableFoods,
+      ).toContain('frango');
+      expect(correctivePayload.nutritionGuidance.excludedFoods).not.toContain(
+        'frango',
+      );
+      outputs.push(
+        answer('Uma ideia geral depois do treino é arroz com frango.'),
+      );
+      const available = await inbound(
+        'Tenho frango. O que eu como depois do treino?',
+      );
+      expect(available.response.content).toContain('frango');
+      const payload = JSON.parse(
+        provider.createTextResponse.mock.calls.at(-1)![0].input,
+      );
+      expect(
+        payload.nutritionGuidance.temporarilyUnavailableFoods,
+      ).not.toContain('frango');
+      expect(payload.nutritionGuidance.excludedFoods).not.toContain('frango');
+    });
+    it('second homologation reaches all twelve turns, owns diet presentation and preserves the latest food referent', async () => {
+      const texts = [
+        'me dá uma dica de janta',
+        'o que eu como agora?',
+        'manda um lanche',
+        'quero algo barato',
+        'outra opção',
+        'não tenho frango',
+        'posso comer isso?',
+        'o que eu como depois do treino?',
+      ];
+      const replies = [
+        firstDinner,
+        firstDinner,
+        'Uma ideia de lanche é iogurte natural com banana e aveia.',
+        'Um lanche econômico é pão com ovo mexido.',
+        'Outra opção de lanche é iogurte natural com mamão.',
+        'Se tiver e for compatível com suas restrições, pode considerar ovo ou atum como ideia geral para o lanche, sem equivalência com o plano.',
+        'Você está falando do ovo ou do atum?',
+        'Após o treino, uma ideia geral é pão com queijo branco e uma fruta.',
+      ];
+      for (let i = 0; i < texts.length; i++) {
+        outputs.push(
+          i === 6
+            ? {
+                ...answer(replies[i]),
+                disposition: 'CLARIFY',
+                answer: null,
+                followUpQuestion: replies[i],
+              }
+            : answer(replies[i]),
+        );
+        const turn = await inbound(texts[i]);
+        expect(turn.response.content).toBe(replies[i]);
+        const payload = JSON.parse(
+          provider.createTextResponse.mock.calls.at(-1)![0].input,
+        );
+        if (i === 2) {
+          expect(payload.nutritionGuidance.meal).toBe('lanche');
+          expect(payload.nutritionGuidance.compatibleFoods).toEqual([]);
+        }
+        if (i === 7) {
+          expect(
+            payload.nutritionGuidance.temporarilyUnavailableFoods,
+          ).toContain('frango');
+        }
+        if (i === 6) {
+          expect(payload.previousAnswer).toBe(replies[5]);
+          expect(payload.nutritionGuidance.meal).toBe('lanche');
+          expect(turn.response.content).not.toContain('bate com o jantar');
+        }
+      }
+      const calls = provider.createTextResponse.mock.calls.length;
+      const diet = await inbound('me mostra minha dieta');
+      expect(
+        (
+          await db.auditLog.findFirstOrThrow({
+            where: { userId, action: 'CONVERSATION_RUNTIME_EVALUATED' },
+            orderBy: { createdAt: 'desc' },
+          })
+        ).metadata,
+      ).toMatchObject({
+        answerFallbackReason: 'NONE',
+        routeKind: 'CURRENT_PLAN_PRESENTATION',
+        recognizedIntent: 'CURRENT_PLAN_REQUEST',
+        bridgeStatus: 'COMPLETED',
+      });
+      expect(diet.response.content).toContain(plan.title);
+      expect(diet.response.content).toContain('Jantar');
+      expect(diet.response.content).toContain('120 g');
+      expect(provider.createTextResponse).toHaveBeenCalledTimes(calls);
+      expect(
+        await db.aIJob.count({ where: { messageId: diet.inbound.id } }),
+      ).toBe(0);
+      outputs.push(
+        answer(
+          'Como aproximação para 95 kg e 60 minutos, o gasto pode ficar em torno de 350 a 550 kcal, conforme intensidade e pausas. Não é uma medição individual.',
+          'WORKOUT',
+        ),
+      );
+      const calories = await inbound('meu treino gasta quantas calorias?');
+      expect(calories.response.content).toContain('aproximação');
+      outputs.push(
+        answer(
+          'Distribua a água ao longo do dia, considerando sede, calor e exercício; esse relato não comprova uma meta atingida.',
+          'GENERAL',
+        ),
+      );
+      const hydration = await inbound('já bebi 1 litro de água hoje');
+      expect(hydration.response.content).not.toMatch(
+        /Registrei|atingiu sua meta/u,
+      );
+      outputs.push({
+        ...answer('Qual alteração você quer fazer?', 'GENERAL'),
+        disposition: 'CLARIFY',
+        answer: null,
+        followUpQuestion: 'Qual alteração você quer fazer?',
+      });
+      const mutation = await inbound('troca isso no meu plano');
+      expect(mutation.response.content.trim()).not.toBe('');
+      expect(planning.execute).not.toHaveBeenCalled();
+    });
+    it('variety complement exact five-turn sequence retains snack through budget and accepts safe text without composition', async () => {
+      const texts = [
+        'me dá uma dica de janta',
+        'o que eu como agora?',
+        'manda um lanche',
+        'quero algo barato',
+        'outra opção',
+      ];
+      const replies = [
+        firstDinner,
+        firstDinner,
+        'Uma opção de lanche é iogurte natural com banana e aveia.',
+        'Um lanche barato é iogurte natural com banana e aveia.',
+        'Outra ideia de lanche é pão integral com queijo branco e pepino.',
+      ];
+      for (let i = 0; i < texts.length; i++) {
+        outputs.push({
+          ...answer(replies[i]),
+          ...(i === 4
+            ? { nutritionComposition: { current: 'auxiliary invalid' } }
+            : {}),
+        });
+        const turn = await inbound(texts[i]);
+        expect(turn.response.content).toBe(replies[i]);
+        expect(provider.createTextResponse).toHaveBeenCalledTimes(i + 1);
+        const payload = JSON.parse(
+          provider.createTextResponse.mock.calls.at(-1)![0].input,
+        );
+        if (i >= 2) expect(payload.nutritionGuidance.meal).toBe('lanche');
+        if (i === 4) {
+          expect(payload.nutritionGuidance.requiresMaterialVariety).toBe(true);
+          expect(payload.previousAnswer).toBe(replies[3]);
+          expect(payload.nutritionGuidance.recentSuggestions).toContain(
+            replies[3],
+          );
+          expect(
+            provider.createTextResponse.mock.calls.at(-1)![0].jsonSchema.schema
+              .required,
+          ).not.toContain('nutritionComposition');
+        }
+      }
+    });
+    it.each([
+      ['repetition', 'Um lanche é iogurte natural com banana e aveia.'],
+      ['rejection', 'Uma opção de lanche é tomate com queijo branco.'],
+      ['allergy', 'Uma opção de lanche é pasta de amendoim com banana.'],
+    ])(
+      'variety complement keeps %s blocked despite malformed auxiliary metadata',
+      async (kind, unsafe) => {
+        outputs.push(
+          answer('Um lanche barato é iogurte natural com banana e aveia.'),
+        );
+        await inbound('manda um lanche');
+        outputs.push(
+          { ...answer(unsafe), nutritionComposition: { current: 'invalid' } },
+          { ...answer(unsafe), nutritionComposition: { current: 'invalid' } },
+        );
+        const result = await inbound('outra opção');
+        expect(result.response.content).not.toBe(unsafe);
+        expect(result.response.content).not.toContain('qual refeição');
+        const job = await db.aIJob.findFirstOrThrow({
+          where: { userId, messageId: result.inbound.id, type: 'TEXT' },
+        });
+        expect(job.status).toBe('FAILED');
+        expect(job.error).toBe(
+          kind === 'repetition'
+            ? 'NUTRITION_ADVICE_REPEATS_PREVIOUS_SUGGESTION'
+            : kind === 'rejection'
+              ? 'NUTRITION_ADVICE_REJECTED_FOOD'
+              : 'NUTRITION_ADVICE_UNSAFE_FOOD',
+        );
+        expect(
+          provider.createTextResponse.mock.calls.length,
+        ).toBeLessThanOrEqual(3);
+      },
+    );
+    it('variety complement permits shared side ingredients when grounded main composition is different', async () => {
+      const prior = 'Arroz branco com peito de frango.';
+      outputs.push({
+        ...answer(prior),
+        nutritionComposition: {
+          previous: [],
+          current: [
+            composition(
+              prior,
+              ['arroz branco', 'peito de frango'],
+              'peito de frango',
+            ),
+          ],
+        },
+      });
+      await inbound('Me dê uma dica de jantar');
+      const next =
+        'Batata assada com peixe, acompanhada de arroz branco e peito de frango em pequenas quantidades.';
+      outputs.push({
+        ...answer(next),
+        nutritionComposition: {
+          previous: [
+            composition(
+              prior,
+              ['arroz branco', 'peito de frango'],
+              'peito de frango',
+            ),
+          ],
+          current: [
+            composition(next, ['batata', 'peixe'], 'peixe', [
+              'arroz branco',
+              'peito de frango',
+            ]),
+          ],
+        },
+      });
+      expect((await inbound('outra opção')).response.content).toBe(next);
+      expect(provider.createTextResponse).toHaveBeenCalledTimes(2);
+    });
     it('consolidated P0 calorie question reaches contextual AI and the final sent response', async () => {
       const estimate =
         'Como aproximação para 95 kg e 60 minutos, atividades entre 3,5 e 6 MET correspondem a cerca de 350–600 kcal. Intensidade e pausas mudam essa faixa; não é uma medição do seu treino.';
@@ -692,6 +1247,64 @@ integration(
       expect(provider.createTextResponse.mock.calls[0][0].input).toContain(
         '95',
       );
+    });
+    it.each([false, true])(
+      'architecture initial dinner may use the registered meal despite auxiliary metadata invalidity: %s',
+      async (invalidMetadata) => {
+        const dinner =
+          'Uma ideia para jantar é arroz branco com peito de frango grelhado, abobrinha e feijão.';
+        outputs.push({
+          ...answer(dinner),
+          ...(invalidMetadata
+            ? { nutritionComposition: { current: [{ mainProtein: 'FRANGO' }] } }
+            : {}),
+        });
+        expect(
+          (await inbound('me dá uma dica de janta pra hoje')).response.content,
+        ).toBe(dinner);
+        expect(provider.createTextResponse).toHaveBeenCalledTimes(1);
+        expect(
+          provider.createTextResponse.mock.calls[0][0].jsonSchema.schema
+            .required,
+        ).not.toContain('nutritionComposition');
+      },
+    );
+    it('architecture ungrounded auxiliary composition is not persisted as trusted meal history', async () => {
+      outputs.push({
+        ...answer(newDinner),
+        nutritionComposition: {
+          previous: [],
+          current: [
+            composition('Arroz com frango.', ['arroz', 'frango'], 'frango'),
+          ],
+        },
+      });
+      const turn = await inbound('me dá uma dica de janta pra hoje');
+      expect(turn.response.content).toBe(newDinner);
+      expect(provider.createTextResponse).toHaveBeenCalledTimes(1);
+      const job = await db.aIJob.findFirstOrThrow({
+        where: { userId, messageId: turn.inbound.id, type: 'TEXT' },
+      });
+      expect(job.result).not.toHaveProperty('nutritionComposition');
+    });
+    it('architecture malformed auxiliary metadata never bypasses rejected food', async () => {
+      outputs.push(
+        {
+          ...answer('Uma ideia é salada de tomate.'),
+          nutritionComposition: { current: 'invalid auxiliary description' },
+        },
+        answer(newDinner),
+      );
+      expect(
+        (await inbound('me dá uma dica de janta pra hoje')).response.content,
+      ).toBe(newDinner);
+      expect(provider.createTextResponse).toHaveBeenCalledTimes(2);
+      const audit = await db.auditLog.findFirstOrThrow({
+        where: { userId, action: 'CONVERSATION_RUNTIME_EVALUATED' },
+      });
+      expect(audit.metadata).toMatchObject({
+        nutritionAdviceInitialViolation: 'NUTRITION_ADVICE_REJECTED_FOOD',
+      });
     });
     it('consolidated P0 real dinner sequence repairs the repeated central pair once and publishes a different meal', async () => {
       outputs.push(answer(firstDinner));
@@ -1308,7 +1921,7 @@ integration(
           },
           answer(newDinner),
         );
-        const turn = await inbound('Me dê uma dica para jantar hoje');
+        const turn = await inbound('Me dê outra opção para jantar hoje');
         expect(turn.response.content).toBe(newDinner);
         expect(provider.createTextResponse).toHaveBeenCalledTimes(2);
         const audit = await db.auditLog.findFirstOrThrow({
@@ -1493,7 +2106,7 @@ integration(
       ).toBe(text);
       expect(provider.createTextResponse).toHaveBeenCalledTimes(1);
     });
-    it('macro P0 two dinner options repair malformed composition once and publish the valid correction', async () => {
+    it('architecture initial two-option dinner ignores malformed auxiliary composition without a corrective call', async () => {
       const first = 'Batata com peixe.';
       const second = 'Macarrão com bife bovino.';
       outputs.push({
@@ -1520,8 +2133,8 @@ integration(
             'Me sugira duas opções de jantar para hoje, considerando meu plano alimentar atual e minhas restrições.',
           )
         ).response.content,
-      ).toBe(text);
-      expect(provider.createTextResponse).toHaveBeenCalledTimes(2);
+      ).toBe(`${first} ${second}`);
+      expect(provider.createTextResponse).toHaveBeenCalledTimes(1);
     });
   },
 );

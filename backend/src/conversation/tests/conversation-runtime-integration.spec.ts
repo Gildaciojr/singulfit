@@ -162,6 +162,63 @@ describe('ConversationRuntimeIntegrationService', () => {
     expect(subject.bridge.execute).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    [
+      'DETERMINISTIC_FALLBACK',
+      'CURRENT_PLAN_PRESENTATION',
+      'CANONICAL_NUTRITION_PLAN',
+    ],
+    ['AI', 'CURRENT_PLAN_PRESENTATION', undefined],
+    ['AI_REUSED', 'CURRENT_PLAN_PRESENTATION', undefined],
+    ['DETERMINISTIC_FALLBACK', 'ANSWER_MESSAGE', undefined],
+  ] as const)(
+    'issues a publication receipt only for canonical diet presentation: %s / %s',
+    async (answerSource, kind, expected) => {
+      const subject = createSubject({ mode: 'INTERNAL' });
+      const base = await subject.runtime.evaluate();
+      const goal = goalDecision('SHOW_CURRENT_PLAN', 'CURRENT_PLAN_REQUEST', {
+        targetPlan: 'DIET',
+      });
+      subject.runtime.evaluate.mockResolvedValue({
+        ...base,
+        decision: {
+          ...base.decision,
+          executionRoute: {
+            routerVersion: 'conversation-execution-router:v1',
+            goalDecision: goal,
+            reasonCodes: ['PLANNER_GOAL_ROUTED'],
+            canExecute: true,
+            missingPreconditions: [],
+            kind,
+            targetPlan: 'DIET',
+            references: [],
+          },
+        },
+      });
+      subject.bridge.execute.mockResolvedValue({
+        status: 'COMPLETED',
+        content: 'Dieta cadastrada',
+        routeKind: kind,
+        observability: {
+          publicationKind: 'CANONICAL_NUTRITION_PLAN',
+          answerSource,
+          disposition: 'ANSWER',
+          domain: 'NUTRITION',
+          grounding: 'CURRENT_PLAN',
+          providerDurationMs: 0,
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          fallbackReason: null,
+        },
+      });
+      const result = await subject.service.decide(decisionRequest);
+      expect(result.source).toBe('CONVERSATION_RUNTIME');
+      if (result.source !== 'CONVERSATION_RUNTIME')
+        throw new Error('Expected selected runtime');
+      expect(result.publicationKind).toBe(expected);
+    },
+  );
   it('returns a legacy pre-execution decision when Runtime is OFF', async () => {
     const subject = createSubject({ mode: 'OFF' });
 

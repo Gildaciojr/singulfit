@@ -33,6 +33,7 @@ export interface NutritionAdviceContext {
   readonly immediateConstraints: readonly string[];
   readonly safetyConstraints: readonly string[];
   readonly excludedFoods: readonly string[];
+  readonly temporarilyUnavailableFoods?: readonly string[];
   readonly originalMeals: readonly PublicNutritionResponse['days'][number]['meals'][number][];
   readonly recentSuggestions: readonly string[];
   readonly previousAdvice?: string | null;
@@ -61,6 +62,7 @@ export function matchesFoodTerm(text: string, food: string): boolean {
 export function materiallyRepeatsNutritionAdvice(
   previous: string,
   candidate: string,
+  checkContainedCore = false,
 ): boolean {
   const functional = new Set(
     'a o as os um uma uns umas de do da dos das e com para por ao na no nas nos que meu minha seu sua voce pode uma opcao alternativa ideia sugestao jantar almoco lanche refeicao cafe manha tarde noite prepare preparar experimente experimentar escolha escolher sirva servir boa bom deliciosa delicioso simples pratica pratico nova novo diferente'.split(
@@ -93,7 +95,11 @@ export function materiallyRepeatsNutritionAdvice(
       remaining.splice(index, 1);
     }
   }
-  return common >= 2 && (2 * common) / (left.length + right.length) >= 0.8;
+  return (
+    common >= 2 &&
+    ((2 * common) / (left.length + right.length) >= 0.8 ||
+      (checkContainedCore && common / left.length >= 0.8))
+  );
 }
 
 function record(
@@ -141,6 +147,22 @@ export function nutritionAdviceContext(
         )
       : []),
   ];
+  // Turn-scoped availability is neither a safety restriction nor a learned
+  // preference. Only explicit stock statements in this owned recent context
+  // qualify; questions and conditional statements do not establish stock.
+  const unavailable = new Set<string>();
+  for (const turn of [...inboundHistory, human.currentMessage]) {
+    for (const span of turn.split(/[.!;,]/u)) {
+      if (span.includes('?')) continue;
+      const clause = normalizeFoodTerm(span);
+      const statement = clause.trim().match(/^(nao )?tenho (.+)$/u);
+      if (!statement) continue;
+      const food = statement[2].replace(/ (?:hoje|agora|em casa)$/u, '').trim();
+      if (!isSemanticFoodTerm(food)) continue;
+      if (statement[1]) unavailable.add(food);
+      else unavailable.delete(food);
+    }
+  }
   const precedingRequest = [...inboundHistory]
     .reverse()
     .find((text) => nutritionRequest(text)?.intent === 'MEAL_SUBSTITUTION');
@@ -419,6 +441,7 @@ export function nutritionAdviceContext(
       ]),
     ]),
     excludedFoods: Object.freeze([...new Set(excludedFoods)]),
+    temporarilyUnavailableFoods: Object.freeze([...unavailable]),
     originalMeals: Object.freeze(originalMeals),
     unresolvedOriginalMeal:
       request.intent === 'MEAL_SUBSTITUTION' &&
@@ -577,6 +600,7 @@ export function nutritionAdvicePayload(
     immediateConstraints: context.immediateConstraints,
     safetyConstraints: context.safetyConstraints,
     excludedFoods: context.excludedFoods,
+    temporarilyUnavailableFoods: context.temporarilyUnavailableFoods ?? [],
     compatibleFoods: context.compatibleFoods ?? [],
     unresolvedSafety: context.unresolvedSafety,
     unresolvedOriginalMeal: context.unresolvedOriginalMeal,
@@ -591,8 +615,9 @@ export function nutritionAdvicePayload(
     })),
     recentSuggestions: context.recentSuggestions,
     requiresMaterialVariety: context.requiresMaterialVariety ?? false,
-    compositionPolicy:
-      'Para recomendações livres, preencha nutritionComposition: current descreve cada opção realmente sugerida; previous descreve todas as opções das recomendações anteriores relevantes, inclusive alternativas. quote é um trecho literal completo da respectiva opção. mainIngredients são nomes de ingredientes centrais literalmente presentes na quote; mainProtein reutiliza literalmente um desses nomes ou null; accompaniments são acompanhamentos literais, e preparation é preparo literal ou null se não estiver na quote. Não use objetivo, adjetivos, quantidades ou prosa como ingredientes. Não omita opções para disfarçar repetição. Outra opção precisa mudar a composição central, não somente acompanhamentos ou redação. Isso é análise da resposta, nunca evidência de cadastro, estoque ou dose.',
+    compositionPolicy: context.requiresMaterialVariety
+      ? 'nutritionComposition é auxiliar e opcional; se fornecida, current descreve cada opção realmente sugerida; previous descreve todas as opções das recomendações anteriores relevantes, inclusive alternativas. quote é um trecho literal completo da respectiva opção. mainIngredients são nomes de ingredientes centrais literalmente presentes na quote; mainProtein reutiliza literalmente um desses nomes ou null; accompaniments são acompanhamentos literais, e preparation é preparo literal ou null se não estiver na quote. Não use objetivo, adjetivos, quantidades ou prosa como ingredientes. Não omita opções para disfarçar repetição. Outra opção precisa mudar a composição central, não somente acompanhamentos ou redação. Isso é análise da resposta, nunca evidência de cadastro, estoque ou dose.'
+      : null,
     substitutionEvidence: context.substitutionEvidence
       ? {
           ...context.substitutionEvidence,
@@ -604,10 +629,12 @@ export function nutritionAdvicePayload(
       : null,
     policy: {
       readOnly: true,
+      contextualInquiry:
+        'Uma pergunta deítica refere-se à resposta efetivamente entregue em previousAnswer, não automaticamente ao plano antigo. Se a resposta anterior ofereceu alternativas e o turno não identifica qual alimento, esclareça somente essa escolha. Relato de indisponibilidade não autoriza consumo, estoque, equivalência nem alteração da dieta.',
       foodEvidence:
-        'compatibleFoods contém somente nomes encontrados no plano ou nas preferências e aprovados contra as restrições/rejeições deste turno. Use-os como base para uma combinação concreta nova quando forem suficientes. Isso não comprova estoque em casa, porção da alternativa, equivalência nutricional ou troca cadastrada. Não copie uma refeição inteira só porque seus ingredientes são compatíveis. A lista não é um catálogo fechado: conhecimento geral não clínico continua permitido se respeitar todos os controles. Se unresolvedSafety for true, esclareça a restrição antes de recomendar.',
+        'compatibleFoods contém somente nomes encontrados no plano ou nas preferências e aprovados contra as restrições/rejeições deste turno. Use-os como evidência de compatibilidade, não como catálogo fechado nem prova de disponibilidade em casa. Para lanche, adapte formato e preparo ao alvo: um plano que contém apenas jantar não limita os ingredientes do lanche. Conhecimento nutricional geral seguro pode fornecer uma ideia prática, sem inventar estoque ou porções individuais. Isso não comprova estoque em casa, porção da alternativa, equivalência nutricional ou troca cadastrada. Uma recomendação inicial pode usar uma refeição compatível do plano, sem alegar que seja uma nova alternativa. A lista não é um catálogo fechado: conhecimento geral não clínico continua permitido se respeitar todos os controles. Se unresolvedSafety for true, esclareça a restrição antes de recomendar.',
       publicFoodBoundary:
-        'A validação alimentar abrange todo o texto público, incluindo explicações, negações e followUpQuestion. Nunca mencione alimentos de excludedFoods ou incompatíveis com safetyConstraints, nem para dizer que foram evitados. Apresente diretamente a opção segura; não repita alimentos vetados do plano ou do histórico.',
+        'A validação alimentar abrange todo o texto público, incluindo explicações, negações e followUpQuestion. temporarilyUnavailableFoods é indisponibilidade explícita apenas neste contexto recente, não alergia nem rejeição permanente. Não recomende nem mencione esses alimentos nesta orientação, mesmo quando estiverem no plano. Nunca mencione alimentos de excludedFoods ou incompatíveis com safetyConstraints, nem para dizer que foram evitados. Apresente diretamente a opção segura; não repita alimentos vetados do plano ou do histórico.',
 
       decisionIsAuthoritativeRealizationIsFlexible: true,
       personalizedEstimates:
@@ -623,14 +650,20 @@ export function nutritionAdvicePayload(
         (context.substitutionEvidence &&
         context.request.substitutionPurpose !== 'OFF_PLAN_ADVICE'
           ? 'Responda primeiro se o par perguntado está cadastrado no plano verdadeiro, mantendo a refeição e o alimento original. Não trate esta consulta como pedido de uma nova receita nem de alteração permanente. '
-          : 'Entregue uma ideia concreta nova, plausível e compatível com o objetivo, perfil, horário local, rotina e preferências. O plano orienta a estratégia; não copie a composição da refeição de originalMeals. Ingredientes isolados podem ser reutilizados em uma combinação diferente. ') +
-        'Combine todas as immediateConstraints: QUICK significa pouco preparo, HIGH_PROTEIN significa incluir fonte compatível de proteína, LOW_COST significa acessível, PORTABLE significa fácil de transportar; LACTOSE/GLUTEN são exclusões obrigatórias. Não invente alergias nem preferências. Em MEAL_SUBSTITUTION, entenda a refeição original e preserve aproximadamente sua função nutricional, sem prometer equivalência exata de calorias/macros; apresente como alternativa para essa refeição, sem afirmar alteração do plano. Nas consultas de troca, preserve os fatos do plano e do histórico; somente nas recomendações novas varie em relação às recentSuggestions quando houver alternativas compatíveis. Responda em um ou dois parágrafos curtos, com uma opção principal e no máximo uma alternativa útil, sem menu numerado ou preâmbulo genérico. Se faltar contexto essencial de segurança ou da refeição a substituir, faça apenas uma pergunta útil. Conhecimento geral não clínico é permitido. Somente em PLAN_INQUIRY, responda separadamente se a troca está cadastrada: use substitutionEvidence e os registros reais, nunca a presença da alternativa em outra refeição. Source é o alimento original e requestedAlternative é a alternativa perguntada, não os inverta. Preserve o almoço/horário e a resposta anterior, inclusive ausência de troca cadastrada, sem perguntar novamente por um alvo já informado. Em PLAN_INQUIRY com UNRESOLVED, esclareça apenas a informação essencial que falta. OFF_PLAN_ADVICE pede uma sugestão aproximada fora do plano, não uma checagem de cadastro; a falta de alternativa cadastrada não impede sugerir alimentos seguros, sem porção equivalente inventada. Se NOT_REGISTERED, não atribua a troca à dieta: qualquer sugestão deve ser explicitamente uma orientação aproximada fora do plano. Não invente porções da alternativa nem equivalência de calorias/macros. Uma porção do alimento original ou de outra refeição não comprova a porção da alternativa. Ser REGISTERED comprova somente o par descrito no registro; não comprova doses ausentes. Use a compreensão semântica do histórico e da mensagem, sem inferir fatos faltantes.',
+          : 'Entregue uma ideia concreta, plausível e compatível com o objetivo, perfil, horário local, rotina e preferências. Uma recomendação inicial pode aproveitar uma refeição segura do plano. ' +
+            (context.requiresMaterialVariety
+              ? 'Este turno pede outra opção: mude a composição principal em relação às sugestões anteriores; variar apenas acompanhamentos ou redação não basta. '
+              : 'Não há exigência automática de novidade em uma recomendação inicial. ')) +
+        'Combine todas as immediateConstraints: QUICK significa pouco preparo, HIGH_PROTEIN significa incluir fonte compatível de proteína, LOW_COST significa acessível, PORTABLE significa fácil de transportar; LACTOSE/GLUTEN são exclusões obrigatórias. Não invente alergias nem preferências. Em MEAL_SUBSTITUTION, entenda a refeição original e preserve aproximadamente sua função nutricional, sem prometer equivalência exata de calorias/macros; apresente como alternativa para essa refeição, sem afirmar alteração do plano. Nas consultas de troca, preserve os fatos do plano e do histórico; somente quando requiresMaterialVariety for true varie em relação às recentSuggestions, usando alternativas compatíveis. Responda em um ou dois parágrafos curtos, com uma opção principal e no máximo uma alternativa útil, sem menu numerado ou preâmbulo genérico. Se faltar contexto essencial de segurança ou da refeição a substituir, faça apenas uma pergunta útil. Conhecimento geral não clínico é permitido. Somente em PLAN_INQUIRY, responda separadamente se a troca está cadastrada: use substitutionEvidence e os registros reais, nunca a presença da alternativa em outra refeição. Source é o alimento original e requestedAlternative é a alternativa perguntada, não os inverta. Preserve o almoço/horário e a resposta anterior, inclusive ausência de troca cadastrada, sem perguntar novamente por um alvo já informado. Em PLAN_INQUIRY com UNRESOLVED, esclareça apenas a informação essencial que falta. OFF_PLAN_ADVICE pede uma sugestão aproximada fora do plano, não uma checagem de cadastro; a falta de alternativa cadastrada não impede sugerir alimentos seguros, sem porção equivalente inventada. Se NOT_REGISTERED, não atribua a troca à dieta: qualquer sugestão deve ser explicitamente uma orientação aproximada fora do plano. Não invente porções da alternativa nem equivalência de calorias/macros. Uma porção do alimento original ou de outra refeição não comprova a porção da alternativa. Ser REGISTERED comprova somente o par descrito no registro; não comprova doses ausentes. Use a compreensão semântica do histórico e da mensagem, sem inferir fatos faltantes.',
     },
   });
 }
 
 export function nutritionAdviceFoodViolation(
-  context: Pick<NutritionAdviceContext, 'safetyConstraints' | 'excludedFoods'>,
+  context: Pick<
+    NutritionAdviceContext,
+    'safetyConstraints' | 'excludedFoods' | 'temporarilyUnavailableFoods'
+  >,
   value: string,
 ): string | null {
   const text = normalizeFoodTerm(value);
@@ -676,6 +709,12 @@ export function nutritionAdviceFoodViolation(
       if (matchesFoodTerm(text, food)) return 'NUTRITION_ADVICE_UNSAFE_FOOD';
     }
   }
+  if (
+    context.temporarilyUnavailableFoods?.some((food) =>
+      matchesFoodTerm(text, food),
+    )
+  )
+    return 'NUTRITION_ADVICE_REJECTED_FOOD';
   if (context.excludedFoods.some((food) => matchesFoodTerm(text, food)))
     return 'NUTRITION_ADVICE_REJECTED_FOOD';
   return null;
@@ -686,7 +725,6 @@ export function nutritionAdviceViolation(
   context: NutritionAdviceContext | null,
   candidate: ConversationAnswerCandidate,
   decisionVerified = false,
-  optionQuotes: readonly string[] = [],
 ): string | null {
   if (!context) return null;
   if (candidate.disposition === 'ANSWER' && context.unresolvedSafety)
@@ -809,7 +847,18 @@ export function nutritionAdviceViolation(
     )
       return 'NUTRITION_SUBSTITUTION_DOMAIN_DECISION_REQUIRED';
   }
-  if (candidate.disposition !== 'ANSWER') return null;
+  return null;
+}
+
+/** Quality applies to an explicit alternative, never to a safe initial recommendation. */
+export function nutritionAdviceQualityViolation(
+  context: NutritionAdviceContext | null,
+  candidate: ConversationAnswerCandidate,
+  optionQuotes: readonly string[] = [],
+): string | null {
+  if (!context?.requiresMaterialVariety || candidate.disposition !== 'ANSWER')
+    return null;
+  const text = normalizeFoodTerm(candidate.answer ?? '');
   if (
     !context.substitutionEvidence &&
     context.previousAdvice &&

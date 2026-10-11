@@ -1,4 +1,7 @@
-import { matchesFoodTerm } from './nutrition-advice.policy';
+import {
+  matchesFoodTerm,
+  materiallyRepeatsNutritionAdvice,
+} from './nutrition-advice.policy';
 import { normalizeFoodTerm } from '../../context/food-preference-policy';
 import type { OpenAIJsonSchema } from '../../ai/interfaces/openai.interface';
 
@@ -222,4 +225,51 @@ export function nutritionCompositionViolation(
   })
     ? 'NUTRITION_ADVICE_REPEATS_PREVIOUS_SUGGESTION'
     : null;
+}
+
+/** Public delivered text is the evidence; descriptive metadata may refine roles,
+ * but its absence is not a contract failure for an otherwise distinct answer. */
+export function nutritionTextVarietyViolation(
+  answer: string | null,
+  previous: readonly string[],
+  trustedPrevious: readonly NutritionSuggestionComposition[] = [],
+  groundedCurrent: readonly NutritionSuggestionComposition[] = [],
+): string | null {
+  if (!answer) return null;
+  const scopes = (text: string) =>
+    text.split(/[.!?;\n]+/u).filter((part) => part.trim());
+  const currentScopes = scopes(answer);
+  for (const prior of trustedPrevious) {
+    if (prior.mainIngredients.length < 2) continue;
+    if (
+      currentScopes.some(
+        (scope) =>
+          prior.mainIngredients.every((food) => matchesFoodTerm(scope, food)) &&
+          !groundedCurrent.some(
+            (current) =>
+              normalizeFoodTerm(scope).includes(
+                normalizeFoodTerm(current.quote),
+              ) &&
+              !repeatedNutritionComposition({
+                previous: [prior],
+                current: [current],
+              }),
+          ),
+      )
+    )
+      return 'NUTRITION_ADVICE_REPEATS_PREVIOUS_SUGGESTION';
+  }
+  if (
+    previous.some((text) =>
+      scopes(text).some((prior) =>
+        currentScopes.some(
+          (current) =>
+            materiallyRepeatsNutritionAdvice(prior, current, true) &&
+            groundedCurrent.length === 0,
+        ),
+      ),
+    )
+  )
+    return 'NUTRITION_ADVICE_REPEATS_PREVIOUS_SUGGESTION';
+  return null;
 }
