@@ -558,7 +558,7 @@ export default function Pricing({ data }: Props) {
             </div>
 
             <div className="mt-1 text-[12px] leading-relaxed text-zinc-500">
-              Pagamento seguro • Cancelamento simples • Garantia de 7 dias
+              Nutrição inteligente • Acompanhamento no WhatsApp • Sua rotina, seu ritmo
             </div>
           </div>
         </motion.div>

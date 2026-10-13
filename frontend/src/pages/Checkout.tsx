@@ -447,19 +447,19 @@ export default function Checkout() {
   }
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[#f8f7f3] text-zinc-950">
-      <div className="absolute inset-0 -z-10 bg-[radial-gradient(900px_520px_at_50%_0%,rgba(34,120,84,0.13),transparent_70%)]" />
+    <main className="relative isolate min-h-screen bg-[#f8f7f3] text-zinc-950">
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(900px_520px_at_50%_0%,rgba(34,120,84,0.13),transparent_70%)]" />
 
-      <div className="container mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:py-12">
+      <div className="mx-auto w-full max-w-[1080px] px-4 py-4 sm:px-6 sm:py-5 lg:py-4">
         <Link
           to="/"
-          className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-900 hover:text-emerald-950"
+          className="inline-flex min-h-11 items-center gap-2 rounded-md text-sm font-semibold text-emerald-900 hover:text-emerald-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2"
         >
           <ArrowLeft className="h-4 w-4" />
           Voltar para a landing
         </Link>
 
-        <section className="mt-8 grid gap-8 lg:grid-cols-[0.92fr_1.08fr] lg:items-start">
+        <section className="mt-3 grid min-w-0 gap-5 sm:gap-6 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)] lg:items-start lg:gap-7">
           <PlanSummary plan={plan} availablePlans={Object.values(offers.data ?? {})} priceAvailable={Boolean(offer || contracted)} onSelectPlan={selectPlan} />
 
           {!accessToken && sessionExpired ? (
@@ -536,12 +536,12 @@ function PlanSummary({
   priceAvailable: boolean;
 }) {
   return (
-    <div className="lg:sticky lg:top-8">
-      <div className="mb-6 flex items-center gap-3">
+    <div className="min-w-0 lg:sticky lg:top-6">
+      <div className="mb-3 flex items-center gap-2.5">
         <img
           src={singulfitLogo}
           alt="SingulFit"
-          className="h-18 w-auto"
+          className="h-10 w-10 shrink-0 object-contain sm:h-12 sm:w-12"
         />
         <div>
           <div className="text-2xl font-black tracking-[-0.04em]">
@@ -553,47 +553,48 @@ function PlanSummary({
         </div>
       </div>
 
-      <Card className="overflow-hidden rounded-[2rem] border-zinc-200 bg-white/90 shadow-[0_35px_90px_-45px_rgba(15,23,42,0.25)] backdrop-blur-xl">
-        <CardContent className="p-5 sm:p-7">
-          <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-emerald-900">
+      <Card className="overflow-hidden min-w-0 rounded-2xl border-zinc-200 bg-white/90 shadow-[0_12px_36px_-20px_rgba(15,23,42,0.18)] backdrop-blur-xl">
+        <CardContent className="px-4 py-3 sm:p-5">
+          <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-emerald-900">
             <ShieldCheck className="h-4 w-4" />
             Plano selecionado
           </div>
 
-          <h1 className="mt-6 text-3xl font-black tracking-[-0.055em] text-zinc-950 sm:text-4xl">
+          <h1 className="mt-3 text-2xl font-black tracking-[-0.04em] text-zinc-950">
             {plan.displayName}
           </h1>
 
-          <div className="mt-4 flex items-end gap-2">
-            <span className="text-4xl font-black tracking-[-0.06em] sm:text-5xl">
+          <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <span className={`min-w-0 break-words font-black tracking-[-0.04em] ${priceAvailable ? "text-3xl sm:text-4xl" : "text-xl leading-7"}`}>
               {priceAvailable ? formatPlanPrice(plan.price) : "Oferta indisponível"}
             </span>
-            <span className="pb-2 text-zinc-500">{plan.interval}</span>
+            <span className="text-sm text-zinc-500">{plan.interval}</span>
           </div>
 
-          <p className="mt-5 text-sm leading-7 text-zinc-600">
+          <p className="mt-3 text-sm leading-6 text-zinc-600">
             {plan.description}
           </p>
 
-          <div className="mt-6 grid gap-3">
+          <div className="mt-3 grid gap-1.5">
             {plan.features.map((feature) => (
               <div
                 key={feature}
-                className="flex items-start gap-3 rounded-2xl bg-zinc-50 p-3 text-sm text-zinc-700"
+                className="flex items-start gap-2 text-sm leading-5 text-zinc-700"
               >
-                <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-800" />
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-800" />
                 {feature}
               </div>
             ))}
           </div>
 
-          <div className="mt-6 grid gap-3 sm:grid-cols-2">
+          <div className="mt-3 grid grid-cols-2 gap-2">
             {availablePlans.map((item) => (
               <Button
                 key={item.type}
                 type="button"
                 variant={item.type === plan.type ? "default" : "outline"}
-                className="rounded-2xl"
+                className={`h-auto min-h-11 min-w-0 whitespace-normal rounded-xl px-2 py-2 text-sm shadow-none focus-visible:ring-emerald-700 ${item.type === plan.type ? "bg-emerald-900 text-white hover:bg-emerald-950" : "hover:border-emerald-700 hover:bg-emerald-50 hover:text-emerald-950"}`}
+                aria-pressed={item.type === plan.type}
                 onClick={() => onSelectPlan(item.type)}
               >
                 {item.displayName}
@@ -634,25 +635,25 @@ function RegisterCard({
   priceAvailable: boolean;
 }) {
   return (
-    <Card className="rounded-[2rem] border-zinc-200 bg-white shadow-[0_35px_90px_-45px_rgba(15,23,42,0.24)]">
-      <CardContent className="p-5 sm:p-7 lg:p-9">
-        <div className="mb-8">
-          <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-emerald-900">
+    <Card className="min-w-0 rounded-2xl border-zinc-200 bg-white shadow-[0_12px_36px_-20px_rgba(15,23,42,0.18)]">
+      <CardContent className="p-4 sm:p-5">
+        <div className="mb-3">
+          <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-emerald-900">
             Cadastro
           </div>
-          <h2 className="mt-5 text-3xl font-black tracking-[-0.04em]">
+          <h2 className="mt-2 text-xl font-black leading-tight tracking-[-0.03em]">
             {paymentMethod === "PIX"
               ? "Crie seu acesso para gerar o PIX."
               : "Crie seu acesso para pagar com cartão."}
           </h2>
-          <p className="mt-3 text-sm leading-7 text-zinc-600">
+          <p className="mt-2 text-sm leading-5 text-zinc-600">
             O CPF é obrigatório aqui porque o provedor de pagamento exige esse
             dado para processar o pagamento.
           </p>
         </div>
 
-        <form className="space-y-5" onSubmit={onSubmit}>
-          <div className="grid gap-4 md:grid-cols-2">
+        <form className="space-y-2.5" onSubmit={onSubmit}>
+          <div className="grid min-w-0 gap-2.5 sm:grid-cols-2">
             <FormField
               error={errors.firstName}
               label="Nome"
@@ -667,7 +668,7 @@ function RegisterCard({
             />
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid min-w-0 gap-2.5 sm:grid-cols-2">
             <FormField
               error={errors.phone}
               inputMode="tel"
@@ -703,9 +704,9 @@ function RegisterCard({
             value={form.password}
           />
 
-          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5">
             <Label>Plano</Label>
-            <div className="mt-2 text-sm font-bold text-zinc-950">
+            <div className="break-words text-sm font-bold text-zinc-950">
               {plan.displayName} · {priceAvailable ? formatPlanPrice(plan.price) : "Oferta indisponível"}
               {plan.interval}
             </div>
@@ -727,7 +728,7 @@ function RegisterCard({
           <Button
             type="submit"
             disabled={submitting}
-            className="h-14 w-full rounded-2xl bg-emerald-900 text-base font-bold text-white hover:bg-emerald-950"
+            className="h-auto min-h-11 w-full whitespace-normal rounded-xl bg-emerald-900 px-3 py-3 text-sm font-bold leading-5 text-white hover:bg-emerald-950 focus-visible:ring-emerald-700 [&_svg]:shrink-0"
           >
             {submitting ? (
               <>
@@ -758,14 +759,15 @@ function PaymentMethodSelector({
 }) {
   return (
     <div>
-      <Label>Forma de pagamento</Label>
-      <div className="mt-2 grid gap-3 sm:grid-cols-2">
+      <Label className="block leading-5">Forma de pagamento</Label>
+      <div className="mt-2 grid grid-cols-2 gap-2">
         <button
           type="button"
+          aria-pressed={paymentMethod === "PIX"}
           onClick={() => onChange("PIX")}
-          className={`rounded-2xl border p-4 text-left transition ${
+          className={`min-w-0 rounded-xl border p-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2 ${
             paymentMethod === "PIX"
-              ? "border-emerald-800 bg-emerald-50 text-emerald-950"
+              ? "border-emerald-800 bg-emerald-50 text-emerald-950 ring-1 ring-emerald-800"
               : "border-zinc-200 bg-white text-zinc-700 hover:border-emerald-200"
           }`}
         >
@@ -773,17 +775,18 @@ function PaymentMethodSelector({
             <ShieldCheck className="h-4 w-4" />
             PIX
           </div>
-          <p className="mt-2 text-xs leading-5 text-zinc-600">
+          <p className="mt-1 text-xs leading-5 text-zinc-600">
             Geração instantânea com QR Code e copia e cola.
           </p>
         </button>
 
         <button
           type="button"
+          aria-pressed={paymentMethod === "CREDIT_CARD"}
           onClick={() => onChange("CREDIT_CARD")}
-          className={`rounded-2xl border p-4 text-left transition ${
+          className={`min-w-0 rounded-xl border p-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2 ${
             paymentMethod === "CREDIT_CARD"
-              ? "border-emerald-800 bg-emerald-50 text-emerald-950"
+              ? "border-emerald-800 bg-emerald-50 text-emerald-950 ring-1 ring-emerald-800"
               : "border-zinc-200 bg-white text-zinc-700 hover:border-emerald-200"
           }`}
         >
@@ -791,7 +794,7 @@ function PaymentMethodSelector({
             <CreditCard className="h-4 w-4" />
             Cartão de Crédito
           </div>
-          <p className="mt-2 text-xs leading-5 text-zinc-600">
+          <p className="mt-1 text-xs leading-5 text-zinc-600">
             Pagamento à vista com criptografia PagBank.
           </p>
         </button>
@@ -810,13 +813,13 @@ function CreditCardForm({
   onChange: (field: keyof CardFormState, value: string) => void;
 }) {
   return (
-    <div className="rounded-[1.6rem] border border-zinc-200 bg-zinc-50 p-4">
+    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 sm:p-4">
       <div className="flex items-center gap-2 text-sm font-bold text-zinc-950">
         <Lock className="h-4 w-4 text-emerald-800" />
         Dados criptografados no ambiente seguro PagBank
       </div>
 
-      <div className="mt-4 grid gap-4">
+      <div className="mt-3 grid gap-3">
         <FormField
           error={errors.holderName}
           label="Nome do titular"
@@ -840,7 +843,7 @@ function CreditCardForm({
           placeholder="0000 0000 0000 0000"
           value={form.cardNumber}
         />
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid min-w-0 gap-3 sm:grid-cols-2">
           <FormField
             error={errors.expiry}
             inputMode="numeric"
@@ -883,18 +886,20 @@ function FormField({
   const id = label.toLowerCase().replace(/\s+/g, "-");
 
   return (
-    <div>
-      <Label htmlFor={id}>{label}</Label>
+    <div className="min-w-0">
+      <Label htmlFor={id} className="block leading-5">{label}</Label>
       <Input
         id={id}
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? `${id}-error` : undefined}
         inputMode={inputMode}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         type={type}
         value={value}
-        className="mt-2 h-12 rounded-2xl border-zinc-200 bg-white"
+        className="mt-1 h-11 min-w-0 lg:h-10 rounded-xl border-zinc-300 bg-white text-base focus-visible:ring-emerald-700 md:text-sm"
       />
-      {error && <p className="mt-2 text-xs font-semibold text-red-600">{error}</p>}
+      {error && <p id={`${id}-error`} className="mt-1 text-xs font-semibold text-red-700">{error}</p>}
     </div>
   );
 }
@@ -915,24 +920,24 @@ function PixCard({
   const normalized = normalizePayment(payment);
 
   return (
-    <Card className="rounded-[2rem] border-zinc-200 bg-white shadow-[0_35px_90px_-45px_rgba(15,23,42,0.24)]">
-      <CardContent className="p-7 lg:p-9">
-        <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-emerald-900">
+    <Card className="min-w-0 rounded-2xl border-zinc-200 bg-white shadow-[0_12px_36px_-20px_rgba(15,23,42,0.18)]">
+      <CardContent className="p-4 sm:p-5 lg:p-6">
+        <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-emerald-900">
           <Clock3 className="h-4 w-4" />
           {statusLabel}
         </div>
 
-        <h2 className="mt-5 text-3xl font-black tracking-[-0.04em]">
+        <h2 className="mt-3 text-xl font-black leading-tight tracking-[-0.03em] sm:text-2xl">
           Pague com PIX para ativar seu acesso.
         </h2>
-        <p className="mt-3 text-sm leading-7 text-zinc-600">
+        <p className="mt-2 text-sm leading-6 text-zinc-600">
           Depois do pagamento aprovado, o acesso será ativado automaticamente e
           você receberá a mensagem inicial no WhatsApp cadastrado.
         </p>
 
-        <div className="mt-8 rounded-[1.6rem] border border-zinc-200 bg-zinc-50 p-4 sm:p-5">
+        <div className="mt-5 rounded-xl border border-zinc-200 bg-zinc-50 p-3 sm:p-4">
           {loadingPix && !normalized ? (
-            <div className="flex min-h-[260px] flex-col items-center justify-center gap-3 text-zinc-600">
+            <div className="flex min-h-[200px] flex-col items-center justify-center gap-3 text-zinc-600">
               <Loader2 className="h-8 w-8 animate-spin text-emerald-900" />
               Gerando dados do PIX...
             </div>
@@ -943,7 +948,7 @@ function PixCard({
                   <img
                     src={normalized.qrCodeImageUrl}
                     alt="QR Code PIX"
-                    className="aspect-square w-full max-w-64 rounded-2xl border border-zinc-200 bg-white object-contain p-3"
+                    className="aspect-square w-full max-w-52 rounded-2xl border border-zinc-200 bg-white object-contain p-3"
                   />
                 </div>
               )}
@@ -953,7 +958,7 @@ function PixCard({
                 <textarea
                   readOnly
                   value={normalized?.qrCode ?? ""}
-                  className="mt-2 min-h-28 w-full rounded-2xl border border-zinc-200 bg-white p-4 text-xs text-zinc-700"
+                  className="mt-2 min-h-20 w-full rounded-xl border border-zinc-200 bg-white p-3 text-xs text-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700"
                 />
                 <Button
                   type="button"
@@ -1003,22 +1008,22 @@ function CreditCardStatusCard({
   statusLabel: string;
 }) {
   return (
-    <Card className="rounded-[2rem] border-zinc-200 bg-white shadow-[0_35px_90px_-45px_rgba(15,23,42,0.24)]">
-      <CardContent className="p-7 lg:p-9">
-        <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-emerald-900">
+    <Card className="min-w-0 rounded-2xl border-zinc-200 bg-white shadow-[0_12px_36px_-20px_rgba(15,23,42,0.18)]">
+      <CardContent className="p-4 sm:p-5 lg:p-6">
+        <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-emerald-900">
           <CreditCard className="h-4 w-4" />
           {statusLabel}
         </div>
 
-        <h2 className="mt-5 text-3xl font-black tracking-[-0.04em]">
+        <h2 className="mt-3 text-xl font-black leading-tight tracking-[-0.03em] sm:text-2xl">
           Pagamento com cartão em processamento.
         </h2>
-        <p className="mt-3 text-sm leading-7 text-zinc-600">
+        <p className="mt-2 text-sm leading-6 text-zinc-600">
           Seus dados sensíveis foram criptografados pelo ambiente seguro do
           PagBank. Agora estamos aguardando a confirmação automática.
         </p>
 
-        <div className="mt-8 rounded-[1.6rem] border border-zinc-200 bg-zinc-50 p-5">
+        <div className="mt-5 rounded-xl border border-zinc-200 bg-zinc-50 p-5">
           <div className="flex items-center gap-3">
             {loading ? (
               <Loader2 className="h-6 w-6 animate-spin text-emerald-900" />
@@ -1216,18 +1221,18 @@ function StatusCard({
   }[tone];
 
   return (
-    <Card className="rounded-[2rem] border-zinc-200 bg-white shadow-[0_35px_90px_-45px_rgba(15,23,42,0.24)]">
-      <CardContent className="p-6 sm:p-8 lg:p-10">
+    <Card className="min-w-0 rounded-2xl border-zinc-200 bg-white shadow-[0_12px_36px_-20px_rgba(15,23,42,0.18)]">
+      <CardContent className="p-4 sm:p-5 lg:p-6">
         <div
-          className={`flex h-20 w-20 items-center justify-center rounded-[1.6rem] ${toneClass}`}
+          className={`flex h-14 w-14 items-center justify-center rounded-xl ${toneClass}`}
         >
           {icon}
         </div>
-        <h2 className="mt-6 text-4xl font-black tracking-[-0.05em]">
+        <h2 className="mt-4 text-2xl font-black leading-tight tracking-[-0.04em] sm:text-3xl">
           {title}
         </h2>
-        <div className="mt-5 text-base leading-8 text-zinc-600">{children}</div>
-        <div className="mt-8 flex items-center gap-2 text-sm font-semibold text-zinc-500">
+        <div className="mt-3 text-sm leading-6 text-zinc-600">{children}</div>
+        <div className="mt-5 flex items-start gap-2 text-xs font-medium leading-5 text-zinc-500">
           <Lock className="h-4 w-4 text-emerald-800" />
           Checkout protegido e sem redirecionamento automático para WhatsApp.
         </div>

@@ -1,238 +1,129 @@
-"use client";
-
-import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRight, Sparkles } from "lucide-react";
-import { useEffect, useState } from "react";
-
+import { ArrowRight } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 
 export default function StickyCTA() {
-  const [footerInView, setFooterInView] = useState(false);
   const [canRender, setCanRender] = useState(false);
-  const [lastTrigger, setLastTrigger] = useState(0);
+  const dockRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handleScroll = () => {
-      const hero = document.getElementById("hero");
-      const pricing = document.getElementById("pricing");
-
-      if (!hero || !pricing) return;
-
-      const heroBottom = hero.getBoundingClientRect().bottom + window.scrollY;
-
-      const pricingTop = pricing.getBoundingClientRect().top + window.scrollY;
-
-      const current = window.scrollY + window.innerHeight * 0.5;
-
-      const insideRange = current > heroBottom && current < pricingTop;
-
-      if (!insideRange) {
-        setCanRender(false);
-        return;
-      }
-
-      const now = Date.now();
-
-      if (now - lastTrigger < 18000) {
-        return;
-      }
-
-      setLastTrigger(now);
-      setCanRender(true);
-
-      window.setTimeout(() => {
-        setCanRender(false);
-      }, 4200);
-    };
-
-    handleScroll();
-
-    window.addEventListener("scroll", handleScroll, {
-      passive: true,
-    });
-
+    const hero = document.getElementById("hero");
+    const pricing = document.getElementById("pricing");
     const footer = document.querySelector("footer");
+    if (!hero || !pricing) return;
 
-    let observer: IntersectionObserver | null = null;
+    const protectedElements = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        "[data-cta-protected], #how-it-works h2, #how-it-works p, #features h2, #features p, #testimonials article, #testimonials h2, #testimonials p, #testimonials a, #guarantee h2, #guarantee p, #guarantee a, #guarantee li",
+      ),
+    );
+    let frame = 0;
+    let lastTriggeredAt = -Infinity;
+    let activeUntil = 0;
+    let hideTimer: number | undefined;
 
-    if (footer) {
-      observer = new IntersectionObserver(
-        ([entry]) => {
-          setFooterInView(entry.isIntersecting);
-        },
-        {
-          threshold: 0.15,
-        },
-      );
+    const updateVisibility = () => {
+      frame = 0;
+      const dock = dockRef.current;
+      if (!dock) return;
+      const current = window.innerHeight * 0.5;
+      const insideRange =
+        current > hero.getBoundingClientRect().bottom &&
+        current < pricing.getBoundingClientRect().top;
+      const footerBounds = footer?.getBoundingClientRect();
+      const footerVisible =
+        footerBounds &&
+        footerBounds.top < window.innerHeight &&
+        footerBounds.bottom > 0;
+      const keyboardOpen =
+        (window.visualViewport?.height ?? window.innerHeight) <
+        window.innerHeight - 120;
+      const menuOpen = document.querySelector('header [aria-expanded="true"]');
+      const dockBounds = dock.getBoundingClientRect();
+      const obstructsContent = protectedElements.some((element) => {
+        const bounds = element.getBoundingClientRect();
+        return (
+          bounds.width > 0 &&
+          bounds.height > 0 &&
+          bounds.left < dockBounds.right + 8 &&
+          bounds.right > dockBounds.left - 8 &&
+          bounds.top < dockBounds.bottom + 8 &&
+          bounds.bottom > dockBounds.top - 8
+        );
+      });
 
-      observer.observe(footer);
-    }
-
-    return () => {
-      window.removeEventListener("scroll", handleScroll);
-
-      if (observer) {
-        observer.disconnect();
+      if (
+        !insideRange ||
+        footerVisible ||
+        keyboardOpen ||
+        menuOpen ||
+        obstructsContent
+      ) {
+        setCanRender(false);
+        return;
       }
+      const now = Date.now();
+      if (now >= activeUntil && now - lastTriggeredAt >= 18000) {
+        lastTriggeredAt = now;
+        activeUntil = now + 4200;
+        if (hideTimer !== undefined) window.clearTimeout(hideTimer);
+        hideTimer = window.setTimeout(() => {
+          if (!dock.contains(document.activeElement)) setCanRender(false);
+        }, 4200);
+      }
+      setCanRender(now < activeUntil || dock.contains(document.activeElement));
     };
-  }, [lastTrigger]);
+    const scheduleUpdate = () => {
+      if (!frame) frame = window.requestAnimationFrame(updateVisibility);
+    };
+
+    scheduleUpdate();
+    window.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate);
+    window.addEventListener("focusin", scheduleUpdate);
+    window.addEventListener("focusout", scheduleUpdate);
+    window.visualViewport?.addEventListener("resize", scheduleUpdate);
+    return () => {
+      window.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+      window.removeEventListener("focusin", scheduleUpdate);
+      window.removeEventListener("focusout", scheduleUpdate);
+      window.visualViewport?.removeEventListener("resize", scheduleUpdate);
+      if (frame) window.cancelAnimationFrame(frame);
+      if (hideTimer !== undefined) window.clearTimeout(hideTimer);
+    };
+  }, []);
 
   const scrollToPricing = () => {
-    document.getElementById("pricing")?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
+    const reducedMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    document
+      .getElementById("pricing")
+      ?.scrollIntoView({
+        behavior: reducedMotion ? "instant" : "smooth",
+        block: "start",
+      });
   };
 
   return (
-    <AnimatePresence>
-      {canRender && !footerInView && (
-        <motion.div
-          initial={{
-            opacity: 0,
-            y: 80,
-            scale: 0.96,
-          }}
-          animate={{
-            opacity: 1,
-            y: 0,
-            scale: 1,
-          }}
-          exit={{
-            opacity: 0,
-            y: 80,
-            scale: 0.96,
-          }}
-          transition={{
-            duration: 0.42,
-            ease: [0.22, 1, 0.36, 1],
-          }}
-          className="
-            fixed
-            bottom-5
-            left-1/2
-            z-50
-            w-[90%]
-            max-w-[470px]
-            -translate-x-1/2
-          "
-        >
-          <div className="relative">
-            {/* Glow discreto */}
-            <div
-              className="
-                absolute
-                inset-0
-                -z-10
-                rounded-full
-                bg-emerald-400/10
-                blur-2xl
-              "
-            />
-
-            <div
-              className="
-                relative
-                flex
-                items-center
-                justify-between
-                gap-3
-                rounded-full
-                border
-                border-white/70
-                bg-white/72
-                px-3
-                py-3
-                shadow-[0_20px_50px_-28px_rgba(15,23,42,.28)]
-                backdrop-blur-[28px]
-                supports-[backdrop-filter]:bg-white/70
-              "
-            >
-              {/* ESQUERDA */}
-
-              <div className="flex min-w-0 items-center gap-3">
-                <div
-                  className="
-                    flex
-                    h-10
-                    w-10
-                    shrink-0
-                    items-center
-                    justify-center
-                    rounded-full
-                    bg-emerald-50
-                    text-emerald-800
-                  "
-                >
-                  <Sparkles className="h-4 w-4" />
-                </div>
-
-                <div className="min-w-0">
-                  <p
-                    className="
-                      truncate
-                      text-[13px]
-                      font-semibold
-                      tracking-[-0.02em]
-                      text-zinc-900
-                      sm:text-sm
-                    "
-                  >
-                    Pronto para começar sua evolução?
-                  </p>
-
-                  <p
-                    className="
-                      hidden
-                      text-[11px]
-                      text-zinc-500
-                      sm:block
-                    "
-                  >
-                    Escolha seu plano e comece agora.
-                  </p>
-                </div>
-              </div>
-
-              {/* DIREITA */}
-
-              <Button
-                size="sm"
-                onClick={scrollToPricing}
-                className="
-                  group
-                  h-10
-                  shrink-0
-                  rounded-full
-                  bg-emerald-900
-                  px-4
-                  font-semibold
-                  text-white
-                  shadow-none
-                  transition-all
-                  duration-300
-                  hover:bg-emerald-950
-                "
-              >
-                <span className="hidden sm:inline">Ver planos</span>
-
-                <span className="sm:hidden">Planos</span>
-
-                <ArrowRight
-                  className="
-                    ml-2
-                    h-4
-                    w-4
-                    transition-transform
-                    duration-300
-                    group-hover:translate-x-1
-                  "
-                />
-              </Button>
-            </div>
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <div
+      id="singulfit-sticky-cta"
+      ref={dockRef}
+      aria-hidden={!canRender}
+      data-visible={canRender}
+      className={`fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] z-40 ${canRender ? "" : "invisible pointer-events-none"}`}
+    >
+      <Button
+        size="sm"
+        tabIndex={canRender ? 0 : -1}
+        onClick={scrollToPricing}
+        className="min-h-11 rounded-xl bg-emerald-900 px-4 text-sm font-semibold text-white shadow-[0_8px_24px_-12px_rgba(6,78,59,0.35)] hover:bg-emerald-950 focus-visible:ring-emerald-700 motion-reduce:transition-none"
+      >
+        <span className="hidden sm:inline">Ver planos</span>
+        <span className="sm:hidden">Planos</span>
+        <ArrowRight aria-hidden="true" className="h-4 w-4" />
+      </Button>
+    </div>
   );
 }

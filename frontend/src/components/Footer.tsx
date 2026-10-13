@@ -414,7 +414,7 @@ export default function Footer() {
                 href="#guarantee"
                 className="relative transition-all duration-300 hover:-translate-y-0.5 hover:text-emerald-700"
               >
-                Garantia
+                Experiência SingulFit
               </a>
             </nav>
           </div>
