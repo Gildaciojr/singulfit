@@ -1,3 +1,7 @@
+import { ConversationDailyQueryService } from '../runtime/conversation-daily-query.service';
+import { NutritionIntakeLedgerService } from '../../nutrition/nutrition-intake-ledger.service';
+import { CoachWeeklySnapshotService } from '../../automation/coach-weekly-snapshot.service';
+import { NutritionConsumptionSummaryService } from '../../nutrition/nutrition-consumption-summary.service';
 import { BadGatewayException, BadRequestException } from '@nestjs/common';
 import { AudioConversationService } from '../../audio/audio-conversation.service';
 import {
@@ -65,8 +69,12 @@ import { AIUsageService, RecordAIUsageInput } from '../../ai/ai-usage.service';
 import { OpenAIGateway } from '../../ai/openai.gateway';
 import type { OpenAITextRequest } from '../../ai/interfaces/openai.interface';
 import type { PromptService } from '../../ai/prompt.service';
-import type { ReservationService } from '../../entitlements/reservation.service';
-import type { UsageService } from '../../usage/usage.service';
+import { EntitlementsService } from '../../entitlements/entitlements.service';
+import { SubscriptionAccessService } from '../../subscriptions/subscription-access.service';
+import { AIRecoveryService } from '../../ai/ai-recovery.service';
+import type { EventService } from '../../observability/event.service';
+import { ReservationService } from '../../entitlements/reservation.service';
+import { UsageService } from '../../usage/usage.service';
 import { IntegrationEventHandlersService } from '../../event-bus/integration-event-handlers.service';
 import { EventHandlerRegistry } from '../../event-bus/event-handler.registry';
 import { INTERNAL_EVENT } from '../../event-bus/event-bus.constants';
@@ -136,11 +144,15 @@ integration(
     let foreignId: string;
     let conversationId: string;
     let command: CoachCommandService;
+    let quotaReadsEnabled: boolean;
     let automation: AutomationService;
     let handleInbound: OutboxEventHandler;
     let handleMedia: OutboxEventHandler;
     let audioService: AudioConversationService;
     let audioUsage: AIUsageService;
+    let audioCommercialUsage: UsageService;
+    let audioEntitlements: EntitlementsService;
+    let audioPlanId: string;
     let audioWebhook: EvolutionWebhookService;
     let audioMedia: MediaService;
     let audioAllowed: boolean;
@@ -223,6 +235,7 @@ integration(
       ).id;
     });
     beforeEach(async () => {
+      quotaReadsEnabled = false;
       provider.createTextResponse.mockReset();
       send.mockReset();
       planning.execute.mockReset();
@@ -254,6 +267,49 @@ integration(
           },
         })
       ).id;
+      const audioPlan = await db.plan.upsert({
+        where: {
+          type_contractVersion: { type: 'BASIC', contractVersion: 'legacy-v1' },
+        },
+        update: {},
+        create: {
+          type: 'BASIC',
+          name: 'Isolated quota Basic',
+          price: 29.9,
+          imageLimit: 5,
+        },
+      });
+      audioPlanId = audioPlan.id;
+      const audioDefinition = await db.entitlementDefinition.upsert({
+        where: { code: 'AUDIO_TRANSCRIPTION' },
+        update: {},
+        create: { code: 'AUDIO_TRANSCRIPTION', name: 'Isolated audio quota' },
+      });
+      await db.planEntitlement.upsert({
+        where: {
+          planId_entitlementId: {
+            planId: audioPlan.id,
+            entitlementId: audioDefinition.id,
+          },
+        },
+        update: { value: 30, unlimited: false },
+        create: {
+          planId: audioPlan.id,
+          entitlementId: audioDefinition.id,
+          value: 30,
+          unlimited: false,
+        },
+      });
+      await db.subscription.create({
+        data: {
+          userId,
+          planId: audioPlan.id,
+          status: 'ACTIVE',
+          amount: 29.9,
+          currentPeriodStart: new Date(Date.now() - 86400000),
+          currentPeriodEnd: new Date(Date.now() + 30 * 86400000),
+        },
+      });
       const profile = await db.fitnessProfile.create({
         data: {
           userId,
@@ -525,26 +581,41 @@ integration(
       );
       const interpreter = new ConversationContinuationSemanticsService(
         {
-          execute: (input: { payload: { text: string } }) =>
+          execute: (input: {
+            payload: { text?: string; description?: string };
+          }) =>
             Promise.resolve({
               status: 'COMPLETED',
-              structuredOutput: interpretationOutputs.shift() ?? {
-                action: input.payload.text.includes('água')
-                  ? 'HYDRATION_REPLY'
-                  : 'INDEPENDENT',
-                day: 'UNRESOLVED',
-                consumption: 'UNKNOWN',
-                meal: 'UNKNOWN',
-                description: null,
-                hydrationGoal: false,
-                reference: input.payload.text.includes('água')
-                  ? 'PENDING'
-                  : 'EXPLICIT',
-                workoutEffect: 'NONE',
-                response: input.payload.text.includes('água')
-                  ? 'Você já bebeu 1 litro de água hoje.'
-                  : null,
-              },
+              structuredOutput: input.payload.description
+                ? {
+                    adherence: 'INSUFFICIENT_INFORMATION',
+                    content:
+                      'Quais foram as porções dos alimentos que você relatou?',
+                    dayIndex: null,
+                    mealIndex: null,
+                    matches: [],
+                    unmatchedFoodQuotes: [],
+                    reportedFoods: input.payload.description
+                      .split(/,\s*|\s+e\s+/u)
+                      .map((foodQuote) => ({ foodQuote, quantityQuote: null })),
+                  }
+                : (interpretationOutputs.shift() ?? {
+                    action: input.payload.text?.includes('água')
+                      ? 'HYDRATION_REPLY'
+                      : 'INDEPENDENT',
+                    day: 'UNRESOLVED',
+                    consumption: 'UNKNOWN',
+                    meal: 'UNKNOWN',
+                    description: null,
+                    hydrationGoal: false,
+                    reference: input.payload.text?.includes('água')
+                      ? 'PENDING'
+                      : 'EXPLICIT',
+                    workoutEffect: 'NONE',
+                    response: input.payload.text?.includes('água')
+                      ? 'Você já bebeu 1 litro de água hoje.'
+                      : null,
+                  }),
             }),
         } as unknown as ConversationAIService,
         boundary,
@@ -559,8 +630,24 @@ integration(
         module.get(ConversationMessageNormalizerService),
         followUp,
         new ConversationContinuationStore(prisma, config),
+        new NutritionIntakeLedgerService(prisma),
       );
       continuationService = continuations;
+      const commercialQueries = new ConversationDailyQueryService(
+        prisma,
+        {} as NutritionConsumptionSummaryService,
+        new CurrentNutritionPlanReaderService(
+          prisma,
+          new NutritionPlanV2PersistenceValidator(),
+        ),
+        new UsageService(
+          prisma,
+          new EntitlementsService(
+            prisma,
+            new SubscriptionAccessService(prisma),
+          ),
+        ),
+      );
       command = new CoachCommandService(
         prisma,
         planning as unknown as CoachPlanningExecutionService,
@@ -573,9 +660,22 @@ integration(
         undefined,
         undefined,
         undefined,
-        undefined,
+        {
+          acceptsCommercialBalance: (text: string) =>
+            quotaReadsEnabled &&
+            commercialQueries.acceptsCommercialBalance(text),
+          accepts: (text: string) =>
+            quotaReadsEnabled && commercialQueries.accepts(text),
+          answer: (
+            input: Parameters<ConversationDailyQueryService['answer']>[0],
+          ) =>
+            quotaReadsEnabled
+              ? commercialQueries.answer(input)
+              : Promise.resolve(null),
+        } as unknown as ConversationDailyQueryService,
         undefined,
         continuations,
+        new NutritionIntakeLedgerService(prisma),
       );
       send.mockImplementation(() =>
         Promise.resolve({
@@ -637,13 +737,22 @@ integration(
           OPENAI_AUDIO_OUTPUT_COST_PER_1M_USD: '2',
         }),
       );
+      audioEntitlements = new EntitlementsService(
+        prisma,
+        new SubscriptionAccessService(prisma),
+      );
+      audioCommercialUsage = new UsageService(prisma, audioEntitlements);
+      const audioReservations = new ReservationService(
+        prisma,
+        audioEntitlements,
+      );
       const audioAI = new AIService(
         prisma,
         {} as PromptService,
         {} as OpenAIGateway,
         audioUsage,
-        {} as ReservationService,
-        { confirmInTransaction: jest.fn() } as unknown as UsageService,
+        audioReservations,
+        audioCommercialUsage,
         new ConfigService(),
         eventBus,
       );
@@ -657,6 +766,9 @@ integration(
         {
           get: (key: string) => audioRolloutValues[key],
         } as unknown as ConfigService,
+        audioReservations,
+        audioCommercialUsage,
+        audioEntitlements,
       );
       const conversations = new ConversationsService(prisma);
       audioWebhook = new EvolutionWebhookService(
@@ -730,8 +842,49 @@ integration(
       if (module) await module.close();
       await db.$disconnect();
     });
-    async function inbound(text: string, quote?: string) {
-      at = new Date();
+    it('publishes real commercial balances without provider, effects or duplicate delivery', async () => {
+      quotaReadsEnabled = true;
+      for (const [code, limit] of [
+        ['NUTRITION_PLAN_GENERATION', 2],
+        ['WORKOUT_PLAN_GENERATION', 2],
+        ['IMAGE_ANALYSIS', 30],
+        ['AUDIO_TRANSCRIPTION', 30],
+      ] as const) {
+        const definition = await db.entitlementDefinition.upsert({
+          where: { code },
+          update: {},
+          create: { code, name: 'Isolated quota fixture' },
+        });
+        await db.planEntitlement.upsert({
+          where: {
+            planId_entitlementId: {
+              planId: audioPlanId,
+              entitlementId: definition.id,
+            },
+          },
+          update: { value: limit, unlimited: false },
+          create: {
+            planId: audioPlanId,
+            entitlementId: definition.id,
+            value: limit,
+            unlimited: false,
+          },
+        });
+      }
+      const result = await inbound(
+        'Quais são minhas cotas de fotos e áudios neste ciclo?',
+      );
+      expect(result.response.content).toContain('Fotos: 30 disponíveis de 30');
+      expect(result.response.content).toContain('Áudios: 30 disponíveis de 30');
+      expect(result.response.content).toContain(
+        'Planos alimentares: 2 disponíveis de 2',
+      );
+      expect(provider.createTextResponse).not.toHaveBeenCalled();
+      expect(await db.usageEvent.count({ where: { userId } })).toBe(0);
+      expect(planning.execute).not.toHaveBeenCalled();
+    });
+    async function inbound(text: string, quote?: string, reportedAt?: Date) {
+      at = reportedAt ?? new Date();
       const row = await db.message.create({
         data: {
           conversationId,
@@ -829,13 +982,14 @@ integration(
     }
     async function queuedAudio(
       options: {
+        at?: Date;
         externalId?: string;
         mime?: string;
         content?: Buffer;
         download?: boolean;
       } = {},
     ) {
-      at = new Date();
+      at = options.at ?? new Date();
       const externalId = options.externalId ?? randomUUID();
       const payload = {
         event: 'messages.upsert',
@@ -1580,6 +1734,403 @@ integration(
         }),
       ).toMatchObject({ status: 'FAILED', attempts: 3 });
     });
+    async function quota(value: number, premium = false) {
+      const definition = await db.entitlementDefinition.findUniqueOrThrow({
+        where: { code: 'AUDIO_TRANSCRIPTION' },
+      });
+      let planId = audioPlanId;
+      if (premium) {
+        const plan = await db.plan.upsert({
+          where: {
+            type_contractVersion: {
+              type: 'PREMIUM',
+              contractVersion: 'legacy-v1',
+            },
+          },
+          update: {},
+          create: {
+            type: 'PREMIUM',
+            name: 'Isolated Premium',
+            price: 69.9,
+            imageLimit: 150,
+          },
+        });
+        planId = plan.id;
+        await db.subscription.updateMany({
+          where: { userId },
+          data: { planId },
+        });
+      }
+      await db.planEntitlement.upsert({
+        where: {
+          planId_entitlementId: { planId, entitlementId: definition.id },
+        },
+        update: { value, unlimited: false },
+        create: {
+          planId,
+          entitlementId: definition.id,
+          value,
+          unlimited: false,
+        },
+      });
+    }
+    async function audioJob(sourceId: string) {
+      return db.aIJob.findFirstOrThrow({
+        where: { messageId: sourceId, type: 'AUDIO' },
+      });
+    }
+    async function audioEvent(sourceId: string) {
+      return db.usageEvent.findUniqueOrThrow({
+        where: {
+          aiJobId_entitlementCode: {
+            aiJobId: (await audioJob(sourceId)).id,
+            entitlementCode: 'AUDIO_TRANSCRIPTION',
+          },
+        },
+      });
+    }
+    it.each([30, 200])(
+      'reserves the final unit of %i concurrently and delivers one limit reply on replay',
+      async (limit) => {
+        await quota(limit, limit === 200);
+        const sub = await db.subscription.findFirstOrThrow({
+          where: { userId },
+        });
+        await db.usageBucket.create({
+          data: {
+            userId,
+            entitlementCode: 'AUDIO_TRANSCRIPTION',
+            periodStart: sub.currentPeriodStart!,
+            periodEnd: sub.currentPeriodEnd!,
+            used: limit - 1,
+          },
+        });
+        const first = await queuedAudio();
+        const second = await queuedAudio();
+        audioProvider.transcribe.mockResolvedValue(
+          transcript('Já bebi água hoje'),
+        );
+        await Promise.all([
+          handleMedia(first.mediaEvent),
+          handleMedia(second.mediaEvent),
+        ]);
+        expect(audioProvider.transcribe).toHaveBeenCalledTimes(1);
+        const jobs = await db.aIJob.findMany({
+          where: { userId, type: 'AUDIO' },
+        });
+        expect(jobs.map((job) => job.status).sort()).toEqual([
+          'COMPLETED',
+          'FAILED',
+        ]);
+        const limited = jobs.find(
+          (job) => job.error === 'AUDIO_QUOTA_EXCEEDED',
+        )!;
+        const queue = limited.messageId === first.source.id ? first : second;
+        await handleMedia(queue.mediaEvent);
+        const messages = await db.scheduledMessage.findMany({
+          where: {
+            userId,
+            context: {
+              path: ['audioSourceMessageId'],
+              equals: limited.messageId!,
+            },
+          },
+        });
+        expect(messages).toHaveLength(1);
+        if (limit === 30)
+          expect(messages[0].content).toBe(
+            '🎙️ Você aproveitou todos os áudios disponíveis no seu plano neste ciclo!\n\nMas pode continuar conversando comigo normalmente por texto. 💚\n\nSe quiser ter mais liberdade para me mandar áudios, o Premium oferece uma quantidade bem maior a cada ciclo.',
+          );
+        else {
+          expect(messages[0].content).toContain('renovados em');
+          expect(messages[0].content).not.toContain('Premium');
+        }
+        const sent = send.mock.calls.length;
+        await automation.sendScheduledMessage(
+          messages[0].id,
+          new Date(Date.now() + 2000),
+        );
+        await automation.sendScheduledMessage(
+          messages[0].id,
+          new Date(Date.now() + 3000),
+        );
+        expect(send).toHaveBeenCalledTimes(sent + 1);
+        expect(send.mock.calls.at(-1)?.[0].text).toBe(messages[0].content);
+        expect(
+          await db.usageBucket.findFirst({ where: { userId } }),
+        ).toMatchObject({ used: limit, reserved: 0 });
+      },
+    );
+    it('quota zero blocks before provider and new cycles isolate existing consumption', async () => {
+      await quota(0);
+      const blocked = await queuedAudio();
+      await handleMedia(blocked.mediaEvent);
+      expect(audioProvider.transcribe).not.toHaveBeenCalled();
+      expect((await audioJob(blocked.source.id)).error).toBe(
+        'AUDIO_QUOTA_EXCEEDED',
+      );
+      await quota(1);
+      const sub = await db.subscription.findFirstOrThrow({ where: { userId } });
+      await db.usageBucket.create({
+        data: {
+          userId,
+          entitlementCode: 'AUDIO_TRANSCRIPTION',
+          periodStart: new Date(Date.now() - 60 * 86400000),
+          periodEnd: new Date(Date.now() - 31 * 86400000),
+          used: 1,
+        },
+      });
+      const current = await queuedAudio();
+      audioProvider.transcribe.mockResolvedValueOnce(transcript('Água hoje'));
+      await handleMedia(current.mediaEvent);
+      const event = await audioEvent(current.source.id);
+      expect(event.status).toBe('CONFIRMED');
+      expect(
+        await db.usageBucket.findFirst({
+          where: { userId, periodStart: sub.currentPeriodStart! },
+        }),
+      ).toMatchObject({ used: 1, reserved: 0 });
+    });
+    it('missing entitlement rolls back AUDIO job and never calls provider', async () => {
+      await db.planEntitlement.deleteMany({
+        where: {
+          planId: audioPlanId,
+          entitlement: { code: 'AUDIO_TRANSCRIPTION' },
+        },
+      });
+      const queued = await queuedAudio();
+      await expect(handleMedia(queued.mediaEvent)).rejects.toThrow(
+        'não configurado',
+      );
+      expect(
+        await db.aIJob.count({
+          where: { messageId: queued.source.id, type: 'AUDIO' },
+        }),
+      ).toBe(0);
+      expect(audioProvider.transcribe).not.toHaveBeenCalled();
+    });
+    it.each(['', 'fala\u0000inválida'])(
+      'charged invalid text confirms quota and financial usage once: %j',
+      async (text) => {
+        audioProvider.transcribe.mockResolvedValueOnce(transcript(text));
+        const queued = await queuedAudio();
+        await handleMedia(queued.mediaEvent);
+        await handleMedia(queued.mediaEvent);
+        expect((await audioEvent(queued.source.id)).status).toBe('CONFIRMED');
+        expect(
+          await db.aIUsage.count({
+            where: { aiJobId: (await audioJob(queued.source.id)).id },
+          }),
+        ).toBe(1);
+        expect(audioProvider.transcribe).toHaveBeenCalledTimes(1);
+      },
+    );
+    it('explicit uncharged provider rejection releases only the original reservation', async () => {
+      audioProvider.transcribe.mockRejectedValueOnce(
+        new AudioTranscriptionError('AUDIO_PROVIDER_REJECTED_UNCHARGED', false),
+      );
+      const queued = await queuedAudio();
+      await handleMedia(queued.mediaEvent);
+      await handleMedia(queued.mediaEvent);
+      expect((await audioEvent(queued.source.id)).status).toBe('REVERSED');
+      expect(
+        await db.aIUsage.count({
+          where: { aiJobId: (await audioJob(queued.source.id)).id },
+        }),
+      ).toBe(0);
+    });
+    it('429 reuses one reservation and confirms one commercial unit after success', async () => {
+      audioProvider.transcribe
+        .mockRejectedValueOnce(
+          new AudioTranscriptionError('AUDIO_PROVIDER_RATE_LIMIT', true),
+        )
+        .mockResolvedValueOnce(transcript('Água hoje'));
+      const queued = await queuedAudio();
+      await expect(handleMedia(queued.mediaEvent)).rejects.toThrow(
+        'AUDIO_TRANSIENT_FAILURE',
+      );
+      const first = await audioEvent(queued.source.id);
+      expect(first.status).toBe('RESERVED');
+      await handleMedia(queued.mediaEvent);
+      expect(await audioEvent(queued.source.id)).toMatchObject({
+        id: first.id,
+        quantity: 1,
+        status: 'CONFIRMED',
+      });
+      expect(
+        await db.usageBucket.findFirst({ where: { userId } }),
+      ).toMatchObject({ used: 1, reserved: 0 });
+    });
+    it('recovery retains potentially charged usage and replay never retranscribes uncertain outcomes', async () => {
+      const queued = await queuedAudio();
+      audioProvider.transcribe.mockRejectedValueOnce(
+        new AudioTranscriptionError('AUDIO_PROVIDER_OUTCOME_UNKNOWN', false),
+      );
+      await handleMedia(queued.mediaEvent);
+      const job = await audioJob(queued.source.id);
+      // Reproduce a worker crash before failure persistence, with the exact ledger.
+      await db.aIJob.update({
+        where: { id: job.id },
+        data: {
+          status: 'PROCESSING',
+          failedAt: null,
+          error: null,
+          leaseExpiresAt: new Date(Date.now() - 1000),
+        },
+      });
+      const recovery = new AIRecoveryService(
+        prisma,
+        audioCommercialUsage,
+        { recordInTransaction: jest.fn() } as unknown as EventService,
+        {} as AIService,
+      );
+      await recovery.recover();
+      await handleMedia(queued.mediaEvent);
+      expect((await audioEvent(queued.source.id)).status).toBe('RESERVED');
+      expect(audioProvider.transcribe).toHaveBeenCalledTimes(1);
+      expect((await audioJob(queued.source.id)).result).toMatchObject({
+        phase: 'REQUEST_STARTED',
+      });
+      expect(await db.aIUsage.count({ where: { aiJobId: job.id } })).toBe(0);
+    });
+    it('acknowledged usage survives accounting rollback and confirms on replay without recharging', async () => {
+      audioProvider.transcribe.mockResolvedValueOnce(transcript('Água hoje'));
+      const queued = await queuedAudio();
+      const failure = jest
+        .spyOn(audioCommercialUsage, 'confirmInTransaction')
+        .mockRejectedValueOnce(
+          new Error('controlled quota persistence failure'),
+        );
+      await expect(handleMedia(queued.mediaEvent)).rejects.toThrow(
+        'controlled quota persistence failure',
+      );
+      expect((await audioJob(queued.source.id)).result).toMatchObject({
+        phase: 'RECEIVED',
+      });
+      expect((await audioEvent(queued.source.id)).status).toBe('RESERVED');
+      failure.mockRestore();
+      await handleMedia(queued.mediaEvent);
+      expect((await audioEvent(queued.source.id)).status).toBe('CONFIRMED');
+      expect(audioProvider.transcribe).toHaveBeenCalledTimes(1);
+    });
+    it('failure to persist acknowledged usage retains the reservation without another paid call', async () => {
+      const queued = await queuedAudio();
+      let acknowledgementFailure: jest.SpyInstance | undefined;
+      audioProvider.transcribe.mockImplementationOnce(() => {
+        acknowledgementFailure = jest
+          .spyOn(db.aIJob, 'updateMany')
+          .mockRejectedValueOnce(
+            new Error('controlled acknowledgement persistence failure'),
+          );
+        return Promise.resolve(transcript('Água hoje'));
+      });
+      try {
+        await expect(handleMedia(queued.mediaEvent)).rejects.toThrow(
+          'controlled acknowledgement persistence failure',
+        );
+      } finally {
+        acknowledgementFailure?.mockRestore();
+      }
+      const job = await audioJob(queued.source.id);
+      expect(job.result).toMatchObject({ phase: 'REQUEST_STARTED' });
+      await db.aIJob.update({
+        where: { id: job.id },
+        data: { leaseExpiresAt: new Date(Date.now() - 1000) },
+      });
+      await handleMedia(queued.mediaEvent);
+      await handleMedia(queued.mediaEvent);
+      expect((await audioEvent(queued.source.id)).status).toBe('RESERVED');
+      expect(audioProvider.transcribe).toHaveBeenCalledTimes(1);
+      expect(await db.aIUsage.count({ where: { aiJobId: job.id } })).toBe(0);
+    });
+    it('intake rejection is uncharged and quota is isolated from another eligible user', async () => {
+      await quota(0);
+      const sub = await db.subscription.findFirstOrThrow({ where: { userId } });
+      // A second user has an independent bucket, even with the same plan/cycle.
+      await quota(1);
+      await db.usageBucket.create({
+        data: {
+          userId,
+          entitlementCode: 'AUDIO_TRANSCRIPTION',
+          periodStart: sub.currentPeriodStart!,
+          periodEnd: sub.currentPeriodEnd!,
+          used: 1,
+        },
+      });
+      await db.subscription.create({
+        data: {
+          userId: foreignId,
+          planId: audioPlanId,
+          amount: 29.9,
+          status: 'ACTIVE',
+          currentPeriodStart: sub.currentPeriodStart!,
+          currentPeriodEnd: sub.currentPeriodEnd!,
+        },
+      });
+      const foreignConversation = await db.conversation.create({
+        data: {
+          userId: foreignId,
+          phoneNumber:
+            '+999' +
+            BigInt('0x' + randomUUID().replace(/-/gu, '').slice(0, 12))
+              .toString()
+              .slice(0, 10),
+        },
+      });
+      const foreignMessage = await db.message.create({
+        data: {
+          conversationId: foreignConversation.id,
+          type: 'AUDIO',
+          direction: 'INBOUND',
+          externalMessageId: randomUUID(),
+          instanceName: 'isolated-audio',
+          content: 'Synthetic audio',
+          timestamp: new Date(),
+        },
+      });
+      audioRolloutValues.AUDIO_TRANSCRIPTION_CANARY_USER_IDS = `${userId},${foreignId}`;
+      await audioService.process({
+        userId: foreignId,
+        messageId: foreignMessage.id,
+        intakeError: true,
+      });
+      const foreignJob = await audioJob(foreignMessage.id);
+      expect(
+        await db.usageEvent.findFirst({ where: { aiJobId: foreignJob.id } }),
+      ).toMatchObject({ userId: foreignId, status: 'REVERSED' });
+      expect(
+        await db.usageBucket.findFirst({ where: { userId: foreignId } }),
+      ).toMatchObject({ used: 0, reserved: 0 });
+      expect(
+        await db.usageBucket.findFirst({ where: { userId } }),
+      ).toMatchObject({ used: 1, reserved: 0 });
+      expect(audioProvider.transcribe).not.toHaveBeenCalled();
+    });
+    it('recovery refunds expired explicitly uncharged retries without retranscribing', async () => {
+      const queued = await queuedAudio();
+      audioProvider.transcribe.mockRejectedValueOnce(
+        new AudioTranscriptionError('AUDIO_PROVIDER_RATE_LIMIT', true),
+      );
+      await expect(handleMedia(queued.mediaEvent)).rejects.toThrow(
+        'AUDIO_TRANSIENT_FAILURE',
+      );
+      const event = await audioEvent(queued.source.id);
+      await db.usageEvent.update({
+        where: { id: event.id },
+        data: { expiresAt: new Date(Date.now() - 1000) },
+      });
+      const recovery = new AIRecoveryService(
+        prisma,
+        audioCommercialUsage,
+        { recordInTransaction: jest.fn() } as unknown as EventService,
+        {} as AIService,
+      );
+      await recovery.recover();
+      await handleMedia(queued.mediaEvent);
+      expect((await audioEvent(queued.source.id)).status).toBe('REVERSED');
+      expect(audioProvider.transcribe).toHaveBeenCalledTimes(1);
+      expect((await audioJob(queued.source.id)).status).toBe('FAILED');
+    });
     it('audio refusal uses the same deterministic effect boundary as text', async () => {
       audioProvider.transcribe.mockResolvedValueOnce(
         transcript('Não crie um novo plano de treino. Já bebi água hoje.'),
@@ -1865,6 +2416,253 @@ integration(
       // completion is not a structured-publication authorization.
       expect(job.status).toBe('COMPLETED');
       expect(job.result).toMatchObject({ answer: free });
+    });
+    it.each(['TEXT', 'AUDIO', 'PHOTO'] as const)(
+      'follows seven synthetic days of %s meal reports through receipt, replay, query and factual Sunday presentation',
+      async (channel) => {
+        const clock = new CoachProactiveSchedulePolicy();
+        const range = clock.localWeekRange(new Date(), 'America/Sao_Paulo');
+        await db.subscription.updateMany({
+          where: { userId },
+          data: {
+            currentPeriodStart: new Date(range.start.getTime() - 86400000),
+            billingPeriodStart: new Date(range.start.getTime() - 86400000),
+          },
+        });
+        for (let day = 0; day < 7; day++) {
+          const date = new Date(
+            range.start.getTime() + day * 86400000 + 15 * 3600000,
+          );
+          let quote: string | undefined;
+          if (channel === 'PHOTO') {
+            const image = await db.message.create({
+              data: {
+                conversationId,
+                direction: 'INBOUND',
+                type: 'IMAGE',
+                content: 'Refeição sintética',
+                timestamp: date,
+                externalMessageId: randomUUID(),
+              },
+            });
+            const media = await db.mediaFile.create({
+              data: {
+                userId,
+                conversationId,
+                messageId: image.id,
+                mediaType: 'IMAGE',
+                storageProvider: 'LOCAL',
+                originalFileName: 'synthetic.jpg',
+                mimeType: 'image/jpeg',
+                fileSize: 4,
+                checksum: '0'.repeat(64),
+                storagePath: 'synthetic/never-read.jpg',
+              },
+            });
+            await db.meal.create({
+              data: {
+                userId,
+                conversationId,
+                messageId: image.id,
+                mediaFileId: media.id,
+                source: 'WHATSAPP',
+                analysis: {
+                  create: {
+                    status: 'COMPLETED',
+                    confidence: 0.9,
+                    rawResponse: { source: 'CONTROLLED_PROVIDER' },
+                    totalCalories: 400,
+                    totalProtein: 30,
+                    totalCarbs: 45,
+                    totalFat: 11,
+                  },
+                },
+              },
+            });
+            quote = image.externalMessageId ?? undefined;
+          }
+          const text =
+            channel === 'PHOTO'
+              ? 'Comi essa refeição no almoço'
+              : 'Acabei de almoçar arroz, feijão e frango.';
+          interpretationOutputs.push({
+            action: 'MEAL_REPLY',
+            day: 'TODAY',
+            consumption: 'CONFIRMED',
+            meal: 'LUNCH',
+            description: channel === 'PHOTO' ? null : 'arroz, feijão e frango',
+            hydrationGoal: false,
+            reference: 'EXPLICIT',
+            workoutEffect: 'NONE',
+            response: null,
+            intake: {
+              kind: 'MEAL',
+              day: 'TODAY',
+              quote:
+                channel === 'PHOTO'
+                  ? 'essa refeição'
+                  : 'arroz, feijão e frango',
+              volumeMl: null,
+            },
+          });
+          if (channel === 'AUDIO') {
+            audioProvider.transcribe.mockResolvedValueOnce(transcript(text));
+            await deliverAudio(await queuedAudio({ at: date }));
+          } else await inbound(text, quote, date);
+          interpretationOutputs.push({
+            action: 'HYDRATION_REPLY',
+            day: 'TODAY',
+            consumption: 'CONFIRMED',
+            meal: 'UNKNOWN',
+            description: null,
+            hydrationGoal: false,
+            reference: 'EXPLICIT',
+            workoutEffect: 'NONE',
+            response: null,
+            intake: {
+              kind: 'WATER_ADD',
+              day: 'TODAY',
+              quote: '500 ml',
+              volumeMl: 500,
+            },
+          });
+          const water = await inbound(
+            'Bebi 500 ml de água',
+            undefined,
+            new Date(date.getTime() + 1000),
+          );
+          expect(water.response.content).not.toContain('meta atingida');
+          expect(water.response.content).not.toBe(
+            'Você já bebeu 500 ml de água hoje.',
+          );
+        }
+        const cutoff = new Date(range.end.getTime() - 4 * 3600000);
+        const reader = {
+          getApplicableAt: () => Promise.resolve(null),
+        } as unknown as import('../../diet/current-nutrition-plan-reader.service').CurrentNutritionPlanReaderService;
+        const summaryService = new NutritionConsumptionSummaryService(
+          db as unknown as PrismaService,
+        );
+        const summary = await summaryService.summarize({
+          userId,
+          period: 'THIS_WEEK',
+          referenceDate: cutoff,
+          timezone: 'America/Sao_Paulo',
+          confirmedOnly: true,
+        });
+        expect(summary.mealCount).toBe(7);
+        expect(summary.calories).toBe(channel === 'PHOTO' ? 2800 : null);
+        const weekly = new CoachWeeklySnapshotService(
+          db as unknown as PrismaService,
+          summaryService,
+          reader,
+        );
+        const snapshot = await weekly.build(userId, cutoff);
+        expect(snapshot.hydration).toHaveLength(7);
+        expect(snapshot.hydration.every((day) => day.volumeMl === 500)).toBe(
+          true,
+        );
+        const premium = weekly.render(snapshot, 'PREMIUM');
+        const basic = weekly.render(snapshot, 'BASIC');
+        expect(premium).toContain('7 refeições');
+        expect(basic).toContain('7 refeições');
+        expect(premium).not.toMatch(/falhou|pulou|compense|emagreceu/iu);
+        expect(
+          new ConversationPublicAnswerBoundaryService().projectText(premium),
+        ).toBe(premium);
+        expect(
+          await db.nutritionIntakeRecord.count({ where: { userId } }),
+        ).toBe(14);
+        expect(planning.execute).not.toHaveBeenCalled();
+      },
+    );
+    it.each(['TEXT', 'AUDIO'] as const)(
+      'persists an actual %s meal through publication and replay without using IMAGE quota',
+      async (channel) => {
+        const text = 'Acabei de almoçar arroz, feijão e frango.';
+        interpretationOutputs.push({
+          action: 'MEAL_REPLY',
+          day: 'TODAY',
+          consumption: 'CONFIRMED',
+          meal: 'LUNCH',
+          description: 'arroz, feijão e frango',
+          hydrationGoal: false,
+          reference: 'EXPLICIT',
+          workoutEffect: 'NONE',
+          response: null,
+          intake: {
+            kind: 'MEAL',
+            day: 'TODAY',
+            quote: 'arroz, feijão e frango',
+            volumeMl: null,
+          },
+        });
+        if (channel === 'AUDIO') {
+          audioProvider.transcribe.mockResolvedValueOnce(transcript(text));
+          await deliverAudio(await queuedAudio());
+          expect(audioProvider.transcribe).toHaveBeenCalledTimes(1);
+        } else await inbound(text);
+        expect(
+          await db.nutritionIntakeRecord.count({
+            where: { userId, kind: 'MEAL' },
+          }),
+        ).toBe(1);
+        const report = await db.nutritionIntakeRecord.findFirstOrThrow({
+          where: { userId, kind: 'MEAL' },
+          include: { sourceMessage: true },
+        });
+        expect(report.sourceMessage.type).toBe('TEXT');
+        expect(report.sourceMessage.content).toBe(text);
+        expect(await db.meal.count({ where: { userId } })).toBe(1);
+        expect(
+          await db.usageEvent.count({
+            where: { userId, entitlement: { code: 'IMAGE_ANALYSIS' } },
+          }),
+        ).toBe(0);
+      },
+    );
+    it('persists quantitative water once through inbound, publication, outbox and replay', async () => {
+      interpretationOutputs.push({
+        action: 'HYDRATION_REPLY',
+        day: 'TODAY',
+        consumption: 'CONFIRMED',
+        meal: 'UNKNOWN',
+        description: null,
+        hydrationGoal: false,
+        reference: 'EXPLICIT',
+        workoutEffect: 'NONE',
+        response: null,
+        intake: {
+          kind: 'WATER_TOTAL',
+          day: 'TODAY',
+          quote: '1 litro',
+          volumeMl: 1000,
+        },
+      });
+      const turn = await inbound('Já bebi 1 litro de água hoje');
+      expect(turn.response.content).toContain('ao longo do dia');
+      expect(
+        await db.nutritionIntakeRecord.count({
+          where: { userId, sourceMessageId: turn.inbound.id },
+        }),
+      ).toBe(1);
+      expect(
+        await db.nutritionIntakeRecord.findUnique({
+          where: { sourceMessageId: turn.inbound.id },
+        }),
+      ).toMatchObject({ volumeMl: 1000, kind: 'WATER_TOTAL' });
+      expect(
+        await db.aIJob.count({ where: { userId, messageId: turn.inbound.id } }),
+      ).toBe(0);
+      expect(
+        await db.coachMessage.count({
+          where: {
+            userId,
+            context: { path: ['canonicalContinuation'], equals: true },
+          },
+        }),
+      ).toBe(1);
+      expect(provider.createTextResponse).not.toHaveBeenCalled();
     });
     it.each([
       'Já bebi 1 litro de água hoje',

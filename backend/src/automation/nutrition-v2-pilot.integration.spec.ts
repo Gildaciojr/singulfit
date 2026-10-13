@@ -36,8 +36,14 @@ describe('Nutrition V2 internal pilot integration', () => {
     goal?: string;
     engineFailure?: Error;
     timeoutMs?: number;
+    message?: string;
   }) {
     const order: string[] = [];
+    const request =
+      options?.message ??
+      (options?.goal === 'GENERATE_COMBINED_PLANS'
+        ? 'Quero uma dieta e um plano de treino'
+        : 'quero uma dieta');
     const referenceDate = new Date('2026-07-30T12:00:00.000Z');
     const decision = Object.freeze({
       goal: options?.goal ?? 'GENERATE_DIET_PLAN',
@@ -247,6 +253,14 @@ describe('Nutrition V2 internal pilot integration', () => {
       undefined,
       undefined,
       routePolicy,
+      undefined,
+      {
+        message: {
+          findFirst: jest
+            .fn()
+            .mockResolvedValue({ content: request, timestamp: referenceDate }),
+        },
+      } as unknown as PrismaService,
     );
     const transaction = {
       scheduledMessage: {
@@ -258,7 +272,7 @@ describe('Nutrition V2 internal pilot integration', () => {
       message: {
         findFirst: jest.fn().mockResolvedValue({
           id: 'message-id',
-          content: 'quero uma dieta',
+          content: request,
           timestamp: referenceDate,
           conversation: {
             id: 'conversation-id',
@@ -403,5 +417,22 @@ describe('Nutrition V2 internal pilot integration', () => {
     expect(test.order).toEqual(['v2']);
     expect(test.engine.generateCandidate).toHaveBeenCalledTimes(1);
     expect(test.shadowRuntime.execute).not.toHaveBeenCalled();
+    expect(test.planPersistence.persist).toHaveBeenCalledTimes(1);
+    expect(test.prisma.coachMessage.create).toHaveBeenCalledTimes(1);
+    expect(test.transaction.scheduledMessage.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not authorize workout from a combined decision without an owned workout request', async () => {
+    const test = setup({
+      goal: 'GENERATE_COMBINED_PLANS',
+      message: 'quero uma dieta',
+    });
+    await test.command.processTextMessage({
+      userId: USER_ID,
+      messageId: 'message-id',
+    });
+    expect(test.engine.generateCandidate).not.toHaveBeenCalled();
+    expect(test.planPersistence.persist).not.toHaveBeenCalled();
+    expect(test.order).toEqual([]);
   });
 });

@@ -1,5 +1,5 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { PlanType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SubscriptionAccessService } from '../subscriptions/subscription-access.service';
 import type { CommercialUsageEntitlementCode } from './entitlement.constants';
@@ -8,6 +8,7 @@ type DatabaseClient = PrismaService | Prisma.TransactionClient;
 
 export interface CommercialEntitlementGrant {
   readonly code: CommercialUsageEntitlementCode;
+  readonly planType: PlanType;
   readonly unlimited: boolean;
   readonly limit: number | null;
   readonly periodStart: Date;
@@ -126,6 +127,7 @@ export class EntitlementsService {
     }
     return Object.freeze({
       code,
+      planType: subscription.plan.type,
       unlimited: entitlement.unlimited,
       limit: entitlement.unlimited ? null : entitlement.value,
       periodStart,

@@ -1,5 +1,7 @@
 "use client";
 
+import { useCommercialOffers } from "@/hooks/useCommercialOffers";
+
 import { motion } from "framer-motion";
 import { Check, Shield, Flame } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -109,7 +111,8 @@ function PricingCard({
       <Button
         variant={highlight ? "default" : "outline"}
         className="w-full"
-        onClick={() => window.location.assign(checkoutUrl)}
+        disabled={!checkoutUrl}
+        onClick={() => { if (checkoutUrl) window.location.assign(checkoutUrl); }}
       >
         {highlight ? "Quero acesso completo" : "Testar por 1 mês"}
       </Button>
@@ -129,6 +132,7 @@ function PricingCard({
 }
 
 export const PricingPage = () => {
+  const offers = useCommercialOffers();
   return (
     <div className="relative min-h-screen flex flex-col items-center justify-center px-6">
 
@@ -148,17 +152,17 @@ export const PricingPage = () => {
 
         <PricingCard
           title={COMMERCIAL_PLANS.BASIC.displayName}
-          price={formatPlanPrice(COMMERCIAL_PLANS.BASIC.price).replace("R$ ", "")}
+          price={offers.data?.BASIC ? formatPlanPrice(offers.data.BASIC.price).replace("R$ ", "") : "Indisponível"}
           period="/ mês"
-          checkoutUrl={checkoutPath("BASIC")}
+          checkoutUrl={offers.data?.BASIC ? checkoutPath("BASIC") : ""}
         />
 
         <PricingCard
           title={COMMERCIAL_PLANS.PREMIUM.displayName}
-          price={formatPlanPrice(COMMERCIAL_PLANS.PREMIUM.price).replace("R$ ", "")}
+          price={offers.data?.PREMIUM ? formatPlanPrice(offers.data.PREMIUM.price).replace("R$ ", "") : "Indisponível"}
           period="/ mês"
           subtitle="Plano completo da SingulFit"
-          checkoutUrl={checkoutPath("PREMIUM")}
+          checkoutUrl={offers.data?.PREMIUM ? checkoutPath("PREMIUM") : ""}
           highlight
         />
 

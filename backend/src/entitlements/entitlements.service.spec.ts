@@ -14,6 +14,7 @@ describe('EntitlementsService', () => {
       const accessService = {
         requireAccessInTransaction: jest.fn().mockResolvedValue({
           planId,
+          plan: { type: unlimited ? 'PREMIUM' : 'BASIC' },
           currentPeriodStart: periodStart,
           currentPeriodEnd: periodEnd,
         }),
@@ -39,6 +40,7 @@ describe('EntitlementsService', () => {
         ),
       ).resolves.toEqual({
         code: 'WORKOUT_PLAN_GENERATION',
+        planType: unlimited ? 'PREMIUM' : 'BASIC',
         unlimited,
         limit,
         periodStart,

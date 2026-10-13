@@ -33,6 +33,38 @@ describe('DietGeneratorService', () => {
     expect(subject.transaction.dietPlan.updateMany).not.toHaveBeenCalled();
   });
 
+  it('full legacy adaptation reserves a generation before provider', async () => {
+    const subject = createSubject();
+    const previousPlan = {
+      id: 'owned-plan',
+      userId: 'user-id',
+      profileId: 'profile-id',
+      aiJobId: 'old-job',
+      implementation: 'LEGACY' as const,
+      status: DietPlanStatus.ACTIVE,
+      objective: FitnessGoal.WEIGHT_LOSS,
+      title: 'Existing diet',
+      dailyCaloriesTarget: 1900,
+      proteinTarget: 135,
+      carbsTarget: 210,
+      fatTarget: 58,
+      generatedAt: '2026-10-01T00:00:00Z',
+      createdAt: '2026-10-01T00:00:00Z',
+      updatedAt: '2026-10-01T00:00:00Z',
+      meals: [],
+    };
+    await subject.service.generateCandidate('user-id', 'full-adaptation', {
+      requestedChange: 'Replaneje todas as refeições',
+      previousPlan,
+    });
+    expect(subject.aiService.createStandaloneJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usageEntitlementCode: 'NUTRITION_PLAN_GENERATION',
+      }),
+    );
+    expect(subject.aiService.runTextJob).toHaveBeenCalledTimes(1);
+  });
+
   function generatedDiet(title = 'Plano brasileiro personalizado') {
     return {
       responseId: `response-${title}`,

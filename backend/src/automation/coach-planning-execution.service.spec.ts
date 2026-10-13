@@ -556,7 +556,7 @@ describe('CoachPlanningExecutionService', () => {
 
     expect(result).toMatchObject({
       content:
-        'Olá, Ana. Você atingiu seu limite de geração de plano alimentar deste mês. No plano Premium você tem acesso ilimitado a tudo que eu posso te ajudar.',
+        '💚 Você já utilizou as gerações de planos disponíveis neste ciclo.\n\nSeu plano atual continua salvo, e podemos consultá-lo e conversar sobre suas refeições e treinos normalmente.\n\nSe quiser criar novos planejamentos com mais frequência, o Premium oferece mais possibilidades. Quer conhecer as vantagens?',
       selectedSource: 'COMMERCIAL_LIMIT',
       dispatch: {
         executor: 'COMMERCIAL_LIMIT',

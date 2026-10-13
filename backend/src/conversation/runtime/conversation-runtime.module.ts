@@ -1,3 +1,5 @@
+import { EntitlementsModule } from '../../entitlements/entitlements.module';
+import { NutritionIntakeLedgerService } from '../../nutrition/nutrition-intake-ledger.service';
 import { Module } from '@nestjs/common';
 import { ContextModule } from '../../context/context.module';
 import { ObservabilityModule } from '../../observability/observability.module';
@@ -35,6 +37,7 @@ import { ConversationContinuationStore } from './conversation-continuation.store
 
 @Module({
   imports: [
+    EntitlementsModule,
     NutritionExecutionModule,
     PrismaModule,
     ObservabilityModule,
@@ -45,6 +48,7 @@ import { ConversationContinuationStore } from './conversation-continuation.store
     WorkoutModule,
   ],
   providers: [
+    NutritionIntakeLedgerService,
     ConversationContinuationService,
     ConversationContinuationStore,
     ConversationContinuationSemanticsService,

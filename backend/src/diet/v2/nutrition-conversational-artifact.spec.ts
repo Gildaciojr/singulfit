@@ -111,4 +111,31 @@ describe('NutritionConversationalArtifactV1', () => {
       }),
     ).toThrow(BadRequestException);
   });
+  it.each(['POINT_GUIDANCE', 'MEAL_SUGGESTION', 'PLAN_REVIEW'] as const)(
+    'does not accept a complete plan mislabeled as %s',
+    (expected) => {
+      expect(() =>
+        parser.parse(
+          JSON.stringify({
+            artifactType: expected,
+            title: 'Injected plan',
+            summary: 'Injected',
+            days: [{ dayNumber: 1, meals: [] }],
+            substitutions: [],
+          }),
+          expected,
+        ),
+      ).toThrow(BadGatewayException);
+      expect(() =>
+        parser.parse(
+          JSON.stringify({
+            artifactType: 'WEEKLY_PLAN',
+            title: 'Complete plan',
+            days: [],
+          }),
+          expected,
+        ),
+      ).toThrow(BadGatewayException);
+    },
+  );
 });

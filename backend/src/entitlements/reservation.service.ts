@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma, UsageEventStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  AUDIO_TRANSCRIPTION,
   IMAGE_ANALYSIS,
   type CommercialUsageEntitlementCode,
 } from './entitlement.constants';
@@ -69,6 +70,15 @@ export class ReservationService {
       throw new ConflictException('Quantidade de reserva inválida');
     }
 
+    if (input.entitlementCode === AUDIO_TRANSCRIPTION) {
+      // Use the same lock order as audio acknowledgement and settlement.
+      const owned = await transaction.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "ai_jobs" WHERE "id" = ${input.aiJobId}
+          AND "userId" = ${input.userId} AND "type" = 'AUDIO' FOR UPDATE
+      `;
+      if (owned.length !== 1)
+        throw new ConflictException('Audio reservation ownership mismatch');
+    }
     await this.lockUser(transaction, input.userId);
 
     const existingEvent = await transaction.usageEvent.findUnique({
@@ -79,6 +89,14 @@ export class ReservationService {
         },
       },
     });
+
+    if (
+      existingEvent &&
+      (existingEvent.userId !== input.userId ||
+        existingEvent.quantity !== quantity)
+    ) {
+      throw new ConflictException('Reserva de uso inconsistente para o job');
+    }
 
     if (existingEvent && existingEvent.status !== UsageEventStatus.REVERSED) {
       if (
@@ -132,6 +150,7 @@ export class ReservationService {
         input.entitlementCode,
         limit,
         this.firstName(user?.name),
+        { planType: grant.planType, periodEnd: grant.periodEnd },
       );
     }
 

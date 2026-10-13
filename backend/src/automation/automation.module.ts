@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { CoachWeeklySnapshotService } from './coach-weekly-snapshot.service';
 import { AuthModule } from '../auth/auth.module';
 import { BehaviorModule } from '../behavior/behavior.module';
 import { EvolutionModule } from '../evolution/evolution.module';
@@ -69,6 +70,7 @@ import { WorkoutAsyncCompletionService } from './workout-async-completion.servic
   ],
   controllers: [AutomationController, CoachAdminController, DietController],
   providers: [
+    CoachWeeklySnapshotService,
     WorkoutAsyncCompletionService,
     AutomationService,
     CoachPlanningExecutionDispatcherService,

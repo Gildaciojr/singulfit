@@ -140,6 +140,74 @@ export class CurrentNutritionPlanReaderService {
     }
   }
 
+  /** Resolve persisted versions at the observation date, never today's ownership. */
+  async getApplicableAt(
+    userId: string,
+    at: Date,
+  ): Promise<CurrentNutritionPlan | null> {
+    if (!userId.trim() || !Number.isFinite(at.getTime()))
+      throw new ConflictException('INVALID_NUTRITION_HISTORY_DATE');
+    const where = { userId, createdAt: { lte: at }, generatedAt: { lte: at } };
+    const [legacy, v2] = await Promise.all([
+      this.prisma.dietPlan.findFirst({
+        where: {
+          ...where,
+          status: { in: [DietPlanStatus.ACTIVE, DietPlanStatus.ARCHIVED] },
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: {
+          id: true,
+          userId: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+          generatedAt: true,
+        },
+      }),
+      this.prisma.nutritionPlanV2.findFirst({
+        where: {
+          ...where,
+          status: {
+            in: [NutritionPlanStatus.ACTIVE, NutritionPlanStatus.ARCHIVED],
+          },
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: {
+          id: true,
+          userId: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+          generatedAt: true,
+        },
+      }),
+    ]);
+    const versions = [
+      ...(legacy ? [{ ...legacy, implementation: 'LEGACY' as const }] : []),
+      ...(v2 ? [{ ...v2, implementation: 'V2' as const }] : []),
+    ]
+      .filter(
+        (plan) =>
+          plan.userId === userId &&
+          plan.createdAt <= at &&
+          plan.generatedAt <= at &&
+          (plan.status === 'ACTIVE' || plan.updatedAt > at),
+      )
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    if (
+      versions.length > 1 &&
+      versions[1].createdAt.getTime() === versions[0].createdAt.getTime()
+    )
+      throw new ConflictException(CANONICAL_NUTRITION_READ_CONFLICT);
+    const version = versions[0];
+    return version
+      ? this.getByReference(userId, {
+          implementation: version.implementation,
+          id: version.id,
+        })
+      : null;
+  }
+
   async listHistory(
     userId: string,
     requestedLimit = DEFAULT_HISTORY_LIMIT,

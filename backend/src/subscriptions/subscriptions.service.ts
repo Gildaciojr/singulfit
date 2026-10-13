@@ -22,7 +22,7 @@ import {
   AUDIT_ENTITY,
 } from '../observability/observability.constants';
 
-type PlanEntity = Prisma.PlanGetPayload<{}>;
+import { lockCurrentCommercialOffer } from './commercial-plan.policy';
 
 type SubscriptionWithPlan = Prisma.SubscriptionGetPayload<{
   include: { plan: true };
@@ -39,16 +39,65 @@ export class SubscriptionsService {
     private readonly auditService: AuditService,
   ) {}
 
-  async createPendingSubscription(userId: string, planType: PlanType) {
-    const plan: PlanEntity | null = await this.prisma.plan.findUnique({
-      where: { type: planType },
+  async createPendingSubscription(
+    userId: string,
+    planType: PlanType,
+    expectedPlanId?: string,
+  ) {
+    return this.prisma.$transaction((transaction) =>
+      this.createPendingSubscriptionInTransaction(
+        transaction,
+        userId,
+        planType,
+        expectedPlanId,
+      ),
+    );
+  }
+
+  async createPendingSubscriptionInTransaction(
+    transaction: Prisma.TransactionClient,
+    userId: string,
+    planType: PlanType,
+    expectedPlanId?: string,
+  ) {
+    await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'checkout-user:' + userId}))`;
+    const existing = await transaction.subscription.findMany({
+      where: {
+        userId,
+        status: {
+          in: [
+            SubscriptionStatus.ACTIVE,
+            SubscriptionStatus.PAST_DUE,
+            SubscriptionStatus.PENDING_PAYMENT,
+            SubscriptionStatus.EXPIRED,
+          ],
+        },
+      },
+      include: { plan: true },
+      orderBy: { createdAt: 'desc' },
     });
-
-    if (!plan) {
-      throw new NotFoundException('Plano não encontrado');
+    const contracted =
+      existing.find(
+        (subscription) =>
+          subscription.status === SubscriptionStatus.ACTIVE ||
+          subscription.status === SubscriptionStatus.PAST_DUE,
+      ) ?? existing[0];
+    if (contracted) {
+      if (
+        contracted.plan.type !== planType ||
+        (expectedPlanId && contracted.planId !== expectedPlanId)
+      )
+        throw new ConflictException(
+          'Alteração de plano exige contrato explicitamente autorizado',
+        );
+      return contracted;
     }
-
-    return this.prisma.subscription.create({
+    const plan = await lockCurrentCommercialOffer(
+      transaction,
+      planType,
+      expectedPlanId,
+    );
+    return transaction.subscription.create({
       data: {
         userId,
         planId: plan.id,

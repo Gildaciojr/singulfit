@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { DietModule } from '../diet/diet.module';
 import { AIModule } from '../ai/ai.module';
 import { AuthModule } from '../auth/auth.module';
 import { ContextModule } from '../context/context.module';
@@ -11,9 +12,12 @@ import { NutritionIntelligenceService } from './nutrition-intelligence.service';
 import { NutritionQualityService } from './nutrition-quality.service';
 import { NutritionVisionService } from './nutrition-vision.service';
 import { NutritionService } from './nutrition.service';
+import { NutritionIntakeLedgerService } from './nutrition-intake-ledger.service';
+import { NutritionConsumptionSummaryService } from './nutrition-consumption-summary.service';
 
 @Module({
   imports: [
+    DietModule,
     AIModule,
     AuthModule,
     ContextModule,
@@ -24,12 +28,16 @@ import { NutritionService } from './nutrition.service';
   ],
   controllers: [NutritionAdminController],
   providers: [
+    NutritionIntakeLedgerService,
+    NutritionConsumptionSummaryService,
     NutritionService,
     NutritionVisionService,
     NutritionQualityService,
     NutritionIntelligenceService,
   ],
   exports: [
+    NutritionIntakeLedgerService,
+    NutritionConsumptionSummaryService,
     NutritionService,
     NutritionVisionService,
     NutritionQualityService,

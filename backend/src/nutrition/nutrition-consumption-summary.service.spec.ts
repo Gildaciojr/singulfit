@@ -22,6 +22,7 @@ describe('NutritionConsumptionSummaryService', () => {
   }
   function subject(records: ReturnType<typeof record>[]) {
     const prisma = {
+      nutritionIntakeRecord: { findMany: jest.fn().mockResolvedValue([]) },
       mealAnalysis: { findMany: jest.fn().mockResolvedValue(records) },
     };
     return {
@@ -64,14 +65,25 @@ describe('NutritionConsumptionSummaryService', () => {
       expect.objectContaining({
         where: {
           status: 'COMPLETED',
-          meal: {
+          meal: expect.objectContaining({
             userId: 'user',
-            createdAt: {
-              gte: result.periodStart,
-              lt: result.periodEnd,
-              lte: at,
-            },
-          },
+            OR: expect.arrayContaining([
+              expect.objectContaining({
+                intakeRecords: {
+                  some: {
+                    kind: 'MEAL',
+                    OR: [{ voidedAt: null }, { voidedAt: { gt: at } }],
+                    reportedAt: { lte: at },
+                    occurredAt: {
+                      gte: result.periodStart,
+                      lt: result.periodEnd,
+                      lte: at,
+                    },
+                  },
+                },
+              }),
+            ]),
+          }),
         },
       }),
     );

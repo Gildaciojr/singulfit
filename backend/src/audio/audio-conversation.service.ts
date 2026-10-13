@@ -17,6 +17,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AIService } from '../ai/ai.service';
 import { AIUsageService } from '../ai/ai-usage.service';
 import type { OpenAIResponseResult } from '../ai/interfaces/openai.interface';
+import { ReservationService } from '../entitlements/reservation.service';
+import { EntitlementsService } from '../entitlements/entitlements.service';
+import { AUDIO_TRANSCRIPTION } from '../entitlements/entitlement.constants';
+import { UsageLimitExceededException } from '../entitlements/usage-limit.exception';
+import { UsageService } from '../usage/usage.service';
 import { EventBusService } from '../event-bus/event-bus.service';
 import { INTERNAL_EVENT } from '../event-bus/event-bus.constants';
 import { MediaService } from '../storage/media.service';
@@ -43,6 +48,9 @@ export class AudioConversationService {
     private readonly usage: AIUsageService,
     private readonly events: EventBusService,
     private readonly config: ConfigService,
+    private readonly reservations: ReservationService,
+    private readonly commercialUsage: UsageService,
+    private readonly entitlements: EntitlementsService,
   ) {}
 
   isEnabledForUser(userId: string): boolean {
@@ -111,26 +119,72 @@ export class AudioConversationService {
     });
     if (prompt.prompt !== PROMPT || prompt.capability !== 'AUDIO')
       throw new ConflictException('Audio prompt identity mismatch');
-    const job = await this.prisma.aIJob.upsert({
-      where: { operationKey: `${REVISION}:${source.id}` },
-      update: {},
-      create: {
-        userId: input.userId,
-        conversationId: source.conversationId,
-        messageId: source.id,
-        type: AIJobType.AUDIO,
-        promptVersionId: prompt.id,
-        operationKey: `${REVISION}:${source.id}`,
-      },
+    const job = await this.prisma.$transaction(async (transaction) => {
+      const job = await transaction.aIJob.upsert({
+        where: { operationKey: `${REVISION}:${source.id}` },
+        update: {},
+        create: {
+          userId: input.userId,
+          conversationId: source.conversationId,
+          messageId: source.id,
+          type: AIJobType.AUDIO,
+          promptVersionId: prompt.id,
+          operationKey: `${REVISION}:${source.id}`,
+        },
+      });
+      if (
+        job.userId !== input.userId ||
+        job.messageId !== source.id ||
+        job.conversationId !== source.conversationId ||
+        job.type !== AIJobType.AUDIO ||
+        job.promptVersionId !== prompt.id
+      )
+        throw new ConflictException('Audio job ownership mismatch');
+      if (job.status === AIJobStatus.PENDING) {
+        // Revalidate eligibility even when a retry already has a reservation.
+        const grant =
+          await this.entitlements.resolveCommercialGrantInTransaction(
+            transaction,
+            input.userId,
+            AUDIO_TRANSCRIPTION,
+          );
+        try {
+          await this.reservations.reserveCommercialUsageInTransaction(
+            transaction,
+            {
+              userId: input.userId,
+              aiJobId: job.id,
+              entitlementCode: AUDIO_TRANSCRIPTION,
+            },
+          );
+        } catch (error: unknown) {
+          if (!(error instanceof UsageLimitExceededException)) throw error;
+          const content =
+            grant.planType === 'BASIC'
+              ? '🎙️ Você aproveitou todos os áudios disponíveis no seu plano neste ciclo!\n\nMas pode continuar conversando comigo normalmente por texto. 💚\n\nSe quiser ter mais liberdade para me mandar áudios, o Premium oferece uma quantidade bem maior a cada ciclo.'
+              : `🎙️ Os áudios disponíveis no seu plano neste ciclo terminaram. Você pode continuar conversando comigo por texto. 💚\n\nSeus áudios serão renovados em ${grant.periodEnd.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })}.`;
+          const limited = await transaction.aIJob.update({
+            where: { id: job.id },
+            data: {
+              status: AIJobStatus.FAILED,
+              startedAt: new Date(),
+              failedAt: new Date(),
+              leaseExpiresAt: null,
+              error: 'AUDIO_QUOTA_EXCEEDED',
+              result: {
+                revision: REVISION,
+                phase: 'LIMIT',
+                sourceMessageId: source.id,
+              },
+            },
+          });
+          await this.clarify(transaction, job.userId, source, job.id, content);
+          return limited;
+        }
+      }
+      return job;
     });
-    if (
-      job.userId !== input.userId ||
-      job.messageId !== source.id ||
-      job.conversationId !== source.conversationId ||
-      job.type !== AIJobType.AUDIO ||
-      job.promptVersionId !== prompt.id
-    )
-      throw new ConflictException('Audio job ownership mismatch');
+    if (job.error === 'AUDIO_QUOTA_EXCEEDED') return;
     if (job.status === AIJobStatus.COMPLETED) return;
     const received = receivedResponse(job.result);
     if (received) {
@@ -189,8 +243,8 @@ export class AudioConversationService {
         conversationId: source.conversationId,
         messageId: source.id,
       });
-      await this.prisma.aIJob.update({
-        where: { id: job.id },
+      const requestClaim = await this.prisma.aIJob.updateMany({
+        where: { id: job.id, status: AIJobStatus.PROCESSING },
         data: {
           result: {
             revision: REVISION,
@@ -201,6 +255,8 @@ export class AudioConversationService {
           },
         },
       });
+      if (requestClaim.count !== 1)
+        throw new ConflictException('Audio provider request lost its claim');
       requestStarted = true;
       response = await this.provider.transcribe({
         content: audio.content,
@@ -228,6 +284,27 @@ export class AudioConversationService {
           },
         });
         throw new Error('AUDIO_TRANSIENT_FAILURE');
+      }
+      // Explicit pre-processing rejections release quota. Unknown outcomes and
+      // malformed accepted responses retain the original auditable reservation.
+      if (
+        !requestStarted ||
+        (error instanceof AudioTranscriptionError &&
+          [
+            'AUDIO_PROVIDER_RATE_LIMIT',
+            'AUDIO_PROVIDER_REJECTED_UNCHARGED',
+          ].includes(error.code))
+      ) {
+        await this.prisma.aIJob.update({
+          where: { id: job.id },
+          data: {
+            result: {
+              revision: REVISION,
+              phase: 'REJECTED_UNCHARGED',
+              sourceMessageId: source.id,
+            },
+          },
+        });
       }
       await this.fail(
         job,
@@ -298,6 +375,7 @@ export class AudioConversationService {
           completionTokens: response.completionTokens,
           totalTokens: response.totalTokens,
         });
+        await this.commercialUsage.confirmInTransaction(transaction, job.id);
         await transaction.aIJob.update({
           where: { id: job.id },
           data: {
@@ -401,8 +479,10 @@ export class AudioConversationService {
           error: code,
         },
       });
-      if (changed.count)
+      if (changed.count) {
+        await this.commercialUsage.reverseInTransaction(transaction, job.id);
         await this.clarify(transaction, job.userId, source, job.id);
+      }
     });
   }
   private async clarify(
@@ -410,6 +490,7 @@ export class AudioConversationService {
     userId: string,
     source: AudioSource,
     audioJobId: string,
+    content = CLARIFY,
   ) {
     const rule = await transaction.automationRule.findUnique({
       where: { code: 'DAILY_COACH' },
@@ -435,7 +516,7 @@ export class AudioConversationService {
         conversationId: source.conversationId,
         automationRuleId: rule.id,
         scheduledFor: new Date(),
-        content: CLARIFY,
+        content,
         context: {
           source: 'AUDIO_TRANSCRIPTION_CLARIFICATION',
           audioSourceMessageId: source.id,

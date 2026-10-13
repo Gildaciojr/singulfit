@@ -1,5 +1,7 @@
 "use client";
 
+import { useCommercialOffers } from "@/hooks/useCommercialOffers";
+
 import { motion } from "framer-motion";
 import {
   ArrowRight,
@@ -222,7 +224,7 @@ function PlanCard({
         ${featured ? "text-[3.2rem] sm:text-[4.4rem]" : "text-[2.6rem] sm:text-[3rem]"}
       `}
           >
-            R$ {plan.price.toFixed(2).replace(".", ",")}
+            {plan.price > 0 ? "R$ " + plan.price.toFixed(2).replace(".", ",") : "Indisponível"}
           </span>
 
           <span
@@ -341,7 +343,16 @@ function PlanCard({
 
 export default function Pricing({ data }: Props) {
   const isMobile = useIsMobile();
-  const { monthly, annual } = data;
+  const offers = useCommercialOffers();
+  function presented(type: "BASIC" | "PREMIUM", original: PricingPlan): PricingPlan {
+    const offer = offers.data?.[type];
+    return { ...original, name: offer?.displayName ?? original.name,
+      price: offer?.price ?? 0, description: offer?.description ?? "Oferta indisponível no momento.",
+      features: offer?.features.map((name) => ({ name, included: true })) ?? [],
+      cta: offer ? { text: "Conhecer esta oferta", href: "/checkout/" + offer.routeParam } : { text: "Oferta indisponível", href: "#pricing" } };
+  }
+  const monthly = presented("BASIC", data.monthly);
+  const annual = presented("PREMIUM", data.annual);
 
   return (
     <section id="pricing" className="relative overflow-hidden py-16 lg:py-20">

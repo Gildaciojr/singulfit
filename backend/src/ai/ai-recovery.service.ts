@@ -207,6 +207,12 @@ export class AIRecoveryService {
 
   private async recoverJob(aiJobId: string, at: Date): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
+      // An expired reservation can still belong to an unclaimed PENDING job.
+      // All terminal recoveries must satisfy the same lifecycle invariant.
+      const job = await transaction.aIJob.findUnique({
+        where: { id: aiJobId },
+        select: { startedAt: true },
+      });
       const changed = await transaction.aIJob.updateMany({
         where: {
           id: aiJobId,
@@ -219,6 +225,7 @@ export class AIRecoveryService {
           failedAt: at,
           leaseExpiresAt: null,
           error: 'Job recuperado após expiração do lease',
+          startedAt: job?.startedAt ?? at,
         },
       });
 

@@ -91,7 +91,9 @@ export class AudioTranscriptionGateway {
       throw new AudioTranscriptionError(
         response.status === 429
           ? 'AUDIO_PROVIDER_RATE_LIMIT'
-          : 'AUDIO_PROVIDER_REJECTED',
+          : [401, 403, 404, 413, 415].includes(response.status)
+            ? 'AUDIO_PROVIDER_REJECTED_UNCHARGED'
+            : 'AUDIO_PROVIDER_REJECTED',
         response.status === 429,
       );
     }

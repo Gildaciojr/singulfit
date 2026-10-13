@@ -251,6 +251,19 @@ describe('Targeted V2 mutation preservation', () => {
       restSeconds: 60,
     });
     expect(() =>
+      applyWorkoutTargetedMutation(candidate, source, 'missing'),
+    ).toThrow('target function');
+    expect(() =>
+      applyWorkoutTargetedMutation(
+        {
+          ...candidate,
+          sessions: [candidate.sessions[0], candidate.sessions[0]],
+        },
+        source,
+        'press',
+      ),
+    ).toThrow('target function');
+    expect(() =>
       applyWorkoutTargetedMutation(
         {
           ...candidate,

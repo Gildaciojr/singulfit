@@ -12,11 +12,24 @@ import { NUTRITION_CONVERSATIONAL_PROMPTS } from '../src/diet/v2/nutrition-conve
 import { WORKOUT_PLANNING_V2_PROMPT } from '../src/workout/v2/workout-planning-v2.prompt.definition';
 import { COACH_CONVERSATIONAL_QA_V3_PROMPT_SEED } from '../src/conversation/runtime/coach-conversational-qa.prompt.definition';
 
+import { assertDisposableCommercialSeed } from '../src/subscriptions/commercial-plan.policy';
+
 const prisma = new PrismaClient();
 
 async function main() {
+  await prisma.$transaction((transaction) =>
+    assertDisposableCommercialSeed(
+      transaction,
+      process.env.SINGULFIT_SEED_DISPOSABLE_DATABASE_AUTHORIZED === 'true',
+    ),
+  );
   const basicPlan = await prisma.plan.upsert({
-    where: { type: PlanType.BASIC },
+    where: {
+      type_contractVersion: {
+        type: PlanType.BASIC,
+        contractVersion: 'basic-v2',
+      },
+    },
     update: {
       name: 'Basic',
       description: 'Plano essencial da SingulFit.',
@@ -24,26 +37,33 @@ async function main() {
       currency: Currency.BRL,
       billingInterval: BillingInterval.MONTH,
       billingIntervalCount: 1,
-      imageLimit: 5,
+      imageLimit: 30,
       imageUnlimited: false,
       isActive: true,
     },
     create: {
       type: PlanType.BASIC,
+      contractVersion: 'basic-v2',
+      isCurrentOffer: false,
       name: 'Basic',
       description: 'Plano essencial da SingulFit.',
       price: new Prisma.Decimal('29.90'),
       currency: Currency.BRL,
       billingInterval: BillingInterval.MONTH,
       billingIntervalCount: 1,
-      imageLimit: 5,
+      imageLimit: 30,
       imageUnlimited: false,
       isActive: true,
     },
   });
 
   const premiumPlan = await prisma.plan.upsert({
-    where: { type: PlanType.PREMIUM },
+    where: {
+      type_contractVersion: {
+        type: PlanType.PREMIUM,
+        contractVersion: 'legacy-v1',
+      },
+    },
     update: {
       name: 'Premium',
       description: 'Plano completo da SingulFit.',
@@ -51,20 +71,22 @@ async function main() {
       currency: Currency.BRL,
       billingInterval: BillingInterval.MONTH,
       billingIntervalCount: 1,
-      imageLimit: 0,
-      imageUnlimited: true,
+      imageLimit: 150,
+      imageUnlimited: false,
       isActive: true,
     },
     create: {
       type: PlanType.PREMIUM,
+      contractVersion: 'legacy-v1',
+      isCurrentOffer: false,
       name: 'Premium',
       description: 'Plano completo da SingulFit.',
       price: new Prisma.Decimal('69.90'),
       currency: Currency.BRL,
       billingInterval: BillingInterval.MONTH,
       billingIntervalCount: 1,
-      imageLimit: 0,
-      imageUnlimited: true,
+      imageLimit: 150,
+      imageUnlimited: false,
       isActive: true,
     },
   });
@@ -99,6 +121,11 @@ async function main() {
   });
   const commercialEntitlements = await Promise.all(
     [
+      {
+        code: 'AUDIO_TRANSCRIPTION',
+        name: 'Transcrições de áudio por ciclo',
+        description: 'Quantidade de transcrições por ciclo da assinatura.',
+      },
       {
         code: 'NUTRITION_PLAN_GENERATION',
         name: 'Geração de plano alimentar por ciclo',
@@ -138,10 +165,21 @@ async function main() {
       upsertPlanEntitlement(
         basicPlan.id,
         entitlement.id,
-        entitlement.code === 'IMAGE_ANALYSIS' ? 5 : 1,
+        ['IMAGE_ANALYSIS', 'AUDIO_TRANSCRIPTION'].includes(entitlement.code)
+          ? 30
+          : 2,
         false,
       ),
-      upsertPlanEntitlement(premiumPlan.id, entitlement.id, 0, true),
+      upsertPlanEntitlement(
+        premiumPlan.id,
+        entitlement.id,
+        entitlement.code === 'AUDIO_TRANSCRIPTION'
+          ? 200
+          : entitlement.code === 'IMAGE_ANALYSIS'
+            ? 150
+            : 6,
+        false,
+      ),
     ]),
   ]);
 

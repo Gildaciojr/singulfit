@@ -140,6 +140,7 @@ enum MealAnalysisStatus {
 enum MealSource {
   WHATSAPP
   UPLOAD
+  TEXT_REPORT
 }
 
 enum MealCategory {
@@ -844,6 +845,7 @@ model User {
 
   subscriptions                    Subscription[]
   meals                            Meal[]
+  intakeRecords                    NutritionIntakeRecord[]
   usageDaily                       UsageDaily[]
   authSessions                     AuthSession[]
   conversations                    Conversation[]
@@ -1588,7 +1590,9 @@ model AuthSession {
 
 model Plan {
   id                   String          @id @default(uuid())
-  type                 PlanType        @unique
+  type                 PlanType
+  contractVersion      String          @default("legacy-v1")
+  isCurrentOffer       Boolean         @default(false)
   name                 String
   description          String?
   price                Decimal         @db.Decimal(10, 2)
@@ -1604,6 +1608,8 @@ model Plan {
   subscriptions Subscription[]
   entitlements  PlanEntitlement[]
 
+  @@unique([type, contractVersion])
+  @@index([type, isCurrentOffer])
   @@index([isActive])
   @@map("plans")
 }
@@ -1853,6 +1859,7 @@ model Message {
   aiJobs                   AIJob[]
   mediaFile                MediaFile?
   meal                     Meal?
+  intakeRecord             NutritionIntakeRecord?
   outboundResponses        OutboundMessage[]
   aiResponseEvaluations    AIResponseEvaluation[]
   pendingActionsOriginated PendingConversationAction[] @relation("PendingActionSourceMessage")
@@ -2520,16 +2527,42 @@ model Meal {
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  message      Message?      @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  mediaFile    MediaFile?    @relation(fields: [mediaFileId], references: [id], onDelete: Restrict)
-  analysis     MealAnalysis?
+  user          User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation  Conversation?           @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message       Message?                @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  mediaFile     MediaFile?              @relation(fields: [mediaFileId], references: [id], onDelete: Restrict)
+  analysis      MealAnalysis?
+  intakeRecords NutritionIntakeRecord[]
 
   @@index([userId, createdAt])
   @@index([conversationId, createdAt])
   @@index([source, createdAt])
   @@map("meals")
+}
+
+// Append-only receipts. Quantities are reported, not inferred from narrative memory.
+model NutritionIntakeRecord {
+  id              String                 @id @default(uuid())
+  userId          String
+  sourceMessageId String                 @unique
+  operationKey    String                 @unique
+  kind            String
+  occurredAt      DateTime
+  reportedAt      DateTime
+  volumeMl        Int?
+  mealId          String?
+  evidence        Json
+  voidedAt        DateTime?
+  supersedesId    String?                @unique
+  supersedes      NutritionIntakeRecord? @relation("IntakeRevision", fields: [supersedesId], references: [id], onDelete: Restrict)
+  revision        NutritionIntakeRecord? @relation("IntakeRevision")
+  createdAt       DateTime               @default(now())
+  user            User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceMessage   Message                @relation(fields: [sourceMessageId], references: [id], onDelete: NoAction)
+  meal            Meal?                  @relation(fields: [mealId], references: [id], onDelete: Restrict)
+
+  @@index([userId, occurredAt])
+  @@map("nutrition_intake_records")
 }
 
 model MealAnalysis {

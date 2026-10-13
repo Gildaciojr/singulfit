@@ -107,6 +107,29 @@ describe('ReservationService commercial billing-cycle quota', () => {
     };
   }
 
+  it.each(['foreign-owner', 'different-quantity'])(
+    'rejects a reversed reservation with %s before reuse',
+    async (mismatch) => {
+      const subject = createSubject();
+      subject.transaction.usageEvent.findUnique.mockResolvedValueOnce({
+        id: 'old-event',
+        userId: mismatch === 'foreign-owner' ? 'foreign-user' : 'user-id',
+        aiJobId: 'job-id',
+        entitlementCode: IMAGE_ANALYSIS,
+        quantity: mismatch === 'different-quantity' ? 2 : 1,
+        status: UsageEventStatus.REVERSED,
+        createdAt: new Date(),
+      });
+      await expect(
+        subject.service.reserveImageAnalysisInTransaction(
+          subject.transaction as never,
+          { userId: 'user-id', aiJobId: 'job-id' },
+        ),
+      ).rejects.toThrow('inconsistente');
+      expect(subject.transaction.usageBucket.update).not.toHaveBeenCalled();
+      expect(subject.transaction.usageEvent.update).not.toHaveBeenCalled();
+    },
+  );
   it('reserves one image analysis in the persisted subscription cycle', async () => {
     const subject = createSubject();
     await expect(
@@ -134,7 +157,7 @@ describe('ReservationService commercial billing-cycle quota', () => {
       entitlementCode: IMAGE_ANALYSIS,
       limit: 5,
       friendlyMessage:
-        'Olá, Ana. Você atingiu seu limite de 5 análises de alimentos e bebidas deste mês. No plano Premium você tem acesso ilimitado a tudo que eu posso te ajudar.',
+        '📸 Suas análises por foto deste ciclo chegaram ao limite!\n\nEnquanto ele não renova, você pode me contar por texto o que está comendo, e eu continuo te ajudando com sua alimentação.\n\nCom o Premium, você consegue analisar muito mais refeições por foto. 💚',
     } satisfies Partial<UsageLimitExceededException>);
     expect(subject.transaction.usageEvent.create).not.toHaveBeenCalled();
   });

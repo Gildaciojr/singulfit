@@ -32,6 +32,45 @@ describe('Canonical conversation continuation', () => {
     reference: 'PENDING',
   };
   it.each([
+    ['Almocei arroz e bebi 500 ml de água', 'MEAL_REPLY', 'MEAL', 'arroz'],
+    [
+      'Bebi 500 ml e depois mais 300 ml de água',
+      'HYDRATION_REPLY',
+      'WATER_ADD',
+      '500 ml',
+    ],
+  ])(
+    'does not silently publish a partial intake receipt: %s',
+    async (text, action, kind, quote) => {
+      const ai = {
+        execute: jest.fn().mockResolvedValue({
+          status: 'COMPLETED',
+          structuredOutput: {
+            ...base,
+            action,
+            consumption: 'CONFIRMED',
+            reference: 'EXPLICIT',
+            description: action === 'MEAL_REPLY' ? 'arroz' : null,
+            intake: { kind, day: 'TODAY', quote },
+            workoutEffect: 'NONE',
+            workoutRequestQuote: null,
+            response: null,
+          },
+        }),
+      };
+      const service = new ConversationContinuationSemanticsService(
+        ai as unknown as ConversationAIService,
+        new ConversationPublicAnswerBoundaryService(),
+      );
+      expect(await service.interpret(text, null)).toMatchObject({
+        intake: null,
+        consumption: 'UNKNOWN',
+        intakeClarification: true,
+      });
+      expect(ai.execute).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each([
     'Orientação breve\n• primeiro\n• segundo\n• terceiro\n• quarto',
     'x'.repeat(4001),
   ])(
@@ -1582,6 +1621,43 @@ describe('Continuation semantic provider boundary', () => {
       ),
     };
   }
+  it.each([
+    [
+      'Meu café foi 3 ovos e 2 fatias de pão.',
+      'MEAL_REPLY',
+      'MEAL',
+      '3 ovos e 2 fatias de pão',
+      'BREAKFAST',
+    ],
+    [
+      'Agora foram mais 300 ml.',
+      'HYDRATION_REPLY',
+      'WATER_ADD',
+      '300 ml',
+      'UNKNOWN',
+    ],
+  ])(
+    'keeps genuine reported quantities in %s without turning future intent into consumption',
+    async (text, action, kind, quote, meal) => {
+      const s = subject({
+        action,
+        day: 'TODAY',
+        consumption: 'CONFIRMED',
+        meal,
+        description: action === 'MEAL_REPLY' ? quote : null,
+        hydrationGoal: false,
+        reference: 'EXPLICIT',
+        intake: { kind, day: 'TODAY', quote },
+      });
+      expect(await s.service.interpret(text, null)).toMatchObject({
+        consumption: 'CONFIRMED',
+        intake: { kind, quote },
+      });
+      expect(
+        await s.service.interpret(`Vou consumir: ${text}`, null),
+      ).toMatchObject({ consumption: 'PLANNED' });
+    },
+  );
   it('requires quoted food evidence rather than a model invented meal', async () => {
     const s = subject({
       action: 'MEAL_REPLY',

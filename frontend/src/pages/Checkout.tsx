@@ -1,4 +1,6 @@
-import { FormEvent, ReactNode, useMemo, useState } from "react";
+import { useCommercialOffers } from "@/hooks/useCommercialOffers";
+import { unavailableCommercialPlan } from "@/lib/commercial-offers";
+import { FormEvent, ReactNode, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import {
@@ -36,7 +38,6 @@ import {
 } from "@/lib/api";
 import { encryptPagBankCard, loadPagBankSdk } from "@/lib/pagbank-sdk";
 import {
-  COMMERCIAL_PLAN_LIST,
   CommercialPlan,
   CommercialPlanType,
   checkoutPath,
@@ -131,10 +132,7 @@ export default function Checkout() {
     null,
   );
 
-  const plan = useMemo(
-    () => commercialPlanFromRouteParam(selectedPlan.toLowerCase()),
-    [selectedPlan],
-  );
+  const offers = useCommercialOffers();
   const checkoutStatus = useCheckoutStatus({
     accessToken,
     refreshToken,
@@ -142,6 +140,14 @@ export default function Checkout() {
     onTokenRefresh: handleTokenRefresh,
     pollingStartedAt,
   });
+
+  const offer = offers.data?.[selectedPlan];
+  const contracted = checkoutStatus.data?.subscription;
+  const plan: CommercialPlan = contracted
+    ? { ...unavailableCommercialPlan(contracted.plan.type), name: contracted.plan.name,
+        displayName: contracted.plan.name, price: Number(contracted.amount),
+        description: "Condições da sua assinatura contratada.", features: [] }
+    : offer ?? unavailableCommercialPlan(selectedPlan);
 
   const registerMutation = useMutation({
     mutationFn: registerCheckout,
@@ -211,6 +217,7 @@ export default function Checkout() {
 
   async function submitRegister(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!offer) { toast({ title: "Oferta indisponível", description: "Confira o catálogo antes de contratar." }); return; }
     const validation = validateForm(form);
     const cardValidation =
       paymentMethod === "CREDIT_CARD" ? validateCardForm(cardForm) : {};
@@ -232,6 +239,7 @@ export default function Checkout() {
         email: form.email.trim().toLowerCase(),
         password: form.password,
         planType: selectedPlan,
+        offerPlanId: offer.id,
       });
 
       saveCheckoutSession(registerResult.tokens, selectedPlan);
@@ -452,7 +460,7 @@ export default function Checkout() {
         </Link>
 
         <section className="mt-8 grid gap-8 lg:grid-cols-[0.92fr_1.08fr] lg:items-start">
-          <PlanSummary plan={plan} onSelectPlan={selectPlan} />
+          <PlanSummary plan={plan} availablePlans={Object.values(offers.data ?? {})} priceAvailable={Boolean(offer || contracted)} onSelectPlan={selectPlan} />
 
           {!accessToken && sessionExpired ? (
             <SessionExpiredCard onRestart={() => setSessionExpired(false)} />
@@ -474,6 +482,7 @@ export default function Checkout() {
               paymentMethod={paymentMethod}
               plan={plan}
               submitting={submitting}
+              priceAvailable={Boolean(offer || contracted)}
             />
           ) : currentStatus === "ACTIVE" ? (
             <ApprovedCard />
@@ -516,11 +525,15 @@ export default function Checkout() {
 }
 
 function PlanSummary({
+  availablePlans,
+  priceAvailable,
   plan,
   onSelectPlan,
 }: {
   plan: CommercialPlan;
   onSelectPlan: (plan: CommercialPlanType) => void;
+  availablePlans: CommercialPlan[];
+  priceAvailable: boolean;
 }) {
   return (
     <div className="lg:sticky lg:top-8">
@@ -553,7 +566,7 @@ function PlanSummary({
 
           <div className="mt-4 flex items-end gap-2">
             <span className="text-4xl font-black tracking-[-0.06em] sm:text-5xl">
-              {formatPlanPrice(plan.price)}
+              {priceAvailable ? formatPlanPrice(plan.price) : "Oferta indisponível"}
             </span>
             <span className="pb-2 text-zinc-500">{plan.interval}</span>
           </div>
@@ -575,7 +588,7 @@ function PlanSummary({
           </div>
 
           <div className="mt-6 grid gap-3 sm:grid-cols-2">
-            {COMMERCIAL_PLAN_LIST.map((item) => (
+            {availablePlans.map((item) => (
               <Button
                 key={item.type}
                 type="button"
@@ -594,6 +607,7 @@ function PlanSummary({
 }
 
 function RegisterCard({
+  priceAvailable,
   cardErrors,
   cardForm,
   errors,
@@ -617,6 +631,7 @@ function RegisterCard({
   paymentMethod: PaymentMethodOption;
   plan: CommercialPlan;
   submitting: boolean;
+  priceAvailable: boolean;
 }) {
   return (
     <Card className="rounded-[2rem] border-zinc-200 bg-white shadow-[0_35px_90px_-45px_rgba(15,23,42,0.24)]">
@@ -691,7 +706,7 @@ function RegisterCard({
           <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
             <Label>Plano</Label>
             <div className="mt-2 text-sm font-bold text-zinc-950">
-              {plan.displayName} · {formatPlanPrice(plan.price)}
+              {plan.displayName} · {priceAvailable ? formatPlanPrice(plan.price) : "Oferta indisponível"}
               {plan.interval}
             </div>
           </div>

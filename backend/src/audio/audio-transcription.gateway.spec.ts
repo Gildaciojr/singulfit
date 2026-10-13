@@ -216,4 +216,23 @@ describe('AudioTranscriptionGateway (controlled HTTP)', () => {
       ).configuration(),
     ).toThrow('MODEL_UNSUPPORTED');
   });
+  it.each([400, 422, 500])(
+    'retains uncertain accounting for processing rejection HTTP %s',
+    async (status) => {
+      jest
+        .spyOn(global, 'fetch')
+        .mockResolvedValue(new Response('{}', { status }));
+      await expect(
+        new AudioTranscriptionGateway(config).transcribe({
+          content: Buffer.from('synthetic'),
+          mimeType: 'audio/ogg',
+          filename: 'recording.ogg',
+          requestId: 'job',
+        }),
+      ).rejects.toMatchObject({
+        code: 'AUDIO_PROVIDER_REJECTED',
+        retryable: false,
+      });
+    },
+  );
 });

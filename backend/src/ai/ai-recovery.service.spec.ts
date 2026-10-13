@@ -380,6 +380,7 @@ describe('AIRecoveryService', () => {
   it('fails stale jobs, fails their analysis and reverses reservations', async () => {
     const transaction = {
       aIJob: {
+        findUnique: jest.fn().mockResolvedValue({ startedAt: null }),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       mealAnalysis: {
@@ -414,6 +415,7 @@ describe('AIRecoveryService', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           status: AIJobStatus.FAILED,
+          startedAt: now,
           leaseExpiresAt: null,
         }),
       }),

@@ -1,4 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { UsageService } from '../../usage/usage.service';
+import { NutritionIntakeLedgerService } from '../../nutrition/nutrition-intake-ledger.service';
+import { COMMERCIAL_USAGE_ENTITLEMENTS } from '../../entitlements/entitlement.constants';
+import { ConversationOperationResolverService } from '../understanding/conversation-operation-resolver.service';
+import { Injectable, Optional } from '@nestjs/common';
 import { ConversationSafetyDetectorService } from '../understanding/conversation-safety-detector.service';
 import { ConversationMessageNormalizerService } from '../understanding/conversation-message-normalizer.service';
 import { MessageDirection, MessageType } from '@prisma/client';
@@ -12,6 +16,8 @@ import {
   dailyQuery,
   foldDailyText,
   isDailyMealRequest,
+  isNutritionMetricTopic,
+  isWorkoutExpenditureTopic,
   isWeeklyFollowUp,
   metricFollowUp,
   type DailyQuery,
@@ -34,14 +40,169 @@ export class ConversationDailyQueryService {
     private readonly prisma: PrismaService,
     private readonly consumption: NutritionConsumptionSummaryService,
     private readonly nutrition: CurrentNutritionPlanReaderService,
+    @Optional() private readonly commercialUsage?: UsageService,
+    @Optional() private readonly intakeLedger?: NutritionIntakeLedgerService,
   ) {}
 
   accepts(text: string): boolean {
     return (
+      this.acceptsCommercialBalance(text) ||
+      (Boolean(this.intakeLedger) && this.isWaterLedgerQuery(text)) ||
+      this.historicalQuery(text) !== null ||
       dailyQuery(text) !== null ||
       isWeeklyFollowUp(text) ||
       metricFollowUp(text) !== null ||
       isDailyMealRequest(text)
+    );
+  }
+
+  private historicalQuery(text: string): DailyQuery | null {
+    const folded = foldDailyText(text);
+    if (!/\b(ontem|semana passada|comparar|compare)\b/u.test(folded))
+      return null;
+    return dailyQuery(
+      folded
+        .replace(/\bontem\b/gu, 'hoje')
+        .replace(/\bsemana passada\b/gu, 'esta semana')
+        .replace(/^(?:compare|comparar)\s+/u, 'mostre '),
+    );
+  }
+
+  private async historicalAnswer(
+    input: {
+      userId: string;
+      conversationId: string;
+      messageId: string;
+      text: string;
+      referenceDate: Date;
+    },
+    query: DailyQuery,
+  ): Promise<string | null> {
+    const source = await this.prisma.message.findFirst({
+      where: {
+        id: input.messageId,
+        conversationId: input.conversationId,
+        direction: MessageDirection.INBOUND,
+        type: MessageType.TEXT,
+        conversation: { userId: input.userId },
+      },
+      select: { id: true },
+    });
+    if (!source) return null;
+    const preferences = await this.prisma.userPreferences.findUnique({
+      where: { userId: input.userId },
+      select: { userId: true, timezone: true },
+    });
+    if (
+      preferences &&
+      preferences.userId !== undefined &&
+      preferences.userId !== input.userId
+    )
+      return null;
+    const timezone = this.clock.timezone(preferences?.timezone);
+    const text = foldDailyText(input.text);
+    const previous = new Date(
+      (query.period === 'THIS_WEEK'
+        ? this.clock.localWeekRange(input.referenceDate, timezone)
+        : this.clock.localDayRange(input.referenceDate, timezone)
+      ).start.getTime() - 1,
+    );
+    const compare = /\b(compare|comparar)\b/u.test(text);
+    const dates = compare ? [previous, input.referenceDate] : [previous];
+    const number = (value: number | null, unit: string) =>
+      value === null
+        ? 'incompleto'
+        : `${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 }).format(value)} ${unit}`;
+    const replies: string[] = [];
+    for (const at of dates) {
+      const summary = await this.consumption.summarize({
+        userId: input.userId,
+        period: query.period,
+        referenceDate: at,
+        timezone,
+        confirmedOnly: true,
+        knownAt: input.referenceDate,
+      });
+      const label = `${summary.periodStart.toLocaleDateString('pt-BR', { timeZone: timezone })} a ${at.toLocaleDateString('pt-BR', { timeZone: timezone })}`;
+      let target = '';
+      if (query.kind === 'TARGET' || query.kind === 'COMPARISON') {
+        if (query.period === 'THIS_WEEK')
+          target =
+            'As metas semanais dependem das versões aplicáveis a cada dia; não multipliquei a meta atual por sete.';
+        else {
+          const plan = await this.nutrition.getApplicableAt(input.userId, at);
+          if (plan && plan.userId !== input.userId) return null;
+          const values = plan ? this.targetValues(plan) : null;
+          target = values
+            ? `Meta planejada nessa data: ${number(values.calories, 'kcal')}; proteína ${number(values.protein, 'g')}, carboidratos ${number(values.carbs, 'g')}, gordura ${number(values.fat, 'g')}.`
+            : 'Não há versão de meta comprovada nessa data.';
+        }
+      }
+      replies.push(
+        `${label}: ${summary.mealCount} refeições registradas. ${summary.mealCount ? `Estimativas: ${number(summary.calories, 'kcal')}; proteína ${number(summary.protein, 'g')}, carboidratos ${number(summary.carbs, 'g')}, gordura ${number(summary.fat, 'g')}.` : 'Sem registro, não concluo ausência de consumo.'} ${target}`.trim(),
+      );
+    }
+    return `${replies.join('\n')} Os registros não comprovam o consumo total nem adesão ao plano.`;
+  }
+
+  acceptsCommercialBalance(text: string): boolean {
+    return Boolean(this.commercialUsage) && this.isBalanceQuestion(text);
+  }
+
+  private isWaterLedgerQuery(text: string): boolean {
+    const value = foldDailyText(text);
+    return (
+      /\b(agua|hidratacao)\b/u.test(value) &&
+      /\b(quanto|quantos|quantidade|total)\b/u.test(value) &&
+      /\b(bebi|bebido|tomei|consumi|ingeri|falta|registrad\w*)\b/u.test(value)
+    );
+  }
+
+  private isBalanceQuestion(value: string): boolean {
+    const message = new ConversationMessageNormalizerService().normalize(value);
+    if (
+      isNutritionMetricTopic(value) ||
+      isWorkoutExpenditureTopic(value) ||
+      !message.question ||
+      !(
+        /\b(saldo|cotas?|usos?|renovacao)\b/u.test(message.folded) ||
+        (/\blimites?\b/u.test(message.folded) &&
+          /\b(assinatura|ciclo|audios?|fotos?|geracoes?|transcricoes?)\b/u.test(
+            message.folded,
+          ))
+      ) ||
+      !/\b(plano|assinatura|ciclo|audios?|fotos?|geracoes?|transcricoes?)\b/u.test(
+        message.folded,
+      )
+    )
+      return false;
+    const resolution = new ConversationOperationResolverService().resolve(
+      {
+        continuity: {
+          currentLogicalTurn: 0,
+          activeProfileField: null,
+          pendingConfirmation: false,
+          targetPlan: null,
+        },
+      },
+      message,
+    );
+    if (
+      resolution.candidates.some(
+        (operation) =>
+          operation === 'GENERATE_PLAN' ||
+          operation === 'UPDATE_PLAN' ||
+          operation === 'SUBSTITUTE_ITEM' ||
+          operation === 'REQUEST_CONFIRMATION',
+      )
+    )
+      return false;
+    const operation = resolution.operation;
+    return (
+      operation === 'PROVIDE_GUIDANCE' ||
+      operation === 'ANSWER' ||
+      operation === 'PRESENT_CURRENT_PLAN' ||
+      operation === 'PRESENT_PLAN_STATUS'
     );
   }
 
@@ -58,6 +219,107 @@ export class ConversationDailyQueryService {
       ).safety.requiresSafeResponse
     )
       return null;
+    const historical = this.historicalQuery(input.text);
+    if (historical) {
+      try {
+        return await this.historicalAnswer(input, historical);
+      } catch {
+        return 'Não consegui consultar os registros históricos com segurança agora.';
+      }
+    }
+    if (this.intakeLedger && this.isWaterLedgerQuery(input.text)) {
+      const source = await this.prisma.message.findFirst({
+        where: {
+          id: input.messageId,
+          conversationId: input.conversationId,
+          direction: 'INBOUND',
+          type: 'TEXT',
+          conversation: { userId: input.userId },
+        },
+        select: {
+          conversation: {
+            select: {
+              user: { select: { preferences: { select: { timezone: true } } } },
+            },
+          },
+        },
+      });
+      if (!source) return null;
+      const result = await this.intakeLedger.water(
+        input.userId,
+        input.referenceDate,
+        source.conversation.user.preferences?.timezone,
+      );
+      const amount =
+        result.volumeMl === null
+          ? 'Ainda não há volume de água registrado hoje.'
+          : `Pelos volumes que você informou, há ${new Intl.NumberFormat('pt-BR').format(result.volumeMl)} ml de água registrados hoje.`;
+      if (/\bsemana\b/u.test(foldDailyText(input.text))) {
+        const days = await this.intakeLedger.waterWeek(
+          input.userId,
+          input.referenceDate,
+          source.conversation.user.preferences?.timezone,
+        );
+        return (
+          days
+            .filter((day) => day.recordCount > 0)
+            .map(
+              (day) =>
+                `${day.date.toLocaleDateString('pt-BR', { timeZone: source.conversation.user.preferences?.timezone ?? 'America/Sao_Paulo' })}: ${day.volumeMl} ml informados.`,
+            )
+            .join('\n') ||
+          'Ainda não há volumes de água registrados nessa semana.'
+        );
+      }
+      if (/\b(meta|falta)\b/u.test(foldDailyText(input.text))) {
+        const goal = await this.intakeLedger.goal(
+          input.userId,
+          input.referenceDate,
+        );
+        return goal?.volumeMl && result.volumeMl !== null
+          ? `${amount} Sua meta informada é ${goal.volumeMl} ml; a diferença dos registros é ${Math.max(0, goal.volumeMl - result.volumeMl)} ml. Não compense volumes de uma vez.`
+          : `${amount} Não tenho meta e consumo suficientes registrados para calcular quanto falta.`;
+      }
+      return amount;
+    }
+    const commercialUsage = this.commercialUsage;
+    if (commercialUsage && this.isBalanceQuestion(input.text)) {
+      const source = await this.prisma.message.findFirst({
+        where: {
+          id: input.messageId,
+          conversationId: input.conversationId,
+          direction: MessageDirection.INBOUND,
+          conversation: { userId: input.userId },
+        },
+        select: { id: true },
+      });
+      if (!source) return null;
+      try {
+        const balances = await Promise.all(
+          COMMERCIAL_USAGE_ENTITLEMENTS.map((code) =>
+            commercialUsage.commercialBalance(
+              input.userId,
+              code,
+              input.referenceDate,
+            ),
+          ),
+        );
+        const labels = {
+          NUTRITION_PLAN_GENERATION: 'Planos alimentares',
+          WORKOUT_PLAN_GENERATION: 'Planos de treino',
+          IMAGE_ANALYSIS: 'Fotos',
+          AUDIO_TRANSCRIPTION: 'Áudios',
+        };
+        return balances
+          .map(
+            (balance) =>
+              `${labels[balance.code]}: ${balance.unlimited ? 'sem limite configurado' : `${balance.remaining} disponíveis de ${balance.limit} neste ciclo`}. Renova em ${balance.renewsAt.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })}.`,
+          )
+          .join('\n');
+      } catch {
+        return 'Não consegui consultar os usos disponíveis do seu plano agora. Seu saldo não foi alterado.';
+      }
+    }
     const text = foldDailyText(input.text);
     let query = dailyQuery(text);
     const metric = metricFollowUp(text);
@@ -120,6 +382,7 @@ export class ConversationDailyQueryService {
           period: query.period,
           referenceDate: input.referenceDate,
           timezone,
+          confirmedOnly: true,
         });
         if (summary.mealCount === 0)
           return `Ainda não há refeições com análise nutricional registrada ${query.period === 'TODAY' ? 'hoje' : 'nesta semana'}. Sem essa análise, não consigo informar seu consumo de calorias e nutrientes.`;
@@ -217,6 +480,7 @@ export class ConversationDailyQueryService {
       referenceDate: input.referenceDate,
       period: query.period,
       timezone,
+      confirmedOnly: true,
     });
     const consumed =
       query.metric === 'PROTEIN'

@@ -112,6 +112,41 @@ export class CoachProactiveSchedulePolicy {
     }
   }
 
+  weeklySummarySlot(
+    at: Date,
+    preferences: CoachProactivePreferences,
+    time = '20:00',
+  ) {
+    const timezone = this.timezone(preferences.timezone);
+    let date = this.localDate(at, timezone);
+    const minute = this.parseTime(time) ?? 20 * 60;
+    const sunday = (day: LocalDateParts) =>
+      this.localToUtc(
+        day,
+        minute,
+        timezone,
+        day.weekday === 0 ? 0 : 7 - day.weekday,
+      );
+    let cutoff = sunday(date);
+    // Monday catch-up belongs to the preceding week, not next Sunday's report.
+    if (date.weekday === 1 && cutoff > at) {
+      date = this.localDate(
+        new Date(this.localDayRange(at, timezone).start.getTime() - 1),
+        timezone,
+      );
+      cutoff = sunday(date);
+    }
+    const scheduledFor = this.nextAllowedSendAt(cutoff, preferences);
+    if (at < scheduledFor || at.getTime() - scheduledFor.getTime() > 86400000)
+      return null;
+    return {
+      cutoff,
+      scheduledFor,
+      range: this.localWeekRange(cutoff, timezone),
+      timezone,
+    };
+  }
+
   localDayRange(
     at: Date,
     timezoneValue?: string | null,

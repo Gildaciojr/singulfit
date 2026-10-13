@@ -73,7 +73,9 @@ describe('AIService', () => {
       (options.promptService ?? {}) as unknown as PromptService,
       (options.gateway ?? {}) as unknown as OpenAIGateway,
       (options.aiUsageService ?? {}) as unknown as AIUsageService,
-      (options.reservationService ?? {}) as unknown as ReservationService,
+      (options.reservationService ?? {
+        reserveCommercialUsageInTransaction: jest.fn(),
+      }) as unknown as ReservationService,
       (options.usageService ?? {
         confirmInTransaction: jest.fn(),
         reverseInTransaction: jest.fn(),
@@ -314,53 +316,70 @@ describe('AIService', () => {
     },
   );
 
-  it('creates one standalone job after taking the operation lock', async () => {
-    const createdJob = {
-      id: 'diet-job-id',
-      type: AIJobType.DIET,
-      promptVersion: { id: 'prompt-id', prompt: 'Prompt' },
-    };
-    const transaction = {
-      $queryRaw: jest.fn().mockResolvedValue([]),
-      aIJob: {
-        findMany: jest.fn().mockResolvedValue([]),
-        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
-        findFirst: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockResolvedValue(createdJob),
-      },
-    };
-    const prisma = {
-      $transaction: jest.fn(
-        (callback: (client: typeof transaction) => unknown) =>
-          callback(transaction),
-      ),
-    };
-    const service = createService({
-      prisma,
-      promptService: {
-        getActive: jest
-          .fn()
-          .mockResolvedValue({ id: 'prompt-id', prompt: 'Prompt' }),
-      },
-    });
+  it.each([AIJobType.DIET, AIJobType.WORKOUT])(
+    'reserves complete %s even when caller omits entitlement',
+    async (type) => {
+      const createdJob = {
+        id: 'diet-job-id',
+        type,
+        promptVersion: { id: 'prompt-id', prompt: 'Prompt' },
+      };
+      const transaction = {
+        $queryRaw: jest.fn().mockResolvedValue([]),
+        aIJob: {
+          findMany: jest.fn().mockResolvedValue([]),
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+          findFirst: jest.fn().mockResolvedValue(null),
+          create: jest.fn().mockResolvedValue(createdJob),
+        },
+      };
+      const prisma = {
+        $transaction: jest.fn(
+          (callback: (client: typeof transaction) => unknown) =>
+            callback(transaction),
+        ),
+      };
+      const reservationService = {
+        reserveCommercialUsageInTransaction: jest.fn(),
+      };
+      const service = createService({
+        reservationService,
+        prisma,
+        promptService: {
+          getActive: jest
+            .fn()
+            .mockResolvedValue({ id: 'prompt-id', prompt: 'Prompt' }),
+        },
+      });
 
-    await expect(
-      service.createStandaloneJob({
-        userId: 'user-id',
-        type: AIJobType.DIET,
-        promptName: 'diet_generation_weight_loss',
-      }),
-    ).resolves.toBe(createdJob);
-    expect(transaction.$queryRaw).toHaveBeenCalled();
-    expect(transaction.aIJob.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
+      await expect(
+        service.createStandaloneJob({
           userId: 'user-id',
-          type: AIJobType.DIET,
+          type,
+          promptName: 'diet_generation_weight_loss',
         }),
-      }),
-    );
-  });
+      ).resolves.toBe(createdJob);
+      expect(
+        reservationService.reserveCommercialUsageInTransaction,
+      ).toHaveBeenCalledWith(transaction, {
+        userId: 'user-id',
+        aiJobId: 'diet-job-id',
+        entitlementCode:
+          type === AIJobType.DIET
+            ? 'NUTRITION_PLAN_GENERATION'
+            : 'WORKOUT_PLAN_GENERATION',
+      });
+      expect(transaction.$queryRaw).toHaveBeenCalled();
+      expect(transaction.aIJob.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            userId: 'user-id',
+            type,
+          }),
+        }),
+      );
+    },
+  );
 
   it('explicitly allows a standalone text job for proactive realization', async () => {
     const createdJob = {

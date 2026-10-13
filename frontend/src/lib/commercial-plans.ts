@@ -12,6 +12,7 @@ export type CommercialPlan = {
     nutritionPlansPerCycle: number | null;
     workoutPlansPerCycle: number | null;
     imageAnalysesPerCycle: number | null;
+    audioTranscriptionsPerCycle: number | null;
   };
   description: string;
   features: string[];
@@ -25,11 +26,12 @@ export const COMMERCIAL_PLANS: Record<CommercialPlanType, CommercialPlan> = {
     displayName: "Plano Básico",
     price: 29.9,
     interval: "/mês",
-    imageLimit: 5,
+    imageLimit: 30,
     entitlements: {
-      nutritionPlansPerCycle: 1,
-      workoutPlansPerCycle: 1,
-      imageAnalysesPerCycle: 5,
+      nutritionPlansPerCycle: 2,
+      workoutPlansPerCycle: 2,
+      imageAnalysesPerCycle: 30,
+      audioTranscriptionsPerCycle: 30,
     },
     description:
       "Ideal para quem deseja melhorar a alimentação e acompanhar sua evolução diária pelo WhatsApp.",
@@ -42,9 +44,10 @@ export const COMMERCIAL_PLANS: Record<CommercialPlanType, CommercialPlan> = {
       "Relatórios de evolução",
       "Registro de exercícios e atividades",
       "Suporte prioritário via WhatsApp",
-      "1 plano alimentar por ciclo",
-      "1 plano de treino por ciclo",
-      "Até 5 análises de alimentos e bebidas por ciclo",
+      "2 planos alimentares por ciclo",
+      "2 planos de treino por ciclo",
+      "30 análises de refeições por foto por ciclo",
+      "30 transcrições de áudio por ciclo (ativação gradual)",
     ],
   },
   PREMIUM: {
@@ -54,27 +57,29 @@ export const COMMERCIAL_PLANS: Record<CommercialPlanType, CommercialPlan> = {
     displayName: "Plano Premium",
     price: 69.9,
     interval: "/mês",
-    imageLimit: null,
+    imageLimit: 150,
     entitlements: {
-      nutritionPlansPerCycle: null,
-      workoutPlansPerCycle: null,
-      imageAnalysesPerCycle: null,
+      nutritionPlansPerCycle: 6,
+      workoutPlansPerCycle: 6,
+      imageAnalysesPerCycle: 150,
+      audioTranscriptionsPerCycle: 200,
     },
     description:
       "Experiência completa com inteligência avançada, memória nutricional e acompanhamento contínuo para acelerar seus resultados.",
     features: [
-      "Acesso ilimitado à SingulFit",
+      "Acompanhamento pelo WhatsApp",
       "Memória nutricional avançada",
-      "Planos alimentares sem quota comercial",
-      "Planos de treino sem quota comercial",
-      "Análises de alimentos e bebidas sem quota comercial",
+      "6 planos alimentares por ciclo",
+      "6 planos de treino por ciclo",
+      "150 análises de refeições por foto por ciclo",
+      "200 transcrições de áudio por ciclo (ativação gradual)",
       "Análise de refeições por foto, áudio e texto",
       "Histórico Completo de Refeições",
       "Acompanhamento premium",
       "Análise de Macronutrientes",
       "Acompanhamento de Peso e Evolução",
       "Assistente SingulFit para dúvidas em tempo real",
-      "Cadastro ilimitado de Receitas Personalizadas",
+      "Cadastro de receitas personalizadas",
       "Relatórios inteligentes de sua Evolução",
       "Registros e planos personalizads de Exercícios",
       "Suporte Prioritário via WhatsApp",

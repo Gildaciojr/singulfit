@@ -1,6 +1,11 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { AIJobStatus, AIJobType, Prisma } from '@prisma/client';
 import { AIService } from '../../ai/ai.service';
+import { isNutritionConversationalArtifactType } from './nutrition-conversational-artifact.contract';
 import { NUTRITION_PLAN_GENERATION } from '../../entitlements/entitlement.constants';
 import { NutritionGenerationExecutionMode } from './nutrition-generation-runner-v2.contract';
 import { NutritionGenerationRunnerV2Service } from './nutrition-generation-runner-v2.service';
@@ -45,6 +50,27 @@ export class NutritionPlanningEngineV2Service {
         }),
       });
 
+    if (input.mutationTarget) {
+      const target = input.mutationTarget;
+      const source = input.previousPlan;
+      const meals = source?.days.flatMap((day) =>
+        day.dayNumber === target.dayNumber
+          ? day.meals.filter((meal) => meal.mealKey === target.mealKey)
+          : [],
+      );
+      if (
+        !source?.generation.aiJobId ||
+        (input.reviewedPlan && input.reviewedPlan.id !== target.sourcePlanId) ||
+        meals?.length !== 1 ||
+        (target.itemKey !== null &&
+          meals[0].items.filter((item) => item.itemKey === target.itemKey)
+            .length !== 1)
+      )
+        throw new BadRequestException(
+          'Nutrition mutation source/target mismatch',
+        );
+    }
+
     const descriptor = this.runner.describe(
       input,
       prepared,
@@ -56,10 +82,19 @@ export class NutritionPlanningEngineV2Service {
       promptName: descriptor.promptName,
       operationKey: descriptor.operationKey,
       recoverExpiredOperation: identity?.recoverExpiredOperation,
-      ...(prepared.resolution.artifactType === 'DAILY_STRUCTURE' ||
-      prepared.resolution.artifactType === 'WEEKLY_PLAN'
-        ? { usageEntitlementCode: NUTRITION_PLAN_GENERATION }
-        : {}),
+      ...(prepared.resolution.artifactType !== null &&
+      isNutritionConversationalArtifactType(prepared.resolution.artifactType)
+        ? { generationScope: { kind: 'NON_PLAN' as const } }
+        : input.mutationTarget && input.previousPlan
+          ? {
+              generationScope: {
+                kind: 'TARGETED' as const,
+                sourcePlanId: input.mutationTarget.sourcePlanId,
+                sourceAIJobId: input.previousPlan.generation.aiJobId,
+                targetKey: `${input.mutationTarget.dayNumber}:${input.mutationTarget.mealKey}:${input.mutationTarget.itemKey ?? ''}`,
+              },
+            }
+          : { usageEntitlementCode: NUTRITION_PLAN_GENERATION }),
     });
 
     if (job.status === AIJobStatus.COMPLETED) {

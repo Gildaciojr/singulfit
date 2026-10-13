@@ -1,5 +1,6 @@
 import { chunkWorkoutWhatsApp } from '../workout/v2/workout-whatsapp.chunker';
 import { Injectable, Optional } from '@nestjs/common';
+import { NutritionIntakeLedgerService } from '../nutrition/nutrition-intake-ledger.service';
 import { explicitPlanningIntent } from '../conversation/understanding/explicit-planning-intent';
 import {
   isWorkoutEffectAuthorized,
@@ -89,6 +90,7 @@ export class CoachCommandService {
     private readonly profileConsent?: ConversationProfileConsentService,
     @Optional()
     private readonly continuations?: ConversationContinuationService,
+    @Optional() private readonly intakeLedger?: NutritionIntakeLedgerService,
   ) {}
 
   async deliverWorkoutCompletion(input: {
@@ -190,6 +192,13 @@ export class CoachCommandService {
       });
       return true;
     }
+    // An independent commercial read belongs to the canonical backend query,
+    // not to interpretation of a previous question. Historical replay stays above.
+    if (
+      !existing &&
+      this.dailyQueries?.acceptsCommercialBalance?.(message.content)
+    )
+      return false;
     let reply = existing
       ? null
       : await this.continuations.resolve(input.userId, input.messageId);
@@ -342,6 +351,18 @@ export class CoachCommandService {
         );
         if (!this.continuations.enabled(input.userId))
           throw new Error('Continuation runtime disabled before coach commit');
+        if (
+          claimed &&
+          reply.outcome === 'COMPLETED' &&
+          reply.evidence.intake &&
+          this.intakeLedger
+        )
+          await this.intakeLedger.record(
+            transaction,
+            input.userId,
+            message.id,
+            reply.evidence.intake,
+          );
         const persisted = await transaction.coachMessage.create({
           data: {
             userId: input.userId,

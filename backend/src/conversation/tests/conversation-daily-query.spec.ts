@@ -1,9 +1,123 @@
+import type { UsageService } from '../../usage/usage.service';
 import { ConversationDailyQueryService } from '../runtime/conversation-daily-query.service';
 import { NutritionConsumptionSummaryService } from '../../nutrition/nutrition-consumption-summary.service';
 import { CurrentNutritionPlanReaderService } from '../../diet/current-nutrition-plan-reader.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
 describe('ConversationDailyQueryService', () => {
+  it.each([
+    'Quantas calorias consumi ontem?',
+    'Quantas calorias consumi na semana passada?',
+    'Compare calorias consumidas nesta semana e na semana passada',
+  ])(
+    'reads only owned historical records without substituting today: %s',
+    async (text) => {
+      const source = subject();
+      source.prisma.message.findFirst.mockResolvedValue({ id: 'message' });
+      source.consumption.summarize.mockResolvedValue({
+        calories: 500,
+        protein: 35,
+        carbs: 50,
+        fat: 10,
+        mealCount: 2,
+        periodStart: new Date('2026-08-23T03:00:00Z'),
+        periodEnd: new Date('2026-08-24T03:00:00Z'),
+      });
+      const result = await source.service.answer({ ...source.input, text });
+      expect(source.service.accepts(text)).toBe(true);
+      expect(result).toContain('500 kcal');
+      expect(result).toContain('não comprovam o consumo total');
+      expect(source.consumption.summarize).toHaveBeenCalledWith(
+        expect.objectContaining({
+          confirmedOnly: true,
+          knownAt: source.input.referenceDate,
+          referenceDate: new Date('2026-08-24T02:59:59.999Z'),
+        }),
+      );
+      expect(source.nutrition.getCurrent).not.toHaveBeenCalled();
+      source.prisma.message.findFirst.mockResolvedValue(null);
+      source.consumption.summarize.mockClear();
+      expect(await source.service.answer({ ...source.input, text })).toBeNull();
+      expect(source.consumption.summarize).not.toHaveBeenCalled();
+    },
+  );
+  it('does not turn historical instructions into a read authorization', () => {
+    const source = subject();
+    expect(
+      source.service.accepts('Quantas calorias consumi ontem? Crie uma dieta.'),
+    ).toBe(false);
+  });
+  it.each([true, false])(
+    'commercial counters require owned inbound: %s',
+    async (owned) => {
+      const commercial = {
+        commercialBalance: jest
+          .fn()
+          .mockImplementation((userId: string, code: string) =>
+            Promise.resolve({
+              code,
+              limit: 30,
+              remaining: 7,
+              unlimited: false,
+              renewsAt: new Date('2026-11-01T15:00:00Z'),
+            }),
+          ),
+      };
+      const prisma = {
+        message: {
+          findFirst: jest
+            .fn()
+            .mockResolvedValue(owned ? { id: 'message' } : null),
+        },
+      };
+      const service = new ConversationDailyQueryService(
+        prisma as unknown as PrismaService,
+        {} as NutritionConsumptionSummaryService,
+        {} as CurrentNutritionPlanReaderService,
+        commercial as unknown as UsageService,
+      );
+      const text = 'Qual o saldo de usos do meu plano neste ciclo?';
+      expect(service.accepts(text)).toBe(true);
+      const result = await service.answer({
+        userId: 'user',
+        conversationId: 'conversation',
+        messageId: 'message',
+        text,
+        referenceDate: new Date(),
+      });
+      if (owned) {
+        expect(result).toContain('7 disponíveis de 30');
+        expect(result).toContain('01/11/2026');
+        expect(commercial.commercialBalance).toHaveBeenCalledTimes(4);
+      } else {
+        expect(result).toBeNull();
+        expect(commercial.commercialBalance).not.toHaveBeenCalled();
+      }
+    },
+  );
+  it.each([
+    'Qual meu limite de calorias no plano?',
+    'Qual o saldo de calorias no meu plano?',
+    'Qual o saldo do plano? Crie uma nova dieta.',
+    'Qual o saldo do plano? Troque o frango por ovos na dieta.',
+  ])('quota read cannot consume another purpose: %s', async (text) => {
+    const commercial = { commercialBalance: jest.fn() };
+    const source = subject();
+    const service = new ConversationDailyQueryService(
+      source.prisma as unknown as PrismaService,
+      source.consumption as unknown as NutritionConsumptionSummaryService,
+      source.nutrition as unknown as CurrentNutritionPlanReaderService,
+      commercial as unknown as UsageService,
+    );
+    await service.answer({
+      userId: 'user',
+      conversationId: 'conversation',
+      messageId: 'message',
+      text,
+      referenceDate: new Date(),
+    });
+    expect(commercial.commercialBalance).not.toHaveBeenCalled();
+  });
   const meal = (
     period: string,
     name: string,
@@ -36,6 +150,8 @@ describe('ConversationDailyQueryService', () => {
         carbs: 50,
         fat: 10,
         mealCount: 2,
+        periodStart: new Date('2026-08-23T03:00:00Z'),
+        periodEnd: new Date('2026-08-24T03:00:00Z'),
       }),
     };
     const current = {
@@ -174,6 +290,7 @@ describe('ConversationDailyQueryService', () => {
       period: 'THIS_WEEK',
       referenceDate: s.input.referenceDate,
       timezone: 'America/Sao_Paulo',
+      confirmedOnly: true,
     });
   });
   it.each([
@@ -304,6 +421,7 @@ describe('ConversationDailyQueryService', () => {
         period,
         timezone: 'America/Sao_Paulo',
         referenceDate: s.input.referenceDate,
+        confirmedOnly: true,
       });
       expect(await s.service.answer({ ...s.input, text })).toContain(
         'registrou e foram analisadas',

@@ -9,9 +9,10 @@ import { CoachIntelligenceService } from './coach-intelligence.service';
 import type { CurrentNutritionPlanReaderService } from '../diet/current-nutrition-plan-reader.service';
 import type { CoachProactiveRealizerService } from './coach-proactive-realizer.service';
 import type { CurrentWorkoutPlanReaderService } from '../workout/v2/current-workout-plan-reader.service';
+import type { NutritionIntakeLedgerService } from '../nutrition/nutrition-intake-ledger.service';
 
 describe('CoachService', () => {
-  function createSubject() {
+  function createSubject(intake?: NutritionIntakeLedgerService) {
     const prisma = {
       user: {
         findUnique: jest.fn().mockResolvedValue({
@@ -139,6 +140,7 @@ describe('CoachService', () => {
       currentNutritionPlanReader as unknown as CurrentNutritionPlanReaderService,
       proactiveRealizer as unknown as CoachProactiveRealizerService,
       currentWorkoutPlanReader as unknown as CurrentWorkoutPlanReaderService,
+      intake,
     );
 
     return {
@@ -150,6 +152,29 @@ describe('CoachService', () => {
       currentWorkoutPlanReader,
     };
   }
+
+  it.each(['LUNCH_CHECK', 'DINNER_CHECK', 'HYDRATION_CHECK'] as const)(
+    'does not ask again for an already reported %s',
+    async (intent) => {
+      const ledger = {
+        hasMeal: jest.fn().mockResolvedValue(true),
+        water: jest.fn().mockResolvedValue({ recordCount: 1, volumeMl: 500 }),
+      };
+      const subject = createSubject(
+        ledger as unknown as NutritionIntakeLedgerService,
+      );
+      const result = await subject.service.generateProactiveContent('user-id', {
+        intent,
+        slotKey: intent,
+        ruleCode:
+          intent === 'HYDRATION_CHECK' ? 'HYDRATION_REMINDER' : 'MEAL_REMINDER',
+        scheduledFor: new Date('2026-08-16T18:00:00Z'),
+        localTime: '15:00',
+      });
+      expect(result).toBeNull();
+      expect(subject.proactiveRealizer.realize).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(Object.values(AUTOMATION_RULE_CODES))(
     'generates non-empty personalized content for %s',

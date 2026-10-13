@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { NutritionIntakeLedgerService } from '../nutrition/nutrition-intake-ledger.service';
 import { CoachReviewType, WorkoutStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -43,6 +44,7 @@ export class CoachService {
     private readonly currentNutritionPlanReader: CurrentNutritionPlanReaderService,
     private readonly proactiveRealizer: CoachProactiveRealizerService,
     private readonly currentWorkoutPlanReader: CurrentWorkoutPlanReaderService,
+    @Optional() private readonly intakeLedger?: NutritionIntakeLedgerService,
   ) {}
 
   async generateContent(
@@ -184,6 +186,32 @@ export class CoachService {
       this.currentNutritionPlanReader.getCurrent(userId),
       this.prisma.userPreferences.findUnique({ where: { userId } }),
     ]);
+    if (this.intakeLedger) {
+      if (
+        (slot.intent === COACH_PROACTIVE_INTENTS.LUNCH_CHECK ||
+          slot.intent === COACH_PROACTIVE_INTENTS.DINNER_CHECK) &&
+        (await this.intakeLedger.hasMeal(
+          userId,
+          slot.intent === COACH_PROACTIVE_INTENTS.LUNCH_CHECK
+            ? 'LUNCH'
+            : 'DINNER',
+          slot.scheduledFor,
+          preferences?.timezone,
+        ))
+      )
+        return null;
+      if (
+        slot.intent === COACH_PROACTIVE_INTENTS.HYDRATION_CHECK &&
+        (
+          await this.intakeLedger.water(
+            userId,
+            slot.scheduledFor,
+            preferences?.timezone,
+          )
+        ).recordCount > 0
+      )
+        return null;
+    }
     const workoutSession =
       slot.intent === COACH_PROACTIVE_INTENTS.WORKOUT_CHECK &&
       workout.status === 'AVAILABLE'

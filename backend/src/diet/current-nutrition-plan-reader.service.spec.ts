@@ -417,4 +417,49 @@ describe('CurrentNutritionPlanReaderService', () => {
       subject.service.listHistory('user-id', 101),
     ).rejects.toBeInstanceOf(ConflictException);
   });
+
+  it('does not replace historical targets with a later generated plan', async () => {
+    const subject = createSubject();
+    subject.prisma.dietPlan.findFirst.mockResolvedValue(
+      legacyPlan({ status: 'ARCHIVED', updatedAt: V2_DATE }),
+    );
+    subject.prisma.nutritionPlanV2.findFirst.mockResolvedValue(v2Plan());
+    const historical = await subject.service.getApplicableAt(
+      'user-id',
+      new Date('2026-07-29T20:00:00Z'),
+    );
+    expect(historical).toMatchObject({
+      implementation: 'LEGACY',
+      id: 'legacy-id',
+      dailyCaloriesTarget: 1800,
+    });
+    expect(subject.prisma.nutritionPlanV2.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          userId: 'user-id',
+          createdAt: { lte: new Date('2026-07-29T20:00:00Z') },
+        }),
+      }),
+    );
+  });
+
+  it('does not invent an applicable plan before persistence or after archival', async () => {
+    const subject = createSubject();
+    subject.prisma.dietPlan.findFirst.mockResolvedValue(
+      legacyPlan({ status: 'ARCHIVED', updatedAt: V2_DATE }),
+    );
+    subject.prisma.nutritionPlanV2.findFirst.mockResolvedValue(null);
+    expect(
+      await subject.service.getApplicableAt(
+        'user-id',
+        new Date('2026-07-28T20:00:00Z'),
+      ),
+    ).toBeNull();
+    expect(
+      await subject.service.getApplicableAt(
+        'user-id',
+        new Date('2026-07-31T20:00:00Z'),
+      ),
+    ).toBeNull();
+  });
 });

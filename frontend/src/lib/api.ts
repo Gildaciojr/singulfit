@@ -41,6 +41,7 @@ export type RegisterCheckoutPayload = {
   email: string;
   password: string;
   planType: CommercialPlanType;
+  offerPlanId?: string;
 };
 
 export type AuthTokensResponse = {
@@ -303,4 +304,10 @@ async function extractErrorMessage(response: Response): Promise<string> {
   }
 
   return "Não foi possível concluir a solicitação.";
+}
+
+export async function getCommercialCatalog(): Promise<unknown> {
+  const response = await fetch(API_BASE_URL.replace(/\/api\/v1$/, "") + "/");
+  if (!response.ok) throw new Error("Catálogo indisponível");
+  return response.json();
 }

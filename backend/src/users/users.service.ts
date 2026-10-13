@@ -125,20 +125,36 @@ export class UsersService {
     });
   }
 
-  async createUser(data: {
-    name: string;
-    phone: string;
-    email: string;
-    passwordHash?: string;
-    role?: UserRole;
-    cpf?: string;
-    address?: string;
-    city?: string;
-    state?: string;
-    zipCode?: string;
-  }) {
+  async createUserWith<T>(
+    data: Parameters<UsersService['createUser']>[0],
+    after: (
+      transaction: Prisma.TransactionClient,
+      userId: string,
+    ) => Promise<T>,
+  ) {
+    return this.prisma.$transaction(async (transaction) => {
+      const user = await this.createUser(data, transaction);
+      return { user, result: await after(transaction, user.id) };
+    });
+  }
+
+  async createUser(
+    data: {
+      name: string;
+      phone: string;
+      email: string;
+      passwordHash?: string;
+      role?: UserRole;
+      cpf?: string;
+      address?: string;
+      city?: string;
+      state?: string;
+      zipCode?: string;
+    },
+    transaction: Prisma.TransactionClient = this.prisma,
+  ) {
     const phoneE164 = normalizeBrazilianPhone(data.phone);
-    const userWithPhone = await this.prisma.user.findFirst({
+    const userWithPhone = await transaction.user.findFirst({
       where: {
         OR: [{ phone: data.phone }, ...(phoneE164 ? [{ phoneE164 }] : [])],
       },
@@ -148,7 +164,7 @@ export class UsersService {
       throw new ConflictException('Já existe usuário com este telefone');
     }
 
-    const userWithEmail = await this.prisma.user.findUnique({
+    const userWithEmail = await transaction.user.findUnique({
       where: { email: data.email },
     });
 
@@ -156,7 +172,7 @@ export class UsersService {
       throw new ConflictException('Já existe usuário com este e-mail');
     }
 
-    return this.prisma.user.create({
+    return transaction.user.create({
       data: {
         name: data.name,
         phone: data.phone,

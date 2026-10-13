@@ -219,7 +219,9 @@ describeIntegration('Unlimited commercial backfill cleanup integration', () => {
 
   function upsertPlan(type: PlanType, price: string, imageUnlimited: boolean) {
     return prisma.plan.upsert({
-      where: { type },
+      where: {
+        type_contractVersion: { type: type, contractVersion: 'legacy-v1' },
+      },
       update: {},
       create: {
         type,

@@ -1,6 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { Prisma, UsageEventStatus } from '@prisma/client';
-import { IMAGE_ANALYSIS } from '../entitlements/entitlement.constants';
+import {
+  IMAGE_ANALYSIS,
+  type CommercialUsageEntitlementCode,
+} from '../entitlements/entitlement.constants';
 import { EntitlementsService } from '../entitlements/entitlements.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -40,6 +43,43 @@ export class UsageService {
     };
   }
 
+  /** Read-only balance of the active cycle; unsettled reservations remain unavailable. */
+  async commercialBalance(
+    userId: string,
+    code: CommercialUsageEntitlementCode,
+    at = new Date(),
+  ) {
+    const grant = await this.entitlementsService.resolveCommercialGrant(
+      userId,
+      code,
+      at,
+    );
+    const bucket = await this.prisma.usageBucket.findUnique({
+      where: {
+        userId_entitlementCode_periodStart_periodEnd: {
+          userId,
+          entitlementCode: code,
+          periodStart: grant.periodStart,
+          periodEnd: grant.periodEnd,
+        },
+      },
+    });
+    return {
+      code,
+      limit: grant.limit,
+      unlimited: grant.unlimited,
+      used: bucket?.used ?? 0,
+      reserved: bucket?.reserved ?? 0,
+      remaining: grant.unlimited
+        ? null
+        : Math.max(
+            0,
+            (grant.limit ?? 0) - (bucket?.used ?? 0) - (bucket?.reserved ?? 0),
+          ),
+      renewsAt: grant.periodEnd,
+    };
+  }
+
   confirm(aiJobId: string) {
     return this.prisma.$transaction((transaction) =>
       this.confirmInTransaction(transaction, aiJobId),
@@ -73,17 +113,45 @@ export class UsageService {
     aiJobId: string,
     targetStatus: UsageEventStatus,
   ) {
-    const job = await transaction.aIJob.findUnique({
+    let job = await transaction.aIJob.findUnique({
       where: {
         id: aiJobId,
       },
       select: {
         userId: true,
+        type: true,
+        result: true,
       },
     });
 
     if (!job) {
       return [];
+    }
+    if (job.type === 'AUDIO') {
+      // Audio reservation/publication lock the job before the user. Re-read its
+      // ledger after acquiring the row lock so recovery cannot refund a call
+      // which has just started or been acknowledged. Other paths stay unchanged.
+      await transaction.$queryRaw`SELECT "id" FROM "ai_jobs" WHERE "id" = ${aiJobId} FOR UPDATE`;
+      job = await transaction.aIJob.findUnique({
+        where: { id: aiJobId },
+        select: { userId: true, type: true, result: true },
+      });
+      if (!job) return [];
+    }
+
+    // Only positively identified uncharged audio states may be refunded.
+    // Unknown/malformed ledgers fail closed rather than implying zero cost.
+    if (targetStatus === UsageEventStatus.REVERSED && job.type === 'AUDIO') {
+      const result = job.result;
+      const uncharged =
+        result === null ||
+        (result &&
+          typeof result === 'object' &&
+          !Array.isArray(result) &&
+          result.revision === 'whatsapp-audio-transcription:v1' &&
+          typeof result.phase === 'string' &&
+          ['RETRY', 'REJECTED_UNCHARGED', 'LIMIT'].includes(result.phase));
+      if (!uncharged) return [];
     }
 
     await transaction.$queryRaw`
@@ -105,7 +173,9 @@ export class UsageService {
     });
 
     for (const event of events) {
-      const bucket = await transaction.usageBucket.findFirstOrThrow({
+      if (event.userId !== job.userId)
+        throw new ConflictException('Usage event ownership mismatch');
+      const buckets = await transaction.usageBucket.findMany({
         where: {
           userId: event.userId,
           entitlementCode: event.entitlementCode,
@@ -116,7 +186,13 @@ export class UsageService {
             gt: event.createdAt,
           },
         },
+        take: 2,
       });
+      if (buckets.length !== 1)
+        throw new ConflictException(
+          'Usage cycle bucket is missing or ambiguous',
+        );
+      const bucket = buckets[0];
 
       await transaction.usageBucket.update({
         where: {

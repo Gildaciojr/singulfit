@@ -761,6 +761,15 @@ describe('AppController (e2e)', () => {
         email,
         password: 'SingulFit#Secure123',
         planType: PlanType.BASIC,
+        offerPlanId: (
+          await prisma.plan.findFirstOrThrow({
+            where: {
+              type: PlanType.BASIC,
+              isCurrentOffer: true,
+              isActive: true,
+            },
+          })
+        ).id,
       })
       .expect(201);
     const registration = registrationResponse.body as AuthResponse;
@@ -850,6 +859,15 @@ describe('AppController (e2e)', () => {
         email,
         password: 'SingulFit#Secure123',
         planType: PlanType.BASIC,
+        offerPlanId: (
+          await prisma.plan.findFirstOrThrow({
+            where: {
+              type: PlanType.BASIC,
+              isCurrentOffer: true,
+              isActive: true,
+            },
+          })
+        ).id,
       })
       .expect(201);
     const registration = registrationResponse.body as AuthResponse;
@@ -1172,6 +1190,15 @@ describe('AppController (e2e)', () => {
         email,
         password: 'SingulFit#Secure123',
         planType: PlanType.PREMIUM,
+        offerPlanId: (
+          await prisma.plan.findFirstOrThrow({
+            where: {
+              type: PlanType.PREMIUM,
+              isCurrentOffer: true,
+              isActive: true,
+            },
+          })
+        ).id,
       })
       .expect(201);
     const registration = registrationResponse.body as AuthResponse;
@@ -1452,6 +1479,15 @@ describe('AppController (e2e)', () => {
         email,
         password: 'SingulFit#Secure123',
         planType: PlanType.PREMIUM,
+        offerPlanId: (
+          await prisma.plan.findFirstOrThrow({
+            where: {
+              type: PlanType.PREMIUM,
+              isCurrentOffer: true,
+              isActive: true,
+            },
+          })
+        ).id,
       })
       .expect(201);
     const registration = registrationResponse.body as AuthResponse;
@@ -1839,6 +1875,15 @@ describe('AppController (e2e)', () => {
         email,
         password: 'SingulFit#Secure123',
         planType: PlanType.BASIC,
+        offerPlanId: (
+          await prisma.plan.findFirstOrThrow({
+            where: {
+              type: PlanType.BASIC,
+              isCurrentOffer: true,
+              isActive: true,
+            },
+          })
+        ).id,
       })
       .expect(201);
     const registration = registrationResponse.body as AuthResponse;
@@ -1850,6 +1895,8 @@ describe('AppController (e2e)', () => {
       },
     });
     const now = new Date();
+    // Exercise immediate dispatch inside the configured awake window.
+    now.setUTCHours(12, 0, 0, 0);
 
     await prisma.subscription.update({
       where: {
@@ -1934,6 +1981,20 @@ describe('AppController (e2e)', () => {
       });
 
     const automationService = app.get(AutomationService);
+    await prisma.userPreferences.upsert({
+      where: { userId: createdUserId },
+      update: {
+        timezone: 'UTC',
+        preferredWakeUpTime: '00:00',
+        preferredSleepTime: '23:59',
+      },
+      create: {
+        userId: createdUserId,
+        timezone: 'UTC',
+        preferredWakeUpTime: '00:00',
+        preferredSleepTime: '23:59',
+      },
+    });
     const goodMorningAt = new Date(now.getTime() - 2 * 60 * 1000);
     const workoutAt = new Date(now.getTime() - 60 * 1000);
     const firstGoodMorning = await automationService.scheduleMessage(
@@ -1995,8 +2056,18 @@ describe('AppController (e2e)', () => {
         expect(response.body.scheduledMessages).toHaveLength(2);
       });
 
+    // This case dispatches two explicitly scheduled messages. Weekly delivery
+    // now covers Basic too; opt out through the real API instead of depending
+    // on whether the test happens to run during Sunday's recovery window.
+    await request(app.getHttpServer())
+      .patch('/api/v1/automations/preferences')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ progressReminderEnabled: false })
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.progressReminderEnabled).toBe(false);
+      });
     const dispatched = await automationService.dispatchDue(now);
-
     expect(dispatched).toHaveLength(2);
     expect(
       dispatched.every(
@@ -2053,7 +2124,10 @@ describe('AppController (e2e)', () => {
   it('serializes concurrent image reservations at the plan limit', async () => {
     const plan = await prisma.plan.findUniqueOrThrow({
       where: {
-        type: PlanType.BASIC,
+        type_contractVersion: {
+          type: PlanType.BASIC,
+          contractVersion: 'legacy-v1',
+        },
       },
       include: {
         entitlements: {
@@ -2217,6 +2291,15 @@ describe('AppController (e2e)', () => {
         email,
         password,
         planType: PlanType.BASIC,
+        offerPlanId: (
+          await prisma.plan.findFirstOrThrow({
+            where: {
+              type: PlanType.BASIC,
+              isCurrentOffer: true,
+              isActive: true,
+            },
+          })
+        ).id,
       })
       .expect(201);
     const registration = registrationResponse.body as AuthResponse;
@@ -2342,6 +2425,15 @@ describe('AppController (e2e)', () => {
         email,
         password: 'SingulFit#Secure123',
         planType: PlanType.BASIC,
+        offerPlanId: (
+          await prisma.plan.findFirstOrThrow({
+            where: {
+              type: PlanType.BASIC,
+              isCurrentOffer: true,
+              isActive: true,
+            },
+          })
+        ).id,
         cpf: '12345678901',
       })
       .expect(201);
@@ -2997,6 +3089,15 @@ describe('AppController (e2e)', () => {
         email: `ai-${uniqueId}@singulfit.test`,
         password: 'SingulFit#Secure123',
         planType: PlanType.BASIC,
+        offerPlanId: (
+          await prisma.plan.findFirstOrThrow({
+            where: {
+              type: PlanType.BASIC,
+              isCurrentOffer: true,
+              isActive: true,
+            },
+          })
+        ).id,
       })
       .expect(201);
     const registration = registrationResponse.body as AuthResponse;
@@ -3080,6 +3181,23 @@ describe('AppController (e2e)', () => {
     const phone = `119${randomInt(10_000_000, 100_000_000)}`;
     const password = 'SingulFit#Secure123';
 
+    const currentOffer = await prisma.plan.findFirstOrThrow({
+      where: { type: PlanType.BASIC, isCurrentOffer: true },
+    });
+    if (currentOffer.contractVersion === 'basic-v2') {
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/register')
+        .send({
+          name: 'Synthetic negative registration',
+          phone,
+          email,
+          password,
+          planType: PlanType.BASIC,
+          cpf: '12345678901',
+        })
+        .expect(409);
+      expect(await prisma.user.findUnique({ where: { email } })).toBeNull();
+    }
     const registerResponse = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
       .send({
@@ -3088,6 +3206,15 @@ describe('AppController (e2e)', () => {
         email,
         password,
         planType: PlanType.BASIC,
+        offerPlanId: (
+          await prisma.plan.findFirstOrThrow({
+            where: {
+              type: PlanType.BASIC,
+              isCurrentOffer: true,
+              isActive: true,
+            },
+          })
+        ).id,
         cpf: '12345678901',
       })
       .expect(201);
@@ -3329,6 +3456,15 @@ describe('AppController (e2e)', () => {
         email,
         password,
         planType: PlanType.BASIC,
+        offerPlanId: (
+          await prisma.plan.findFirstOrThrow({
+            where: {
+              type: PlanType.BASIC,
+              isCurrentOffer: true,
+              isActive: true,
+            },
+          })
+        ).id,
         cpf: '12345678901',
       })
       .expect(201);
@@ -3598,6 +3734,15 @@ describe('AppController (e2e)', () => {
         email,
         password,
         planType: PlanType.PREMIUM,
+        offerPlanId: (
+          await prisma.plan.findFirstOrThrow({
+            where: {
+              type: PlanType.PREMIUM,
+              isCurrentOffer: true,
+              isActive: true,
+            },
+          })
+        ).id,
       })
       .expect(201);
     const registration = registrationResponse.body as AuthResponse;
@@ -3765,6 +3910,15 @@ describe('AppController (e2e)', () => {
         email,
         password,
         planType: PlanType.PREMIUM,
+        offerPlanId: (
+          await prisma.plan.findFirstOrThrow({
+            where: {
+              type: PlanType.PREMIUM,
+              isCurrentOffer: true,
+              isActive: true,
+            },
+          })
+        ).id,
       })
       .expect(201);
     const registration = registrationResponse.body as AuthResponse;
@@ -3863,6 +4017,15 @@ describe('AppController (e2e)', () => {
         email,
         password,
         planType: PlanType.PREMIUM,
+        offerPlanId: (
+          await prisma.plan.findFirstOrThrow({
+            where: {
+              type: PlanType.PREMIUM,
+              isCurrentOffer: true,
+              isActive: true,
+            },
+          })
+        ).id,
       })
       .expect(201);
     const registration = registrationResponse.body as AuthResponse;
@@ -4040,6 +4203,15 @@ describe('AppController (e2e)', () => {
         email,
         password,
         planType: PlanType.PREMIUM,
+        offerPlanId: (
+          await prisma.plan.findFirstOrThrow({
+            where: {
+              type: PlanType.PREMIUM,
+              isCurrentOffer: true,
+              isActive: true,
+            },
+          })
+        ).id,
       })
       .expect(201);
     const registration = registrationResponse.body as AuthResponse;
@@ -4216,6 +4388,15 @@ describe('AppController (e2e)', () => {
         email,
         password,
         planType: PlanType.PREMIUM,
+        offerPlanId: (
+          await prisma.plan.findFirstOrThrow({
+            where: {
+              type: PlanType.PREMIUM,
+              isCurrentOffer: true,
+              isActive: true,
+            },
+          })
+        ).id,
       })
       .expect(201);
     const registration = registrationResponse.body as AuthResponse;

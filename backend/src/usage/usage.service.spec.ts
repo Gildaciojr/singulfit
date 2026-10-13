@@ -1,4 +1,4 @@
-import { UsageEventStatus } from '@prisma/client';
+import { Prisma, UsageEventStatus } from '@prisma/client';
 import { EntitlementsService } from '../entitlements/entitlements.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsageService } from './usage.service';
@@ -43,16 +43,14 @@ describe('UsageService', () => {
       aIJob: {
         findUnique: jest.fn().mockResolvedValue({
           userId: 'user-id',
-        }),
+        } as { userId: string; type?: string; result?: Prisma.JsonValue }),
       },
       usageEvent: {
         findMany: jest.fn().mockResolvedValue([event]),
         update: jest.fn().mockResolvedValue(event),
       },
       usageBucket: {
-        findFirstOrThrow: jest.fn().mockResolvedValue({
-          id: 'bucket-id',
-        }),
+        findMany: jest.fn().mockResolvedValue([{ id: 'bucket-id' }]),
         update: jest.fn().mockResolvedValue({
           id: 'bucket-id',
         }),
@@ -69,6 +67,40 @@ describe('UsageService', () => {
     };
   }
 
+  it.each([{ buckets: [] }, { buckets: [{ id: 'one' }, { id: 'two' }] }])(
+    'rejects missing or ambiguous cycle buckets without settling: %j',
+    async ({ buckets }) => {
+      const subject = createSubject();
+      subject.transaction.usageBucket.findMany.mockResolvedValueOnce(buckets);
+      await expect(
+        subject.service.confirmInTransaction(
+          subject.transaction as never,
+          'job-id',
+        ),
+      ).rejects.toThrow('missing or ambiguous');
+      expect(subject.transaction.usageBucket.update).not.toHaveBeenCalled();
+      expect(subject.transaction.usageEvent.update).not.toHaveBeenCalled();
+    },
+  );
+  it.each(['REQUEST_STARTED', 'RECEIVED', 'UNKNOWN_LEDGER_PHASE'])(
+    'never refunds potentially charged AUDIO in %s during generic recovery',
+    async (phase) => {
+      const subject = createSubject();
+      subject.transaction.aIJob.findUnique.mockResolvedValue({
+        userId: 'user-id',
+        type: 'AUDIO',
+        result: { revision: 'whatsapp-audio-transcription:v1', phase },
+      });
+      await expect(
+        subject.service.reverseInTransaction(
+          subject.transaction as never,
+          'job-id',
+        ),
+      ).resolves.toEqual([]);
+      expect(subject.transaction.usageEvent.findMany).not.toHaveBeenCalled();
+      expect(subject.transaction.usageBucket.update).not.toHaveBeenCalled();
+    },
+  );
   it('confirms a reservation by moving reserved usage to used', async () => {
     const subject = createSubject();
 

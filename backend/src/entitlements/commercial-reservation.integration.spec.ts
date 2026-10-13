@@ -66,7 +66,12 @@ describeIntegration('Commercial entitlement reservation integration', () => {
       },
     });
     const basic = await prisma.plan.upsert({
-      where: { type: PlanType.BASIC },
+      where: {
+        type_contractVersion: {
+          type: PlanType.BASIC,
+          contractVersion: 'legacy-v1',
+        },
+      },
       update: {},
       create: {
         type: PlanType.BASIC,
@@ -79,7 +84,12 @@ describeIntegration('Commercial entitlement reservation integration', () => {
       },
     });
     const premium = await prisma.plan.upsert({
-      where: { type: PlanType.PREMIUM },
+      where: {
+        type_contractVersion: {
+          type: PlanType.PREMIUM,
+          contractVersion: 'legacy-v1',
+        },
+      },
       update: {},
       create: {
         type: PlanType.PREMIUM,

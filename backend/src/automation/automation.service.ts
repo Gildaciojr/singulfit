@@ -4,8 +4,15 @@ import {
   ForbiddenException,
   Injectable,
   Logger,
+  Optional,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import {
+  CoachWeeklySnapshotService,
+  weeklyReportEnabled,
+} from './coach-weekly-snapshot.service';
+import { NutritionIntakeLedgerService } from '../nutrition/nutrition-intake-ledger.service';
 import {
   CoachProfileAcquisitionCycleStatus,
   ChurnRiskLevel,
@@ -68,6 +75,9 @@ export class AutomationService {
     private readonly coachIntelligence: CoachIntelligenceService,
     private readonly behavioralIntelligence: BehavioralIntelligenceService,
     private readonly proactiveSchedule: CoachProactiveSchedulePolicy,
+    @Optional() private readonly weeklySnapshots?: CoachWeeklySnapshotService,
+    @Optional() private readonly config?: ConfigService,
+    @Optional() private readonly intakeLedger?: NutritionIntakeLedgerService,
   ) {}
 
   async materializeDueMessages(at = new Date()): Promise<{
@@ -245,6 +255,21 @@ export class AutomationService {
     ruleCode: AutomationRuleCode,
     scheduledFor: Date,
   ) {
+    if (
+      this.weeklySnapshots &&
+      (ruleCode === AUTOMATION_RULE_CODES.WEEKLY_SUMMARY ||
+        ruleCode === AUTOMATION_RULE_CODES.WEEKLY_REVIEW)
+    ) {
+      const result = await this.materializeWeeklySummary(
+        userId,
+        new Date(Math.min(scheduledFor.getTime(), Date.now())),
+      );
+      if (!result)
+        throw new ForbiddenException(
+          'Weekly summary is not due or not eligible',
+        );
+      return result;
+    }
     await this.subscriptionsService.getProfileSubscription(userId);
 
     if (
@@ -655,6 +680,19 @@ export class AutomationService {
           }
         }
 
+        // Only the new factual weekly result is gated; legacy notices are unaffected.
+        // Keep blocked pending reports intact so an authorized rollout can resume them.
+        if (
+          current.context &&
+          typeof current.context === 'object' &&
+          !Array.isArray(current.context) &&
+          typeof current.context.weeklyKey === 'string' &&
+          current.context.weeklyKey.startsWith('coach-weekly-v1:') &&
+          !this.weeklyEnabled(current.userId)
+        ) {
+          return { shouldSend: false as const, message: current };
+        }
+
         if (current.scheduledFor > at) {
           throw new BadRequestException(
             'Mensagem ainda não atingiu o horário agendado',
@@ -759,11 +797,54 @@ export class AutomationService {
 
         if (!subscriptionLifecycleNotice) {
           try {
-            await this.subscriptionAccessService.requireAccessInTransaction(
-              transaction,
-              current.userId,
-              at,
-            );
+            const dispatchAccess =
+              await this.subscriptionAccessService.requireAccessInTransaction(
+                transaction,
+                current.userId,
+                at,
+              );
+            if (
+              current.context &&
+              typeof current.context === 'object' &&
+              !Array.isArray(current.context) &&
+              typeof current.context.weeklyKey === 'string' &&
+              current.context.weeklyKey.startsWith('coach-weekly-v1:') &&
+              current.context.weeklyPlanType !== dispatchAccess.plan.type
+            ) {
+              const stored = await transaction.coachMessage.findFirst({
+                where: {
+                  id: current.coachMessageId ?? '',
+                  userId: current.userId,
+                },
+                select: { context: true },
+              });
+              const context = stored?.context;
+              if (
+                !this.weeklySnapshots ||
+                !context ||
+                typeof context !== 'object' ||
+                Array.isArray(context) ||
+                !context.weeklySnapshot ||
+                typeof context.weeklySnapshot !== 'object' ||
+                Array.isArray(context.weeklySnapshot) ||
+                context.weeklySnapshot.userId !== current.userId
+              )
+                throw new ForbiddenException('WEEKLY_SNAPSHOT_NOT_OWNED');
+              current.content = this.weeklySnapshots.render(
+                context.weeklySnapshot as unknown as import('./coach-weekly-snapshot.service').CoachWeeklySnapshot,
+                dispatchAccess.plan.type,
+              );
+              await transaction.scheduledMessage.update({
+                where: { id: current.id },
+                data: {
+                  content: current.content,
+                  context: {
+                    ...current.context,
+                    weeklyPlanType: dispatchAccess.plan.type,
+                  },
+                },
+              });
+            }
           } catch (error: unknown) {
             if (!(error instanceof ForbiddenException)) {
               throw error;
@@ -789,6 +870,39 @@ export class AutomationService {
           }
         }
 
+        if (
+          this.intakeLedger &&
+          current.context &&
+          typeof current.context === 'object' &&
+          !Array.isArray(current.context) &&
+          current.context.source === COACH_PROACTIVE_SOURCE
+        ) {
+          const intent = current.context.intent;
+          const alreadyReported =
+            intent === 'LUNCH_CHECK' || intent === 'DINNER_CHECK'
+              ? await this.intakeLedger.hasMeal(
+                  current.userId,
+                  intent === 'LUNCH_CHECK' ? 'LUNCH' : 'DINNER',
+                  at,
+                  current.user.preferences?.timezone,
+                )
+              : intent === 'HYDRATION_CHECK' &&
+                (
+                  await this.intakeLedger.water(
+                    current.userId,
+                    at,
+                    current.user.preferences?.timezone,
+                  )
+                ).recordCount > 0;
+          if (alreadyReported) {
+            const canceled = await transaction.scheduledMessage.update({
+              where: { id: current.id },
+              data: { status: 'CANCELED', leaseExpiresAt: null },
+              include: { automationRule: true },
+            });
+            return { shouldSend: false as const, message: canceled };
+          }
+        }
         if (this.isControlledOutreachContext(current.context)) {
           const activeAcquisition =
             await transaction.coachProfileAcquisitionCycle.findFirst({
@@ -1425,8 +1539,21 @@ export class AutomationService {
 
       for (const user of users) {
         try {
+          // When installed, the factual engine owns weekly scheduling even while OFF.
+          // Do not fall back to legacy weekly generation and abort other retention rules.
+          const factualWeekly = !!this.weeklySnapshots;
           try {
-            await this.subscriptionAccessService.requireAccess(user.id, at);
+            const access = await this.subscriptionAccessService.requireAccess(
+              user.id,
+              at,
+            );
+            if (
+              this.weeklySnapshots &&
+              this.weeklyEnabled(user.id) &&
+              ['BASIC', 'PREMIUM'].includes(access.plan.type)
+            ) {
+              await this.materializeWeeklySummary(user.id, at);
+            }
           } catch (error: unknown) {
             if (error instanceof ForbiddenException) {
               continue;
@@ -1477,13 +1604,17 @@ export class AutomationService {
                   },
                 ]
               : []),
-            {
-              code: AUTOMATION_RULE_CODES.WEEKLY_REVIEW,
-              scheduledFor: this.atUtcHour(
-                this.weekStart(snapshotDate),
-                preferredHour,
-              ),
-            },
+            ...(!factualWeekly
+              ? [
+                  {
+                    code: AUTOMATION_RULE_CODES.WEEKLY_REVIEW,
+                    scheduledFor: this.atUtcHour(
+                      this.weekStart(snapshotDate),
+                      preferredHour,
+                    ),
+                  },
+                ]
+              : []),
             {
               code: AUTOMATION_RULE_CODES.MONTHLY_REVIEW,
               scheduledFor: this.atUtcHour(
@@ -1539,6 +1670,179 @@ export class AutomationService {
 
       cursor = users.at(-1)?.id;
     }
+  }
+
+  private weeklyEnabled(userId: string): boolean {
+    return weeklyReportEnabled(
+      userId,
+      this.config?.get<unknown>('COACH_WEEKLY_REPORT_MODE') ?? 'OFF',
+      this.config?.get<unknown>('COACH_WEEKLY_REPORT_CANARY_USER_IDS') ?? '',
+      this.config?.get<unknown>('COACH_WEEKLY_REPORT_GLOBAL_AUTHORIZED') ??
+        'false',
+    );
+  }
+
+  private async materializeWeeklySummary(userId: string, at: Date) {
+    const snapshots = this.weeklySnapshots;
+    if (!snapshots || !this.weeklyEnabled(userId)) return null;
+    const access = await this.subscriptionAccessService.requireAccess(
+      userId,
+      at,
+    );
+    if (!['BASIC', 'PREMIUM'].includes(access.plan.type)) return null;
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { isActive: true, preferences: true, automationPreference: true },
+    });
+    if (
+      !user?.isActive ||
+      !user.automationPreference?.remindersEnabled ||
+      !user.automationPreference.progressReminderEnabled
+    )
+      return null;
+    const slot = this.proactiveSchedule.weeklySummarySlot(
+      at,
+      user.preferences ?? {},
+      this.config?.get<string>('COACH_WEEKLY_SUMMARY_LOCAL_TIME') ?? '20:00',
+    );
+    if (!slot) return null;
+    const rule = await this.prisma.automationRule.findUnique({
+      where: { code: AUTOMATION_RULE_CODES.WEEKLY_SUMMARY },
+    });
+    if (!rule?.enabled) return null;
+    const key = `coach-weekly-v1:${userId}:${slot.range.start.toISOString()}`;
+    return this.prisma.$transaction(
+      async (transaction) => {
+        await transaction.$queryRaw`WITH acquired AS MATERIALIZED (SELECT pg_advisory_xact_lock(hashtext(${key}))) SELECT 1::int AS acquired FROM acquired`;
+        const prior = await transaction.coachMessage.findUnique({
+          where: { idempotencyKey: key },
+          select: { id: true },
+        });
+        if (prior)
+          return transaction.scheduledMessage.findUnique({
+            where: { coachMessageId: prior.id },
+            include: { automationRule: true },
+          });
+        const weeklyRules = [
+          AUTOMATION_RULE_CODES.WEEKLY_SUMMARY,
+          AUTOMATION_RULE_CODES.WEEKLY_REVIEW,
+        ];
+        const delivered = await transaction.scheduledMessage.findFirst({
+          where: {
+            userId,
+            automationRule: { code: { in: weeklyRules } },
+            scheduledFor: { gte: slot.range.start, lt: slot.range.end },
+            status: { in: ['SENT', 'SENDING'] },
+          },
+          include: { automationRule: true },
+        });
+        if (delivered) return delivered;
+        const day = this.proactiveSchedule.localDayRange(at, slot.timezone);
+        const count = await transaction.scheduledMessage.count({
+          where: {
+            userId,
+            scheduledFor: { gte: day.start, lt: day.end },
+            status: { not: 'CANCELED' },
+            OR: CONTROLLED_OUTREACH_SOURCES.map((source) => ({
+              context: { path: ['source'], equals: source },
+            })),
+          },
+        });
+        if (count >= COACH_PROACTIVE_DAILY_CAP) return null;
+        const recent = await transaction.scheduledMessage.findFirst({
+          where: {
+            userId,
+            status: 'SENT',
+            sentAt: {
+              gt: new Date(
+                at.getTime() - COACH_PROACTIVE_MIN_GAP_MINUTES * 60000,
+              ),
+            },
+            OR: CONTROLLED_OUTREACH_SOURCES.map((source) => ({
+              context: { path: ['source'], equals: source },
+            })),
+          },
+          orderBy: { sentAt: 'desc' },
+          select: { sentAt: true },
+        });
+        const scheduledFor = this.proactiveSchedule.nextAllowedSendAt(
+          new Date(
+            Math.max(
+              slot.scheduledFor.getTime(),
+              recent?.sentAt
+                ? recent.sentAt.getTime() +
+                    COACH_PROACTIVE_MIN_GAP_MINUTES * 60000
+                : 0,
+            ),
+          ),
+          user.preferences ?? {},
+        );
+        const snapshot = await snapshots.build(userId, slot.cutoff);
+        const content = snapshots.render(snapshot, access.plan.type);
+        const coach = await transaction.coachMessage.create({
+          data: {
+            userId,
+            type: 'FOLLOW_UP',
+            idempotencyKey: key,
+            content,
+            scheduledFor,
+            context: {
+              source: COACH_RETENTION_SOURCE,
+              weeklySnapshot: snapshot as unknown as Prisma.InputJsonObject,
+            },
+          },
+        });
+        // Retire only pending duplicates from the same authorized weekly window.
+        await transaction.scheduledMessage.updateMany({
+          where: {
+            userId,
+            automationRule: { code: { in: weeklyRules } },
+            scheduledFor: { gte: slot.range.start, lt: slot.range.end },
+            status: 'PENDING',
+          },
+          data: { status: 'CANCELED' },
+        });
+        const conversation = await transaction.conversation.findFirst({
+          where: { userId, status: 'ACTIVE' },
+          orderBy: { lastMessageAt: 'desc' },
+          select: { id: true },
+        });
+        const scheduled = await transaction.scheduledMessage.create({
+          data: {
+            userId,
+            automationRuleId: rule.id,
+            coachMessageId: coach.id,
+            conversationId: conversation?.id,
+            content,
+            scheduledFor,
+            context: {
+              source: COACH_RETENTION_SOURCE,
+              weeklyKey: key,
+              weeklyPlanType: access.plan.type,
+              cutoff: slot.cutoff.toISOString(),
+            },
+          },
+          include: { automationRule: true },
+        });
+        await this.eventBus.publish(
+          {
+            eventType: INTERNAL_EVENT.AUTOMATION_TRIGGERED,
+            aggregateType: 'SCHEDULED_MESSAGE',
+            aggregateId: scheduled.id,
+            payload: {
+              scheduledMessageId: scheduled.id,
+              userId,
+              automationRuleId: rule.id,
+              ruleCode: rule.code,
+            },
+            availableAt: scheduledFor,
+          },
+          transaction,
+        );
+        return scheduled;
+      },
+      { timeout: 30000 },
+    );
   }
 
   private async hasScheduledInPeriod(

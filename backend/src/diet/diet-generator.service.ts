@@ -192,9 +192,7 @@ export class DietGeneratorService {
       userId,
       type: AIJobType.DIET,
       promptName: DIET_PROMPT_BY_GOAL[profile.goal],
-      ...(adaptation
-        ? {}
-        : { usageEntitlementCode: NUTRITION_PLAN_GENERATION }),
+      usageEntitlementCode: NUTRITION_PLAN_GENERATION,
       ...(operationKey ? { operationKey, recoverExpiredOperation: true } : {}),
     });
     if (job.status === AIJobStatus.PROCESSING)

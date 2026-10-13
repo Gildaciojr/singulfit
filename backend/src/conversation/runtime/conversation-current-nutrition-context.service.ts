@@ -14,9 +14,14 @@ export class ConversationCurrentNutritionContextService {
     private readonly presenter: CanonicalNutritionPlanPresenterService,
   ) {}
 
-  async read(userId: string): Promise<ConversationCurrentNutritionContext> {
+  async read(
+    userId: string,
+    at?: Date,
+  ): Promise<ConversationCurrentNutritionContext> {
     try {
-      const current = await this.reader.getCurrent(userId);
+      const current = at
+        ? await this.reader.getApplicableAt(userId, at)
+        : await this.reader.getCurrent(userId);
       if (!current) return Object.freeze({ status: 'ABSENT', plan: null });
       if (current.userId !== userId)
         return Object.freeze({ status: 'UNAVAILABLE', plan: null });

@@ -11,7 +11,8 @@ import {
   dailyQuery,
   isDailyMealRequest,
 } from '../understanding/daily-query.policy';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { NutritionIntakeLedgerService } from '../../nutrition/nutrition-intake-ledger.service';
 import { MessageType, ScheduledMessageStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CurrentWorkoutPlanReaderService } from '../../workout/v2/current-workout-plan-reader.service';
@@ -61,6 +62,7 @@ export class ConversationContinuationService {
     private readonly normalizer: ConversationMessageNormalizerService,
     private readonly qaFollowUp: ConversationQAFollowUpContextService,
     private readonly store: ConversationContinuationStore,
+    @Optional() private readonly intakeLedger?: NutritionIntakeLedgerService,
   ) {}
   enabled(userId: string) {
     return this.store.enabled(userId);
@@ -267,10 +269,27 @@ export class ConversationContinuationService {
         return null;
       pending = null;
     }
-    const interpreted = await this.semantics.interpret(
-      message.content,
-      pending,
-    );
+    const interpreted = this.intakeLedger
+      ? await this.semantics.interpret(
+          message.content,
+          pending,
+          this.intakeLedger
+            ? (
+                await this.intakeLedger.recent(
+                  userId,
+                  message.conversationId,
+                  message.timestamp,
+                )
+              ).map((entry) => ({
+                id: entry.id,
+                kind: entry.kind,
+                occurredAt: entry.occurredAt.toISOString(),
+                evidence:
+                  entry.evidence as import('../../ai/conversation-ai.contract').ConversationAIValue,
+              }))
+            : [],
+        )
+      : await this.semantics.interpret(message.content, pending);
     // A semantic capability is not authorized by the previous topic. Enforce
     // the current domain even for a quoted reminder and an uncertain model.
     if (
@@ -324,6 +343,111 @@ export class ConversationContinuationService {
     )
       return { ...safe(), evidence: { delegateRuntime: true } };
     if (!interpreted) return safe();
+    if (interpreted.intakeClarification)
+      return {
+        content:
+          'Você trouxe mais de um registro. Ainda não registrei essas informações; me envie a refeição e cada volume de água separadamente para eu acompanhar sem perder nada.',
+        domain: interpreted.action === 'MEAL_REPLY' ? 'NUTRITION' : 'HYDRATION',
+        pending: null,
+        next: null,
+        outcome: 'COMPLETED',
+        evidence: { intakeClarification: true },
+      };
+    if (
+      interpreted.intake &&
+      (interpreted.consumption === 'CONFIRMED' ||
+        interpreted.intake.action === 'DELETE' ||
+        interpreted.intake.action === 'CORRECT' ||
+        interpreted.intake.kind === 'WATER_GOAL') &&
+      (!interpreted.workoutEffect || interpreted.workoutEffect === 'NONE')
+    ) {
+      if (
+        interpreted.intake.action === 'DELETE' ||
+        interpreted.intake.action === 'CORRECT'
+      )
+        return {
+          content:
+            interpreted.intake.action === 'DELETE'
+              ? 'Retirei esse registro do acompanhamento. O histórico da correção fica preservado.'
+              : 'Atualizei esse registro com o que você informou. Não contei como uma nova refeição ou um novo volume.',
+          domain:
+            interpreted.action === 'MEAL_REPLY' ? 'NUTRITION' : 'HYDRATION',
+          pending: null,
+          next: null,
+          outcome: 'COMPLETED',
+          evidence: { intake: { ...interpreted.intake } },
+        };
+      if (
+        interpreted.action === 'HYDRATION_REPLY' &&
+        interpreted.intake.kind !== 'MEAL'
+      ) {
+        return {
+          content:
+            'Obrigado por contar. Continue distribuindo a água aos poucos ao longo do dia, sem tentar compensar tudo de uma vez.',
+          domain: 'HYDRATION',
+          pending:
+            pending?.continuation.domain === 'HYDRATION' &&
+            interpreted.intake.kind !== 'WATER_GOAL'
+              ? pending
+              : null,
+          next: null,
+          outcome: 'COMPLETED',
+          evidence: {
+            consumption:
+              interpreted.intake.kind === 'WATER_GOAL'
+                ? 'UNKNOWN'
+                : 'CONFIRMED',
+            hydrationGoal: false,
+            intake: { ...interpreted.intake },
+          },
+        };
+      }
+      if (
+        interpreted.action === 'MEAL_REPLY' &&
+        interpreted.intake.kind === 'MEAL'
+      ) {
+        const mealPending =
+          pending?.continuation.domain === 'NUTRITION' &&
+          interpreted.intake.day !== 'YESTERDAY' &&
+          (pending.continuation.meal === interpreted.meal ||
+            (interpreted.reference === 'PENDING' &&
+              interpreted.meal === 'UNKNOWN'))
+            ? pending
+            : null;
+        const response = await this.mealReply(
+          userId,
+          interpreted.intake.quote,
+          interpreted.meal,
+          interpreted.intake.day === 'YESTERDAY'
+            ? new Date(
+                new CoachProactiveSchedulePolicy()
+                  .localDayRange(
+                    message.timestamp,
+                    message.conversation.user?.preferences?.timezone,
+                  )
+                  .start.getTime() - 1,
+              )
+            : message.timestamp,
+          mealPending,
+          false,
+          message.conversation.user?.preferences?.timezone,
+          'CONFIRMED',
+          interpreted.intake.day === 'YESTERDAY',
+        );
+        return {
+          ...response,
+          evidence: {
+            ...response.evidence,
+            intake: {
+              ...interpreted.intake,
+              ...(mealPending?.receiptMessageId
+                ? { linkedMessageId: mealPending.receiptMessageId }
+                : {}),
+            },
+          },
+        };
+      }
+    }
     if (interpreted.workoutEffect && interpreted.workoutEffect !== 'NONE') {
       return {
         ...safe(),
@@ -591,6 +715,7 @@ export class ConversationContinuationService {
     estimated: boolean,
     timezoneValue?: string | null,
     consumption: ContinuationInterpretation['consumption'] = 'UNKNOWN',
+    historical = false,
   ): Promise<ContinuationReply> {
     if (!estimated && consumption !== 'CONFIRMED')
       return {
@@ -610,7 +735,9 @@ export class ConversationContinuationService {
           reportedContent: description,
         },
       };
-    const current = await this.nutrition.read(userId);
+    const current = historical
+      ? await this.nutrition.read(userId, at)
+      : await this.nutrition.read(userId);
     const clock = new CoachProactiveSchedulePolicy();
     const timezone = clock.timezone(timezoneValue);
     const local = clock.parts(at, timezone);

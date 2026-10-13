@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -44,13 +45,22 @@ export class BillingService {
   }
 
   async getOrCreateInitialInvoice(userId: string) {
-    return this.getOrCreatePayableInvoice(userId);
+    return this.getOrCreatePayableInvoice(userId, new Date(), false);
   }
 
-  async getOrCreatePayableInvoice(userId: string, at = new Date()) {
+  async getOrCreatePayableInvoice(
+    userId: string,
+    at = new Date(),
+    allowActiveRenewal = true,
+  ) {
+    const activeContract = await this.prisma.subscription.findFirst({
+      where: { userId, status: SubscriptionStatus.ACTIVE },
+      select: { id: true },
+    });
     const subscription = await this.prisma.subscription.findFirst({
       where: {
         userId,
+        ...(activeContract ? { id: activeContract.id } : {}),
         status: {
           in: [
             SubscriptionStatus.PENDING_PAYMENT,
@@ -101,6 +111,14 @@ export class BillingService {
       };
     }
 
+    if (
+      !allowActiveRenewal &&
+      subscription.status === SubscriptionStatus.ACTIVE
+    )
+      throw new ConflictException(
+        'Assinatura ativa; uma nova cobrança exige renovação autorizada',
+      );
+
     const latestInvoice = await this.prisma.invoice.findFirst({
       where: { subscriptionId: subscription.id },
       orderBy: { cycleNumber: 'desc' },
@@ -124,7 +142,7 @@ export class BillingService {
         subscriptionId: subscription.id,
         cycleNumber,
         currency: subscription.plan.currency,
-        subtotal: subscription.plan.price.toFixed(2),
+        subtotal: subscription.amount.toFixed(2),
         periodStart: periodStart.toISOString(),
         periodEnd: periodEnd.toISOString(),
         dueAt: dayjs(at).add(1, 'day').toISOString(),

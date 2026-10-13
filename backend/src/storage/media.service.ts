@@ -25,7 +25,7 @@ import {
 import { LOCAL_STORAGE_PROVIDER } from './interfaces/storage-provider.interface';
 import type { StorageProviderAdapter } from './interfaces/storage-provider.interface';
 import { SecureMediaDownloader } from './secure-media-downloader';
-import { validOggAudio } from './ogg-audio.policy';
+import { validOggAudio, oggOpusDurationSeconds } from './ogg-audio.policy';
 
 const ALLOWED_MIME_TYPES: Record<MediaType, ReadonlySet<string>> = {
   [MediaType.IMAGE]: new Set([
@@ -380,6 +380,11 @@ export class MediaService {
     )
       throw new BadRequestException('Audio integrity mismatch');
     this.validateMimeType(MediaType.AUDIO, media.mimeType, content);
+    const duration = oggOpusDurationSeconds(content);
+    if (duration === null)
+      throw new BadRequestException('Audio duration unavailable');
+    if (duration > 120)
+      throw new BadRequestException('Audio exceeds 120 seconds');
     return { mediaFile: media, content };
   }
 
