@@ -12,11 +12,24 @@ import { NUTRITION_CONVERSATIONAL_PROMPTS } from '../src/diet/v2/nutrition-conve
 import { WORKOUT_PLANNING_V2_PROMPT } from '../src/workout/v2/workout-planning-v2.prompt.definition';
 import { COACH_CONVERSATIONAL_QA_V3_PROMPT_SEED } from '../src/conversation/runtime/coach-conversational-qa.prompt.definition';
 
+import { assertDisposableCommercialSeed } from '../src/subscriptions/commercial-plan.policy';
+
 const prisma = new PrismaClient();
 
 async function main() {
+  await prisma.$transaction((transaction) =>
+    assertDisposableCommercialSeed(
+      transaction,
+      process.env.SINGULFIT_SEED_DISPOSABLE_DATABASE_AUTHORIZED === 'true',
+    ),
+  );
   const basicPlan = await prisma.plan.upsert({
-    where: { type: PlanType.BASIC },
+    where: {
+      type_contractVersion: {
+        type: PlanType.BASIC,
+        contractVersion: 'basic-v2',
+      },
+    },
     update: {
       name: 'Basic',
       description: 'Plano essencial da SingulFit.',
@@ -30,6 +43,8 @@ async function main() {
     },
     create: {
       type: PlanType.BASIC,
+      contractVersion: 'basic-v2',
+      isCurrentOffer: false,
       name: 'Basic',
       description: 'Plano essencial da SingulFit.',
       price: new Prisma.Decimal('29.90'),
@@ -43,7 +58,12 @@ async function main() {
   });
 
   const premiumPlan = await prisma.plan.upsert({
-    where: { type: PlanType.PREMIUM },
+    where: {
+      type_contractVersion: {
+        type: PlanType.PREMIUM,
+        contractVersion: 'legacy-v1',
+      },
+    },
     update: {
       name: 'Premium',
       description: 'Plano completo da SingulFit.',
@@ -57,6 +77,8 @@ async function main() {
     },
     create: {
       type: PlanType.PREMIUM,
+      contractVersion: 'legacy-v1',
+      isCurrentOffer: false,
       name: 'Premium',
       description: 'Plano completo da SingulFit.',
       price: new Prisma.Decimal('69.90'),

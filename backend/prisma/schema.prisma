@@ -138,6 +138,7 @@ enum MealAnalysisStatus {
 }
 
 enum MealSource {
+  TEXT_REPORT
   WHATSAPP
   UPLOAD
 }
@@ -1588,7 +1589,9 @@ model AuthSession {
 
 model Plan {
   id                   String          @id @default(uuid())
-  type                 PlanType        @unique
+  type                 PlanType
+  contractVersion      String          @default("legacy-v1")
+  isCurrentOffer       Boolean         @default(false)
   name                 String
   description          String?
   price                Decimal         @db.Decimal(10, 2)
@@ -1604,6 +1607,8 @@ model Plan {
   subscriptions Subscription[]
   entitlements  PlanEntitlement[]
 
+  @@unique([type, contractVersion])
+  @@index([type, isCurrentOffer])
   @@index([isActive])
   @@map("plans")
 }

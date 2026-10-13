@@ -1,4 +1,4 @@
-import { InvoiceStatus, SubscriptionStatus } from '@prisma/client';
+import { InvoiceStatus, Prisma, SubscriptionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { BillingService } from './billing.service';
 import { InvoicesService } from './invoices.service';
@@ -7,6 +7,7 @@ describe('BillingService subscription cycles', () => {
   it('reuses the current open renewal invoice', async () => {
     const subscription = {
       id: 'subscription-id',
+      amount: new Prisma.Decimal('19.90'),
       status: SubscriptionStatus.ACTIVE,
       currentPeriodEnd: new Date('2026-08-31T12:00:00.000Z'),
       plan: { isActive: true, billingIntervalCount: 1 },
@@ -35,6 +36,7 @@ describe('BillingService subscription cycles', () => {
   it('creates the next numbered cycle without replacing the subscription', async () => {
     const subscription = {
       id: 'subscription-id',
+      amount: new Prisma.Decimal('19.90'),
       status: SubscriptionStatus.ACTIVE,
       currentPeriodEnd: new Date('2026-08-31T12:00:00.000Z'),
       plan: {

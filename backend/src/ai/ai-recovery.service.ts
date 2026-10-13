@@ -43,6 +43,8 @@ export class AIRecoveryService {
     try {
       const jobs = await this.prisma.aIJob.findMany({
         where: {
+          // Preserve paid/uncertain audio claims and commercial reservations.
+          type: { not: AIJobType.AUDIO },
           OR: [
             {
               status: AIJobStatus.PENDING,
@@ -104,6 +106,7 @@ export class AIRecoveryService {
       const recoveryDeadline = Date.now() + 30_000;
       let processed = 0;
       for (const job of jobs) {
+        if (job.type === AIJobType.AUDIO) continue;
         if (Date.now() >= recoveryDeadline) break;
         processed += 1;
         const durable = durableTextOperation(job.result);
@@ -207,6 +210,10 @@ export class AIRecoveryService {
 
   private async recoverJob(aiJobId: string, at: Date): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
+      const job = await transaction.aIJob.findUnique({
+        where: { id: aiJobId },
+        select: { startedAt: true },
+      });
       const changed = await transaction.aIJob.updateMany({
         where: {
           id: aiJobId,
@@ -216,6 +223,7 @@ export class AIRecoveryService {
         },
         data: {
           status: AIJobStatus.FAILED,
+          startedAt: job?.startedAt ?? at,
           failedAt: at,
           leaseExpiresAt: null,
           error: 'Job recuperado após expiração do lease',

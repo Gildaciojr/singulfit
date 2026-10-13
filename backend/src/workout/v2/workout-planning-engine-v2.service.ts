@@ -306,6 +306,21 @@ export class WorkoutPlanningEngineV2Service {
         : legacy
           ? legacyKey
           : `workout-planning-v2:${createHash('sha256').update(`${input.userId}:${definition.version}:${WORKOUT_PLANNING_V2_EXECUTION_REVISION}:${identity}`).digest('hex')}`;
+    if (input.recognizedContext.mutation?.kind === 'EXERCISE_SUBSTITUTION') {
+      const key = input.recognizedContext.mutation.sourceActivityKey;
+      const matches = input.previousPlan?.sessions.flatMap((session) =>
+        session.blocks.flatMap((block) =>
+          block.activities.filter((activity) => activity.activityKey === key),
+        ),
+      );
+      if (
+        !input.previousPlan?.generationMetadata.aiJobId ||
+        matches?.length !== 1
+      )
+        throw new BadRequestException(
+          'Workout mutation source/target mismatch',
+        );
+    }
     const job =
       v11 ??
       v10 ??
@@ -315,9 +330,19 @@ export class WorkoutPlanningEngineV2Service {
         type: AIJobType.WORKOUT,
         promptName: definition.name,
         operationKey,
-        ...(prepared.context?.artifactType === 'WEEKLY_PLAN'
-          ? { usageEntitlementCode: WORKOUT_PLAN_GENERATION }
-          : {}),
+        ...(input.previousPlan &&
+        input.recognizedContext.mutation?.kind === 'EXERCISE_SUBSTITUTION' &&
+        input.recognizedContext.mutation.sourcePlanId &&
+        input.recognizedContext.mutation.sourceActivityKey
+          ? {
+              generationScope: {
+                kind: 'TARGETED' as const,
+                sourcePlanId: input.recognizedContext.mutation.sourcePlanId,
+                sourceAIJobId: input.previousPlan.generationMetadata.aiJobId,
+                targetKey: input.recognizedContext.mutation.sourceActivityKey,
+              },
+            }
+          : { usageEntitlementCode: WORKOUT_PLAN_GENERATION }),
       }));
     if (
       job.promptVersion?.version !== definition.version ||

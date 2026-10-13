@@ -80,6 +80,14 @@ export class ReservationService {
       },
     });
 
+    if (
+      existingEvent &&
+      (existingEvent.userId !== input.userId ||
+        existingEvent.quantity !== quantity)
+    ) {
+      throw new ConflictException('Reserva de uso inconsistente para o job');
+    }
+
     if (existingEvent && existingEvent.status !== UsageEventStatus.REVERSED) {
       if (
         existingEvent.userId === input.userId &&

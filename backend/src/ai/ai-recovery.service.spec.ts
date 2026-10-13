@@ -173,6 +173,7 @@ describe('AIRecoveryService', () => {
       expect(prisma.aIJob.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
+            type: { not: AIJobType.AUDIO },
             OR: expect.arrayContaining([
               {
                 status: AIJobStatus.PENDING,
@@ -377,66 +378,71 @@ describe('AIRecoveryService', () => {
     expect(ai.runTextJob).toHaveBeenCalledTimes(2);
     expect(ai.failJob).toHaveBeenCalledTimes(1);
   });
-  it('fails stale jobs, fails their analysis and reverses reservations', async () => {
-    const transaction = {
-      aIJob: {
-        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-      },
-      mealAnalysis: {
-        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-      },
-    };
-    const prisma = {
-      aIJob: {
-        findMany: jest.fn().mockResolvedValue([{ id: 'job-id' }]),
-      },
-      $transaction: jest.fn(
-        (callback: (client: typeof transaction) => unknown) =>
-          callback(transaction),
-      ),
-    };
-    const usageService = {
-      reverseInTransaction: jest.fn().mockResolvedValue([]),
-    };
-    const eventService = {
-      recordInTransaction: jest.fn().mockResolvedValue({}),
-    };
-    const service = new AIRecoveryService(
-      prisma as unknown as PrismaService,
-      usageService as unknown as UsageService,
-      eventService as unknown as EventService,
-      {} as AIService,
-    );
-    const now = new Date('2026-06-10T12:00:00.000Z');
+  it.each([null, new Date('2026-06-10T11:00:00.000Z')])(
+    'fails stale jobs lifecycle-valid, preserving original start %s',
+    async (startedAt) => {
+      const transaction = {
+        aIJob: {
+          findUnique: jest.fn().mockResolvedValue({ startedAt }),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        mealAnalysis: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+      };
+      const prisma = {
+        aIJob: {
+          findMany: jest.fn().mockResolvedValue([{ id: 'job-id' }]),
+        },
+        $transaction: jest.fn(
+          (callback: (client: typeof transaction) => unknown) =>
+            callback(transaction),
+        ),
+      };
+      const usageService = {
+        reverseInTransaction: jest.fn().mockResolvedValue([]),
+      };
+      const eventService = {
+        recordInTransaction: jest.fn().mockResolvedValue({}),
+      };
+      const service = new AIRecoveryService(
+        prisma as unknown as PrismaService,
+        usageService as unknown as UsageService,
+        eventService as unknown as EventService,
+        {} as AIService,
+      );
+      const now = new Date('2026-06-10T12:00:00.000Z');
 
-    await expect(service.recover(now)).resolves.toBe(1);
-    expect(transaction.aIJob.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          status: AIJobStatus.FAILED,
-          leaseExpiresAt: null,
+      await expect(service.recover(now)).resolves.toBe(1);
+      expect(transaction.aIJob.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: AIJobStatus.FAILED,
+            startedAt: startedAt ?? now,
+            leaseExpiresAt: null,
+          }),
         }),
-      }),
-    );
-    expect(transaction.mealAnalysis.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          status: MealAnalysisStatus.FAILED,
+      );
+      expect(transaction.mealAnalysis.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: MealAnalysisStatus.FAILED,
+          }),
         }),
-      }),
-    );
-    expect(usageService.reverseInTransaction).toHaveBeenCalledWith(
-      transaction,
-      'job-id',
-    );
-    expect(eventService.recordInTransaction).toHaveBeenCalledWith(
-      transaction,
-      expect.objectContaining({
-        source: 'AI_WORKER',
-        eventType: 'LEASE_EXPIRED',
-      }),
-    );
-  });
+      );
+      expect(usageService.reverseInTransaction).toHaveBeenCalledWith(
+        transaction,
+        'job-id',
+      );
+      expect(eventService.recordInTransaction).toHaveBeenCalledWith(
+        transaction,
+        expect.objectContaining({
+          source: 'AI_WORKER',
+          eventType: 'LEASE_EXPIRED',
+        }),
+      );
+    },
+  );
   it.each([false, true])(
     'preserves durable responses on restart and settles them only after deadline=%s',
     async (expired) => {

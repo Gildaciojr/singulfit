@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import { Prisma, UsageEventStatus } from '@prisma/client';
+import { ConflictException, Injectable } from '@nestjs/common';
+import { AIJobType, Prisma, UsageEventStatus } from '@prisma/client';
 import { IMAGE_ANALYSIS } from '../entitlements/entitlement.constants';
 import { EntitlementsService } from '../entitlements/entitlements.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -79,8 +79,12 @@ export class UsageService {
       },
       select: {
         userId: true,
+        type: true,
       },
     });
+
+    // Neither confirm nor release post-upgrade audio quota without its ledger.
+    if (job?.type === AIJobType.AUDIO) return [];
 
     if (!job) {
       return [];
@@ -105,7 +109,9 @@ export class UsageService {
     });
 
     for (const event of events) {
-      const bucket = await transaction.usageBucket.findFirstOrThrow({
+      if (event.userId !== job.userId)
+        throw new ConflictException('Usage event ownership mismatch');
+      const buckets = await transaction.usageBucket.findMany({
         where: {
           userId: event.userId,
           entitlementCode: event.entitlementCode,
@@ -116,7 +122,12 @@ export class UsageService {
             gt: event.createdAt,
           },
         },
+        take: 2,
       });
+
+      if (buckets.length !== 1)
+        throw new ConflictException('Ambiguous usage bucket');
+      const bucket = buckets[0];
 
       await transaction.usageBucket.update({
         where: {

@@ -8,7 +8,11 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { AIJobStatus, AIJobType, MessageType, Prisma } from '@prisma/client';
 import { ReservationService } from '../entitlements/reservation.service';
-import type { CommercialUsageEntitlementCode } from '../entitlements/entitlement.constants';
+import {
+  NUTRITION_PLAN_GENERATION,
+  WORKOUT_PLAN_GENERATION,
+  type CommercialUsageEntitlementCode,
+} from '../entitlements/entitlement.constants';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
 import { EventBusService } from '../event-bus/event-bus.service';
@@ -43,6 +47,16 @@ export interface CreateStandaloneAIJobInput {
   readonly operationKey?: string;
   readonly recoverExpiredOperation?: boolean;
   readonly usageEntitlementCode?: CommercialUsageEntitlementCode;
+  /** Only producers that enforce a non-plan output or preserve the source plan
+   * outside a specific target may request this internal exemption. */
+  readonly generationScope?:
+    | Readonly<{ kind: 'NON_PLAN' }>
+    | Readonly<{
+        kind: 'TARGETED';
+        sourcePlanId: string;
+        sourceAIJobId: string;
+        targetKey: string;
+      }>;
 }
 
 interface RunTextJobInput {
@@ -393,13 +407,68 @@ export class AIService {
     input: CreateStandaloneAIJobInput,
     aiJobId: string,
   ): Promise<void> {
-    if (!input.usageEntitlementCode) return;
+    const planEntitlement =
+      input.type === AIJobType.DIET
+        ? NUTRITION_PLAN_GENERATION
+        : input.type === AIJobType.WORKOUT
+          ? WORKOUT_PLAN_GENERATION
+          : undefined;
+    if (input.generationScope && !planEntitlement)
+      throw new BadRequestException('Escopo de geração incompatível');
+    if (
+      input.generationScope?.kind === 'TARGETED' &&
+      (!input.generationScope.sourcePlanId.trim() ||
+        !input.generationScope.sourceAIJobId?.trim() ||
+        !input.generationScope.targetKey.trim())
+    )
+      throw new BadRequestException('Alvo da alteração ausente');
+    if (
+      planEntitlement &&
+      input.usageEntitlementCode &&
+      input.usageEntitlementCode !== planEntitlement
+    )
+      throw new BadRequestException('Entitlement de geração incompatível');
+    if (
+      input.generationScope?.kind === 'NON_PLAN' &&
+      input.type !== AIJobType.DIET
+    )
+      throw new BadRequestException('Resposta sem plano incompatível');
+    if (input.generationScope?.kind === 'TARGETED') {
+      const where = {
+        id: input.generationScope.sourcePlanId,
+        userId: input.userId,
+        status: 'ACTIVE' as const,
+        aiJobId: input.generationScope.sourceAIJobId,
+      };
+      const source =
+        input.type === AIJobType.WORKOUT
+          ? await transaction.workoutPlan.findFirst({
+              where,
+              select: { id: true },
+            })
+          : ((await transaction.nutritionPlanV2.findFirst({
+              where,
+              select: { id: true },
+            })) ??
+            (await transaction.dietPlan.findFirst({
+              where,
+              select: { id: true },
+            })));
+      if (!source)
+        throw new BadRequestException(
+          'Plano de origem não autorizado para alteração pontual',
+        );
+    }
+    const entitlementCode = input.generationScope
+      ? undefined
+      : (planEntitlement ?? input.usageEntitlementCode);
+    if (!entitlementCode) return;
     await this.reservationService.reserveCommercialUsageInTransaction(
       transaction,
       {
         userId: input.userId,
         aiJobId,
-        entitlementCode: input.usageEntitlementCode,
+        entitlementCode,
       },
     );
   }

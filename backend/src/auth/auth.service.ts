@@ -36,23 +36,28 @@ export class AuthService {
       AuthService.PASSWORD_SALT_ROUNDS,
     );
 
-    const user = await this.usersService.createUser({
-      name: data.name,
-      phone: data.phone,
-      email: data.email,
-      passwordHash,
-      cpf: data.cpf,
-      address: data.address,
-      city: data.city,
-      state: data.state,
-      zipCode: data.zipCode,
-    });
-
-    const subscription =
-      await this.subscriptionsService.createPendingSubscription(
-        user.id,
-        data.planType,
+    const { user, result: subscription } =
+      await this.usersService.createUserWith(
+        {
+          name: data.name,
+          phone: data.phone,
+          email: data.email,
+          passwordHash,
+          cpf: data.cpf,
+          address: data.address,
+          city: data.city,
+          state: data.state,
+          zipCode: data.zipCode,
+        },
+        (transaction, userId) =>
+          this.subscriptionsService.createPendingSubscriptionInTransaction(
+            transaction,
+            userId,
+            data.planType,
+            data.offerPlanId,
+          ),
       );
+
     const authenticatedUser = await this.usersService.updateLastLoginAt(
       user.id,
     );

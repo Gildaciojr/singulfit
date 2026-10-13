@@ -72,6 +72,7 @@ describe('AIService standalone operation key', () => {
   });
 
   it('recovers an abandoned idempotent continuation job without creating another job', async () => {
+    const reserveCommercialUsageInTransaction = jest.fn().mockResolvedValue({});
     const abandoned = {
       id: 'job-id',
       userId: 'user-id',
@@ -116,7 +117,10 @@ describe('AIService standalone operation key', () => {
         },
         { provide: OpenAIGateway, useValue: {} },
         { provide: AIUsageService, useValue: {} },
-        { provide: ReservationService, useValue: {} },
+        {
+          provide: ReservationService,
+          useValue: { reserveCommercialUsageInTransaction },
+        },
         { provide: UsageService, useValue: {} },
         {
           provide: ConfigService,
@@ -143,6 +147,17 @@ describe('AIService standalone operation key', () => {
           leaseExpiresAt: null,
           providerResponseId: null,
         }),
+      }),
+    );
+    expect(
+      reserveCommercialUsageInTransaction.mock.calls[0][1].quantity ?? 1,
+    ).toBe(1);
+    expect(reserveCommercialUsageInTransaction).toHaveBeenCalledWith(
+      transaction,
+      expect.objectContaining({
+        userId: 'user-id',
+        aiJobId: 'job-id',
+        entitlementCode: 'NUTRITION_PLAN_GENERATION',
       }),
     );
     expect(transaction.aIJob.create).not.toHaveBeenCalled();

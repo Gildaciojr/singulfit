@@ -72,8 +72,9 @@ export class AudioConversationService {
     // Never interpret wildcard, contact information or a malformed entry as
     // global permission, even when another entry is a valid internal ID.
     if (ids.some((id) => !isUUID(id))) return false;
-    if (normalizedMode === 'CANARY') return ids.includes(userId.toLowerCase());
-    return normalizedMode === 'GLOBAL' && globalAuthorization === 'true';
+    // Contingency runtime deliberately suspends audio effects. The newer ledger
+    // must be reconciled by the release runtime, never by this older processor.
+    return false;
   }
 
   async process(input: {

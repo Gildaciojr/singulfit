@@ -50,9 +50,9 @@ describe('UsageService', () => {
         update: jest.fn().mockResolvedValue(event),
       },
       usageBucket: {
-        findFirstOrThrow: jest.fn().mockResolvedValue({
-          id: 'bucket-id',
-        }),
+        findMany: jest
+          .fn()
+          .mockResolvedValue([{ id: 'bucket-id', reserved: 1, used: 0 }]),
         update: jest.fn().mockResolvedValue({
           id: 'bucket-id',
         }),

@@ -4,6 +4,7 @@ import {
   IsEnum,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   MaxLength,
   MinLength,
@@ -28,6 +29,10 @@ export class RegisterDto {
 
   @IsEnum(PlanType)
   planType!: PlanType;
+
+  @IsOptional()
+  @IsUUID()
+  offerPlanId?: string;
 
   @IsOptional()
   @IsString()

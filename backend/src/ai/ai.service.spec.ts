@@ -335,7 +335,9 @@ describe('AIService', () => {
           callback(transaction),
       ),
     };
+    const reserveCommercialUsageInTransaction = jest.fn().mockResolvedValue({});
     const service = createService({
+      reservationService: { reserveCommercialUsageInTransaction },
       prisma,
       promptService: {
         getActive: jest
@@ -351,6 +353,17 @@ describe('AIService', () => {
         promptName: 'diet_generation_weight_loss',
       }),
     ).resolves.toBe(createdJob);
+    expect(
+      reserveCommercialUsageInTransaction.mock.calls[0][1].quantity ?? 1,
+    ).toBe(1);
+    expect(reserveCommercialUsageInTransaction).toHaveBeenCalledWith(
+      transaction,
+      expect.objectContaining({
+        userId: 'user-id',
+        aiJobId: 'diet-job-id',
+        entitlementCode: 'NUTRITION_PLAN_GENERATION',
+      }),
+    );
     expect(transaction.$queryRaw).toHaveBeenCalled();
     expect(transaction.aIJob.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({

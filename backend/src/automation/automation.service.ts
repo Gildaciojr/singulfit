@@ -605,6 +605,16 @@ export class AutomationService {
         }
 
         const context = current.context;
+        // Preserve factual-weekly pending messages for the newer dispatcher.
+        if (
+          typeof context === 'object' &&
+          context !== null &&
+          !Array.isArray(context) &&
+          typeof context.weeklyKey === 'string' &&
+          context.weeklyKey.startsWith('coach-weekly-v1:')
+        ) {
+          return { shouldSend: false as const, message: current };
+        }
         if (
           typeof context === 'object' &&
           context !== null &&
