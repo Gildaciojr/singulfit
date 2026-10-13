@@ -1,38 +1,27 @@
-"use client";
-
 import { useCommercialOffers } from "@/hooks/useCommercialOffers";
-
-import { motion } from "framer-motion";
 import {
   ArrowRight,
   BadgeCheck,
   Check,
   Lock,
-  ShieldCheck,
+  MessageCircle,
   Sparkles,
 } from "lucide-react";
-
-import { useIsMobile } from "@/hooks/use-mobile";
 import { PricingPlan } from "@/engine/landing.types";
 import { trackEvent } from "@/lib/tracking";
-import { MessageCircle } from "lucide-react";
 
 type Props = {
-  data: {
-    monthly: PricingPlan;
-    annual: PricingPlan;
-  };
+  data: { monthly: PricingPlan; annual: PricingPlan };
 };
 
 function FeatureRow({ label }: { label: string }) {
   return (
-    <div className="flex items-start gap-3">
-      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-800">
-        <Check className="h-3.5 w-3.5" />
-      </div>
-
-      <span className="text-[14px] leading-relaxed text-zinc-600">{label}</span>
-    </div>
+    <li className="flex items-start gap-2.5">
+      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-800">
+        <Check aria-hidden="true" className="h-3.5 w-3.5" />
+      </span>
+      <span className="min-w-0 text-sm leading-6 text-zinc-700">{label}</span>
+    </li>
   );
 }
 
@@ -47,521 +36,180 @@ function PlanCard({
 }) {
   const ctaLabel =
     plan.cta?.text ?? (featured ? "Entrar para o Premium" : "Começar agora");
-
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 22 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, amount: 0.25 }}
-      transition={{ duration: 0.45 }}
-      className={`
-      relative
-      flex
-      h-full
-      flex-col
-      overflow-hidden
-      rounded-[2.25rem]
-      border
-      bg-white
-      transition-all
-      duration-500
-      ${
-        featured
-          ? `
-            -translate-y-2
-            border-emerald-800/20
-            p-5
-            sm:p-8
-            shadow-[0_50px_120px_-40px_rgba(6,78,59,0.30)]
-            ring-1
-            ring-emerald-800/10
-          `
-          : `
-             border-zinc-200/70
-             bg-[linear-gradient(180deg,#fbfbfa_0%,#f7f8f7_100%)]
-            p-4
-            sm:p-5
-            shadow-[0_25px_70px_-45px_rgba(15,23,42,0.12)]
-          `
-      }
-    `}
+    <article
+      data-plan-type={planType}
+      aria-labelledby={`pricing-${planType}-title`}
+      className={`relative flex min-w-0 flex-col rounded-2xl border border-t-[3px] p-5 transition-[border-color,box-shadow] duration-200 motion-reduce:transition-none sm:p-6 ${featured ? "border-emerald-700/50 border-t-emerald-800 bg-[#f3f9f5] shadow-[0_16px_40px_-24px_rgba(6,78,59,0.3)] [@media(hover:hover)]:hover:border-emerald-700" : "border-zinc-200 border-t-emerald-200 bg-white shadow-[0_12px_30px_-24px_rgba(6,78,59,0.2)] [@media(hover:hover)]:hover:border-emerald-300"}`}
     >
       {featured && (
-        <>
-          <div
-            className="
-        absolute
-        inset-0
-        bg-[radial-gradient(circle_at_top,rgba(16,185,129,0.14),transparent_55%)]
-        pointer-events-none
-      "
-          />
-
-          <div
-            className="
-        relative
-        mb-5
-        flex
-        w-full
-        items-center
-        gap-3
-        self-start
-        rounded-full
-        border
-        border-emerald-300/40
-        bg-gradient-to-r
-        from-emerald-900
-        via-emerald-800
-        to-emerald-700
-        px-3
-        sm:px-4
-        py-2
-        text-white
-        shadow-[0_18px_45px_-18px_rgba(6,78,59,0.55)]
-      "
-          >
-            <div
-              className="
-          flex
-          h-7
-          w-7
-          items-center
-          justify-center
-          rounded-full
-          bg-white/15
-        "
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-            </div>
-
-            <div className="leading-none">
-              <div className="text-[10px] font-black uppercase tracking-[0.22em]">
-                Melhor Escolha
-              </div>
-
-              <div className="mt-1 text-[11px] font-medium text-white/80">
-                Preferido pelos usuários
-              </div>
-            </div>
+        <div className="mb-4 inline-flex w-fit items-center gap-2 rounded-xl bg-emerald-900 px-3 py-2 text-white">
+          <Sparkles aria-hidden="true" className="h-4 w-4 shrink-0" />
+          <div>
+            <p className="text-xs font-bold">Melhor Escolha</p>
+            <p className="mt-0.5 text-xs leading-5 text-emerald-100">
+              Preferido pelos usuários
+            </p>
           </div>
-        </>
+        </div>
       )}
-
-      <div className="relative mb-6">
-        <div
-          className={`
-      mb-5
-      inline-flex
-      items-center
-      rounded-full
-      px-3.5
-      py-1.5
-      text-[11px]
-      font-bold
-      uppercase
-      tracking-[0.18em]
-      ${
-        featured
-          ? "bg-emerald-50 text-emerald-900 ring-1 ring-emerald-200"
-          : "border border-zinc-200 bg-zinc-100/80 text-zinc-600"
-      }
-    `}
+      <div>
+        <span
+          className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${featured ? "border-emerald-200 bg-white text-emerald-900" : "border-emerald-100 bg-emerald-50 text-emerald-800"}`}
         >
           {featured ? "Experiência Premium" : "Plano Inicial"}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
+        </span>
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
           <h3
-            className={`
-        font-black
-        tracking-[-0.05em]
-        text-zinc-950
-        ${featured ? "text-[2.15rem] sm:text-[2.8rem]" : "text-[1.75rem] sm:text-[1.9rem]"}
-      `}
+            id={`pricing-${planType}-title`}
+            className="min-w-0 break-words text-2xl font-black tracking-[-0.04em] text-zinc-950 sm:text-3xl"
           >
             {plan.name}
           </h3>
-
           {featured && (
-            <div
-              className="
-          rounded-full
-          bg-emerald-100
-          px-3
-          py-1
-          text-[11px]
-          font-bold
-          uppercase
-          tracking-[0.12em]
-          text-emerald-900
-        "
-            >
+            <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-900">
               Melhor custo-benefício
-            </div>
+            </span>
           )}
         </div>
-
-        <p
-          className="
-      mt-4
-      min-h-[48px]
-      text-[14px]
-      leading-7
-      text-zinc-600
-    "
-        >
+        <p className="mt-3 text-sm leading-6 text-zinc-600">
           {plan.description}
         </p>
       </div>
-
-      <div className="relative mb-6">
-        <div className="flex flex-wrap items-end gap-x-2 gap-y-1">
-          <span
-            className={`
-        font-black
-        tracking-[-0.07em]
-        text-zinc-950
-        ${featured ? "text-[3.2rem] sm:text-[4.4rem]" : "text-[2.6rem] sm:text-[3rem]"}
-      `}
-          >
-            {plan.price > 0 ? "R$ " + plan.price.toFixed(2).replace(".", ",") : "Indisponível"}
-          </span>
-
-          <span
-            className={`
-        pb-2
-        font-medium
-        ${featured ? "text-lg text-emerald-800" : "text-base text-zinc-500"}
-      `}
-          >
-            {plan.interval}
-          </span>
-        </div>
-
-        {!featured && (
-          <div className="mt-2 text-xs text-zinc-500">
-          </div>
-        )}
+      <div className="mt-4 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span
+          className={`min-w-0 break-words font-black leading-tight tracking-[-0.05em] text-zinc-950 ${plan.price > 0 ? (featured ? "text-[2.75rem] sm:text-5xl" : "text-[2.5rem] sm:text-[2.75rem]") : "text-2xl"}`}
+        >
+          {plan.price > 0
+            ? "R$ " + plan.price.toFixed(2).replace(".", ",")
+            : "Indisponível"}
+        </span>
+        <span className="text-sm font-medium text-zinc-600">
+          {plan.interval}
+        </span>
       </div>
-
-      <div
-        className={`
-    mt-6
-    mb-6
-    h-px
-    w-full
-    ${
-      featured
-        ? "bg-gradient-to-r from-transparent via-emerald-300 to-transparent"
-        : "bg-zinc-200"
-    }
-  `}
-      />
-
-      <div className="space-y-2.5">
+      <ul className="mt-5 space-y-2.5 border-t border-emerald-100 pt-5">
         {plan.features.map((feature, index) => (
           <FeatureRow key={index} label={feature.name} />
         ))}
-      </div>
-
+      </ul>
       {featured && (
-        <div
-          className="
-      mt-6
-      rounded-2xl
-      border
-      border-emerald-200
-      bg-emerald-50/80
-      px-4
-      py-3
-    "
-        >
-          <div className="flex items-center gap-2">
-            <BadgeCheck className="h-4 w-4 text-emerald-800" />
-
-            <span className="text-xs font-bold text-emerald-900">
-              Inclui todos os recursos do Plano Básico
-            </span>
-          </div>
+        <div className="mt-4 flex items-start gap-2 rounded-xl border border-emerald-200 bg-white/70 px-3 py-2.5">
+          <BadgeCheck
+            aria-hidden="true"
+            className="mt-0.5 h-4 w-4 shrink-0 text-emerald-800"
+          />
+          <span className="text-xs font-semibold leading-5 text-emerald-900">
+            Inclui todos os recursos do Plano Básico
+          </span>
         </div>
       )}
-
       <div className="flex-1" />
-      <motion.a
+      <a
         href={plan.cta?.href ?? "#pricing"}
-        onClick={() =>
-          trackEvent("cta_click", {
-            plan: planType,
-          })
-        }
-        whileHover={{ y: -2 }}
-        whileTap={{ scale: 0.985 }}
-        className={`
-    group
-    mt-8
-    flex
-    h-12
-    w-full
-    items-center
-    justify-center
-    gap-2
-    rounded-2xl
-    px-6
-    text-[15px]
-    font-bold
-    transition-all
-    duration-300
-    ${
-      featured
-        ? `
-          bg-gradient-to-r
-          from-emerald-900
-          via-emerald-800
-          to-emerald-900
-          text-white
-          shadow-[0_25px_55px_-20px_rgba(6,78,59,0.60)]
-          hover:shadow-[0_35px_70px_-20px_rgba(6,78,59,0.70)]
-        `
-        : `
-          border
-          border-zinc-200
-          bg-white
-          text-zinc-950
-          hover:border-emerald-500
-          hover:bg-emerald-50
-        `
-    }
-  `}
+        onClick={() => trackEvent("cta_click", { plan: planType })}
+        className={`mt-5 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-center text-sm font-bold leading-5 transition-[background-color,border-color,box-shadow] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2 motion-reduce:transition-none ${featured ? "bg-emerald-900 text-white shadow-[0_8px_20px_-12px_rgba(6,78,59,0.4)] hover:bg-emerald-950" : "border border-emerald-200 bg-emerald-50 text-emerald-950 hover:border-emerald-400 hover:bg-emerald-100"}`}
       >
         {ctaLabel}
-
-        <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
-      </motion.a>
-    </motion.div>
+        <ArrowRight aria-hidden="true" className="h-4 w-4 shrink-0" />
+      </a>
+    </article>
   );
 }
 
 export default function Pricing({ data }: Props) {
-  const isMobile = useIsMobile();
   const offers = useCommercialOffers();
-  function presented(type: "BASIC" | "PREMIUM", original: PricingPlan): PricingPlan {
+  function presented(
+    type: "BASIC" | "PREMIUM",
+    original: PricingPlan,
+  ): PricingPlan {
     const offer = offers.data?.[type];
-    return { ...original, name: offer?.displayName ?? original.name,
-      price: offer?.price ?? 0, description: offer?.description ?? "Oferta indisponível no momento.",
+    return {
+      ...original,
+      name: offer?.displayName ?? original.name,
+      price: offer?.price ?? 0,
+      description: offer?.description ?? "Oferta indisponível no momento.",
       features: offer?.features.map((name) => ({ name, included: true })) ?? [],
-      cta: offer ? { text: "Conhecer esta oferta", href: "/checkout/" + offer.routeParam } : { text: "Oferta indisponível", href: "#pricing" } };
+      cta: offer
+        ? {
+            text: "Conhecer esta oferta",
+            href: "/checkout/" + offer.routeParam,
+          }
+        : { text: "Oferta indisponível", href: "#pricing" },
+    };
   }
   const monthly = presented("BASIC", data.monthly);
   const annual = presented("PREMIUM", data.annual);
 
   return (
-    <section id="pricing" className="relative overflow-hidden py-16 lg:py-20">
-      <div className="absolute inset-0 -z-20 bg-[radial-gradient(800px_500px_at_50%_0%,rgba(34,120,84,0.08),transparent_70%)]" />
-
-      <div className="absolute inset-0 -z-10 opacity-[0.03] bg-[linear-gradient(to_right,#111_1px,transparent_1px),linear-gradient(to_bottom,#111_1px,transparent_1px)] bg-[size:56px_56px]" />
-
-      <div className="container mx-auto max-w-7xl px-6">
-        {/* HEADER */}
-
-        <motion.div
-          initial={isMobile ? false : { opacity: 0, y: 24 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, amount: 0.25 }}
-          transition={{ duration: 0.45 }}
-          className="mx-auto mb-16 max-w-4xl text-center"
-        >
-          <div
-            className="
-              inline-flex
-              items-center
-              rounded-full
-              border
-              border-emerald-200
-              bg-white/80
-              px-5
-              py-2
-              text-[11px]
-              font-bold
-              uppercase
-              tracking-[0.22em]
-              text-emerald-900
-              backdrop-blur-xl
-              shadow-sm
-            "
-          >
+    <section
+      id="pricing"
+      aria-labelledby="pricing-title"
+      className="bg-[#f8f7f3] py-12 sm:py-16"
+    >
+      <div className="mx-auto w-full max-w-[1040px] px-4 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-2xl text-center">
+          <span className="inline-flex rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-900">
             Planos
-          </div>
-
+          </span>
           <h2
-            className="
-              mt-7
-              text-5xl
-              font-black
-              tracking-[-0.06em]
-              text-zinc-950
-              md:text-7xl
-            "
+            id="pricing-title"
+            className="mt-4 text-[clamp(1.875rem,3.4vw,2.75rem)] font-black leading-[1.12] tracking-[-0.04em] text-zinc-950"
           >
             Escolha sua evolução.
           </h2>
-
-          <p
-            className="
-              mx-auto
-              mt-7
-              max-w-2xl
-              text-lg
-              leading-8
-              text-zinc-600
-            "
-          >
+          <p className="mx-auto mt-3 max-w-xl text-base leading-7 text-zinc-600">
             Comece hoje e tenha acompanhamento nutricional inteligente
             diretamente no WhatsApp.
           </p>
-        </motion.div>
-
-        {/* BENEFÍCIOS */}
-
-        <motion.div
-          initial={isMobile ? false : { opacity: 0, y: 18 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.45 }}
-          className="
-            mx-auto
-            mb-12
-            flex
-            flex-wrap
-            items-center
-            justify-center
-            gap-4
-          "
+        </div>
+        <ul
+          aria-label="Resumo da experiência"
+          className="mx-auto mt-5 flex max-w-2xl flex-wrap items-center justify-center gap-x-4 gap-y-2 text-sm text-zinc-700"
         >
-          <div
-            className="
-              flex
-              items-center
-              gap-3
-              rounded-full
-              border
-              border-zinc-200
-              bg-white/80
-              px-5
-              py-3
-              backdrop-blur-xl
-              shadow-sm
-            "
-          >
-            <Sparkles className="h-4 w-4 text-emerald-800" />
-
-            <span className="text-sm font-semibold text-zinc-700">
-              Acesso imediato
-            </span>
-          </div>
-
-          <div
-            className="
-              flex
-              items-center
-              gap-3
-              rounded-full
-              border
-              border-zinc-200
-              bg-white/80
-              px-5
-              py-3
-              backdrop-blur-xl
-              shadow-sm
-            "
-          >
-            <Lock className="h-4 w-4 text-emerald-800" />
-
-            <span className="text-sm font-semibold text-zinc-700">
-              Pagamento seguro
-            </span>
-          </div>
-
-          <div
-            className="
-              flex
-              items-center
-              gap-3
-              rounded-full
-              border
-              border-zinc-200
-              bg-white/80
-              px-5
-              py-3
-              backdrop-blur-xl
-              shadow-sm
-            "
-          >
-            <BadgeCheck className="h-4 w-4 text-emerald-800" />
-
-            <span className="text-sm font-semibold text-zinc-700">
-              Sem burocracia
-            </span>
-          </div>
-        </motion.div>
-
-        {/* PLANOS */}
-
-        <div className="grid gap-8 lg:grid-cols-2 lg:items-start">
+          <li className="flex items-center gap-2">
+            <Sparkles
+              aria-hidden="true"
+              className="h-4 w-4 shrink-0 text-emerald-800"
+            />{" "}
+            Acesso imediato
+          </li>
+          <li className="flex items-center gap-2">
+            <Lock
+              aria-hidden="true"
+              className="h-4 w-4 shrink-0 text-emerald-800"
+            />{" "}
+            Pagamento seguro
+          </li>
+          <li className="flex items-center gap-2">
+            <BadgeCheck
+              aria-hidden="true"
+              className="h-4 w-4 shrink-0 text-emerald-800"
+            />{" "}
+            Sem burocracia
+          </li>
+        </ul>
+        <div className="mx-auto mt-7 grid w-full max-w-[430px] min-w-0 gap-5 md:max-w-[900px] md:grid-cols-2 md:items-center md:gap-6">
           <PlanCard plan={monthly} planType="basic" />
-
           <PlanCard plan={annual} planType="premium" featured />
         </div>
-
-        {/* WHATSAPP */}
-
-        <motion.div
-          initial={isMobile ? false : { opacity: 0, y: 16 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.4 }}
-          className="
-            mx-auto
-            mt-14
-            flex
-            w-full
-            max-w-xl
-            items-center
-            gap-4
-            rounded-full
-            border
-            border-zinc-200/80
-            bg-white/85
-            px-5
-            py-3
-            backdrop-blur-xl
-            shadow-[0_15px_40px_-25px_rgba(0,0,0,0.15)]
-          "
-        >
-          <div
-            className="
-              flex
-              h-10
-              w-10
-              shrink-0
-              items-center
-              justify-center
-              rounded-full
-              bg-[#25D366]/10
-            "
-          >
-            <MessageCircle className="h-5 w-5 text-[#25D366]" />
-          </div>
-
+        <div className="mx-auto mt-6 flex max-w-xl items-start justify-center gap-3 rounded-xl border border-emerald-100 bg-white/70 p-3 sm:p-4">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-50">
+            <MessageCircle
+              aria-hidden="true"
+              className="h-4 w-4 text-emerald-800"
+            />
+          </span>
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-zinc-900">
+            <p className="text-sm font-semibold text-zinc-950">
               WhatsApp integrado
-            </div>
-
-            <div className="mt-1 text-[12px] leading-relaxed text-zinc-500">
-              Nutrição inteligente • Acompanhamento no WhatsApp • Sua rotina, seu ritmo
-            </div>
+            </p>
+            <p className="mt-1 text-sm leading-6 text-zinc-600">
+              Nutrição inteligente • Acompanhamento no WhatsApp • Sua rotina,
+              seu ritmo
+            </p>
           </div>
-        </motion.div>
+        </div>
       </div>
     </section>
   );
