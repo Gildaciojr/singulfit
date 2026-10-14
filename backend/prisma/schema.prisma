@@ -816,7 +816,9 @@ enum PilotGoStatus {
 }
 
 model User {
-  id String @id @default(uuid())
+  id                       String                  @id @default(uuid())
+  onboardingIngressCounter Int                     @default(0)
+  orderedIngressEvents     EvolutionInboundEvent[]
 
   // IDENTIFICAÇÃO
   phone     String  @unique
@@ -1791,6 +1793,10 @@ model EvolutionInboundEvent {
   id                String        @id @default(uuid())
   instanceName      String
   externalMessageId String
+  orderingUserId    String?
+  admissionSequence Int?
+  turnProcessedAt   DateTime?
+  orderingUser      User?         @relation(fields: [orderingUserId], references: [id], onDelete: Cascade)
   payload           Json
   status            WebhookStatus @default(RECEIVED)
   attempts          Int           @default(0)
@@ -1802,6 +1808,8 @@ model EvolutionInboundEvent {
   updatedAt         DateTime      @updatedAt
 
   @@unique([instanceName, externalMessageId])
+  @@unique([orderingUserId, admissionSequence])
+  @@index([orderingUserId, turnProcessedAt, admissionSequence])
   @@index([status, createdAt])
   @@index([status, leaseExpiresAt])
   @@map("evolution_inbound_events")

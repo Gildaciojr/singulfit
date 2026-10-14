@@ -4,8 +4,59 @@ import { OutboxDispatcherService } from './outbox-dispatcher.service';
 import { OutboxService } from './outbox.service';
 import { INTERNAL_EVENT } from './event-bus.constants';
 import { DurableTextPendingError } from '../ai/durable-text-operation.contract';
+import { DeliveryPendingError } from './delivery-pending.error';
 
 describe('OutboxDispatcherService', () => {
+  it.each([
+    INTERNAL_EVENT.ACTIVATION_ONBOARDING_RESPONSE_REQUESTED,
+    INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED,
+  ])(
+    'does not mark a pending delivery/dependency PROCESSED or exhaust retries: %s',
+    async (eventType) => {
+      const claimed = { ...event(), eventType, createdAt: new Date() };
+      const registry = new EventHandlerRegistry();
+      registry.register(
+        eventType,
+        jest
+          .fn()
+          .mockRejectedValue(new DeliveryPendingError('pending-outbound')),
+      );
+      const outbox = {
+        claimBatch: jest.fn().mockResolvedValue([claimed]),
+        markProcessed: jest.fn(),
+        markFailed: jest.fn(),
+        deferDelivery: jest.fn().mockResolvedValue(true),
+      };
+      await new OutboxDispatcherService(
+        outbox as unknown as OutboxService,
+        registry,
+      ).drain();
+      expect(outbox.deferDelivery).toHaveBeenCalledWith(claimed);
+      expect(outbox.markProcessed).not.toHaveBeenCalled();
+      expect(outbox.markFailed).not.toHaveBeenCalled();
+    },
+  );
+  it('signals exhausted dependency waiting through the existing failure/dead-letter path', async () => {
+    const claimed = {
+      ...event(),
+      createdAt: new Date(Date.now() - 86_400_001),
+    };
+    const registry = new EventHandlerRegistry();
+    const failure = new DeliveryPendingError('expired-dependency');
+    registry.register(claimed.eventType, jest.fn().mockRejectedValue(failure));
+    const outbox = {
+      claimBatch: jest.fn().mockResolvedValue([claimed]),
+      markProcessed: jest.fn(),
+      markFailed: jest.fn().mockResolvedValue(true),
+      deferDelivery: jest.fn(),
+    };
+    await new OutboxDispatcherService(
+      outbox as unknown as OutboxService,
+      registry,
+    ).drain();
+    expect(outbox.markFailed).toHaveBeenCalledWith(claimed, failure);
+    expect(outbox.deferDelivery).not.toHaveBeenCalled();
+  });
   it('defers async workout polling without failure or consuming the failure retry budget', async () => {
     const claimed = {
       ...event(),

@@ -22,8 +22,99 @@ import { SubscriptionLifecycleService } from '../subscriptions/subscription-life
 import { CoachProactiveResponseService } from '../automation/coach-proactive-response.service';
 import type { ConversationContinuationService } from '../conversation/runtime/conversation-continuation.service';
 import type { AudioConversationService } from '../audio/audio-conversation.service';
+import { DeliveryPendingError } from './delivery-pending.error';
 
 describe('IntegrationEventHandlersService', () => {
+  it.each(['SENDING', 'FAILED', 'SENT', 'DELIVERED'])(
+    'does not start acquisition after an unconfirmed official send: %s',
+    async (status) => {
+      const registry = new EventHandlerRegistry();
+      const sender = { sendText: jest.fn().mockResolvedValue({ status }) };
+      const acquisition = acquisitionRollout();
+      const args = [
+        registry,
+        {},
+        {},
+        {},
+        {},
+        {},
+        sender,
+        {},
+        {},
+        {},
+        {},
+        acquisition,
+        {},
+      ] as const;
+      new IntegrationEventHandlersService(
+        ...(args as unknown as ConstructorParameters<
+          typeof IntegrationEventHandlersService
+        >),
+      ).onModuleInit();
+      const handler = registry.get(INTERNAL_EVENT.OUTBOUND_MESSAGE_REQUESTED);
+      if (!handler) throw new Error('Handler missing');
+      const result = handler(
+        outboxEvent(INTERNAL_EVENT.OUTBOUND_MESSAGE_REQUESTED, {
+          outboundMessageId: 'outbound-id',
+          responseType: ResponseType.PROFILE_ACQUISITION,
+        }),
+      );
+      if (status === 'SENDING')
+        await expect(result).rejects.toBeInstanceOf(DeliveryPendingError);
+      else if (status === 'FAILED')
+        await expect(result).rejects.toThrow('Entrega não confirmada');
+      else await expect(result).resolves.toBeUndefined();
+      expect(acquisition.authorizeQuestionSend).toHaveBeenCalledWith(
+        'outbound-id',
+      );
+      if (status === 'SENT' || status === 'DELIVERED')
+        expect(acquisition.afterOutboundSent).toHaveBeenCalledWith(
+          'outbound-id',
+        );
+      else expect(acquisition.afterOutboundSent).not.toHaveBeenCalled();
+    },
+  );
+  it.each(['SENDING', 'FAILED', 'SENT', 'DELIVERED'])(
+    'only confirms actual completed onboarding delivery: %s',
+    async (status) => {
+      const registry = new EventHandlerRegistry();
+      const sender = { sendText: jest.fn().mockResolvedValue({ status }) };
+      const args = [
+        registry,
+        {},
+        {},
+        {},
+        {},
+        {},
+        sender,
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+      ] as const;
+      new IntegrationEventHandlersService(
+        ...(args as unknown as ConstructorParameters<
+          typeof IntegrationEventHandlersService
+        >),
+      ).onModuleInit();
+      const handler = registry.get(
+        INTERNAL_EVENT.ACTIVATION_ONBOARDING_RESPONSE_REQUESTED,
+      );
+      if (!handler) throw new Error('Handler missing');
+      const result = handler(
+        outboxEvent(INTERNAL_EVENT.ACTIVATION_ONBOARDING_RESPONSE_REQUESTED, {
+          outboundMessageId: 'outbound-id',
+        }),
+      );
+      if (status === 'SENDING')
+        await expect(result).rejects.toBeInstanceOf(DeliveryPendingError);
+      else if (status === 'FAILED')
+        await expect(result).rejects.toThrow('Entrega não confirmada');
+      else await expect(result).resolves.toBeUndefined();
+    },
+  );
   it('disabled AUDIO preserves the previous ignored-media behavior before subscription notifications', async () => {
     const registry = new EventHandlerRegistry();
     const lifecycle = subscriptionLifecycle();
@@ -803,7 +894,9 @@ describe('IntegrationEventHandlersService', () => {
   it('runs acquisition only after the official outbound completes sending', async () => {
     const registry = new EventHandlerRegistry();
     const evolutionSend = {
-      sendText: jest.fn().mockResolvedValue({ id: 'outbound-id' }),
+      sendText: jest
+        .fn()
+        .mockResolvedValue({ id: 'outbound-id', status: 'SENT' }),
     };
     const acquisition = acquisitionRollout();
     const handlers = new IntegrationEventHandlersService(
@@ -1174,6 +1267,13 @@ describe('IntegrationEventHandlersService', () => {
       outboxEvent(INTERNAL_EVENT.USER_CONTEXT_REFRESH_COMPLETED, {
         userId: 'user-id',
         refreshKey: 'message-id',
+        snapshotId: 'snapshot-id',
+      }),
+    );
+    await handler(
+      outboxEvent(INTERNAL_EVENT.USER_CONTEXT_REFRESH_COMPLETED, {
+        userId: 'user-id',
+        refreshKey: 'coach_onboarding:v1:profile:user-id:correction:reply',
         snapshotId: 'snapshot-id',
       }),
     );

@@ -52,6 +52,7 @@ describe('EventBusService', () => {
     ).resolves.toBe(event);
     expect(transaction.outboxEvent.create).toHaveBeenCalledWith({
       data: {
+        createdAt: expect.any(Date),
         eventType: 'PAYMENT_APPROVED',
         aggregateType: 'PAYMENT',
         aggregateId: 'payment-id',

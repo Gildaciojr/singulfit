@@ -1,0 +1,40 @@
+# Future integration only. No production network, path, image or secret is assumed.
+name: singulfit-webhook-capture
+services:
+  capture:
+    image: ${CAPTURE_IMAGE:?Immutable capture image by digest required}
+    user: '10001:10001'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    cpus: 0.50
+    mem_limit: 192m
+    pids_limit: 64
+    stop_grace_period: 90s
+    environment:
+      CAPTURE_DIRECTORY: /data
+      CAPTURE_BIND: 0.0.0.0
+      CAPTURE_PORT: '3180'
+      CAPTURE_TARGET: ${CAPTURE_TARGET:?Verified private SingulFit API URL required}
+      EVOLUTION_INSTANCE_NAME: ${EVOLUTION_INSTANCE_NAME:?Exact existing instance required}
+      EVOLUTION_WEBHOOK_SECRET_FILE: /run/secrets/evolution_webhook_secret
+    volumes:
+      - type: bind
+        source: ${CAPTURE_HOST_DIRECTORY:?Exclusive persistent local directory required}
+        target: /data
+        bind:
+          create_host_path: false
+    secrets: [evolution_webhook_secret]
+    ports:
+      [
+        '127.0.0.1:${CAPTURE_HOST_PORT:?Verified free private port required}:3180',
+      ]
+    networks: [singulfit_backend]
+secrets:
+  evolution_webhook_secret:
+    file: ${CAPTURE_SECRET_FILE:?Existing secret file provisioned through protected channel}
+networks:
+  singulfit_backend:
+    external: true
+    name: ${SINGULFIT_BACKEND_NETWORK:?Inspect actual network before use}

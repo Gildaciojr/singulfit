@@ -239,7 +239,14 @@ export class NutritionPlanV2Validator {
     issues: NutritionPlanValidationIssue[],
   ): void {
     const normalized = this.normalize(item.foodName);
-    for (const code of strategy.appliedConstraintCodes) {
+    // Confirmed context constraints remain mandatory even if strategy metadata is incomplete.
+    const requiredCodes = new Set([
+      ...strategy.appliedConstraintCodes,
+      ...context.constraints
+        .filter((constraint) => constraint.status === 'CONFIRMED')
+        .map((constraint) => constraint.code),
+    ]);
+    for (const code of requiredCodes) {
       const tagged = item.allergenTags.includes(code);
       const termMatched = (CONSTRAINT_TERMS[code] ?? []).some((term) =>
         normalized.includes(term),

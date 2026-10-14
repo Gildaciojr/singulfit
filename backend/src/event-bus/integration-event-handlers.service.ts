@@ -20,6 +20,7 @@ import { ACTIVATION_ONBOARDING_PROFILE_SOURCE_KEY } from '../activation/activati
 import { PagBankWebhookService } from '../webhooks/pagbank-webhook.service';
 import { INTERNAL_EVENT } from './event-bus.constants';
 import { EventHandlerRegistry } from './event-handler.registry';
+import { DeliveryPendingError } from './delivery-pending.error';
 import { ProfileAcquisitionInternalRolloutService } from '../context/profile-acquisition/profile-acquisition-internal-rollout.service';
 import { SubscriptionLifecycleService } from '../subscriptions/subscription-lifecycle.service';
 import { CoachProactiveResponseService } from '../automation/coach-proactive-response.service';
@@ -60,6 +61,13 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     this.registry.register(
       INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED,
       (event) => this.processCoachOnboardingText(event),
+    );
+    this.registry.register(
+      INTERNAL_EVENT.ACTIVATION_ONBOARDING_RESPONSE_REQUESTED,
+      (event) =>
+        this.sendConfirmed(
+          this.requiredString(event.payload, 'outboundMessageId'),
+        ),
     );
     this.registry.register(INTERNAL_EVENT.MEDIA_RECEIVED, (event) =>
       this.processMedia(event),
@@ -109,15 +117,24 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     ) {
       return;
     }
+    // An initial question owns its answer even when the generic runtime is PRIMARY.
+    // The service defers independent commands and quotes owned by other flows.
     if (
-      typeof this.coachCommandService.processCanonicalContinuation ===
+      typeof this.activationOnboardingService.processActiveTextMessage ===
         'function' &&
-      (await this.coachCommandService.processCanonicalContinuation(input))
+      (await this.activationOnboardingService.processActiveTextMessage(input))
+        .handled
     )
       return;
     if (
       typeof this.coachCommandService.processReadOnlyText === 'function' &&
       (await this.coachCommandService.processReadOnlyText(input))
+    )
+      return;
+    if (
+      typeof this.coachCommandService.processCanonicalContinuation ===
+        'function' &&
+      (await this.coachCommandService.processCanonicalContinuation(input))
     )
       return;
 
@@ -275,8 +292,15 @@ export class IntegrationEventHandlersService implements OnModuleInit {
       return;
     }
 
-    await this.evolutionSendService.sendText(outboundMessageId);
+    await this.sendConfirmed(outboundMessageId);
     await this.profileAcquisitionRollout.afterOutboundSent(outboundMessageId);
+  }
+
+  private async sendConfirmed(id: string): Promise<void> {
+    const outbound = await this.evolutionSendService.sendText(id);
+    if (outbound.status === 'SENDING') throw new DeliveryPendingError(id);
+    if (outbound.status !== 'SENT' && outbound.status !== 'DELIVERED')
+      throw new Error(`Entrega não confirmada: ${id} (${outbound.status})`);
   }
 
   private async processAutomation(event: OutboxEvent): Promise<void> {
@@ -356,7 +380,8 @@ export class IntegrationEventHandlersService implements OnModuleInit {
     const refreshKey = this.requiredString(event.payload, 'refreshKey');
 
     if (
-      !refreshKey.startsWith(`${ACTIVATION_ONBOARDING_PROFILE_SOURCE_KEY}:`)
+      !refreshKey.startsWith(`${ACTIVATION_ONBOARDING_PROFILE_SOURCE_KEY}:`) ||
+      refreshKey.includes(':correction:')
     ) {
       return;
     }

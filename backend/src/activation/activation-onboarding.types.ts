@@ -36,6 +36,7 @@ export interface ActivationOnboardingPendingInput {
 }
 
 export interface ActivationOnboardingSessionContent {
+  dietary?: ActivationOnboardingDietaryState;
   version: string;
   source: string;
   activationId: string;
@@ -53,6 +54,20 @@ export interface ActivationOnboardingSessionContent {
   startedAt: string;
   updatedAt: string;
   completedAt: string | null;
+}
+
+export interface ActivationOnboardingDietaryState {
+  status: 'UNKNOWN' | 'DETAILS_REQUIRED' | 'CONFIRMATION_PENDING' | 'CONFIRMED';
+  allergies: string[];
+  intolerances: string[];
+  avoidedFoods: string[];
+  otherRestrictions: string[];
+  rawRestrictions: string[];
+  specifiedCategories: Array<
+    'allergies' | 'intolerances' | 'avoidedFoods' | 'otherRestrictions'
+  >;
+  allergiesExplicit: boolean;
+  returnState: ActivationOnboardingState | null;
 }
 
 export interface ActivationOnboardingSession {

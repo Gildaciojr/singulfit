@@ -304,7 +304,11 @@ export class NutritionGenerationRunnerV2Service {
       const frozen = freezeNutritionConversationalArtifact(artifact);
       const validationStarted = performance.now();
       try {
-        this.conversationalValidator.validate(frozen);
+        if (!prepared.context)
+          throw new BadGatewayException(
+            'Contexto de segurança nutricional ausente',
+          );
+        this.conversationalValidator.validate(frozen, prepared.context);
       } catch (error: unknown) {
         if (mode === NutritionGenerationExecutionMode.SHADOW)
           throw new NutritionGenerationRunError('VALIDATION', error);

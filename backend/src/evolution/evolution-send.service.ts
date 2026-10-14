@@ -27,17 +27,21 @@ export class EvolutionSendService {
       return claimed.message;
     }
 
+    const fence = {
+      id: claimed.message.id,
+      status: OutboundMessageStatus.SENDING,
+      attempts: claimed.message.attempts,
+      leaseExpiresAt: claimed.message.leaseExpiresAt,
+    };
+
     try {
       const sent = await this.evolutionGateway.sendText({
         number: claimed.message.conversation.phoneNumber,
         text: claimed.message.content,
       });
 
-      await this.prisma.outboundMessage.updateMany({
-        where: {
-          id: claimed.message.id,
-          status: OutboundMessageStatus.SENDING,
-        },
+      const persisted = await this.prisma.outboundMessage.updateMany({
+        where: fence,
         data: {
           externalMessageId: sent.externalMessageId,
           status: OutboundMessageStatus.SENT,
@@ -48,6 +52,8 @@ export class EvolutionSendService {
           errorMessage: null,
         },
       });
+
+      if (persisted.count !== 1) return this.getMessage(claimed.message.id);
 
       if (sent.remoteJid) {
         await this.prisma.conversation.updateMany({
@@ -64,10 +70,7 @@ export class EvolutionSendService {
       return this.getMessage(claimed.message.id);
     } catch (error: unknown) {
       await this.prisma.outboundMessage.updateMany({
-        where: {
-          id: claimed.message.id,
-          status: OutboundMessageStatus.SENDING,
-        },
+        where: fence,
         data: {
           status: OutboundMessageStatus.FAILED,
           failedAt: new Date(),

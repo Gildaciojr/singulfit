@@ -10,7 +10,11 @@ import { AuditService } from '../observability/audit.service';
 import { EventService } from '../observability/event.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListOutboxEventsDto } from './dto/list-outbox-events.dto';
-import { OUTBOX_SOURCE, OUTBOX_SYSTEM_EVENT } from './event-bus.constants';
+import {
+  INTERNAL_EVENT,
+  OUTBOX_SOURCE,
+  OUTBOX_SYSTEM_EVENT,
+} from './event-bus.constants';
 
 export interface ClaimedOutboxEvent extends OutboxEvent {
   previousStatus: OutboxStatus;
@@ -39,6 +43,93 @@ export class OutboxService {
         : Prisma.empty;
 
     return this.prisma.$transaction(async (transaction) => {
+      if (
+        !eventTypes?.length ||
+        eventTypes.includes(INTERNAL_EVENT.WHATSAPP_MESSAGE_RECEIVED)
+      ) {
+        // Old consumers could acknowledge an admission without materializing a
+        // coach event. Reopen its original parent, preserving the retry budget.
+        // A terminal retry still requires the existing audited admin action.
+        const orphans = await transaction.$queryRaw<OutboxEvent[]>`
+          WITH candidates AS (
+            SELECT event."id" FROM "outbox_events" event
+            JOIN "evolution_inbound_events" inbox ON inbox."id" = event."aggregateId"
+            WHERE event."eventType" = ${INTERNAL_EVENT.WHATSAPP_MESSAGE_RECEIVED}
+              AND event."status" = 'PROCESSED'::"OutboxStatus"
+              AND inbox."admissionSequence" IS NOT NULL AND inbox."turnProcessedAt" IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM "messages" message
+                JOIN "conversations" conversation ON conversation."id" = message."conversationId"
+                JOIN "outbox_events" coach ON coach."aggregateId" = message."id"
+                WHERE message."instanceName" = inbox."instanceName"
+                  AND message."externalMessageId" = inbox."externalMessageId"
+                  AND conversation."userId" = inbox."orderingUserId"
+                  AND coach."eventType" = ${INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED}
+              )
+            ORDER BY event."createdAt", event."id"
+            FOR UPDATE OF event SKIP LOCKED LIMIT ${batchSize}
+          )
+          UPDATE "outbox_events" event SET "status" = 'FAILED'::"OutboxStatus",
+            "availableAt" = (${at}::timestamptz AT TIME ZONE 'UTC'),
+            "claimedAt" = NULL, "processedAt" = NULL,
+            "failedAt" = (${at}::timestamptz AT TIME ZONE 'UTC'),
+            "lastError" = 'ORDERED_INGRESS_MISSING_CONSUMER',
+            "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
+          FROM candidates WHERE event."id" = candidates."id" RETURNING event.*
+        `;
+        for (const event of orphans) {
+          await this.eventService.recordInTransaction(transaction, {
+            source: OUTBOX_SOURCE,
+            severity: Severity.WARNING,
+            eventType: OUTBOX_SYSTEM_EVENT.EVENT_RECOVERED,
+            message: 'Posição sequenciada sem consumidor recuperada',
+            metadata: this.eventMetadata(event, {
+              reason: 'ORDERED_INGRESS_MISSING_CONSUMER',
+            }),
+          });
+        }
+      }
+      if (
+        !eventTypes?.length ||
+        eventTypes.includes(
+          INTERNAL_EVENT.ACTIVATION_ONBOARDING_RESPONSE_REQUESTED,
+        )
+      ) {
+        // Reconcile false completion from the previous consumer even if the
+        // customer never sends another message. SENT remains sender-idempotent.
+        const recovered = await transaction.$queryRaw<OutboxEvent[]>`
+          WITH candidates AS (
+            SELECT event."id"
+            FROM "outbox_events" AS event
+            JOIN "outbound_messages" AS outbound
+              ON outbound."id" = event."payload"->>'outboundMessageId'
+            WHERE event."eventType" = ${INTERNAL_EVENT.ACTIVATION_ONBOARDING_RESPONSE_REQUESTED}
+              AND event."status" = 'PROCESSED'::"OutboxStatus"
+              AND outbound."status" IN ('PENDING'::"OutboundMessageStatus", 'SENDING'::"OutboundMessageStatus", 'FAILED'::"OutboundMessageStatus")
+            ORDER BY event."createdAt", event."id"
+            FOR UPDATE OF event SKIP LOCKED
+            LIMIT ${batchSize}
+          )
+          UPDATE "outbox_events" AS event
+          SET "status" = 'PENDING'::"OutboxStatus", "attempts" = 0,
+            "availableAt" = (${at}::timestamptz AT TIME ZONE 'UTC'), "claimedAt" = NULL, "processedAt" = NULL,
+            "failedAt" = NULL, "lastError" = NULL, "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
+          FROM candidates WHERE event."id" = candidates."id"
+          RETURNING event.*
+        `;
+        for (const event of recovered) {
+          await this.eventService.recordInTransaction(transaction, {
+            source: OUTBOX_SOURCE,
+            severity: Severity.WARNING,
+            eventType: OUTBOX_SYSTEM_EVENT.EVENT_RECOVERED,
+            message:
+              'Conclusão de onboarding sem confirmação de envio recuperada',
+            metadata: this.eventMetadata(event, {
+              reason: 'OUTBOUND_NOT_SENT',
+            }),
+          });
+        }
+      }
       const exhausted = await transaction.$queryRaw<OutboxEvent[]>`
         WITH candidates AS (
           SELECT "id"
@@ -52,11 +143,11 @@ export class OutboxService {
                   'PENDING'::"OutboxStatus",
                   'FAILED'::"OutboxStatus"
                 )
-                AND "availableAt" <= ${at}
+                AND "availableAt" <= (${at}::timestamptz AT TIME ZONE 'UTC')
               )
               OR (
                 "status" = 'PROCESSING'::"OutboxStatus"
-                AND "claimedAt" <= ${leaseExpiredBefore}
+                AND "claimedAt" <= (${leaseExpiredBefore}::timestamptz AT TIME ZONE 'UTC')
               )
             )
           ORDER BY "availableAt" ASC, "createdAt" ASC, "id" ASC
@@ -67,12 +158,12 @@ export class OutboxService {
         SET
           "status" = 'DEAD_LETTER'::"OutboxStatus",
           "claimedAt" = NULL,
-          "failedAt" = ${at},
+          "failedAt" = (${at}::timestamptz AT TIME ZONE 'UTC'),
           "lastError" = COALESCE(
             event."lastError",
             'Lease expirado após esgotar as tentativas'
           ),
-          "updatedAt" = ${at}
+          "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
         FROM candidates
         WHERE event."id" = candidates."id"
         RETURNING event.*
@@ -104,11 +195,11 @@ export class OutboxService {
                   'PENDING'::"OutboxStatus",
                   'FAILED'::"OutboxStatus"
                 )
-                AND "availableAt" <= ${at}
+                AND "availableAt" <= (${at}::timestamptz AT TIME ZONE 'UTC')
               )
               OR (
                 "status" = 'PROCESSING'::"OutboxStatus"
-                AND "claimedAt" <= ${leaseExpiredBefore}
+                AND "claimedAt" <= (${leaseExpiredBefore}::timestamptz AT TIME ZONE 'UTC')
               )
             )
           ORDER BY "availableAt" ASC, "createdAt" ASC, "id" ASC
@@ -120,10 +211,10 @@ export class OutboxService {
           SET
             "status" = 'PROCESSING'::"OutboxStatus",
             "attempts" = event."attempts" + 1,
-            "claimedAt" = ${at},
+            "claimedAt" = (${at}::timestamptz AT TIME ZONE 'UTC'),
             "failedAt" = NULL,
             "lastError" = NULL,
-            "updatedAt" = ${at}
+            "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
           FROM candidates
           WHERE event."id" = candidates."id"
           RETURNING event.*
@@ -165,6 +256,35 @@ export class OutboxService {
   }
 
   async markProcessed(event: OutboxEvent): Promise<boolean> {
+    if (event.eventType === INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED) {
+      return this.prisma.$transaction(async (transaction) => {
+        const completed = await transaction.outboxEvent.updateMany({
+          where: this.claimFence(event),
+          data: {
+            status: OutboxStatus.PROCESSED,
+            processedAt: new Date(),
+            claimedAt: null,
+            failedAt: null,
+            lastError: null,
+          },
+        });
+        if (completed.count !== 1) return false;
+        // This also releases a turn handled outside initial onboarding (access
+        // rejection, read-only command, completed profile). Never releases a stale lease.
+        await transaction.$executeRaw`
+          UPDATE "evolution_inbound_events" inbox
+          SET "turnProcessedAt" = (${new Date()}::timestamptz AT TIME ZONE 'UTC')
+          FROM "messages" message, "conversations" conversation
+          WHERE message."id" = ${event.aggregateId}
+            AND conversation."id" = message."conversationId"
+            AND conversation."userId" = inbox."orderingUserId"
+            AND inbox."instanceName" = message."instanceName"
+            AND inbox."externalMessageId" = message."externalMessageId"
+            AND inbox."admissionSequence" IS NOT NULL AND inbox."turnProcessedAt" IS NULL
+        `;
+        return true;
+      });
+    }
     const result = await this.prisma.outboxEvent.updateMany({
       where: this.claimFence(event),
       data: {
@@ -186,6 +306,17 @@ export class OutboxService {
       1_000,
       3_600_000,
     );
+    return this.deferPending(event, interval);
+  }
+
+  async deferDelivery(event: OutboxEvent): Promise<boolean> {
+    return this.deferPending(event, 30_000);
+  }
+
+  private async deferPending(
+    event: OutboxEvent,
+    interval: number,
+  ): Promise<boolean> {
     const result = await this.prisma.outboxEvent.updateMany({
       where: { ...this.claimFence(event), attempts: event.attempts },
       data: {

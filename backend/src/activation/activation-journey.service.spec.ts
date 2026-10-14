@@ -137,6 +137,114 @@ describe('ActivationJourneyService', () => {
     };
   }
 
+  function d0Subject() {
+    const setup = subject();
+    setup.prisma.user.findUniqueOrThrow.mockResolvedValue({
+      name: 'Ana Silva',
+      phoneE164: '+5511999999999',
+      phone: '11999999999',
+      activation: {
+        currentStage: ActivationStage.PAID,
+        score: 20,
+        riskLevel: ActivationRiskLevel.LOW,
+      },
+      behavioralProfile: null,
+      goalClassification: null,
+      contextSnapshots: [],
+      recommendations: [],
+      coachProfile: null,
+    });
+    setup.prisma.activationEvent.upsert.mockResolvedValue({ id: 'event-id' });
+    setup.transaction.activationEvent.findUnique.mockResolvedValue({
+      id: 'event-id',
+      ...delivery(ActivationDeliveryStatus.PENDING, { attempts: 0 }),
+    });
+    return setup;
+  }
+
+  function sendD0(setup: ReturnType<typeof d0Subject>) {
+    const at = new Date('2026-10-13T12:00:00Z');
+    return setup.testable.sendMessage(
+      'activation-id',
+      'user-id',
+      'FLOW_MESSAGE',
+      'D0',
+      'activation-id:flow:D0',
+      at,
+      at,
+    );
+  }
+
+  it('persists D0 session before an immediate customer response can arrive', async () => {
+    const setup = d0Subject();
+    setup.evolution.sendText.mockImplementation(() => {
+      expect(setup.onboarding.start).toHaveBeenCalledTimes(1);
+      expect(setup.prisma.activationEvent.updateMany).not.toHaveBeenCalled();
+      return Promise.resolve({ externalMessageId: 'immediate-ack' });
+    });
+    await sendD0(setup);
+    expect(setup.onboarding.start).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not expose D0 if session initialization fails and preserves delivery retry', async () => {
+    const setup = d0Subject();
+    setup.onboarding.start.mockRejectedValueOnce(new Error('SESSION_FAILURE'));
+    await expect(sendD0(setup)).rejects.toThrow('SESSION_FAILURE');
+    expect(setup.evolution.sendText).not.toHaveBeenCalled();
+    expect(setup.prisma.activationEvent.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          deliveryStatus: ActivationDeliveryStatus.FAILED,
+        }),
+      }),
+    );
+  });
+
+  it('keeps the session if durable SENT persistence fails after external ACK', async () => {
+    const setup = d0Subject();
+    setup.prisma.activationEvent.updateMany.mockRejectedValueOnce(
+      new Error('SENT_FAILURE'),
+    );
+    await expect(sendD0(setup)).rejects.toThrow('SENT_FAILURE');
+    expect(setup.onboarding.start).toHaveBeenCalledTimes(1);
+    expect(setup.evolution.sendText).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a late ACK whose delivery attempt fence no longer matches', async () => {
+    const setup = d0Subject();
+    setup.prisma.activationEvent.updateMany.mockResolvedValueOnce({ count: 0 });
+    await sendD0(setup);
+    expect(setup.prisma.activationEvent.updateMany).toHaveBeenCalledTimes(1);
+    expect(setup.events.record).not.toHaveBeenCalled();
+  });
+
+  it('repairs historical SENT D0 before cooldown and terminal stage without sending', async () => {
+    const setup = subject();
+    const at = new Date('2026-10-13T12:00:00Z');
+    setup.activationService.reconcile.mockResolvedValue({
+      id: 'activation-id',
+      paidAt: at,
+      currentStage: ActivationStage.ACTIVATED,
+    });
+    setup.prisma.subscription.findFirst.mockResolvedValue({
+      status: 'ACTIVE',
+      currentPeriodEnd: new Date('2099-01-01'),
+      endedAt: null,
+      plan: { isActive: true },
+    });
+    setup.prisma.activationEvent.findUnique.mockResolvedValue({
+      deliveryStatus: ActivationDeliveryStatus.SENT,
+      sentAt: at,
+    });
+    await setup.service.processUser('user-id', at);
+    expect(setup.onboarding.start).toHaveBeenCalledWith({
+      userId: 'user-id',
+      activationId: 'activation-id',
+      startedAt: at,
+    });
+    expect(setup.evolution.sendText).not.toHaveBeenCalled();
+  });
+
   it('selects the latest due D+ flow and retries an expired lease', async () => {
     const setup = subject();
     setup.prisma.activationEvent.findUnique.mockImplementation(

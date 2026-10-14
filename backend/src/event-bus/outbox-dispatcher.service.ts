@@ -4,6 +4,7 @@ import { EventHandlerRegistry } from './event-handler.registry';
 import { OutboxService } from './outbox.service';
 import { INTERNAL_EVENT } from './event-bus.constants';
 import { DurableTextPendingError } from '../ai/durable-text-operation.contract';
+import { DeliveryPendingError } from './delivery-pending.error';
 
 @Injectable()
 export class OutboxDispatcherService {
@@ -41,6 +42,14 @@ export class OutboxDispatcherService {
         this.logger.warn(`Lease perdido ao concluir evento ${event.id}`);
       }
     } catch (error: unknown) {
+      if (error instanceof DeliveryPendingError) {
+        // Bound polling; exhaustion retains operational dead-letter signaling
+        // and audited manual retry instead of silently losing the input.
+        if (Date.now() - event.createdAt.getTime() < 86_400_000) {
+          await this.outboxService.deferDelivery(event);
+          return;
+        }
+      }
       if (
         event.eventType === INTERNAL_EVENT.WORKOUT_ASYNC_COMPLETION &&
         error instanceof DurableTextPendingError

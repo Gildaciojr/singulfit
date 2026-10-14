@@ -666,47 +666,79 @@ export function nutritionAdviceFoodViolation(
   >,
   value: string,
 ): string | null {
-  const text = normalizeFoodTerm(value);
+  // Only a narrow, complete preventive instruction can omit its allergen
+  // mention. Check every other clause, including a later positive suggestion.
+  let preventiveWarning = false;
+  const text = value
+    .split(/[.!?;\n]|\b(?:mas|porém|porem|contudo)\b/iu)
+    .map((clause) => normalizeFoodTerm(clause.replace(/,/gu, ' e ')))
+    .filter((clause) => {
+      const warning =
+        /^(?:evite|nao (?:coma|consuma|prepare|use)) (.+) por causa (?:da sua alergia|das suas alergias|da alergia|das alergias)$/u.exec(
+          clause,
+        );
+      if (!warning) return true;
+      const namedAllergens = Object.values(CONSTRAINT_TERMS)
+        .flat()
+        .map(normalizeFoodTerm);
+      const recognized = warning[1]
+        .split(' e ')
+        .every((food) => namedAllergens.includes(food));
+      preventiveWarning ||= recognized;
+      return !recognized;
+    })
+    .join(' ');
+  // A later positive instruction may refer back to the allergen with a
+  // pronoun. Removing the warning must not authorize that ambiguous advice.
+  if (
+    preventiveWarning &&
+    /\b(?:pode|podem|recomendo|prepare|consuma|coma|use|inclua|sirva)\b.*\b(?:isso|isto|esse|essa|esses|essas|ele|ela|eles|elas|come lo|come la|consumi lo|consumi la|usa lo|usa la)\b/u.test(
+      text,
+    )
+  )
+    return 'NUTRITION_ADVICE_UNSAFE_FOOD';
   for (const constraint of context.safetyConstraints) {
     const directCode = constraint.trim().toUpperCase();
-    const code = Object.hasOwn(NUTRITION_CONSTRAINT_CODE, directCode)
-      ? directCode
-      : constraintBuilder.constraintCode(constraint);
-    // Lactose-free dairy remains forbidden for a milk allergy.
-    const checked =
-      code === 'LACTOSE'
-        ? text.replace(
-            /\b(?:leite|queijo|iogurte|requeijao)(?:\s+\w+){0,2}\s+(?:sem|zero) lactose\b/gu,
-            '',
-          )
-        : text;
-    if (
-      (CONSTRAINT_TERMS[code] ?? []).some((term) =>
-        matchesFoodTerm(checked, term),
-      )
-    )
-      return 'NUTRITION_ADVICE_UNSAFE_FOOD';
-    if (code === 'VEGETARIAN' || code === 'VEGAN') {
-      const animalTerms = [
-        ...CONSTRAINT_TERMS.FISH,
-        ...CONSTRAINT_TERMS.SHELLFISH,
-        ...(code === 'VEGAN'
-          ? [...CONSTRAINT_TERMS.MILK, ...CONSTRAINT_TERMS.EGG]
-          : []),
-      ];
+    const codes = Object.hasOwn(NUTRITION_CONSTRAINT_CODE, directCode)
+      ? [directCode]
+      : constraintBuilder.constraintCodes(constraint);
+    for (const code of codes) {
+      // Lactose-free dairy remains forbidden for a milk allergy.
+      const checked =
+        code === 'LACTOSE'
+          ? text.replace(
+              /\b(?:leite|queijo|iogurte|requeijao)(?:\s+\w+){0,2}\s+(?:sem|zero) lactose\b/gu,
+              '',
+            )
+          : text;
       if (
-        ['carne', 'frango', 'bife', 'presunto', 'bacon', ...animalTerms].some(
-          (term) => matchesFoodTerm(text, term),
+        (CONSTRAINT_TERMS[code] ?? []).some((term) =>
+          matchesFoodTerm(checked, term),
         )
       )
         return 'NUTRITION_ADVICE_UNSAFE_FOOD';
-    }
-    if (code === 'CUSTOM') {
-      const food = normalizeFoodTerm(constraint).replace(
-        /^(?:alergia|intolerancia|restricao)(?: alimentar)?(?: a| ao| de)? /u,
-        '',
-      );
-      if (matchesFoodTerm(text, food)) return 'NUTRITION_ADVICE_UNSAFE_FOOD';
+      if (code === 'VEGETARIAN' || code === 'VEGAN') {
+        const animalTerms = [
+          ...CONSTRAINT_TERMS.FISH,
+          ...CONSTRAINT_TERMS.SHELLFISH,
+          ...(code === 'VEGAN'
+            ? [...CONSTRAINT_TERMS.MILK, ...CONSTRAINT_TERMS.EGG]
+            : []),
+        ];
+        if (
+          ['carne', 'frango', 'bife', 'presunto', 'bacon', ...animalTerms].some(
+            (term) => matchesFoodTerm(text, term),
+          )
+        )
+          return 'NUTRITION_ADVICE_UNSAFE_FOOD';
+      }
+      if (code === 'CUSTOM') {
+        const food = normalizeFoodTerm(constraint).replace(
+          /^(?:alergia|intolerancia|restricao)(?: alimentar)?(?: a| ao| de)? /u,
+          '',
+        );
+        if (matchesFoodTerm(text, food)) return 'NUTRITION_ADVICE_UNSAFE_FOOD';
+      }
     }
   }
   if (
@@ -731,10 +763,11 @@ export function nutritionAdviceViolation(
     return 'NUTRITION_ADVICE_UNRESOLVED_SAFETY';
   if (candidate.disposition === 'ANSWER' && candidate.domain !== 'NUTRITION')
     return 'NUTRITION_ADVICE_WRONG_DOMAIN';
-  const text = normalizeFoodTerm(
-    [candidate.answer, candidate.followUpQuestion].filter(Boolean).join(' '),
-  );
-  const foodViolation = nutritionAdviceFoodViolation(context, text);
+  const rawText = [candidate.answer, candidate.followUpQuestion]
+    .filter(Boolean)
+    .join('\n');
+  const text = normalizeFoodTerm(rawText);
+  const foodViolation = nutritionAdviceFoodViolation(context, rawText);
   if (foodViolation) return foodViolation;
   // Read-only and unsupported equivalence are public boundaries, including CLARIFY.
   if (

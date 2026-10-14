@@ -244,6 +244,23 @@ describe('CoachProfileSnapshotBuilder', () => {
       COACH_PROFILE_COMPLETION_STATE.PARTIAL,
     );
   });
+
+  it.each([false, true])(
+    'distinguishes historical empty allergies from explicit onboarding confirmation: %s',
+    async (confirmed) => {
+      const user = userRecord();
+      user.nutritionProfile.allergies = [];
+      const test = await subject(user, {
+        restrictions: [],
+        allergies: [],
+        allergiesConfirmed: confirmed,
+      });
+      const snapshot = await test.builder.build('user-id', referenceDate);
+      expect(snapshot.restrictions.allergies.status).toBe(
+        confirmed ? 'KNOWN' : 'REQUIRES_CONFIRMATION',
+      );
+    },
+  );
   it('rejects a foreign root user or nested profile returned by a mock', async () => {
     const foreignRoot = await subject({ ...userRecord(), id: 'other' });
     await expect(

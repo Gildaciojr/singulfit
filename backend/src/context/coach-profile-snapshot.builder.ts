@@ -449,7 +449,8 @@ export class CoachProfileSnapshotBuilder {
         nutrition?.allergies,
         COACH_PROFILE_DATA_SOURCE.NUTRITION_PROFILE,
       ),
-      false,
+      activation?.allergiesConfirmed === true &&
+        Array.isArray(activation.allergies),
       nutrition ? [COACH_PROFILE_DATA_SOURCE.NUTRITION_PROFILE] : [],
     );
     const acquiredAllergies = this.acquiredConstraints(

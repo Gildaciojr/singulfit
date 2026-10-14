@@ -100,7 +100,13 @@ export class ActivationJourneyService {
 
     const latestSubscription = await this.prisma.subscription.findFirst({
       where: { userId },
-      select: { status: true },
+      select: {
+        status: true,
+        currentPeriodEnd: true,
+        billingPeriodEnd: true,
+        endedAt: true,
+        plan: { select: { isActive: true } },
+      },
       orderBy: { updatedAt: 'desc' },
     });
     if (
@@ -108,6 +114,30 @@ export class ActivationJourneyService {
       latestSubscription?.status === SubscriptionStatus.CANCELED
     ) {
       return activation;
+    }
+
+    // Repair durable D0 independently of cooldown and later journey stages.
+    const periodEnd =
+      latestSubscription?.currentPeriodEnd ??
+      latestSubscription?.billingPeriodEnd;
+    if (
+      activation.paidAt &&
+      latestSubscription?.status === SubscriptionStatus.ACTIVE &&
+      latestSubscription.plan.isActive &&
+      periodEnd &&
+      periodEnd > at &&
+      (!latestSubscription.endedAt || latestSubscription.endedAt > at)
+    ) {
+      const d0 = await this.prisma.activationEvent.findUnique({
+        where: { idempotencyKey: `${activation.id}:flow:D0` },
+      });
+      if (d0?.deliveryStatus === ActivationDeliveryStatus.SENT) {
+        await this.onboarding.start({
+          userId,
+          activationId: activation.id,
+          startedAt: d0.sentAt ?? at,
+        });
+      }
     }
 
     if (TERMINAL_ACTIVATION_STAGES.has(activation.currentStage)) {
@@ -353,11 +383,25 @@ export class ActivationJourneyService {
       return;
     }
 
+    let providerFailure = false;
     try {
-      const sent = await this.evolution.sendText({
-        number: message.phone,
-        text: message.content,
-      });
+      if (kind === ActivationEventKind.FLOW_MESSAGE && eventCode === 'D0') {
+        await this.onboarding.start({
+          userId,
+          activationId,
+          userFirstName: message.userFirstName,
+          startedAt: at,
+        });
+      }
+      const sent = await this.evolution
+        .sendText({
+          number: message.phone,
+          text: message.content,
+        })
+        .catch((error: unknown) => {
+          providerFailure = true;
+          throw error;
+        });
       const deliveryData: Prisma.ActivationEventUpdateManyMutationInput = {
         deliveryStatus: ActivationDeliveryStatus.SENT,
         sentAt: new Date(),
@@ -375,7 +419,7 @@ export class ActivationJourneyService {
         } satisfies Prisma.InputJsonObject;
       }
 
-      await this.prisma.activationEvent.updateMany({
+      const confirmed = await this.prisma.activationEvent.updateMany({
         where: {
           id: event.id,
           deliveryStatus: ActivationDeliveryStatus.SENDING,
@@ -385,13 +429,9 @@ export class ActivationJourneyService {
         data: deliveryData,
       });
 
-      if (kind === ActivationEventKind.FLOW_MESSAGE && eventCode === 'D0') {
-        await this.onboarding.start({
-          userId,
-          activationId,
-          userFirstName: message.userFirstName,
-          startedAt: at,
-        });
+      if (confirmed.count !== 1) {
+        this.logger.warn(`ACK obsoleto ignorado na ativação ${event.id}`);
+        return;
       }
 
       if (kind === ActivationEventKind.RECOVERY_MESSAGE) {
@@ -409,7 +449,8 @@ export class ActivationJourneyService {
         });
       }
     } catch (error: unknown) {
-      const retryable = isRetryableEvolutionSendError(error);
+      const retryable =
+        !providerFailure || isRetryableEvolutionSendError(error);
       const exhausted = claimed.attempts >= ACTIVATION_DELIVERY_MAX_ATTEMPTS;
       const terminal = !retryable || exhausted;
       const failedAt = new Date();

@@ -222,9 +222,14 @@ export class NutritionPlanningReadinessService {
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '')
         .toLowerCase();
-      return !/(lactose|leite|gluten|amendoim|castanha|nozes|amendoa|ovo|soja|marisco|camarao|crustaceo|peixe|vegano|vegetar)/.test(
-        normalized,
-      );
+      return normalized
+        .split(/[,;]|\s+e\s+/u)
+        .some(
+          (part) =>
+            !/(lactose|leite|gluten|amendoim|castanha|nozes|amendoa|ovo|soja|marisco|camarao|crustaceo|peixe|vegano|vegetar)/.test(
+              part,
+            ),
+        );
     });
   }
 }

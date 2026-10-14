@@ -430,8 +430,8 @@ export class CoachCommandService {
       !isIsolatedReminderReply(message.content)
     )
       return false;
-    await this.processTextMessage(input);
-    return true;
+    const result = await this.processTextMessage(input);
+    return result.handled;
   }
 
   async shouldHandleBeforeProfileAcquisition(

@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   PayloadTooLargeException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import {
   MediaType,
@@ -21,6 +22,10 @@ import { ConversationsService } from '../whatsapp/conversations.service';
 import { MessagesService } from '../whatsapp/messages.service';
 import { EvolutionGateway } from './evolution.gateway';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  admitOrderedText,
+  ingressOrderingRequired,
+} from '../activation/onboarding-ingress-order';
 import {
   EvolutionInboundMessage,
   EvolutionWebhookResult,
@@ -77,18 +82,48 @@ export class EvolutionWebhookService {
       throw new BadRequestException('Evento Evolution sem mensagens');
     }
 
+    // Admission chains are local to this batch; different users stay parallel.
+    // The database counter coordinates concurrent batches and API replicas.
+    const identities = await Promise.all(
+      entries.map((entry) => this.orderingIdentity(instanceName, entry)),
+    );
+    const chains = new Map<string, Promise<EvolutionWebhookResult>>();
     const results = await Promise.all(
-      entries.map((entry) => this.enqueueEntry(instanceName, entry)),
+      entries.map((entry, index) => {
+        const userId = identities[index];
+        const key = userId ?? `unsequenced:${index}`;
+        const previous = chains.get(key) ?? Promise.resolve();
+        const admitted = previous.then(() =>
+          this.enqueueEntry(instanceName, entry, userId),
+        );
+        chains.set(key, admitted);
+        return admitted;
+      }),
     );
 
     return results.length === 1 ? results[0] : results;
   }
 
-  processQueuedEntry(
+  async processQueuedEntry(
     instanceName: string,
     entry: unknown,
   ): Promise<EvolutionWebhookResult> {
-    return this.processEntry(instanceName, entry);
+    const record = this.asRecord(entry);
+    const key = this.asRecord(record?.key);
+    const externalMessageId = this.optionalString(key?.id);
+    const receipt = externalMessageId
+      ? await this.prisma.evolutionInboundEvent.findUnique({
+          where: {
+            instanceName_externalMessageId: { instanceName, externalMessageId },
+          },
+          select: { orderingUserId: true },
+        })
+      : null;
+    return this.processEntry(
+      instanceName,
+      entry,
+      receipt?.orderingUserId ?? undefined,
+    );
   }
 
   async processQueuedEvent(eventId: string): Promise<EvolutionWebhookResult> {
@@ -103,11 +138,37 @@ export class EvolutionWebhookService {
     }
 
     if (event.status === WebhookStatus.PROCESSED) {
-      return {
-        received: true,
-        processed: true,
-        duplicated: true,
-      };
+      const hasConsumer =
+        event.admissionSequence && !event.turnProcessedAt
+          ? await this.prisma.outboxEvent.findFirst({
+              where: {
+                eventType: INTERNAL_EVENT.COACH_ONBOARDING_TEXT_RECEIVED,
+                aggregateId: {
+                  in: (
+                    await this.prisma.message.findMany({
+                      where: {
+                        instanceName: event.instanceName,
+                        externalMessageId: event.externalMessageId,
+                        conversation: {
+                          userId: event.orderingUserId ?? undefined,
+                        },
+                      },
+                      select: { id: true },
+                    })
+                  ).map((message) => message.id),
+                },
+              },
+              select: { id: true },
+            })
+          : true;
+      // Repair only an unconsumed sequenced admission without a durable
+      // consumer. Ordinary historical duplicates and consumed turns stay inert.
+      if (hasConsumer)
+        return {
+          received: true,
+          processed: true,
+          duplicated: true,
+        };
     }
 
     await this.prisma.evolutionInboundEvent.update({
@@ -125,7 +186,15 @@ export class EvolutionWebhookService {
     });
 
     try {
-      const result = await this.processEntry(event.instanceName, event.payload);
+      const result = await this.processEntry(
+        event.instanceName,
+        event.payload,
+        event.orderingUserId ?? undefined,
+      );
+      if (event.admissionSequence && !result.processed)
+        throw new ServiceUnavailableException(
+          `ORDERED_INGRESS_NOT_MATERIALIZED:${result.reason ?? 'UNKNOWN'}`,
+        );
 
       await this.prisma.evolutionInboundEvent.update({
         where: {
@@ -155,9 +224,33 @@ export class EvolutionWebhookService {
     }
   }
 
+  private async orderingIdentity(
+    instanceName: string,
+    entry: unknown,
+  ): Promise<string | undefined> {
+    if (!ingressOrderingRequired()) return undefined;
+    const parsed = this.parseInboundMessage(instanceName, entry);
+    if (
+      !parsed ||
+      parsed.fromMe ||
+      parsed.remoteJid.endsWith('@g.us') ||
+      parsed.messageType !== 'TEXT'
+    )
+      return undefined;
+    const conversation = await this.conversationsService.findActiveByRemoteJid(
+      parsed.remoteJid,
+    );
+    const phone = phoneFromRemoteJid(parsed.remoteJid);
+    const user =
+      conversation?.user ??
+      (phone ? await this.usersService.findByWhatsAppPhone(phone) : null);
+    return user?.id;
+  }
+
   private async enqueueEntry(
     instanceName: string,
     entry: unknown,
+    orderingUserId?: string,
   ): Promise<EvolutionWebhookResult> {
     if (!this.isRecord(entry) || !this.isRecord(entry.key)) {
       throw new BadRequestException('Mensagem Evolution inválida');
@@ -179,20 +272,29 @@ export class EvolutionWebhookService {
           },
         },
       });
-      const event = await transaction.evolutionInboundEvent.upsert({
-        where: {
-          instanceName_externalMessageId: {
+      const admitted = orderingUserId
+        ? await admitOrderedText(transaction, orderingUserId, {
             instanceName,
             externalMessageId,
+            payload: entry as Prisma.InputJsonValue,
+          })
+        : null;
+      const event =
+        admitted?.event ??
+        (await transaction.evolutionInboundEvent.upsert({
+          where: {
+            instanceName_externalMessageId: {
+              instanceName,
+              externalMessageId,
+            },
           },
-        },
-        update: {},
-        create: {
-          instanceName,
-          externalMessageId,
-          payload: entry as Prisma.InputJsonValue,
-        },
-      });
+          update: {},
+          create: {
+            instanceName,
+            externalMessageId,
+            payload: entry as Prisma.InputJsonValue,
+          },
+        }));
 
       await this.eventBus.publish(
         {
@@ -209,7 +311,7 @@ export class EvolutionWebhookService {
       return {
         received: true,
         processed: false,
-        duplicated: existing !== null,
+        duplicated: admitted?.duplicated ?? existing !== null,
         reason: 'QUEUED',
       };
     });
@@ -218,6 +320,7 @@ export class EvolutionWebhookService {
   private async processEntry(
     instanceName: string,
     entry: unknown,
+    admittedUserId?: string,
   ): Promise<EvolutionWebhookResult> {
     const inboundMessage = this.parseInboundMessage(instanceName, entry);
     const entryRecord = this.asRecord(entry);
@@ -267,6 +370,10 @@ export class EvolutionWebhookService {
     );
 
     if (!conversationByRemoteJid && !phoneNumber) {
+      if (admittedUserId)
+        throw new ServiceUnavailableException(
+          'ORDERED_INGRESS_IDENTITY_UNAVAILABLE: original conversation link unavailable',
+        );
       return {
         received: true,
         processed: false,
@@ -294,12 +401,20 @@ export class EvolutionWebhookService {
     );
 
     if (!user) {
+      if (admittedUserId)
+        throw new ServiceUnavailableException(
+          'ORDERED_INGRESS_IDENTITY_UNAVAILABLE: retry original admission',
+        );
       return {
         received: true,
         processed: false,
         reason: 'USER_NOT_FOUND',
       };
     }
+    if (admittedUserId && admittedUserId !== user.id)
+      throw new ServiceUnavailableException(
+        'Ingress owner changed; operational review required',
+      );
 
     if (!conversationByRemoteJid) {
       await this.conversationsService.linkRemoteJid(

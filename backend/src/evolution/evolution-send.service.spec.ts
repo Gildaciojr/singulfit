@@ -18,6 +18,7 @@ describe('EvolutionSendService', () => {
       conversationId: 'conversation-id',
       content: 'Resposta nutricional',
       status: options?.status ?? OutboundMessageStatus.PENDING,
+      attempts: 0,
       leaseExpiresAt: null,
       conversation: {
         id: 'conversation-id',
@@ -33,6 +34,7 @@ describe('EvolutionSendService', () => {
           Promise.resolve({
             ...current,
             ...data,
+            attempts: current.attempts + 1,
           }),
         ),
       },
@@ -89,6 +91,7 @@ describe('EvolutionSendService', () => {
       transaction,
       gateway,
       accessService,
+      current,
     };
   }
 
@@ -160,4 +163,63 @@ describe('EvolutionSendService', () => {
     expect(subject.gateway.sendText).not.toHaveBeenCalled();
     expect(subject.transaction.outboundMessage.update).not.toHaveBeenCalled();
   });
+
+  it('returns active SENDING without another provider send or claiming completion', async () => {
+    const setup = createSubject({ status: OutboundMessageStatus.SENDING });
+    Object.assign(setup.current, {
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+    });
+    await expect(setup.service.sendText('outbound-id')).resolves.toMatchObject({
+      status: 'SENDING',
+    });
+    expect(setup.gateway.sendText).not.toHaveBeenCalled();
+  });
+
+  it('keeps a failed ACK persistence recoverable instead of returning successful delivery', async () => {
+    const setup = createSubject();
+    setup.prisma.outboundMessage.updateMany.mockRejectedValueOnce(
+      new Error('Persistence failed after ACK'),
+    );
+    await expect(setup.service.sendText('outbound-id')).rejects.toThrow(
+      'Persistence failed after ACK',
+    );
+    expect(setup.gateway.sendText).toHaveBeenCalledTimes(1);
+    expect(setup.prisma.outboundMessage.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'FAILED',
+          leaseExpiresAt: null,
+        }),
+        where: expect.objectContaining({
+          status: 'SENDING',
+          leaseExpiresAt: expect.any(Date),
+        }),
+      }),
+    );
+    expect(setup.prisma.conversation.updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])(
+    'fences a late provider ACK/failure by attempt and lease: failure=%s',
+    async (gatewayFailure) => {
+      const setup = createSubject({ gatewayFailure });
+      setup.prisma.outboundMessage.updateMany.mockResolvedValue({ count: 0 });
+      if (gatewayFailure)
+        await expect(setup.service.sendText('outbound-id')).rejects.toThrow(
+          'Evolution indisponível',
+        );
+      else await setup.service.sendText('outbound-id');
+      expect(setup.prisma.outboundMessage.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: 'outbound-id',
+            status: 'SENDING',
+            attempts: 1,
+            leaseExpiresAt: expect.any(Date),
+          }),
+        }),
+      );
+      expect(setup.prisma.conversation.updateMany).not.toHaveBeenCalled();
+    },
+  );
 });

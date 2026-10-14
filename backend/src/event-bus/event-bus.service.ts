@@ -84,6 +84,8 @@ export class EventBusService {
         aggregateId: input.aggregateId,
         payload: input.payload,
         availableAt: input.availableAt,
+        // Do not inherit CURRENT_TIMESTAMP's session-local timestamp cast.
+        createdAt: new Date(),
       },
     });
   }

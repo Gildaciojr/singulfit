@@ -221,18 +221,20 @@ export class NutritionPlanningContextBuilder {
     for (const constraint of datum.value) {
       const label = constraint.description.trim();
       if (!label) continue;
-      const code = this.constraintCode(`${constraint.type ?? ''} ${label}`);
-      target.push(
-        Object.freeze({
-          code,
-          label: label.slice(0, 120),
-          kind,
-          status:
-            code === NUTRITION_CONSTRAINT_CODE.CUSTOM
-              ? 'REQUIRES_CONFIRMATION'
-              : this.factStatus(datum.status),
-        }),
-      );
+      for (const code of this.constraintCodes(
+        `${constraint.type ?? ''} ${label}`,
+      ))
+        target.push(
+          Object.freeze({
+            code,
+            label: label.slice(0, 120),
+            kind,
+            status:
+              code === NUTRITION_CONSTRAINT_CODE.CUSTOM
+                ? 'REQUIRES_CONFIRMATION'
+                : this.factStatus(datum.status),
+          }),
+        );
     }
   }
 
@@ -384,5 +386,14 @@ export class NutritionPlanningContextBuilder {
     if (normalized.includes('vegetar'))
       return NUTRITION_CONSTRAINT_CODE.VEGETARIAN;
     return NUTRITION_CONSTRAINT_CODE.CUSTOM;
+  }
+
+  /** Historical compound descriptions must not silently lose the second allergen. */
+  constraintCodes(value: string): readonly NutritionConstraintCode[] {
+    return Object.freeze([
+      ...new Set(
+        value.split(/[,;]|\s+e\s+/iu).map((part) => this.constraintCode(part)),
+      ),
+    ]);
   }
 }

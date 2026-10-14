@@ -4,8 +4,35 @@ import { AuditService } from '../observability/audit.service';
 import { EventService } from '../observability/event.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { OutboxService } from './outbox.service';
+import { INTERNAL_EVENT } from './event-bus.constants';
 
 describe('OutboxService', () => {
+  it('reconciles false onboarding completion in the worker even without further customer input and records recovery', async () => {
+    const setup = createSubject();
+    const recovered = {
+      ...event(0),
+      eventType: INTERNAL_EVENT.ACTIVATION_ONBOARDING_RESPONSE_REQUESTED,
+      status: OutboxStatus.PENDING,
+    };
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce([recovered])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    Object.assign(setup.transaction, { $queryRaw: query });
+    await expect(
+      setup.service.claimBatch(new Date(), [recovered.eventType]),
+    ).resolves.toEqual([]);
+    expect(query).toHaveBeenCalledTimes(3);
+    expect(setup.eventService.recordInTransaction).toHaveBeenCalledWith(
+      setup.transaction,
+      expect.objectContaining({
+        eventType: 'EVENT_RECOVERED',
+        severity: 'WARNING',
+        metadata: expect.objectContaining({ reason: 'OUTBOUND_NOT_SENT' }),
+      }),
+    );
+  });
   it('fences pending workout polling and preserves the existing failure retry budget', async () => {
     const subject = createSubject();
     const claimed = event(4);
@@ -58,6 +85,7 @@ describe('OutboxService', () => {
 
   function createSubject() {
     const transaction = {
+      $executeRaw: jest.fn().mockResolvedValue(0),
       outboxEvent: {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         findUnique: jest.fn(),

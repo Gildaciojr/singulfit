@@ -32,6 +32,7 @@ import type {
 } from './nutrition-plan-v2.contract';
 import type { NutritionConversationalCandidate } from './nutrition-conversational-artifact.contract';
 import { NutritionConversationalArtifactValidator } from './nutrition-conversational-artifact.validator';
+import { nutritionAdviceFoodViolation } from '../../conversation/runtime/nutrition-advice.policy';
 import { NutritionGenerationRunnerV2Service } from './nutrition-generation-runner-v2.service';
 import {
   NUTRITION_ARTIFACT_TYPE,
@@ -722,6 +723,259 @@ describe('Nutrition Planning Engine V2', () => {
         (constraint) => constraint.kind === 'RESTRICTION',
       ),
     ).toEqual([]);
+  });
+
+  it.each([['amendoim e camarão'], ['amendoim', 'camarão']])(
+    'applies every confirmed allergen and validates against incomplete strategy metadata: %j',
+    (...names: string[]) => {
+      const base = snapshot();
+      const profile: CoachProfileSnapshot = {
+        ...base,
+        restrictions: {
+          ...base.restrictions,
+          allergies: known(
+            names.map((description) => ({
+              description,
+              type: 'ALLERGY',
+              source: COACH_PROFILE_DATA_SOURCE.USER,
+            })),
+          ),
+        },
+      };
+      const context = buildContext('DAILY_STRUCTURE', profile);
+      const strategy = new NutritionPlanningStrategyService().build(context);
+      expect(strategy.appliedConstraintCodes).toEqual(
+        expect.arrayContaining(['PEANUT', 'SHELLFISH']),
+      );
+      for (const food of ['amendoim', 'camarão']) {
+        const candidate = validDailyCandidate();
+        const unsafe: GeneratedNutritionPlanCandidate = {
+          ...candidate,
+          days: candidate.days.map((day) => ({
+            ...day,
+            meals: day.meals.map((meal) => ({
+              ...meal,
+              items: meal.items.map((item) => ({ ...item, foodName: food })),
+            })),
+          })),
+        };
+        const result = new NutritionPlanV2Validator().validate(
+          unsafe,
+          context,
+          { ...strategy, appliedConstraintCodes: [], excludedFoods: [] },
+        );
+        expect(result.issues).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              code: 'FORBIDDEN_CONSTRAINT',
+              severity: 'ERROR',
+            }),
+          ]),
+        );
+      }
+    },
+  );
+
+  it('does not hide an unclassified allergy behind a recognized allergen in the same label', () => {
+    const base = snapshot();
+    const profile: CoachProfileSnapshot = {
+      ...base,
+      restrictions: {
+        ...base.restrictions,
+        allergies: known([
+          {
+            description: 'amendoim e kiwi',
+            type: 'ALLERGY',
+            source: COACH_PROFILE_DATA_SOURCE.USER,
+          },
+        ]),
+      },
+    };
+    const context = buildContext('DAILY_STRUCTURE', profile);
+    expect(context.constraints).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'CUSTOM',
+          status: 'REQUIRES_CONFIRMATION',
+        }),
+      ]),
+    );
+    expect(
+      new NutritionPlanningReadinessService().evaluate(
+        profile,
+        'DAILY_STRUCTURE',
+        false,
+      ).status,
+    ).toBe('REQUIRES_CONFIRMATION');
+  });
+
+  it.each(['amendoim', 'camarão'])(
+    'protects conversational guidance against each allergen in a compound declaration: %s',
+    (food) => {
+      expect(
+        nutritionAdviceFoodViolation(
+          {
+            safetyConstraints: ['amendoim e camarão'],
+            excludedFoods: [],
+            temporarilyUnavailableFoods: [],
+          },
+          `Você pode comer ${food}`,
+        ),
+      ).toBe('NUTRITION_ADVICE_UNSAFE_FOOD');
+      const base = snapshot();
+      const profile: CoachProfileSnapshot = {
+        ...base,
+        restrictions: {
+          ...base.restrictions,
+          allergies: known([
+            {
+              description: 'amendoim e camarão',
+              type: 'ALLERGY',
+              source: COACH_PROFILE_DATA_SOURCE.USER,
+            },
+          ]),
+        },
+      };
+      const context = buildContext('POINT_GUIDANCE', profile);
+      expect(() =>
+        new NutritionConversationalArtifactValidator().validate(
+          {
+            schemaVersion: '1.0',
+            artifactType: 'POINT_GUIDANCE',
+            title: 'Orientação',
+            summary: 'Sugestão',
+            generatedAt: referenceDate.toISOString(),
+            guidance: {
+              answer: `Você pode comer ${food}`,
+              rationale: [],
+              actionableSteps: [`Prepare ${food}`],
+              cautions: [],
+            },
+          },
+          context,
+        ),
+      ).toThrow('inválido');
+    },
+  );
+
+  it.each([
+    ['Você pode comer camarão', true],
+    ['Prepare camarão', true],
+    ['Evite camarão por causa da sua alergia', false],
+    ['Evite camarão por causa da sua alergia. Prepare frango com arroz', false],
+    [
+      'Evite camarão por causa da sua alergia. Você pode comê-lo com arroz',
+      true,
+    ],
+    [
+      'Evite camarão por causa da sua alergia. Prepare esse alimento com arroz',
+      true,
+    ],
+    ['Evite camarão por causa da sua alergia. Prepare camarão com arroz', true],
+    [
+      'Evite camarão por causa da sua alergia, mas você pode comer camarão com frango',
+      true,
+    ],
+    ['Evite arroz e inclua camarão por causa da sua alergia', true],
+    ['Prepare arroz com camarão e frango', true],
+    ['Prepare amendoim', true],
+    ['Evite camarão e amendoim por causa das suas alergias', false],
+  ])(
+    'validates each narrative clause without weakening multiple allergy protection: %s',
+    (answer, rejected) => {
+      const base = snapshot();
+      const profile: CoachProfileSnapshot = {
+        ...base,
+        restrictions: {
+          ...base.restrictions,
+          allergies: known([
+            {
+              description: 'amendoim e camarão',
+              type: 'ALLERGY',
+              source: COACH_PROFILE_DATA_SOURCE.USER,
+            },
+          ]),
+        },
+      };
+      const context = buildContext('POINT_GUIDANCE', profile);
+      const violation = nutritionAdviceFoodViolation(
+        {
+          safetyConstraints: ['SHELLFISH', 'PEANUT'],
+          excludedFoods: [],
+          temporarilyUnavailableFoods: [],
+        },
+        answer,
+      );
+      expect(Boolean(violation)).toBe(rejected);
+      const validate = () =>
+        new NutritionConversationalArtifactValidator().validate(
+          {
+            schemaVersion: '1.0',
+            artifactType: 'POINT_GUIDANCE',
+            title: 'Orientação',
+            summary: 'Segurança',
+            generatedAt: referenceDate.toISOString(),
+            guidance: {
+              answer,
+              actionableSteps: ['Escolha uma alternativa compatível'],
+              rationale: [],
+              cautions: [],
+            },
+          },
+          context,
+        );
+      if (rejected) expect(validate).toThrow('inválido');
+      else expect(validate).not.toThrow();
+    },
+  );
+
+  it('never treats a forbidden ingredient name as preventive guidance', () => {
+    const base = snapshot();
+    const profile: CoachProfileSnapshot = {
+      ...base,
+      restrictions: {
+        ...base.restrictions,
+        allergies: known([
+          {
+            description: 'camarão',
+            type: 'ALLERGY',
+            source: COACH_PROFILE_DATA_SOURCE.USER,
+          },
+        ]),
+      },
+    };
+    expect(() =>
+      new NutritionConversationalArtifactValidator().validate(
+        {
+          schemaVersion: '1.0',
+          artifactType: 'MEAL_SUGGESTION',
+          title: 'Refeição',
+          summary: 'Sugestão',
+          generatedAt: referenceDate.toISOString(),
+          meal: {
+            name: 'Almoço',
+            mealType: null,
+            description: 'Refeição',
+            items: [
+              {
+                name: 'Evite camarão por causa da sua alergia',
+                quantity: 100,
+                unit: 'g',
+                preparationNotes: null,
+              },
+            ],
+            estimatedNutrition: {
+              caloriesKcal: null,
+              proteinGrams: null,
+              carbohydrateGrams: null,
+              fatGrams: null,
+            },
+            alternatives: [],
+          },
+        },
+        buildContext('MEAL_SUGGESTION', profile),
+      ),
+    ).toThrow('inválido');
   });
 
   it('moves weekly nutrition readiness from blocked to ready with structured acquisition facts', () => {
